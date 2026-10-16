@@ -5,6 +5,8 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <paths/local_path.hpp>
+#include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
@@ -23,8 +25,8 @@ class DownloadOperation : public Operation
             std::make_signed_t<std::size_t> bytesPerSecond
         )>
             progressCallback = [](auto, auto, auto, auto) {};
-        std::filesystem::path remotePath{};
-        std::filesystem::path localPath{};
+        Paths::RemotePath remotePath{};
+        Paths::LocalPath localPath{};
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
         bool reserveSpace{false};
@@ -42,6 +44,13 @@ class DownloadOperation : public Operation
          *         may not yet exist locally.
          */
         bool createMissingDirectories{false};
+        /** @brief Mark the file as downloaded from the internet, see Utility::markAsDownloaded. */
+        bool markAsDownloaded{true};
+        /**
+         * @brief When set, a local path running through a symlink or junction below this directory is refused, so
+         *        a link planted inside a downloaded tree cannot redirect the download out of it.
+         */
+        Paths::LocalPath linkFreeRoot{};
     };
 
     SecureShell::ProcessingStrand* strand() const override
@@ -82,12 +91,12 @@ class DownloadOperation : public Operation
         return SharedData::OperationType::Download;
     }
 
-    std::filesystem::path remotePath() const
+    Paths::RemotePath const& remotePath() const
     {
         return options_.remotePath;
     }
 
-    std::filesystem::path localPath() const
+    Paths::LocalPath const& localPath() const
     {
         return options_.localPath;
     }
@@ -122,8 +131,14 @@ class DownloadOperation : public Operation
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
 
+    /**
+     * @brief Refuses @p path when it runs through a symlink or junction, below the link free root when one is set,
+     *        otherwise only at @p path itself.
+     */
+    std::expected<void, Error> refuseLinkedPath(std::filesystem::path const& path) const;
+
     std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
-    readSymlinkInStrand(std::filesystem::path const& remoteFullPath);
+    readSymlinkInStrand(Paths::RemotePath const& remoteFullPath);
 
     void cleanup();
 
@@ -131,7 +146,17 @@ class DownloadOperation : public Operation
     SecureShell::SftpSession* sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     DownloadOperationOptions options_;
+    /** @brief options_.remotePath, unset when none was given. */
+    Paths::RemotePath remotePath_{};
+    /** @brief options_.localPath for the filesystem calls, empty when none was given. */
+    std::filesystem::path localNativePath_{};
     std::ofstream localFile_;
     SecureShell::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
+    /** @brief Bytes already present in an adopted partial file. */
+    std::uint64_t resumeOffset_{0u};
+    /** @brief Bytes in the temp file so far, counted instead of tellp, which append mode misreports on Windows. */
+    std::uint64_t bytesInFile_{0u};
+    /** @brief An adopted partial file already holds the whole content. */
+    bool transferComplete_{false};
 };

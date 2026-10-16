@@ -9,8 +9,8 @@ class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
     DisplayedRenameOperation(
         Ids::OperationId operationId,
         ConfirmDialog& confirmDialog,
-        std::filesystem::path sourcePath,
-        std::filesystem::path destinationPath,
+        Paths::RemotePath sourcePath,
+        Paths::RemotePath destinationPath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction
@@ -36,11 +36,7 @@ class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
     {
         if (isCompletedState())
             return std::nullopt;
-        ResumableOp out;
-        out.kind = ResumableOp::Kind::Rename;
-        out.src = sourcePath_;
-        out.dst = destinationPath_;
-        return out;
+        return Resumable::Rename{.source = sourcePath_, .destination = destinationPath_};
     }
 
     Nui::ElementRenderer body() const override
@@ -55,8 +51,8 @@ class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
             span{}(
                 fmt::format(
                     fmt::runtime(language->get("operationQueue", "renameCard")),
-                    sourcePath_.filename().string(),
-                    destinationPath_.filename().string()
+                    nameOf(sourcePath_),
+                    nameOf(destinationPath_)
                 )
             ),
             div{}()
@@ -65,6 +61,14 @@ class DisplayedRenameOperation : public OperationCard<DisplayedRenameOperation>
     }
 
   private:
-    std::filesystem::path sourcePath_;
-    std::filesystem::path destinationPath_;
+    static std::string nameOf(Paths::RemotePath const& path)
+    {
+        if (auto name = path.filename(); name)
+            return name->value();
+        return path.value();
+    }
+
+  private:
+    Paths::RemotePath sourcePath_;
+    Paths::RemotePath destinationPath_;
 };

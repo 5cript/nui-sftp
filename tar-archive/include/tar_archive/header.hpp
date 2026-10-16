@@ -1,7 +1,7 @@
 #pragma once
 
 #include <tar_archive/error.hpp>
-#include <shared_data/directory_entry.hpp>
+#include <tar_archive/member_header.hpp>
 #include <utility/describe.hpp>
 
 #include <array>
@@ -96,7 +96,7 @@ namespace TarArchive
      * @brief Build the on-disk tar records for a DirectoryEntry, emitting PAX extended
      * headers when the entry's path, link target, or size exceed plain USTAR limits.
      */
-    std::expected<BuiltEntry, TarError> buildRecords(SharedData::DirectoryEntry const& meta);
+    std::expected<BuiltEntry, TarError> buildRecords(MemberHeader const& meta);
 
     /**
      * @brief Parsed representation of a single USTAR file record.
@@ -160,8 +160,8 @@ namespace TarArchive
 
     /**
      * @brief Apply PAX overrides on top of a parsed USTAR record and produce a populated
-     * SharedData::DirectoryEntry to hand out to the caller.
+     * MemberHeader to hand out to the caller.
      */
-    SharedData::DirectoryEntry
-    assembleDirectoryEntry(ParsedUstar const& ustar, PaxOverrides const& overrides);
+    MemberHeader
+    assembleMemberHeader(ParsedUstar const& ustar, PaxOverrides const& overrides);
 }

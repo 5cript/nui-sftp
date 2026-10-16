@@ -39,6 +39,21 @@ namespace SecureShell
         {
             return std::chrono::steady_clock::now() - turnStart > limit;
         }
+
+        SftpError expiredError(std::string_view what)
+        {
+            return SftpError{
+                .message = fmt::format("{} expired during the transfer", what),
+                .wrapperError = WrapperErrors::SharedPtrDestroyed,
+            };
+        }
+
+        SftpError transferError(SftpSession const& sftp, std::string_view what)
+        {
+            auto error = sftp.lastError();
+            error.message = std::string{what};
+            return error;
+        }
     }
 
 #define VERIFY_FILE_STREAM() \
@@ -265,17 +280,19 @@ namespace SecureShell
 
             void onRead(std::make_signed_t<std::size_t> amount)
             {
+                // The callback runs before the promise is set: the waiting caller may destroy what it captured.
                 if (amount < 0)
                 {
-                    promise.set_value(std::unexpected(stream.lastError()));
+                    const auto error = stream.lastError();
                     callback({});
+                    promise.set_value(std::unexpected(error));
                     return;
                 }
 
                 if (amount == 0)
                 {
-                    promise.set_value(totalRead);
                     callback({});
+                    promise.set_value(totalRead);
                     return;
                 }
 
@@ -474,14 +491,14 @@ namespace SecureShell
                 auto stream = weakStream.lock();
                 if (!stream)
                 {
-                    context->cancel();
+                    context->fail(expiredError("File stream"));
                     return false;
                 }
 
                 auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
-                    context->cancel();
+                    context->fail(expiredError("SFTP session"));
                     return false;
                 }
                 const auto target = sftp->chunkController().targetCallDuration();
@@ -504,15 +521,18 @@ namespace SecureShell
                     const auto result = sftp_read(stream->file_.get(), buffer, requested);
                     if (result < 0)
                     {
-                        context->cancel();
+                        context->fail(transferError(*sftp, "Reading the remote file failed"));
                         return false;
                     }
                     if (result == 0)
                     {
-                        // The remote file is shorter than listed; treat it as the end like the
-                        // synchronous path does instead of polling the EOF forever.
+                        // The remote file is shorter than listed. Finalizing would replace the
+                        // destination with a truncated copy.
                         context->calculateBytesPerSecond();
-                        context->ended_ = true;
+                        context->fail(SftpError{
+                            .message = "The remote file ended before the expected size was read",
+                            .wrapperError = WrapperErrors::UnexpectedEndOfFile,
+                        });
                         return false;
                     }
                     // Report against the unclamped chunk: a file tail asks for less and must not
@@ -521,7 +541,10 @@ namespace SecureShell
                     remainingRead -= result;
                     if (!onRead(result))
                     {
-                        context->cancel();
+                        context->fail(SftpError{
+                            .message = "Storing the received data failed",
+                            .wrapperError = WrapperErrors::LocalIoFailure,
+                        });
                         return false;
                     }
                     context->bytesTransferred_ += result;
@@ -531,7 +554,7 @@ namespace SecureShell
                 context->calculateBytesPerSecond();
                 if (remainingRead == 0)
                 {
-                    context->ended_ = true;
+                    context->complete();
                     return false;
                 }
                 return true;
@@ -584,14 +607,14 @@ namespace SecureShell
                 auto stream = weakStream.lock();
                 if (!stream)
                 {
-                    context->cancel();
+                    context->fail(expiredError("File stream"));
                     return false;
                 }
 
                 auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
-                    context->cancel();
+                    context->fail(expiredError("SFTP session"));
                     return false;
                 }
                 const auto target = sftp->chunkController().targetCallDuration();
@@ -612,7 +635,10 @@ namespace SecureShell
                     const auto amountRead = doRead(std::min(remainingWrite, chunk));
                     if (amountRead <= 0)
                     {
-                        context->cancel();
+                        context->fail(SftpError{
+                            .message = "Reading the local file failed",
+                            .wrapperError = WrapperErrors::LocalIoFailure,
+                        });
                         return false;
                     }
                     const auto requested = std::min(remainingWrite, amountRead);
@@ -620,7 +646,7 @@ namespace SecureShell
                     const auto result = sftp_write(stream->file_.get(), buffer, requested);
                     if (result < 0)
                     {
-                        context->cancel();
+                        context->fail(transferError(*sftp, "Writing the remote file failed"));
                         return false;
                     }
                     sftp->chunkController().recordDataCall(result, chunk, std::chrono::steady_clock::now() - callStart);
@@ -632,7 +658,7 @@ namespace SecureShell
                 context->calculateBytesPerSecond();
                 if (remainingWrite == 0)
                 {
-                    context->ended_ = true;
+                    context->complete();
                     return false;
                 }
                 return true;

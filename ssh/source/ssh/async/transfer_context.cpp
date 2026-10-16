@@ -2,14 +2,48 @@
 
 namespace SecureShell
 {
+    void AsyncTransferContext::end(Outcome outcome)
+    {
+        auto expected = Outcome::Running;
+        outcome_.compare_exchange_strong(expected, outcome);
+        ended_.store(true);
+    }
+
     void AsyncTransferContext::cancel()
     {
-        ended_.store(true);
+        end(Outcome::Canceled);
+    }
+
+    void AsyncTransferContext::fail(SftpError error)
+    {
+        if (outcome_.load() == Outcome::Running)
+        {
+            std::scoped_lock lock{errorMutex_};
+            if (!error_)
+                error_ = std::move(error);
+        }
+        end(Outcome::Failed);
+    }
+
+    void AsyncTransferContext::complete()
+    {
+        end(Outcome::Completed);
     }
 
     bool AsyncTransferContext::hasEnded() const
     {
         return ended_.load();
+    }
+
+    AsyncTransferContext::Outcome AsyncTransferContext::outcome() const
+    {
+        return outcome_.load();
+    }
+
+    std::optional<SftpError> AsyncTransferContext::error() const
+    {
+        std::scoped_lock lock{errorMutex_};
+        return error_;
     }
 
     AsyncTransferContext::SignedSizeType AsyncTransferContext::bytesPerSecond() const

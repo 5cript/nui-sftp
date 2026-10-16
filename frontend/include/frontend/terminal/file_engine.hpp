@@ -2,12 +2,14 @@
 
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/archive_download_root.hpp>
+#include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
-#include <shared_data/sync/enqueue_plan_entry.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 #include <nui-file-explorer/item.hpp>
 #include <ids/ids.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
@@ -57,8 +59,8 @@ class FileEngine
     );
 
     void
-    createDirectory(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
-    void createFile(std::filesystem::path const& path, std::function<void(bool, std::string const& info)> onComplete);
+    createDirectory(Paths::RemotePath const& path, std::function<void(bool, std::string const& info)> onComplete);
+    void createFile(Paths::RemotePath const& path, std::function<void(bool, std::string const& info)> onComplete);
 
     /**
      * @brief Opens a backend-resident SyncSession and queues both scans.  The scans
@@ -107,17 +109,12 @@ class FileEngine
     );
 
     /**
-     * @brief Asks the backend to collapse the selected relKey SPARSE set in @p section
-     *        into a minimal enqueue plan.  An entry X in @p selectedRelKeys means "X
-     *        and every descendant selected"; the backend-resident minimizer handles
-     *        bulk-dir / structural-dir rules.
+     * @brief Has the backend plan and queue the selected rows of one section, see
+     *        @ref SharedData::Sync::SyncExecutionRequest.
      */
-    void buildSyncEnqueuePlan(
-        Ids::SyncSessionId syncSessionId,
-        SharedData::Sync::DiffSection section,
-        std::vector<std::string> selectedRelKeys,
-        std::uint64_t generation,
-        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    void executeSyncSelection(
+        SharedData::Sync::SyncExecutionRequest request,
+        std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
         std::function<void(std::string const&)> onRejected
     );
 
@@ -128,8 +125,9 @@ class FileEngine
     void closeSyncSession(Ids::SyncSessionId syncSessionId);
 
     void addDownload(
-        NuiFileExplorer::Item const& remotePath,
-        NuiFileExplorer::Item const& localPath,
+        Paths::RemotePath const& source,
+        Paths::LocalPath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh,
@@ -137,8 +135,9 @@ class FileEngine
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void addUpload(
-        NuiFileExplorer::Item const& remotePath,
-        NuiFileExplorer::Item const& localPath,
+        Paths::LocalPath const& source,
+        Paths::RemotePath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         bool allowOverwrite,
         bool insertRefresh,
@@ -164,7 +163,7 @@ class FileEngine
      *                             before the RPC returns).
      */
     void addBulkDownload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDownloadEntry> entries,
         std::vector<Ids::OperationId> operationIds,
         bool allowOverwrite,
         bool insertRefresh,
@@ -181,8 +180,8 @@ class FileEngine
      *        codec on the backend).
      */
     void addArchiveDownload(
-        std::vector<SharedData::DirectoryEntry> entries,
-        std::filesystem::path const& localArchivePath,
+        std::vector<SharedData::ArchiveDownloadRoot> roots,
+        Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -196,8 +195,8 @@ class FileEngine
      *        addArchiveDownload with source/destination reversed.
      */
     void addArchiveUpload(
-        std::vector<std::filesystem::path> localPaths,
-        std::filesystem::path const& remoteArchivePath,
+        std::vector<Paths::LocalPath> localPaths,
+        Paths::RemotePath const& remoteArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -207,7 +206,7 @@ class FileEngine
 
     /** @brief Upload analogue of addBulkDownload — see its docs. */
     void addBulkUpload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkUploadEntry> entries,
         std::vector<Ids::OperationId> operationIds,
         bool allowOverwrite,
         bool insertRefresh,
@@ -219,26 +218,25 @@ class FileEngine
      * @brief Bulk-delete: collapse N file deletions into a single bulk-delete
      *        card on the frontend.  One RPC, one OperationId for the
      *        aggregate file card; directory entries get their own
-     *        Scan+Delete cards on the backend.  `dst` and `sizeBytes` of
-     *        each entry are ignored — only `src` (target path) and
-     *        `isDirectory` matter.
+     *        Scan+Delete cards on the backend.
      */
     void addBulkDelete(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDeleteEntry> entries,
         Ids::OperationId bulkOperationId,
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(bool success, std::string const& info)> onBulkCreated
     );
 
+    /**
+     * @brief Asks the server which of @p directories are not empty and hands the split to
+     *        @p onNonEmptyDirectoriesFound: files and empty directories first, non-empty directories second.
+     */
     void remove(
-        std::vector<NuiFileExplorer::Item> const& files,
-        std::vector<NuiFileExplorer::Item> const& directories,
+        std::vector<Paths::RemotePath> files,
+        std::vector<Paths::RemotePath> directories,
         std::function<void(bool, std::string const& info)> onComplete,
-        std::function<void(
-            std::vector<std::filesystem::path>, /* regular files & empty */
-            std::vector<std::filesystem::path> /* non empties */
-        )> onNonEmptyDirectoriesFound
+        std::function<void(std::vector<Paths::RemotePath>, std::vector<Paths::RemotePath>)> onNonEmptyDirectoriesFound
     );
 
     /**
@@ -249,21 +247,26 @@ class FileEngine
      * @param onComplete
      */
     void removeOnQueueUnchecked(
-        std::vector<std::filesystem::path> const& paths,
+        std::vector<Paths::RemotePath> const& paths,
         bool recursive,
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    /**
+     * @brief Renames on the server. Fails with "backend.rename.targetExists" when @p newPath exists and
+     *        @p overwrite is false.
+     */
     void rename(
-        std::filesystem::path const& oldPath,
-        std::filesystem::path const& newPath,
+        Paths::RemotePath const& oldPath,
+        Paths::RemotePath const& newPath,
+        bool overwrite,
         std::function<void(bool, std::string const& info)> onComplete
     );
 
     void addRename(
-        std::filesystem::path const& sourcePath,
-        std::filesystem::path const& destinationPath,
+        Paths::RemotePath const& sourcePath,
+        Paths::RemotePath const& destinationPath,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
@@ -286,7 +289,7 @@ class FileEngine
      *                    diagnostic.
      */
     void existsBatchRemote(
-        std::vector<std::filesystem::path> const& paths,
+        std::vector<Paths::RemotePath> const& paths,
         std::function<void(std::vector<bool> exists, std::string const& info)> onComplete
     );
 
@@ -294,11 +297,6 @@ class FileEngine
 
   private:
     void lazyOpen(std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> const& onOpen);
-    void performDelete(
-        std::vector<NuiFileExplorer::Item> files,
-        std::vector<std::filesystem::path> directoriesEmpty,
-        std::function<void(bool, std::string const& info)> onComplete
-    );
 
   private:
     struct Implementation;

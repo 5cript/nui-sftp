@@ -79,8 +79,8 @@ namespace Test
         std::shared_ptr<SyncSession> session_{std::make_shared<SyncSession>(
             SyncSession::Options{
                 .sessionId = Ids::generateSyncSessionId(),
-                .localRoot = "/local",
-                .remoteRoot = "/remote"
+                .localRoot = Paths::LocalPath::fromUtf8("/local", Paths::LocalPlatform::Posix).value(),
+                .remoteRoot = remote("/remote")
             },
             context_.get_executor()
         )};
@@ -134,15 +134,16 @@ namespace Test
         EXPECT_EQ(snapshot.deletes[0].children[0].action, SharedData::Sync::Action::DeleteRemote);
     }
 
-    TEST_F(SyncSessionTests, PlanUsesSessionRoots)
+    TEST_F(SyncSessionTests, PlanResolvesBelowSessionRoots)
     {
         session_->recomputeSnapshotInStrand({}, {}, {});
-        const auto plan = session_->buildEnqueuePlanInStrand(SharedData::Sync::DiffSection::Upload, {"src"});
-        ASSERT_EQ(plan.size(), 2u);
-        EXPECT_EQ(plan[0].relKey, "src/main.cpp");
-        EXPECT_EQ(plan[0].localAbsPath, "/local/src/main.cpp");
-        EXPECT_EQ(plan[0].remoteAbsPath, "/remote/src/main.cpp");
-        EXPECT_EQ(plan[1].relKey, "src/util/strings.cpp");
+        const auto plan = session_->resolvePlanInStrand(SharedData::Sync::DiffSection::Upload, {"src"});
+        ASSERT_EQ(plan.entries.size(), 2u);
+        EXPECT_TRUE(plan.refused.empty());
+        EXPECT_EQ(plan.entries[0].entry.relKey, "src/main.cpp");
+        EXPECT_EQ(plan.entries[0].paths.local.toUtf8(), "/local/src/main.cpp");
+        EXPECT_EQ(plan.entries[0].paths.remote.value(), "/remote/src/main.cpp");
+        EXPECT_EQ(plan.entries[1].entry.relKey, "src/util/strings.cpp");
     }
 
     TEST_F(SyncSessionTests, CancelOnlyStopsTheRunningWalk)
@@ -162,5 +163,27 @@ namespace Test
         EXPECT_FALSE(empty.bothTreesReadyInStrand());
         EXPECT_EQ(summary.generation, 1u);
         EXPECT_EQ(summary.uploads.itemCount, 0u);
+    }
+
+    TEST_F(SyncSessionTests, RowsResolveBelowBothRootsOrNotAtAll)
+    {
+        boost::asio::io_context context{};
+        const SyncSession session{
+            SyncSession::Options{
+                .localRoot = Paths::LocalPath::fromUtf8("C:/sync", Paths::LocalPlatform::Windows).value(),
+                .remoteRoot = remote("/srv/sync"),
+            },
+            context.get_executor()
+        };
+        const auto resolved = session.resolve(Paths::RelativePath::make("dir/a\\b").value());
+        EXPECT_FALSE(resolved.has_value()) << "a backslash is a separator in a Windows path";
+
+        const auto plain = session.resolve(Paths::RelativePath::make("dir/a.txt").value());
+        ASSERT_TRUE(plain.has_value());
+        EXPECT_EQ(plain->local.toUtf8(), "C:/sync/dir/a.txt");
+        EXPECT_EQ(plain->remote.value(), "/srv/sync/dir/a.txt");
+
+        EXPECT_FALSE(session.resolve(Paths::RelativePath::make("dir/CON").value()).has_value());
+        EXPECT_EQ(session.resolve(Paths::RelativePath{})->remote.value(), "/srv/sync");
     }
 }

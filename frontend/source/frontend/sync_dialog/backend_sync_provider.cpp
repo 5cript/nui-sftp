@@ -24,6 +24,7 @@ void BackendSyncProvider::open(
     std::function<void(SharedData::ScanProgress const&)> onLocalListing,
     std::function<void(SharedData::ScanProgress const&)> onRemoteListing,
     std::function<void()> onBothListed,
+    std::function<void(std::string const&)> onScanFailed,
     std::function<void(std::uint64_t)> onDiffProgress
 )
 {
@@ -40,9 +41,11 @@ void BackendSyncProvider::open(
         bool local{false};
         bool remote{false};
         std::function<void()> onBothListed;
+        std::function<void(std::string const&)> onScanFailed;
     };
     auto gate = std::make_shared<PhaseGate>();
     gate->onBothListed = std::move(onBothListed);
+    gate->onScanFailed = std::move(onScanFailed);
 
     queue_->openSyncSession(
         sessionId_,
@@ -63,8 +66,16 @@ void BackendSyncProvider::open(
             {
                 auto cb = std::move(gate->onBothListed);
                 gate->onBothListed = nullptr;
+                gate->onScanFailed = nullptr;
                 cb();
             }
+        },
+        [gate](std::string const& reason)
+        {
+            // The first failure ends the listing, the other side's result is of no use any more.
+            gate->onBothListed = nullptr;
+            if (auto callback = std::exchange(gate->onScanFailed, nullptr); callback)
+                callback(reason);
         },
         std::move(onDiffProgress)
     );
@@ -128,30 +139,24 @@ void BackendSyncProvider::loadChildren(
     );
 }
 
-void BackendSyncProvider::buildEnqueuePlan(
-    SharedData::Sync::DiffSection section,
-    std::vector<std::string> selectedRelKeys,
-    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+void BackendSyncProvider::executeSelection(
+    SharedData::Sync::SyncExecutionRequest request,
+    std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
     std::function<void(std::string const&)> onRejected
 )
 {
     if (!queue_ || closed_)
         return;
 
-    const auto expectedGeneration = generation_;
-    queue_->buildSyncEnqueuePlan(
-        sessionId_,
-        section,
-        std::move(selectedRelKeys),
-        expectedGeneration,
-        [alive = std::weak_ptr{alive_},
-            expectedGeneration,
-            onResolved = std::move(onResolved)](std::vector<SharedData::Sync::EnqueuePlanEntry> plan) mutable
+    request.syncSessionId = sessionId_;
+    request.generation = generation_;
+    queue_->executeSyncSelection(
+        std::move(request),
+        [alive = std::weak_ptr{alive_}, onResolved = std::move(onResolved)](SharedData::Sync::SyncExecutionResult result)
         {
-            const auto self = alive.lock();
-            if (!self || expectedGeneration != (*self)->generation_)
-                return;
-            onResolved(std::move(plan));
+            // The operations are queued either way, the reply only maps them to rows of a dialog that may be gone.
+            if (alive.lock())
+                onResolved(std::move(result));
         },
         std::move(onRejected)
     );

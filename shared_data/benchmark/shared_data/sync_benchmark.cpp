@@ -154,7 +154,7 @@ int main(int argc, char** argv)
             {
                 for (std::size_t file = files; file-- > 0;)
                     entries.push_back(
-                        {.path = fmt::format("file{:05}.txt", file), .type = SharedData::FileType::Regular, .size = 1}
+                        {.name = fmt::format("file{:05}.txt", file), .type = SharedData::FileType::Regular, .size = 1}
                     );
                 total += files;
                 return;
@@ -162,7 +162,7 @@ int main(int argc, char** argv)
             for (std::size_t directory = 10; directory-- > 0;)
             {
                 const auto name = fmt::format("dir{:03}", directory);
-                entries.push_back({.path = name, .type = SharedData::FileType::Directory});
+                entries.push_back({.name = name, .type = SharedData::FileType::Directory});
                 build(path + "/" + name, depth + 1);
             }
         };
@@ -172,12 +172,12 @@ int main(int argc, char** argv)
             [&]
             {
                 auto scanner = [&listing](
-                                   std::filesystem::path const& path
+                                   Paths::RelativePath const& relative
                                ) -> std::expected<std::vector<SharedData::DirectoryEntry>, int>
                 {
-                    return listing.at(path.generic_string());
+                    return listing.at(relative.empty() ? std::string{"/root"} : "/root/" + relative.value());
                 };
-                TreeDirectoryWalker<int, decltype(scanner), false> walker{"/root", std::move(scanner)};
+                TreeDirectoryWalker<int, decltype(scanner), false> walker{std::move(scanner)};
                 if (!walker.walkAll())
                     std::abort();
                 auto tree = std::move(walker).ejectTree();
@@ -267,7 +267,7 @@ int main(int argc, char** argv)
         std::unordered_set<std::string> roots;
         for (std::size_t index = 0; index < count; ++index)
             roots.insert(fmt::format("project{:06}", index));
-        const ScanTrees trees{.local = &sparseLocal, .remote = &sparseRemote, .localRoot = "/l", .remoteRoot = "/r"};
+        const ScanTrees trees{.local = &sparseLocal, .remote = &sparseRemote};
         const auto planTime = measure(
             repetitions,
             [&]
@@ -281,7 +281,7 @@ int main(int argc, char** argv)
     {
         Stores stores;
         stores.run(local, remote);
-        const ScanTrees trees{.local = &local, .remote = &remote, .localRoot = "/l", .remoteRoot = "/r"};
+        const ScanTrees trees{.local = &local, .remote = &remote};
         std::unordered_set<std::string> roots;
         for (auto const& row : stores.uploads.loadChildren("", trees))
             roots.insert(row.relKey);
@@ -311,7 +311,7 @@ int main(int argc, char** argv)
             }
         );
         report("diff + finalize: one-sided subtree", oneSided.subtreeFileCount, diffTime);
-        const ScanTrees trees{.local = &oneSided, .remote = &empty, .localRoot = "/l", .remoteRoot = "/r"};
+        const ScanTrees trees{.local = &oneSided, .remote = &empty};
         const auto planTime = measure(
             repetitions,
             [&]

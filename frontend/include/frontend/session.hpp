@@ -18,6 +18,7 @@
 #include <frontend/command_store/command_store_client.hpp>
 #include <frontend/session_snapshot.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/dropped_item.hpp>
 #include <ids/ids.hpp>
 
 class ProtoSession;
@@ -160,7 +161,7 @@ class Session
 
     /** @brief Handles files dropped onto the session area (Windows). */
     void
-    onDrop(bool isLocalSide, std::vector<SharedData::DirectoryEntry> entries, std::optional<std::string> const& subdir);
+    onDrop(bool isLocalSide, std::vector<SharedData::DroppedItem> entries, std::optional<std::string> const& subdir);
 
     /**
      * @brief Ejects local-shell channels from the aux engine.  Used by

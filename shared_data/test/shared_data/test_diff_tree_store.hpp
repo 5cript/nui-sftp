@@ -41,7 +41,7 @@ namespace SharedData::Sync::Test
 
         ScanTrees trees() const
         {
-            return ScanTrees{.local = &local, .remote = &remote, .localRoot = "/l", .remoteRoot = "/r"};
+            return ScanTrees{.local = &local, .remote = &remote};
         }
     };
 
@@ -203,8 +203,7 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(plan[0].sizeBytes, 16u);
         EXPECT_EQ(plan[0].mtime, 2000u);
         EXPECT_EQ(plan[0].mtimeNsec, 42u);
-        EXPECT_EQ(plan[0].localAbsPath, "/l/socket.cpp");
-        EXPECT_EQ(plan[0].remoteAbsPath, "/r/socket.cpp");
+        EXPECT_EQ(plan[0].relKey, "socket.cpp");
     }
 
     TEST(DiffTreeStoreTests, PlanForANewerLocalFileCarriesLocalSizeAndMtime)
@@ -297,18 +296,50 @@ namespace SharedData::Sync::Test
         EXPECT_TRUE(plan[0].isDirectory);
     }
 
-    TEST(DiffTreeStoreTests, PlanKeepsDeletedDirectoriesWhole)
+    TEST(DiffTreeStoreTests, PlanListsADeletedDirectoryBeforeItsContent)
     {
         DiffStores stores{
             makeDir("", {}),
-            makeDir("", {makeDir("gone", {makeFile("a", 1, 100), makeFile("b", 1, 100)})}),
+            makeDir("", {makeDir("gone", {makeFile("a", 1, 100), makeDir("sub", {makeFile("b", 1, 100)})})}),
             {.direction = Direction::Upload, .actionDelete = true},
         };
         const auto plan = stores.deletes.buildPlan({"gone"}, stores.trees());
-        ASSERT_EQ(plan.size(), 1u);
-        EXPECT_EQ(plan[0].relKey, "gone");
+        EXPECT_EQ(relKeys(plan), (std::vector<std::string>{"gone", "gone/a", "gone/sub", "gone/sub/b"}));
+        for (auto const& entry : plan)
+            EXPECT_EQ(entry.action, Action::DeleteRemote) << entry.relKey;
         EXPECT_TRUE(plan[0].isDirectory);
-        EXPECT_EQ(plan[0].action, Action::DeleteRemote);
+        EXPECT_FALSE(plan[1].isDirectory);
+        EXPECT_TRUE(plan[2].isDirectory);
+    }
+
+    TEST(DiffTreeStoreTests, DeletePlanLeavesOutWhatTheScanDidNotList)
+    {
+        auto unreadable = makeDir("unreadable", {});
+        unreadable.availability = Availability::Unreadable;
+        unreadable.childrenKnown = false;
+        auto fifo = makeFile("fifo", 0, 100);
+        fifo.availability = Availability::Excluded;
+        DiffStores stores{
+            makeDir("", {}),
+            makeDir(
+                "",
+                {makeDir("gone", {makeFile(".hidden", 1, 100), makeFile("a", 1, 100), fifo, unreadable})}
+            ),
+            {.direction = Direction::Upload, .actionDelete = true, .ignoreHidden = true},
+        };
+        EXPECT_EQ(
+            relKeys(stores.deletes.buildPlan({"gone"}, stores.trees())), (std::vector<std::string>{"gone", "gone/a"})
+        );
+    }
+
+    TEST(DiffTreeStoreTests, DownloadPlanSkipsCaseVariantsForACaseFoldingLocalFilesystem)
+    {
+        DiffStores stores{
+            makeDir("", {}),
+            makeDir("", {makeDir("new", {makeFile("A.txt", 1, 100), makeFile("a.txt", 1, 100), makeFile("b", 1, 100)})}),
+            {.direction = Direction::Download, .localCaseInsensitive = true},
+        };
+        EXPECT_EQ(relKeys(stores.downloads.buildPlan({"new"}, stores.trees())), (std::vector<std::string>{"new/b"}));
     }
 
     TEST(DiffTreeStoreTests, PlanForAPartlySelectedExpandedDirectory)
@@ -387,5 +418,34 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(plan[0].relKey, "new");
         EXPECT_TRUE(plan[0].isDirectory);
         EXPECT_EQ(stores.uploads.summary().itemCount, 1u);
+    }
+
+    TEST(DiffTreeStoreTests, PlansAndRowsSkipUnknownAndExcludedEntriesInsideTransferredDirectories)
+    {
+        DiffStores stores{
+            makeDir("", {makeDir("new", {makeFile("a", 1, 100), makeExcluded("pipe"), makeUnreadableDir("secret")})}),
+            makeDir("", {}),
+        };
+
+        EXPECT_EQ(relKeys(stores.uploads.loadChildren("new", stores.trees())), (std::vector<std::string>{"new/a"}));
+        EXPECT_EQ(relKeys(stores.uploads.buildPlan({"new"}, stores.trees())), (std::vector<std::string>{"new/a"}));
+    }
+
+    TEST(DiffTreeStoreTests, BlockedEntriesAreCountedWithSamples)
+    {
+        DiffTreeStore uploads;
+        DiffTreeStore downloads;
+        DiffTreeStore deletes;
+        StoreDiffSink sink{uploads, downloads, deletes};
+        diffScanTrees(
+            makeDir("", {makeUnreadableDir("a"), makeExcluded("b")}),
+            makeDir("", {makeDir("a", {makeFile("x", 1, 100)})}),
+            {.direction = Direction::Upload, .actionDelete = true},
+            sink
+        );
+        EXPECT_EQ(sink.blockedCount(), 2u);
+        ASSERT_EQ(sink.blockedSamples().size(), 2u);
+        EXPECT_EQ(sink.blockedSamples()[0].relKey, "a");
+        EXPECT_EQ(sink.blockedSamples()[1].relKey, "b");
     }
 }

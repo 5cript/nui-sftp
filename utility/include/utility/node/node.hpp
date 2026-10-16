@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -25,8 +26,18 @@ namespace SecureShell::Test
         std::atomic_bool killed = false;
         unsigned short port = 0;
         int code = 0;
+        /** @brief Receives what the process writes to stderr, which is read and dropped. */
+        std::array<char, 4096> stderrBuffer{};
 
         void command(std::string const& command);
+        /**
+         * @brief Sends a command with arguments and blocks until the process acknowledges it.
+         *
+         * @param command The command name.
+         * @param arguments Extra fields merged into the command object.
+         * @return true if the acknowledgement arrived.
+         */
+        bool command(std::string const& command, nlohmann::json const& arguments);
         void terminate();
         int wait();
     };

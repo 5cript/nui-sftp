@@ -13,6 +13,7 @@
 
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <utility/overloaded.hpp>
 #include <constants/sftp.hpp>
 
 #include <nui/frontend/attributes.hpp>
@@ -85,7 +86,7 @@ struct OperationQueue::Implementation
 
     Nui::TimerHandle autoCleanTimer;
     std::unordered_map<std::string, std::function<void(bool)>> completionCallbacks;
-    std::unordered_map<std::string, std::function<void(std::vector<std::filesystem::path> const&)>>
+    std::unordered_map<std::string, std::function<void(std::vector<std::string> const&)>>
         failedEntriesCallbacks;
     std::unordered_map<std::string, std::function<void(double)>> transferProgressCallbacks;
     // Keyed by the aggregate bulk operation id (first pre-generated opId for
@@ -101,6 +102,7 @@ struct OperationQueue::Implementation
     {
         std::array<Ids::OperationId, 2> scanIds{}; // [0]=remote, [1]=local
         std::function<void(bool isLocal)> onScanPhaseDone;
+        std::function<void(std::string const& reason)> onScanFailed;
         std::function<void(std::uint64_t)> onDiffProgress;
     };
     std::unordered_map<std::string, SyncSessionRouting> syncSessionRouting;
@@ -447,6 +449,11 @@ void OperationQueue::deactivate()
     impl_->sessionId = {};
 }
 
+std::shared_ptr<FileEngine> OperationQueue::fileEngine() const
+{
+    return impl_->fileEngine;
+}
+
 void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId)
 {
     impl_->fileEngine = std::move(fileEngine);
@@ -591,6 +598,23 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
 
     impl_->onUpdate.push_back(
         Nui::RpcClient::autoRegisterFunction(
+            fmt::format("OperationQueue::{}::onSyncScanFailed", impl_->sessionId.value()),
+            [this](std::string const& sessionIdString, bool isLocal, std::string const& reason)
+            {
+                const auto routingIt = impl_->syncSessionRouting.find(sessionIdString);
+                if (routingIt == impl_->syncSessionRouting.end())
+                    return;
+                Log::error("Sync scan of the {} side failed: {}", isLocal ? "local" : "remote", reason);
+                for (auto const& scanId : routingIt->second.scanIds)
+                    impl_->syncScanProgressCallbacks.erase(scanId.value());
+                if (routingIt->second.onScanFailed)
+                    routingIt->second.onScanFailed(reason);
+            }
+        )
+    );
+
+    impl_->onUpdate.push_back(
+        Nui::RpcClient::autoRegisterFunction(
             fmt::format("OperationQueue::{}::onSyncDiffProgress", impl_->sessionId.value()),
             [this](std::string const& sessionIdString, std::string const& comparedString)
             {
@@ -651,7 +675,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
                 return {};
             }
-            return std::make_unique<DisplayedTransferOperation>(
+            auto card = std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
                 SharedData::OperationType::Download,
                 *impl_->confirmDialog,
@@ -665,6 +689,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean,
                 localRefresh
             );
+            card->allowOverwrite(added.allowOverwrite.value_or(false));
+            return card;
         }
         else if (added.type == SharedData::OperationType::Upload)
         {
@@ -676,7 +702,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 );
                 return {};
             }
-            return std::make_unique<DisplayedTransferOperation>(
+            auto card = std::make_unique<DisplayedTransferOperation>(
                 added.operationId,
                 SharedData::OperationType::Upload,
                 *impl_->confirmDialog,
@@ -690,6 +716,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 impl_->autoClean,
                 remoteRefresh
             );
+            card->allowOverwrite(added.allowOverwrite.value_or(false));
+            return card;
         }
         else if (added.type == SharedData::OperationType::Scan)
         {
@@ -703,7 +731,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
-                *added.remotePath,
+                added.remotePath->value(),
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -721,7 +749,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedScanOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
-                *added.localPath,
+                added.localPath->toUtf8(),
                 [this](OperationCard<DisplayedScanOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -743,19 +771,38 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 "Creating {} operation card for operation id: {}. path: {}",
                 added.type == SharedData::OperationType::BulkDelete ? "bulk delete" : "delete",
                 added.operationId.value(),
-                added.remotePath ? added.remotePath->generic_string() : "???"s
+                added.remotePath ? added.remotePath->value() : "???"s
             );
             return std::make_unique<DisplayedDeleteOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
                 added.type,
-                added.remotePath ? *added.remotePath : std::filesystem::path{},
+                added.remotePath ? added.remotePath->value() : std::string{},
+                added.type == SharedData::OperationType::Delete ? added.remotePath.value_or(Paths::RemotePath{})
+                                                                : Paths::RemotePath{},
                 [this](OperationCard<DisplayedDeleteOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                remoteRefresh
+                remoteRefresh,
+                added.scanPhase.value_or(false)
+            );
+        }
+        else if (added.type == SharedData::OperationType::LocalDelete)
+        {
+            return std::make_unique<DisplayedDeleteOperation>(
+                added.operationId,
+                *impl_->confirmDialog,
+                added.type,
+                added.localPath ? added.localPath->toUtf8() : std::string{},
+                Paths::RemotePath{},
+                [this](OperationCard<DisplayedDeleteOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean,
+                std::function<void()>{}
             );
         }
         else if (added.type == SharedData::OperationType::BulkDownload)
@@ -784,7 +831,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                localRefresh
+                localRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::BulkUpload)
@@ -813,7 +861,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                remoteRefresh
+                remoteRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::ArchiveDownload)
@@ -832,13 +881,14 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 *impl_->confirmDialog,
                 added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
                 *added.localPath,
-                std::filesystem::path{},
+                Paths::RemotePath{},
                 [this](OperationCard<DisplayedTransferOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                localRefresh
+                localRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::ArchiveUpload)
@@ -856,19 +906,20 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 SharedData::OperationType::ArchiveUpload,
                 *impl_->confirmDialog,
                 added.totalBytes ? static_cast<long long>(*added.totalBytes) : 0,
-                std::filesystem::path{},
+                Paths::LocalPath{},
                 *added.remotePath,
                 [this](OperationCard<DisplayedTransferOperation> const& operation)
                 {
                     cancelOperation(operation);
                 },
                 impl_->autoClean,
-                remoteRefresh
+                remoteRefresh,
+                added.scanPhase.value_or(false)
             );
         }
         else if (added.type == SharedData::OperationType::Rename)
         {
-            if (!added.localPath || !added.remotePath)
+            if (!added.source || !added.destination)
             {
                 Log::error(
                     "Received OperationAdded for Rename id: {} without source or destination", added.operationId.value()
@@ -878,8 +929,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             return std::make_unique<DisplayedRenameOperation>(
                 added.operationId,
                 *impl_->confirmDialog,
-                *added.localPath,
-                *added.remotePath,
+                *added.source,
+                *added.destination,
                 [this](OperationCard<DisplayedRenameOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -950,7 +1001,8 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
     // Both Delete (per-directory recursive) and BulkDelete (the file/empty-dir
     // aggregate) cards render via DisplayedDeleteOperation and emit onDeleteProgress.
     if (operation->type() != SharedData::OperationType::Delete &&
-        operation->type() != SharedData::OperationType::BulkDelete)
+        operation->type() != SharedData::OperationType::BulkDelete &&
+        operation->type() != SharedData::OperationType::LocalDelete)
     {
         Log::error("Received delete progress for operation id: {} which is not a delete", progress.operationId.value());
         return;
@@ -1011,12 +1063,39 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
     if (!operation)
         return; // Scan-only operations (for sync) may not be in the display map — that is fine.
 
-    if (operation->type() == SharedData::OperationType::Scan ||
-        operation->type() == SharedData::OperationType::LocalScan)
+    // Bulk, delete and archive operations report their own scan phase under their id.
+    switch (operation->type())
     {
-        auto* renderer = operation->getCardSpecifically<DisplayedScanOperation>();
-        if (renderer)
-            renderer->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
+        case SharedData::OperationType::Scan:
+        case SharedData::OperationType::LocalScan:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedScanOperation>(); card)
+                card->setProgress(progress.totalBytes, progress.currentIndex, progress.totalScanned);
+            break;
+        }
+        case SharedData::OperationType::BulkDownload:
+        case SharedData::OperationType::BulkUpload:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedBulkOperation>(); card)
+                card->setScanProgress(progress.totalBytes, progress.totalScanned);
+            break;
+        }
+        case SharedData::OperationType::Delete:
+        case SharedData::OperationType::BulkDelete:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedDeleteOperation>(); card)
+                card->setScanProgress(progress.totalBytes, progress.totalScanned);
+            break;
+        }
+        case SharedData::OperationType::ArchiveDownload:
+        case SharedData::OperationType::ArchiveUpload:
+        {
+            if (auto* card = operation->getCardSpecifically<DisplayedTransferOperation>(); card)
+                card->setScanProgress(progress.totalBytes, progress.totalScanned);
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -1216,7 +1295,7 @@ void OperationQueue::onOperationCompleted(Nui::val val)
         impl_->failedEntriesCallbacks.erase(failedIt);
         if (!completed.failedEntries.empty())
         {
-            std::vector<std::filesystem::path> failedPaths;
+            std::vector<std::string> failedPaths;
             failedPaths.reserve(completed.failedEntries.size());
             for (auto const& entry : completed.failedEntries)
                 failedPaths.push_back(entry.first);
@@ -1291,7 +1370,7 @@ void OperationQueue::addCompletionCallback(Ids::OperationId const& opId, std::fu
 
 void OperationQueue::addFailedEntriesCallback(
     Ids::OperationId const& opId,
-    std::function<void(std::vector<std::filesystem::path> const&)> callback
+    std::function<void(std::vector<std::string> const&)> callback
 )
 {
     impl_->failedEntriesCallbacks[opId.value()] = std::move(callback);
@@ -1382,6 +1461,7 @@ void OperationQueue::openSyncSession(
     std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
     std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
     std::function<void(bool)> onScanPhaseDone,
+    std::function<void(std::string const&)> onScanFailed,
     std::function<void(std::uint64_t)> onDiffProgress
 )
 {
@@ -1401,6 +1481,7 @@ void OperationQueue::openSyncSession(
     impl_->syncSessionRouting[syncSessionId.value()] = Implementation::SyncSessionRouting{
         .scanIds = {remoteScanId, localScanId},
         .onScanPhaseDone = std::move(onScanPhaseDone),
+        .onScanFailed = std::move(onScanFailed),
         .onDiffProgress = std::move(onDiffProgress),
     };
 
@@ -1413,15 +1494,20 @@ void OperationQueue::openSyncSession(
         respectIgnoreFiles,
         recursive,
         ignoreHidden,
-        [remoteScanId, localScanId](bool success, std::string const& info)
+        [this, syncSessionId, remoteScanId, localScanId](bool success, std::string const& info)
         {
-            if (!success)
-                Log::error(
-                    "Failed to open sync session (remoteId={}, localId={}): {}",
-                    remoteScanId.value(),
-                    localScanId.value(),
-                    info
-                );
+            if (success)
+                return;
+            Log::error(
+                "Failed to open sync session (remoteId={}, localId={}): {}",
+                remoteScanId.value(),
+                localScanId.value(),
+                info
+            );
+            // No scan runs, so neither phase would ever report back.
+            const auto routingIt = impl_->syncSessionRouting.find(syncSessionId.value());
+            if (routingIt != impl_->syncSessionRouting.end() && routingIt->second.onScanFailed)
+                routingIt->second.onScanFailed(info);
         }
     );
 }
@@ -1467,20 +1553,15 @@ void OperationQueue::loadSyncDiffChildren(
     );
 }
 
-void OperationQueue::buildSyncEnqueuePlan(
-    Ids::SyncSessionId syncSessionId,
-    SharedData::Sync::DiffSection section,
-    std::vector<std::string> selectedRelKeys,
-    std::uint64_t generation,
-    std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+void OperationQueue::executeSyncSelection(
+    SharedData::Sync::SyncExecutionRequest request,
+    std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
     std::function<void(std::string const&)> onRejected
 )
 {
     if (!impl_->fileEngine)
-        return;
-    impl_->fileEngine->buildSyncEnqueuePlan(
-        syncSessionId, section, std::move(selectedRelKeys), generation, std::move(onResolved), std::move(onRejected)
-    );
+        return onRejected("No file engine set");
+    impl_->fileEngine->executeSyncSelection(std::move(request), std::move(onResolved), std::move(onRejected));
 }
 
 void OperationQueue::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
@@ -1497,69 +1578,11 @@ void OperationQueue::closeSyncSession(Ids::SyncSessionId syncSessionId)
     impl_->fileEngine->closeSyncSession(syncSessionId);
 }
 
-void OperationQueue::createRemoteDirectory(
-    std::filesystem::path const& path,
-    std::function<void(bool, std::string const&)> onComplete
-)
+void OperationQueue::removeCallbacks(Ids::OperationId const& opId)
 {
-    if (!impl_->fileEngine)
-    {
-        Log::error("No file engine set for operation queue, cannot create remote directory");
-        onComplete(false, "No file engine set");
-        return;
-    }
-    impl_->fileEngine->createDirectory(path, std::move(onComplete));
-}
-
-void OperationQueue::createLocalDirectory(
-    std::filesystem::path const& path,
-    std::function<void(bool, std::string const&)> onComplete
-)
-{
-    Nui::val args = Nui::val::object();
-    args.set("path", path.generic_string());
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::createDirectory",
-        [onComplete = std::move(onComplete)](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
-            {
-                onComplete(false, "Invalid response from backend");
-                return;
-            }
-            if (!val["success"].as<bool>())
-            {
-                onComplete(false, val["error"].as<std::string>());
-                return;
-            }
-            onComplete(true, "Success");
-        },
-        args
-    );
-}
-
-void OperationQueue::removeLocalPaths(
-    std::vector<std::filesystem::path> const& paths,
-    std::function<void(bool, std::string const&)> onComplete
-)
-{
-    Nui::val args = Nui::val::object();
-    args.set("paths", Nui::val::array());
-    args.set("recursive", true);
-    for (auto const& path : paths)
-        args["paths"].call<void>("push", path.generic_string());
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::removeSome",
-        [onComplete = std::move(onComplete)](Nui::val val)
-        {
-            if (!val.hasOwnProperty("success"))
-                return onComplete(false, "Invalid response from backend");
-            if (!val["success"].as<bool>())
-                return onComplete(false, language->translate(val["error"].as<std::string>()));
-            onComplete(true, "Success");
-        },
-        args
-    );
+    impl_->completionCallbacks.erase(opId.value());
+    impl_->failedEntriesCallbacks.erase(opId.value());
+    impl_->bulkProgressCallbacks.erase(opId.value());
 }
 
 void OperationQueue::showMinimizedSync(std::function<void()> onRestore)
@@ -2151,8 +2174,9 @@ Nui::ElementRenderer OperationQueue::operator()()
 }
 
 void OperationQueue::enqueueDownload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    Paths::RemotePath const& source,
+    Paths::LocalPath const& destination,
+    std::uint64_t sizeBytes,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh,
@@ -2167,16 +2191,22 @@ void OperationQueue::enqueueDownload(
         return;
     }
 
-    Log::info(
-        "Frontend Operation Queue download: {} -> {}", remoteItem.path.generic_string(), localItem.path.generic_string()
-    );
+    Log::info("Frontend Operation Queue download: {} -> {}", source.value(), destination.toUtf8());
     impl_->fileEngine->addDownload(
-        remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
+        source,
+        destination,
+        sizeBytes,
+        std::move(onComplete),
+        allowOverwrite,
+        insertRefresh,
+        createMissingDirectories,
+        mode
     );
 }
 void OperationQueue::enqueueUpload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    Paths::LocalPath const& source,
+    Paths::RemotePath const& destination,
+    std::uint64_t sizeBytes,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     bool allowOverwrite,
     bool insertRefresh,
@@ -2191,16 +2221,21 @@ void OperationQueue::enqueueUpload(
         return;
     }
 
-    Log::info(
-        "Frontend Operation Queue upload: {} -> {}", localItem.path.generic_string(), remoteItem.path.generic_string()
-    );
+    Log::info("Frontend Operation Queue upload: {} -> {}", source.toUtf8(), destination.value());
     impl_->fileEngine->addUpload(
-        remoteItem, localItem, std::move(onComplete), allowOverwrite, insertRefresh, createMissingDirectories, mode
+        source,
+        destination,
+        sizeBytes,
+        std::move(onComplete),
+        allowOverwrite,
+        insertRefresh,
+        createMissingDirectories,
+        mode
     );
 }
 void OperationQueue::enqueueArchiveDownload(
-    std::vector<SharedData::DirectoryEntry> entries,
-    std::filesystem::path const& localArchivePath,
+    std::vector<SharedData::ArchiveDownloadRoot> roots,
+    Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
     bool mayOverwrite,
@@ -2216,14 +2251,14 @@ void OperationQueue::enqueueArchiveDownload(
     }
 
     Log::info(
-        "Frontend Operation Queue archive download: {} entries → {} (codec={}, level={})",
-        entries.size(),
-        localArchivePath.generic_string(),
+        "Frontend Operation Queue archive download: {} roots → {} (codec={}, level={})",
+        roots.size(),
+        localArchivePath.toUtf8(),
         compressionCodec,
         compressionLevel
     );
     impl_->fileEngine->addArchiveDownload(
-        std::move(entries),
+        std::move(roots),
         localArchivePath,
         compressionCodec,
         compressionLevel,
@@ -2238,8 +2273,8 @@ void OperationQueue::enqueueArchiveDownload(
 }
 
 void OperationQueue::enqueueArchiveUpload(
-    std::vector<std::filesystem::path> localPaths,
-    std::filesystem::path const& remoteArchivePath,
+    std::vector<Paths::LocalPath> localPaths,
+    Paths::RemotePath const& remoteArchivePath,
     int compressionCodec,
     int compressionLevel,
     bool mayOverwrite,
@@ -2257,7 +2292,7 @@ void OperationQueue::enqueueArchiveUpload(
     Log::info(
         "Frontend Operation Queue archive upload: {} paths → {} (codec={}, level={})",
         localPaths.size(),
-        remoteArchivePath.generic_string(),
+        remoteArchivePath.value(),
         compressionCodec,
         compressionLevel
     );
@@ -2277,8 +2312,8 @@ void OperationQueue::enqueueArchiveUpload(
 }
 
 void OperationQueue::enqueueRename(
-    std::filesystem::path const& oldPath,
-    std::filesystem::path const& newPath,
+    Paths::RemotePath const& oldPath,
+    Paths::RemotePath const& newPath,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
     SharedData::OperationMode mode
 )
@@ -2290,11 +2325,11 @@ void OperationQueue::enqueueRename(
         return;
     }
 
-    Log::info("Frontend Operation Queue rename: {} -> {}", oldPath.generic_string(), newPath.generic_string());
+    Log::info("Frontend Operation Queue rename: {} -> {}", oldPath.value(), newPath.value());
     impl_->fileEngine->addRename(oldPath, newPath, std::move(onComplete), mode);
 }
 void OperationQueue::enqueueDelete(
-    std::vector<std::filesystem::path> const& paths,
+    std::vector<Paths::RemotePath> const& paths,
     bool recursive,
     std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
     SharedData::OperationMode mode
@@ -2310,7 +2345,7 @@ void OperationQueue::enqueueDelete(
 }
 
 void OperationQueue::enqueueBulkDownload(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkDownloadEntry> entries,
     bool allowOverwrite,
     bool insertRefresh,
     SharedData::OperationMode mode,
@@ -2366,7 +2401,7 @@ void OperationQueue::enqueueBulkDownload(
 }
 
 void OperationQueue::enqueueBulkUpload(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkUploadEntry> entries,
     bool allowOverwrite,
     bool insertRefresh,
     SharedData::OperationMode mode,
@@ -2419,112 +2454,90 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
 {
     if (!impl_->fileEngine)
     {
-        Log::error(
-            "OperationQueue::enqueueResumable: no file engine, cannot resume kind={} src={}",
-            static_cast<int>(op.kind),
-            op.src.generic_string()
-        );
+        Log::error("OperationQueue::enqueueResumable: no file engine, cannot resume an operation");
         return;
     }
 
-    Log::info(
-        "OperationQueue::enqueueResumable: dispatching kind={} src={} dst={}",
-        static_cast<int>(op.kind),
-        op.src.generic_string(),
-        op.dst.generic_string()
+    auto report = [](std::string description)
+    {
+        return
+            [description = std::move(description)](std::optional<Ids::OperationId> const& opId, std::string const& info)
+        {
+            if (opId)
+                Log::info("Resumed {} as id {}", description, opId->value());
+            else
+                Log::error("Failed to resume {}: {}", description, info);
+        };
+    };
+
+    // Resumes take the big-file path, the small-file path does not honour tryContinue.
+    constexpr auto resumeSize = static_cast<std::uint64_t>(Constants::bigFileCutOff) + 1;
+
+    std::visit(
+        Utility::overloaded{
+            [&](Resumable::Download const& download)
+            {
+                enqueueDownload(
+                    download.source,
+                    download.destination,
+                    resumeSize,
+                    report(fmt::format("download {} -> {}", download.source.value(), download.destination.toUtf8())),
+                    download.allowOverwrite,
+                    /*insertRefresh=*/true,
+                    /*createMissingDirectories=*/false,
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [&](Resumable::Upload const& upload)
+            {
+                enqueueUpload(
+                    upload.source,
+                    upload.destination,
+                    resumeSize,
+                    report(fmt::format("upload {} -> {}", upload.source.toUtf8(), upload.destination.value())),
+                    upload.allowOverwrite,
+                    /*insertRefresh=*/true,
+                    /*createMissingDirectories=*/false,
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [&](Resumable::Rename const& rename)
+            {
+                enqueueRename(
+                    rename.source,
+                    rename.destination,
+                    report(fmt::format("rename {} -> {}", rename.source.value(), rename.destination.value())),
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [&](Resumable::Delete const& remove)
+            {
+                enqueueDelete(
+                    {remove.target},
+                    remove.recursive,
+                    [target = remove.target](
+                        std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info
+                    )
+                    {
+                        if (ids)
+                            Log::info("Resumed delete of {} ({} op(s) created)", target.value(), ids->size());
+                        else
+                            Log::error("Failed to re-enqueue delete of {}: {}", target.value(), info);
+                    },
+                    SharedData::OperationMode::Queued
+                );
+            },
+            [](Resumable::Bulk const&)
+            {
+                // Bulks are adopted through SessionManager::adoptBulkResume, see SessionSnapshotManager::apply.
+            },
+        },
+        op
     );
-
-    auto reportSingle = [kind = op.kind,
-                            src = op.src,
-                            dst = op.dst](std::optional<Ids::OperationId> const& opId, std::string const& info)
-    {
-        if (opId)
-        {
-            Log::info(
-                "Resumed operation kind={} src={} dst={} as id {}",
-                static_cast<int>(kind),
-                src.generic_string(),
-                dst.generic_string(),
-                opId->value()
-            );
-        }
-        else
-        {
-            Log::error(
-                "Failed to re-enqueue operation kind={} src={} dst={}: {}",
-                static_cast<int>(kind),
-                src.generic_string(),
-                dst.generic_string(),
-                info
-            );
-        }
-    };
-
-    // Build a minimal Item from a path.  The size hint biases the backend
-    // toward the streaming/big-file code path so a partial transfer can
-    // resume; the small-file path doesn't honour tryContinue.
-    auto makeItem = [](std::filesystem::path const& path)
-    {
-        SharedData::DirectoryEntry entry{};
-        entry.path = path;
-        entry.type = SharedData::FileType::Regular;
-        entry.size = static_cast<std::uint64_t>(Constants::bigFileCutOff) + 1;
-        return NuiFileExplorer::Item{entry};
-    };
-
-    switch (op.kind)
-    {
-        case ResumableOp::Kind::Download:
-            enqueueDownload(
-                makeItem(op.src),
-                makeItem(op.dst),
-                reportSingle,
-                op.allowOverwrite,
-                /*insertRefresh=*/true,
-                op.createMissingDirectories,
-                SharedData::OperationMode::Queued
-            );
-            break;
-        case ResumableOp::Kind::Upload:
-            enqueueUpload(
-                makeItem(op.dst),
-                makeItem(op.src),
-                reportSingle,
-                op.allowOverwrite,
-                /*insertRefresh=*/true,
-                op.createMissingDirectories,
-                SharedData::OperationMode::Queued
-            );
-            break;
-        case ResumableOp::Kind::Rename:
-            enqueueRename(op.src, op.dst, reportSingle, SharedData::OperationMode::Queued);
-            break;
-        case ResumableOp::Kind::Delete:
-            enqueueDelete(
-                {op.src},
-                op.recursive,
-                [src = op.src](std::optional<std::vector<Ids::OperationId>> const& ids, std::string const& info)
-                {
-                    if (ids)
-                        Log::info("Resumed delete of {} ({} op(s) created)", src.generic_string(), ids->size());
-                    else
-                        Log::error("Failed to re-enqueue delete of {}: {}", src.generic_string(), info);
-                },
-                SharedData::OperationMode::Queued
-            );
-            break;
-        case ResumableOp::Kind::BulkDownload:
-        case ResumableOp::Kind::BulkUpload:
-        case ResumableOp::Kind::BulkDelete:
-            // Bulk kinds are adopted via SessionManager::adoptBulkResume —
-            // see Session::applySnapshot.  This helper handles only the
-            // single-file kinds.
-            break;
-    }
 }
 
 void OperationQueue::enqueueBulkDelete(
-    std::vector<SharedData::BulkAddEntry> entries,
+    std::vector<SharedData::BulkDeleteEntry> entries,
     bool insertRefresh,
     SharedData::OperationMode mode,
     std::function<void(bool success)> onBulkComplete,

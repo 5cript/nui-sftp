@@ -1,6 +1,9 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_operation.hpp>
+#include <backend/sftp/scan_phase.hpp>
+#include <paths/local_path.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
@@ -10,6 +13,8 @@
 #include <tar_archive/entry_writer.hpp>
 #include <tar_archive/compression.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <shared_data/file_operations/archive_download_root.hpp>
+#include <tar_archive/member_header.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -62,13 +67,12 @@ class ArchiveDownloadOperation : public Operation
          *    `foo/sub/`, `foo/sub/baz.txt`.
          *  - Other types (symlinks, devices, ...) are silently skipped.
          *
-         * `fullPath` must carry the full remote path; `path` is used only if
-         * `fullPath` is empty.
+         * A root that is the remote root directory has no name and is refused.
          */
-        std::vector<SharedData::DirectoryEntry> entries{};
+        std::vector<SharedData::ArchiveDownloadRoot> roots{};
 
         /** @brief Destination archive path on the local filesystem. */
-        std::filesystem::path localArchivePath{};
+        Paths::LocalPath localArchivePath{};
 
         /** @brief Compression codec. Use TarArchive::Compression::Auto to pick from the extension. */
         TarArchive::Compression compression{TarArchive::Compression::Auto};
@@ -81,6 +85,8 @@ class ArchiveDownloadOperation : public Operation
 
         /** @brief Refuse to overwrite a pre-existing final archive. */
         bool mayOverwrite{false};
+        /** @brief Mark the archive as downloaded from the internet, see Utility::markAsDownloaded. */
+        bool markAsDownloaded{true};
 
         /** @brief Create any missing parents of @ref localArchivePath. */
         bool createMissingDirectories{false};
@@ -98,9 +104,25 @@ class ArchiveDownloadOperation : public Operation
     std::expected<WorkStatus, Error> work() override;
     std::expected<WorkStatus, Error> workInStrand() override;
 
+    // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
+    bool usesStrand() const noexcept override
+    {
+        return scanPhase_ == nullptr;
+    }
+
     bool isBarrier() const noexcept override
     {
-        return false;
+        return scanPhase_ != nullptr;
+    }
+
+    /**
+     * @brief Scans the directory root of @p scan before packing; roots are scanned in the order added.
+     */
+    void addScanRoot(std::unique_ptr<ScanOperation> scan);
+
+    bool scanning() const noexcept
+    {
+        return scanPhase_ != nullptr;
     }
 
     int parallelWorkDoable(int) const noexcept override
@@ -129,16 +151,15 @@ class ArchiveDownloadOperation : public Operation
      *        rather than silently buried inside prepare.
      *
      *        Safe to call multiple times — one call per directory root in
-     *        @ref Options::entries.  Matching is by @p remoteRootPath which
-     *        must equal the root entry's full remote path
-     *        (fullPath-or-fallback-to-path in the root @ref DirectoryEntry).
+     *        @ref Options::roots.  Matching is by @p remoteRootPath, the
+     *        path of the root.
      *
      *        Threading: invoked on the queue's asio strand between SFTP-strand
      *        work batches, so no extra synchronisation is required against
      *        prepareInStrand (which runs on the SFTP strand).
      */
     void setScanResultForRoot(
-        std::filesystem::path const& remoteRootPath,
+        Paths::RemotePath const& remoteRootPath,
         std::vector<SharedData::DirectoryEntry> entries,
         std::uint64_t totalBytes
     );
@@ -152,8 +173,8 @@ class ArchiveDownloadOperation : public Operation
      */
     struct ResolvedEntry
     {
-        SharedData::DirectoryEntry tarMeta{};
-        std::filesystem::path remoteFullPath{};
+        TarArchive::MemberHeader header{};
+        Paths::RemotePath source{};
     };
 
     std::expected<void, Error> prepareInStrand();
@@ -162,14 +183,14 @@ class ArchiveDownloadOperation : public Operation
      * @brief Expand a preceding ScanOperation's flat entry vector into the
      *        op's ResolvedEntry list, prefixing each entry's tar path with
      *        @p archivePrefix and composing remote paths under
-     *        @p remoteRootFullPath. Index 0 (the synthetic scan root) is
+     *        @p remoteRoot. Index 0 (the synthetic scan root) is
      *        skipped because the root directory entry is emitted separately
      *        by flattenRootsInStrand.
      */
     void appendPrescannedInStrand(
         std::vector<SharedData::DirectoryEntry> const& entries,
-        std::filesystem::path const& remoteRootFullPath,
-        std::filesystem::path const& archivePrefix
+        Paths::RemotePath const& remoteRoot,
+        Paths::RelativePath const& archivePrefix
     );
     std::expected<void, Error> openNextEntryInStrand();
     std::expected<bool, Error> readChunkInStrand();
@@ -191,6 +212,8 @@ class ArchiveDownloadOperation : public Operation
     std::uint64_t totalBytesTransferred_{0u};
     std::uint64_t totalPayloadBytes_{0u};
     SecureShell::BufferLease buffer_;
+    /** @brief options_.localArchivePath for the filesystem calls, empty when none was given. */
+    std::filesystem::path localArchiveNativePath_{};
     std::filesystem::path tempPath_{};
     /**
      * @brief Pre-scanned entry lists delivered by preceding ScanOperation(s),
@@ -198,7 +221,7 @@ class ArchiveDownloadOperation : public Operation
      *        looks each directory root up here before falling back to a live
      *        recurseIntoDirectoryInStrand listing.
      */
-    std::map<std::filesystem::path, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
+    std::map<Paths::RemotePath, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
         prescannedRoots_{};
     /**
      * @brief Reused purely for its bytes-transferred + B/s meter machinery;
@@ -208,4 +231,5 @@ class ArchiveDownloadOperation : public Operation
      */
     std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
         std::make_shared<SecureShell::AsyncTransferContext>()};
+    std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};
 };

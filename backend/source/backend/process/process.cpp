@@ -309,6 +309,11 @@ void Process::spawn(
     auto executable = bp2::environment::find_executable(processName, env);
     if (executable.empty())
         executable = processName;
+#ifdef _WIN32
+    // cmd.exe reads its own path as given: in "C:/Windows/System32/cmd.exe" it takes "/c" as a switch and runs
+    // "md.exe" instead of starting a shell.
+    executable.make_preferred();
+#endif
 
     {
         std::scoped_lock lock{impl_->awaitExit};
@@ -317,6 +322,18 @@ void Process::spawn(
 
     if (!launcher)
     {
+#ifdef _WIN32
+        // The app is a GUI program without a console, a console child would open a window of its own.
+        bp2::windows::default_launcher windowlessLauncher{};
+        windowlessLauncher.creation_flags |= CREATE_NO_WINDOW;
+        impl_->child = std::make_unique<bp2::process>(windowlessLauncher(
+            impl_->executor,
+            executable,
+            arguments,
+            bp2::process_environment{env},
+            bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe)
+        ));
+#else
         impl_->child = std::make_unique<bp2::process>(
             impl_->executor,
             executable,
@@ -324,6 +341,7 @@ void Process::spawn(
             bp2::process_environment{env},
             bp2::process_stdio(impl_->stdinPipe, impl_->stdoutPipe, impl_->stderrPipe)
         );
+#endif
     }
     else
     {

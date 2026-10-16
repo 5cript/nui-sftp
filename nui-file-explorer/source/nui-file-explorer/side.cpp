@@ -59,6 +59,14 @@ namespace NuiFileExplorer
 
         // PgUp/PgDn should align with the pagination step so keyboard paging matches the footer.
         impl_->selectionManager.setPageJumpSize(static_cast<std::size_t>(std::max(1, impl_->pageSize.value())));
+        // Items a filter hides are never acted on: select-all and shift ranges skip them.
+        impl_->selectionManager.setVisibilityPredicate(
+            [impl = impl_.get()](std::size_t index)
+            {
+                return impl->filterQuery.value().empty() ||
+                    impl->filterMatchPosition.contains(static_cast<long long>(index));
+            }
+        );
 
         if (impl_->model->placesProvider() || impl_->model->favoritesProvider() || impl_->model->drivesProvider())
         {
@@ -177,10 +185,10 @@ namespace NuiFileExplorer
                 {
                     // If only a single item is selected and its a directory, set that as the target subdir for the
                     // transfer. Otherwise, transfer to the current directory.
-                    std::optional<std::filesystem::path> targetSubdir = std::nullopt;
+                    std::optional<std::string> targetSubdir = std::nullopt;
                     auto selectedItems = this->selectedItems();
                     if (selectedItems.size() == 1 && selectedItems.front().isDirectory())
-                        targetSubdir = selectedItems.front().path.filename();
+                        targetSubdir = selectedItems.front().name;
                     impl_->otherSide->model().onTransfer(copiedFiles, targetSubdir);
                 }
             }
@@ -346,12 +354,12 @@ namespace NuiFileExplorer
             std::views::filter(
                 [showHidden](auto const& item)
                 {
-                    const auto filename = item.path.filename().string();
-                    return showHidden || filename.empty() || filename[0] != '.' || filename == "..";
+                    const auto filename = item.displayName();
+                    return showHidden || item.isParentLink || filename.empty() || filename[0] != '.';
                 }
             );
         for (auto const& item : visibleItems)
-            pathSet.insert(item.path);
+            pathSet.insert(item.fullPath);
         std::ranges::transform(
             visibleItems,
             std::back_inserter(impl_->items.value()),
@@ -591,7 +599,7 @@ namespace NuiFileExplorer
 
         if (item != nullptr)
         {
-            Nui::WebApi::Console::log("Context menu item: ", item->item.path.string());
+            Nui::WebApi::Console::log("Context menu item: ", item->item.displayName());
             auto selected = selectedItems();
 
             if (std::find_if(
@@ -599,7 +607,7 @@ namespace NuiFileExplorer
                     selected.end(),
                     [&item](auto const& sel)
                     {
-                        return sel.path == item->item.path;
+                        return sel.fullPath == item->item.fullPath;
                     }
                 ) == selected.end())
             {
@@ -623,7 +631,7 @@ namespace NuiFileExplorer
                 clickItems.end(),
                 [](auto const& itm)
                 {
-                    return itm.path.filename() == "..";
+                    return itm.isParentLink;
                 }
             ),
             clickItems.end()
@@ -713,7 +721,7 @@ namespace NuiFileExplorer
             result.begin(),
             [](auto const& item)
             {
-                return item.path;
+                return item.fullPath;
             }
         );
         return result;
@@ -1107,7 +1115,7 @@ namespace NuiFileExplorer
         for (auto& item : impl_->items.value())
         {
             item.searchHighlight(
-                matchesQuery(item.item.path.generic_string(), normalizedQuery, queryTokens)
+                matchesQuery(item.item.displayName(), normalizedQuery, queryTokens)
                     ? ItemWithInternals::SearchHighlight::Highlight
                     : ItemWithInternals::SearchHighlight::Muted
             );
@@ -1181,7 +1189,7 @@ namespace NuiFileExplorer
             auto const& items = impl_->items.value();
             for (std::size_t itemIdx = 0; itemIdx < items.size(); ++itemIdx)
             {
-                if (matchesQuery(items[itemIdx].item.path.generic_string(), normalizedQuery, queryTokens))
+                if (matchesQuery(items[itemIdx].item.displayName(), normalizedQuery, queryTokens))
                 {
                     const auto absoluteIndex = static_cast<long long>(itemIdx);
                     impl_->filterMatchPosition.emplace(
@@ -1210,6 +1218,7 @@ namespace NuiFileExplorer
             impl_->currentPage = 0;
 
         impl_->filterQuery = std::move(query);
+        impl_->selectionManager.refreshSelection();
         impl_->items.modifyNow();
         Nui::globalEventContext.executeActiveEventsImmediately();
     }

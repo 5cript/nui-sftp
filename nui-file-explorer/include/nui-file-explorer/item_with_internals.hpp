@@ -40,7 +40,7 @@ namespace NuiFileExplorer
         explicit ItemWithInternals(Item const& sourceItem)
             : item{sourceItem}
             , element{}
-            , displayFilename{sourceItem.path.filename().string()}
+            , displayFilename{sourceItem.displayName()}
             , displaySize{Utility::formatBytes(static_cast<long long>(sourceItem.size))}
             , displayPerms{sourceItem.lsStyleTypePermsUserGroup()}
             , displayMtime{sourceItem.readableMTime()}
@@ -64,7 +64,7 @@ namespace NuiFileExplorer
 
         bool isSelectable() const
         {
-            return item.path.filename() != "..";
+            return !item.isParentLink;
         }
 
         auto observeClassRelevant(auto&& fn) const

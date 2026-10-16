@@ -32,6 +32,7 @@
 
 extern char** environ;
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -185,7 +186,7 @@ namespace Test
          */
         void dumpFixture(std::string const& name) const
         {
-            const auto directory = programDirectory / "temp" / "shell_integration" / "fixtures";
+            const auto directory = temporaryRoot / "shell_integration" / "fixtures";
             // Sessions of earlier runs, possibly under names that no longer exist, would be replayed too.
             static const bool cleared = std::filesystem::remove_all(directory) >= 0;
             static_cast<void>(cleared);
@@ -323,7 +324,7 @@ namespace Test
             if (executable.empty())
                 GTEST_SKIP() << launch.shell << " is not installed on the host; the docker configurations cover it";
 
-            const auto home = programDirectory / "temp" / "shell_integration" / launch.name;
+            const auto home = temporaryRoot / "shell_integration" / launch.name;
             std::filesystem::remove_all(home);
             std::filesystem::create_directories(home);
 
@@ -722,7 +723,7 @@ namespace Test
         if (executable.empty())
             GTEST_SKIP() << "bash is not installed";
 
-        const auto home = programDirectory / "temp" / "shell_integration" / "IgnoreDups";
+        const auto home = temporaryRoot / "shell_integration" / "IgnoreDups";
         std::filesystem::create_directories(home);
         ShellUnderTest shell{{
             .executable = executable,

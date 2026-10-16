@@ -5,6 +5,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 class Opener
@@ -18,6 +19,13 @@ class Opener
     Opener& operator=(Opener&&) noexcept;
 
     std::expected<void, std::string> openFile(std::filesystem::path const& path, bool openWith);
+
+    /**
+     * @brief Why opening @p path could run code: a program, a script, a shortcut or an application bundle. Nothing
+     *        for an ordinary document or a folder.
+     * @return A localized message key describing the risk.
+     */
+    std::optional<std::string> riskOf(std::filesystem::path const& path) const;
 
     /**
      *  @brief Open the native file manager showing @p path.

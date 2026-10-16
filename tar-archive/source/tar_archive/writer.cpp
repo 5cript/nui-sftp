@@ -80,7 +80,7 @@ namespace TarArchive
     }
 
     std::expected<EntryWriter, TarError>
-    Writer::beginEntry(SharedData::DirectoryEntry const& meta)
+    Writer::beginEntry(MemberHeader const& meta)
     {
         if (impl_ == nullptr || impl_->finalized)
             return std::unexpected(

@@ -31,7 +31,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->listDirectoryInStrand("/home/test");
+            return sftp->listDirectoryInStrand(remote("/home/test"));
         });
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_GT(result.value().size(), 0u);
@@ -42,7 +42,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->createDirectoryInStrand("/home/test/newdir_is");
+            return sftp->createDirectoryInStrand(remote("/home/test/newdir_is"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -53,7 +53,7 @@ namespace SecureShell::Test
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         // Existing directory — should be a no-op success.
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->createDirectoryIfItDoesntExistInStrand("/home/test");
+            return sftp->createDirectoryIfItDoesntExistInStrand(remote("/home/test"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -63,7 +63,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->createFileInStrand("/home/test/newfile_is.txt");
+            return sftp->createFileInStrand(remote("/home/test/newfile_is.txt"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -73,7 +73,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->removeFileInStrand("/home/test/file1.txt");
+            return sftp->removeFileInStrand(remote("/home/test/file1.txt"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -84,11 +84,11 @@ namespace SecureShell::Test
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         // First create a directory we can remove.
         auto mk = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->createDirectoryInStrand("/home/test/to_remove_is");
+            return sftp->createDirectoryInStrand(remote("/home/test/to_remove_is"));
         });
         ASSERT_TRUE(mk.has_value());
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->removeDirectoryInStrand("/home/test/to_remove_is");
+            return sftp->removeDirectoryInStrand(remote("/home/test/to_remove_is"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -98,7 +98,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->statInStrand("/home/test/file1.txt");
+            return sftp->statInStrand(remote("/home/test/file1.txt"));
         });
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_GT(result.value().size, 0u);
@@ -109,7 +109,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->lstatInStrand("/home/test/file1.txt");
+            return sftp->lstatInStrand(remote("/home/test/file1.txt"));
         });
         ASSERT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -119,7 +119,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->renameInStrand("/home/test/file1.txt", "/home/test/file1_renamed_is.txt");
+            return sftp->renameInStrand(remote("/home/test/file1.txt"), remote("/home/test/file1_renamed_is.txt"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -129,7 +129,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->chmodInStrand("/home/test/file1.txt", std::filesystem::perms::owner_all);
+            return sftp->chmodInStrand(remote("/home/test/file1.txt"), std::filesystem::perms::owner_all);
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -150,7 +150,7 @@ namespace SecureShell::Test
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
             return sftp->openFileInStrand(
-                "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+                remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
             );
         });
         ASSERT_TRUE(result.has_value()) << result.error().toString();
@@ -163,9 +163,48 @@ namespace SecureShell::Test
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         // Non-symlink regular file is a valid target.
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->readLinkDeepInStrand("/home/test/file1.txt");
+            return sftp->readLinkDeepInStrand(remote("/home/test/file1.txt"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
+    }
+
+    TEST_F(SftpInStrandTests, ReadLinkDeepResolvesRelativeLinksFromTheLinkDirectory)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command(
+            "createSymlink", {{"path", "/home/test/Documents/relative_link"}, {"target", "../link_to_file1.txt"}}
+        ));
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        auto result = runInStrand(sftp, [sftp = sftp]() {
+            return sftp->readLinkDeepInStrand(remote("/home/test/Documents/relative_link"));
+        });
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(result->linkContent, "../link_to_file1.txt");
+        EXPECT_EQ(result->linkTarget.value(), "/home/test/file1.txt");
+        ASSERT_TRUE(result->targetInfo.has_value());
+        EXPECT_TRUE(result->targetInfo->isRegularFile());
+    }
+
+    TEST_F(SftpInStrandTests, UnsetPathsNeverReachTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        auto removed = runInStrand(sftp, [sftp = sftp]() {
+            return sftp->removeFileInStrand(Paths::RemotePath{});
+        });
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_EQ(removed.error().wrapperError, WrapperErrors::InvalidPath);
+
+        auto renamed = runInStrand(sftp, [sftp = sftp]() {
+            return sftp->renameReplaceInStrand(remote("/home/test/file1.txt"), Paths::RemotePath{}, ".old");
+        });
+        ASSERT_FALSE(renamed.has_value());
+        EXPECT_EQ(renamed.error().wrapperError, WrapperErrors::InvalidPath);
+
+        auto stillThere = runInStrand(sftp, [sftp = sftp]() {
+            return sftp->lstatInStrand(remote("/home/test/file1.txt"));
+        });
+        EXPECT_TRUE(stillThere.has_value());
     }
 
     TEST_F(SftpInStrandTests, CreateSymLinkInStrandHappyPath)
@@ -173,7 +212,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto result = runInStrand(sftp, [sftp = sftp]() {
-            return sftp->createSymLinkInStrand("/home/test/file1.txt", "/home/test/link_is.txt");
+            return sftp->createSymLinkInStrand("/home/test/file1.txt", remote("/home/test/link_is.txt"));
         });
         EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
@@ -186,7 +225,7 @@ namespace SecureShell::Test
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto opened = fut.get();
@@ -217,7 +256,7 @@ namespace SecureShell::Test
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto opened = fut.get();
@@ -242,56 +281,56 @@ namespace SecureShell::Test
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->listDirectoryInStrand("/home/test"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->listDirectoryInStrand(remote("/home/test")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, CreateDirectoryInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->createDirectoryInStrand("/home/test/x_dt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->createDirectoryInStrand(remote("/home/test/x_dt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, CreateDirectoryIfItDoesntExistInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->createDirectoryIfItDoesntExistInStrand("/home/test/x_dt2"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->createDirectoryIfItDoesntExistInStrand(remote("/home/test/x_dt2")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, CreateFileInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->createFileInStrand("/home/test/x_dt.txt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->createFileInStrand(remote("/home/test/x_dt.txt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, RemoveFileInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->removeFileInStrand("/home/test/file1.txt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->removeFileInStrand(remote("/home/test/file1.txt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, RemoveDirectoryInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->removeDirectoryInStrand("/home/test/Documents"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->removeDirectoryInStrand(remote("/home/test/Documents")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, StatInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->statInStrand("/home/test/file1.txt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->statInStrand(remote("/home/test/file1.txt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, LstatInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->lstatInStrand("/home/test/file1.txt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->lstatInStrand(remote("/home/test/file1.txt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, SetstatInStrandAssertsOutsideStrand)
@@ -299,21 +338,21 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         sftp_attributes_struct attrs{};
-        ASSERT_DEBUG_DEATH({ (void)sftp->statInStrand("/home/test/file1.txt", &attrs); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->statInStrand(remote("/home/test/file1.txt"), &attrs); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, RenameInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->renameInStrand("/home/test/file1.txt", "/home/test/whatever.txt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->renameInStrand(remote("/home/test/file1.txt"), remote("/home/test/whatever.txt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, ChownInStrandAssertsOutsideStrand)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->chownInStrand("/home/test/file1.txt", 0, 0); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->chownInStrand(remote("/home/test/file1.txt"), 0, 0); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, ChmodInStrandAssertsOutsideStrand)
@@ -321,7 +360,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         ASSERT_DEBUG_DEATH(
-            { (void)sftp->chmodInStrand("/home/test/file1.txt", std::filesystem::perms::owner_all); }, ".*"
+            { (void)sftp->chmodInStrand(remote("/home/test/file1.txt"), std::filesystem::perms::owner_all); }, ".*"
         );
     }
 
@@ -339,7 +378,7 @@ namespace SecureShell::Test
         ASSERT_DEBUG_DEATH(
             {
                 (void)sftp->openFileInStrand(
-                    "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+                    remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
                 );
             },
             ".*"
@@ -350,7 +389,7 @@ namespace SecureShell::Test
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
-        ASSERT_DEBUG_DEATH({ (void)sftp->readLinkDeepInStrand("/home/test/file1.txt"); }, ".*");
+        ASSERT_DEBUG_DEATH({ (void)sftp->readLinkDeepInStrand(remote("/home/test/file1.txt")); }, ".*");
     }
 
     TEST_F(SftpInStrandDeathTests, CreateSymLinkInStrandAssertsOutsideStrand)
@@ -358,7 +397,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         ASSERT_DEBUG_DEATH(
-            { (void)sftp->createSymLinkInStrand("/home/test/file1.txt", "/home/test/link_dt.txt"); }, ".*"
+            { (void)sftp->createSymLinkInStrand("/home/test/file1.txt", remote("/home/test/link_dt.txt")); }, ".*"
         );
     }
 
@@ -372,7 +411,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto file = fut.get().value().lock();
@@ -385,7 +424,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto file = fut.get().value().lock();
@@ -398,7 +437,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto file = fut.get().value().lock();
@@ -411,7 +450,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto file = fut.get().value().lock();
@@ -424,7 +463,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto file = fut.get().value().lock();
@@ -438,7 +477,7 @@ namespace SecureShell::Test
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
         auto fut = sftp->openFile(
-            "/home/test/file1.txt", SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
         ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
         auto file = fut.get().value().lock();

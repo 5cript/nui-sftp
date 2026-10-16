@@ -15,7 +15,10 @@ class FilePropertyDialog
 
     Nui::ElementRenderer operator()();
 
-    void open(SharedData::DirectoryEntry const& entry);
+    /**
+     * @brief Shows @p entry found at @p path. A symlink's target is shown at @p targetPath, which may be empty.
+     */
+    void open(SharedData::DirectoryEntry const& entry, std::string path, std::string targetPath = {});
 
   private:
     struct Implementation;

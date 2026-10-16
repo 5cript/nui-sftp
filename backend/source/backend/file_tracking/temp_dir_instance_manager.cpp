@@ -1,18 +1,35 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
+#include <utility/link_safe_remove.hpp>
+#include <paths/native.hpp>
+#include <paths/local_path.hpp>
 
-#include <utility/path_utf.hpp>
 
 #include <nlohmann/json.hpp>
 #include <log/log.hpp>
 
 #include <chrono>
 #include <fstream>
+#include <optional>
 #include <system_error>
 
 namespace FileTracking
 {
     namespace
     {
+        /**
+         * @brief Parse a metadata file, the stream is closed again on return.
+         *
+         * @param metaPath Path to the metadata.json file.
+         * @return The parsed json.
+         */
+        nlohmann::json readMetadata(std::filesystem::path const& metaPath)
+        {
+            std::ifstream metaIn{metaPath};
+            nlohmann::json meta;
+            metaIn >> meta;
+            return meta;
+        }
+
         /**
          * @brief Scan @p tempRootDir for dead instance directories and handle them.
          *
@@ -136,7 +153,7 @@ namespace FileTracking
 
                 Log::info("forceCleanOrphanedInstanceDirs: removing orphaned instance '{}'", dirPath.filename().string());
                 std::error_code rmErr;
-                fs::remove_all(dirPath, rmErr);
+                Utility::removeAllNoFollow(dirPath, rmErr);
                 if (rmErr)
                     Log::warn("forceCleanOrphanedInstanceDirs: failed to remove '{}': {}", dirPath.filename().string(), rmErr.message());
                 else
@@ -222,45 +239,15 @@ namespace FileTracking
                     continue;
                 }
 
+                // The metadata stream must be closed before remove_all, Windows refuses to delete open files.
+                std::optional<std::chrono::system_clock::time_point> deadAt;
                 try
                 {
-                    std::ifstream metaIn{metaPath};
-                    nlohmann::json meta;
-                    metaIn >> meta;
-
+                    auto const meta = readMetadata(metaPath);
                     if (meta.contains("deadAt") && !meta["deadAt"].is_null())
-                    {
-                        auto deadAtTs = meta["deadAt"].get<std::int64_t>();
-                        auto deadAt = std::chrono::system_clock::from_time_t(
-                            static_cast<std::time_t>(deadAtTs)
+                        deadAt = std::chrono::system_clock::from_time_t(
+                            static_cast<std::time_t>(meta["deadAt"].get<std::int64_t>())
                         );
-                        auto elapsed =
-                            std::chrono::duration_cast<std::chrono::hours>(now - deadAt);
-
-                        if (elapsed >= retentionHours)
-                        {
-                            Log::info(
-                                "Removing dead instance '{}' (dead for {} hours)",
-                                dirName,
-                                elapsed.count()
-                            );
-                            std::error_code rmErr;
-                            fs::remove_all(dirPath, rmErr);
-                            if (rmErr)
-                            {
-                                Log::warn(
-                                    "Failed to remove dead instance '{}': {}",
-                                    dirName,
-                                    rmErr.message()
-                                );
-                            }
-                        }
-                        // else: dead but within retention window, leave it
-                    }
-                    else
-                    {
-                        writeDeadAt();
-                    }
                 }
                 catch (std::exception const& exc)
                 {
@@ -269,8 +256,23 @@ namespace FileTracking
                         dirName,
                         exc.what()
                     );
-                    writeDeadAt();
                 }
+
+                if (!deadAt)
+                {
+                    writeDeadAt();
+                    continue;
+                }
+
+                auto const elapsed = std::chrono::duration_cast<std::chrono::hours>(now - *deadAt);
+                if (elapsed < retentionHours)
+                    continue;
+
+                Log::info("Removing dead instance '{}' (dead for {} hours)", dirName, elapsed.count());
+                std::error_code rmErr;
+                Utility::removeAllNoFollow(dirPath, rmErr);
+                if (rmErr)
+                    Log::warn("Failed to remove dead instance '{}': {}", dirName, rmErr.message());
             }
         }
     } // namespace
@@ -307,7 +309,7 @@ namespace FileTracking
                 reply({
                     {"success", true},
                     {"instanceId", inst->instanceId()},
-                    {"instanceDir", inst->instanceDir().string()},
+                    {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
                 });
             }
         );
@@ -344,7 +346,13 @@ namespace FileTracking
                     reply.error("Instance not found: " + instanceId);
                     return;
                 }
-                auto watch = inst->addWatch(Utility::pathFromUtf8(path), recursive, std::move(downloadTempSuffix));
+                const auto watchedPath = Paths::LocalPath::fromUtf8(path);
+                if (!watchedPath)
+                {
+                    reply.error(fmt::format("Cannot watch '{}': {}", path, watchedPath.error().toString()));
+                    return;
+                }
+                auto watch = inst->addWatch(watchedPath->native(), recursive, std::move(downloadTempSuffix));
                 if (!watch)
                 {
                     reply.error("Failed to add watch on path: " + path);
@@ -364,7 +372,7 @@ namespace FileTracking
                 {
                     arr.push_back({
                         {"instanceId", instId},
-                        {"instanceDir", inst->instanceDir().string()},
+                        {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
                     });
                 }
                 reply({{"success", true}, {"instances", std::move(arr)}});
@@ -384,8 +392,50 @@ namespace FileTracking
                 reply({
                     {"success", true},
                     {"instanceId", instanceId},
-                    {"instanceDir", inst->instanceDir().string()},
+                    {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
                 });
+            }
+        );
+
+        // Size and modification time of every file in an instance, taken right after the download: downloads keep
+        // the server's modification time, so this is what the server had. File tracking compares against it
+        // before replacing the server's copy.
+        registerOnStrand(
+            "FileTracking::fileStates",
+            [this](RpcHelper::RpcOnce&& reply, std::string instanceId)
+            {
+                auto* inst = findInstance(instanceId);
+                if (!inst)
+                {
+                    reply.error("Instance not found: " + instanceId);
+                    return;
+                }
+                nlohmann::json files = nlohmann::json::array();
+                std::error_code walkError{};
+                for (std::filesystem::recursive_directory_iterator iter{inst->instanceDir(), walkError}, end;
+                     !walkError && iter != end;
+                     iter.increment(walkError))
+                {
+                    std::error_code entryError{};
+                    if (!iter->is_regular_file(entryError) || iter->is_symlink(entryError))
+                        continue;
+                    const auto size = iter->file_size(entryError);
+                    const auto modified = iter->last_write_time(entryError);
+                    if (entryError)
+                        continue;
+                    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::file_clock::to_sys(modified).time_since_epoch()
+                    );
+                    // Canonical like the watched directory, so the paths match the change events.
+                    files.push_back({
+                        {"path", Paths::nativeToUtf8(std::filesystem::weakly_canonical(iter->path(), entryError))},
+                        {"size", size},
+                        {"mtime", seconds.count()},
+                    });
+                }
+                if (walkError)
+                    Log::warn("FileTracking::fileStates: walking '{}' failed: {}", instanceId, walkError.message());
+                reply({{"success", true}, {"files", std::move(files)}});
             }
         );
 

@@ -3,7 +3,7 @@
 #include <tar_archive/compression.hpp>
 #include <tar_archive/entry_writer.hpp>
 #include <tar_archive/error.hpp>
-#include <shared_data/directory_entry.hpp>
+#include <tar_archive/member_header.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -39,7 +39,7 @@ namespace TarArchive
          * produced by this Writer is still alive, or with WriteAfterFinalize if the Writer
          * has already been finalised.
          */
-        std::expected<EntryWriter, TarError> beginEntry(SharedData::DirectoryEntry const& meta);
+        std::expected<EntryWriter, TarError> beginEntry(MemberHeader const& meta);
 
         /**
          * @brief Flush pending compression buffers, write two trailing zero records and

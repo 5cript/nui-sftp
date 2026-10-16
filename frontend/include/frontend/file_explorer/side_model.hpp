@@ -10,6 +10,7 @@
 #include <shared_data/opener_capabilities.hpp>
 
 #include <nui-file-explorer/side_model_interface.hpp>
+#include <paths/paths.hpp>
 
 #include <source_location>
 
@@ -111,7 +112,45 @@ class SideModel : public NuiFileExplorer::ISideModel
     // Design smell:
     virtual bool isComplete() const;
 
+    /**
+     * @brief A new name is a single path segment: not empty, not "." or "..", without '/', '\\' or NUL.
+     */
+    static bool isValidItemName(std::string_view name);
+
+    /**
+     * @brief Tells the user @p name cannot be used as a name.
+     */
+    void showInvalidItemName(std::string const& name);
+
+    /**
+     * @brief Tells the user an action was refused because of the path in @p error.
+     */
+    void showPathRefused(std::string const& headerText, Paths::PathError const& error);
+
+    /**
+     * @brief Tells the user a transfer stopped because the destinations could not be checked, @p reason says why.
+     */
+    void showExistenceCheckFailed(std::string const& reason);
+
+    /**
+     * @brief Asks whether the existing item @p name may be replaced, runs @p onReplace when the user agrees.
+     */
+    void confirmReplaceOnRename(std::string const& name, std::function<void()> onReplace);
+
+    /**
+     * @brief The directory has a parent to offer as "..".
+     */
+    virtual bool hasParent(std::filesystem::path const& directory) const
+    {
+        return directory.has_relative_path();
+    }
+
+    /**
+     * @brief Shows the listing of @p directory. A reply for a directory the side has navigated away from is dropped,
+     *        so no item carries the path of another directory.
+     */
     virtual void onDirectoryListing(
+        std::filesystem::path const& directory,
         std::optional<std::vector<SharedData::DirectoryEntry>> directoryEntries,
         std::string const& reason = {}
     );
@@ -126,6 +165,8 @@ class SideModel : public NuiFileExplorer::ISideModel
     std::vector<NuiFileExplorer::Item> items_{};
     OperationQueue* operationQueue_{nullptr};
     Nui::Observed<std::filesystem::path> currentPath_{};
+    /** @brief The directory the shown items were listed from, currentPath_ runs ahead while a listing loads. */
+    std::filesystem::path listedPath_{};
     std::filesystem::path preNavigatePath_{};
     std::function<void(bool, bool)> refreshCallback_{nullptr};
     bool reapplySelectionOnce_{false};

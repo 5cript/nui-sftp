@@ -13,6 +13,7 @@
 #include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace TarArchive::Test
 {
@@ -20,16 +21,15 @@ namespace TarArchive::Test
     {
         std::filesystem::path roundTripDirectory()
         {
-            const auto directory = programDirectory / "temp" / "tar_archive_roundtrip";
+            const auto directory = temporaryRoot / "tar_archive_roundtrip";
             std::filesystem::create_directories(directory);
             return directory;
         }
 
-        SharedData::DirectoryEntry regular(std::string const& path, std::uint64_t size)
+        TarArchive::MemberHeader regular(std::string const& path, std::uint64_t size)
         {
-            SharedData::DirectoryEntry entry{};
-            entry.path = std::filesystem::path{path};
-            entry.fullPath = entry.path;
+            TarArchive::MemberHeader entry{};
+            entry.path = path;
             entry.type = SharedData::FileType::Regular;
             entry.size = size;
             entry.permissions = static_cast<std::filesystem::perms>(0644u);
@@ -41,11 +41,10 @@ namespace TarArchive::Test
             return entry;
         }
 
-        SharedData::DirectoryEntry directory(std::string const& path)
+        TarArchive::MemberHeader directory(std::string const& path)
         {
-            SharedData::DirectoryEntry entry{};
-            entry.path = std::filesystem::path{path};
-            entry.fullPath = entry.path;
+            TarArchive::MemberHeader entry{};
+            entry.path = path;
             entry.type = SharedData::FileType::Directory;
             entry.permissions = static_cast<std::filesystem::perms>(0755u);
             entry.owner = "alice";
@@ -64,7 +63,7 @@ namespace TarArchive::Test
 
         struct WrittenEntry
         {
-            SharedData::DirectoryEntry meta;
+            TarArchive::MemberHeader meta;
             std::vector<std::byte> payload;
         };
 
@@ -117,7 +116,7 @@ namespace TarArchive::Test
                 ASSERT_TRUE(writer.has_value()) << writer.error().toString();
                 for (auto const& entry : entries)
                     ASSERT_TRUE(writeEntry(*writer, entry).has_value())
-                        << "failed on " << entry.meta.path.string();
+                        << "failed on " << entry.meta.path;
                 ASSERT_TRUE(writer->finalize().has_value());
             }
 
@@ -130,10 +129,10 @@ namespace TarArchive::Test
                 ASSERT_TRUE(next.has_value()) << next.error().toString();
                 ASSERT_TRUE(next->has_value());
                 auto entry = std::move(**next);
-                EXPECT_EQ(entry.directoryEntry().path, expected.meta.path);
-                EXPECT_EQ(entry.directoryEntry().type, expected.meta.type);
-                EXPECT_EQ(entry.directoryEntry().size, expected.meta.size);
-                EXPECT_EQ(entry.directoryEntry().owner, expected.meta.owner);
+                EXPECT_EQ(entry.header().path, expected.meta.path);
+                EXPECT_EQ(entry.header().type, expected.meta.type);
+                EXPECT_EQ(entry.header().size, expected.meta.size);
+                EXPECT_EQ(entry.header().owner, expected.meta.owner);
                 if (expected.meta.type == SharedData::FileType::Regular)
                 {
                     const auto payload = readPayload(entry);

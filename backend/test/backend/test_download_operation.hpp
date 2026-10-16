@@ -8,6 +8,8 @@
 #include <fstream>
 #include <string>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class DownloadOperationTests : public RealServerTests
@@ -26,7 +28,7 @@ namespace Test
 
       protected:
         // Isolated subdirectory per test run so downloaded files do not collide across tests.
-        Utility::TemporaryDirectory downloadDir_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory downloadDir_{temporaryRoot, true};
     };
 
     TEST_F(DownloadOperationTests, CanCreateServer)
@@ -60,13 +62,37 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
         EXPECT_TRUE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
+    }
+
+    TEST_F(DownloadOperationTests, InvalidRemotePathsAreRefusedBeforeTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+        // Relative and ".." paths cannot be built as a RemotePath at all, unset and the root remain.
+        for (auto const& remotePath : {Paths::RemotePath{}, Paths::RemotePath::root()})
+        {
+            DownloadOperation operation{
+                *sftp,
+                {
+                    .remotePath = remotePath,
+                    .localPath = toLocal(localPath),
+                }
+            };
+            auto prepareResult = operation.prepare();
+            ASSERT_FALSE(prepareResult.has_value()) << remotePath.value();
+            EXPECT_EQ(prepareResult.error().type, Operation::ErrorType::InvalidPath) << remotePath.value();
+        }
+        EXPECT_FALSE(std::filesystem::exists(localPath));
     }
 
     TEST_F(DownloadOperationTests, CanDownloadFile)
@@ -79,9 +105,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         DownloadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -114,8 +141,7 @@ namespace Test
         constexpr std::uint32_t expectedMtimeNsec = 500000000u; // 0.5s
 
         SharedData::DirectoryEntry entry{};
-        entry.path = "/home/test/file1.txt";
-        entry.fullPath = "/home/test/file1.txt";
+        entry.name = "file1.txt";
         entry.type = SharedData::FileType::Regular;
         entry.size = std::string{"Fake file content"}.size();
         entry.mtime = expectedMtime;
@@ -124,10 +150,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .entry = entry,
-            }};
+            }
+        };
 
         DownloadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -160,9 +187,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         DownloadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -191,10 +219,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .mayOverwrite = false,
-            }};
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -213,9 +242,10 @@ namespace Test
             DownloadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/file1.txt",
-                    .localPath = localPath,
-                }};
+                    .remotePath = remote("/home/test/file1.txt"),
+                    .localPath = toLocal(localPath),
+                }
+            };
 
             DownloadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -234,10 +264,11 @@ namespace Test
             DownloadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/file1.txt",
-                    .localPath = localPath,
+                    .remotePath = remote("/home/test/file1.txt"),
+                    .localPath = toLocal(localPath),
                     .mayOverwrite = true,
-                }};
+                }
+            };
 
             DownloadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -263,9 +294,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/does_not_exist.txt",
-                .localPath = downloadDir_.path() / "does_not_exist.txt",
-            }};
+                .remotePath = remote("/home/test/does_not_exist.txt"),
+                .localPath = toLocal(downloadDir_.path() / "does_not_exist.txt"),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -280,9 +312,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
+                .remotePath = remote("/home/test/file1.txt"),
                 .localPath = {},
-            }};
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -297,9 +330,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = downloadDir_.path() / "file1.txt",
-            }};
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(downloadDir_.path() / "file1.txt"),
+            }
+        };
 
         DownloadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -325,9 +359,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/does_not_exist.txt",
-                .localPath = downloadDir_.path() / "does_not_exist.txt",
-            }};
+                .remotePath = remote("/home/test/does_not_exist.txt"),
+                .localPath = toLocal(downloadDir_.path() / "does_not_exist.txt"),
+            }
+        };
 
         auto firstResult = operation.work();
         ASSERT_FALSE(firstResult.has_value());
@@ -347,10 +382,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .doCleanup = true,
-            }};
+            }
+        };
 
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
@@ -370,10 +406,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .doCleanup = false,
-            }};
+            }
+        };
 
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
@@ -400,10 +437,49 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .tryContinue = true,
-            }};
+            }
+        };
+
+        DownloadOperation::WorkStatus workStatus;
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == DownloadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, DownloadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(std::filesystem::exists(localPath));
+        EXPECT_EQ(readLocalFile(localPath), "Fake file content");
+    }
+
+    TEST_F(DownloadOperationTests, PartialFileOfAnotherSourceIsNotContinued)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto localPath = downloadDir_.path() / "file1.txt";
+        const auto filepartPath = localPath.generic_string() + ".filepart";
+
+        // 8 bytes that are not the start of "Fake file content": a leftover of another program or version.
+        {
+            std::ofstream partial{filepartPath, std::ios::binary};
+            partial << "Wrong fi";
+        }
+
+        DownloadOperation operation{
+            *sftp,
+            {
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
+                .tryContinue = true,
+            }
+        };
 
         DownloadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -437,10 +513,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .tryContinue = true,
-            }};
+            }
+        };
 
         DownloadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -467,9 +544,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/large.txt",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/large.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         // large.txt is 1 MiB: needs ~64 work() calls with a 16384-byte buffer
         DownloadOperation::WorkStatus workStatus;
@@ -525,9 +603,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/link_to_file1.txt",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/link_to_file1.txt"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
 
@@ -547,9 +626,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/link_to_documents",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/link_to_documents"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
 
@@ -568,10 +648,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/link_to_file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/link_to_file1.txt"),
+                .localPath = toLocal(localPath),
                 .symlinkHandling = Persistence::SymlinkHandling::SkipSymlink,
-            }};
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
 
@@ -600,10 +681,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
         ASSERT_TRUE(std::filesystem::exists(localPath));
@@ -621,10 +703,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
         EXPECT_TRUE(std::filesystem::is_directory(downloadDir_.path() / "a"));
@@ -645,10 +728,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .createMissingDirectories = false,
-            }};
+            }
+        };
 
         auto first = operation.work();
         // The error can surface on any iteration before completion.
@@ -670,10 +754,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/file1.txt"),
+                .localPath = toLocal(localPath),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
         EXPECT_EQ(readLocalFile(localPath), "Fake file content");
@@ -689,10 +774,11 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/link_to_file1.txt",
-                .localPath = localPath,
+                .remotePath = remote("/home/test/link_to_file1.txt"),
+                .localPath = toLocal(localPath),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
         EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)));
@@ -711,9 +797,10 @@ namespace Test
         DownloadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/dangling_link",
-                .localPath = localPath,
-            }};
+                .remotePath = remote("/home/test/dangling_link"),
+                .localPath = toLocal(localPath),
+            }
+        };
 
         EXPECT_EQ(runDownloadToCompletion(operation), DownloadOperation::WorkStatus::Complete);
         EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(localPath)));

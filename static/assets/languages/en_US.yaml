@@ -9,6 +9,14 @@ confirmDialog:
   neverShowAgain: "Never show again"
   andMore: "... and {} more"
 fileExplorer:
+  openRiskyHeader: "Open a file that can run code?"
+  openRiskyText: "'{}' {}. Opening it may run it, only do this if you trust where it came from.\n\nOpen it anyway?"
+  invalidItemNameHeader: "Invalid Name"
+  invalidItemName: "'{}' cannot be used as a name. A name may not be empty, '.' or '..', and may not contain '/' or '\\'."
+  renameTargetExistsHeader: "Item Exists"
+  renameTargetExists: "'{}' already exists. Replace it?"
+  existenceCheckFailedHeader: "Existence Check Failed"
+  existenceCheckFailed: "Could not check which destinations already exist, nothing was transferred: {}"
   contextMenu:
     download: "Download"
     upload: "Upload"
@@ -84,12 +92,14 @@ operationQueue:
   cancelOperationText: "Are you sure you want to cancel the operation?"
   deletingItem: "Deleting: '{}'"
   deletingSelectedIn: "Deleting selected items in {}"
+  deletingLocallyIn: "Deleting local items in {}"
   entriesFailed: "{} entries failed:\n"
   errorButton: "Error!"
   livePage: "Live"
   noError: "No Error"
   renameCard: "Rename: '{}' -> '{}'"
   scanCard: "Scan '{}'"
+  scanningItems: "Scanning... {} items ({})"
   unknownError: "Unknown Error"
 syncDialog:
   titleFormat: "Synchronize: {} / {}"
@@ -122,6 +132,21 @@ syncDialog:
   synchronize: "Synchronize"
   confirmHeader: "Synchronize Directories"
   confirmText: "Synchronize {} with {}?"
+  confirmDeletes: "This deletes {} items ({}) {}."
+  deleteSideRemote: "on the server"
+  deleteSideLocal: "locally"
+  confirmDeleteRowHeader: "Delete Now"
+  confirmDeleteRow: "Delete '{}' {} now?"
+  blockedNotice: "{} entries are left alone because they cannot be read, cannot be transferred, a directory faces a symlink, their names differ only in case, or they changed since the last sync where that would lose data. Click to see them."
+  blockedTitle: "Entries left alone"
+  blockReason:
+    Unreadable: "unreadable"
+    Excluded: "not transferable"
+    InvalidName: "invalid name"
+    TypeConflict: "directory against symlink"
+    CaseConflict: "names differ only in case"
+    ChangedOnBothSides: "changed on both sides since the last sync"
+    ChangedOnDestination: "changed on the side it would replace or delete since the last sync"
   tree:
     loading: "Loading…"
     loadFailed: "Failed: {}"
@@ -138,6 +163,7 @@ syncProgressDialog:
   differencesFound: "Differences found"
   hashing: "Hashing..."
   cancel: "Cancel"
+  scanFailed: "Listing failed, nothing was compared."
 reconnectDialog:
   attempt: "Attempt {}"
   retryIn: "Retrying in {} s"
@@ -162,7 +188,7 @@ remoteSideModel:
   failedToCreateDeleteOperation: "Failed to create delete operation: {}"
   deleteMultipleConfirm: "Are you sure you want to delete the following {} items?"
   deleteSingleConfirm: "Are you sure you want to delete this item '{}'?"
-  deleteItemsQuestion: "Delete Items?"
+  deleteRemoteItemsQuestion: "Delete on the server?"
   failedToDeleteItems: "Failed to delete one or more files / directories: {}."
   downloadFailed: "Download Failed"
   failedToCreateDownloadOperation: "Failed to create download operation: {}."
@@ -200,6 +226,8 @@ localSideModel:
   portalUnavailableText: "The desktop portal used to open files in other applications is not available. \"Open\", \"Open With\", and \"Open in File Manager\" have been disabled.\n\n{}"
   archiveUploadFailed: "Archive Upload Failed"
   deleteSelectedConfirm: "Are you sure you want to delete the selected items?"
+  deleteLocalItemsQuestion: "Delete on this computer?"
+  deleteDirectoriesWithContent: "Folders are deleted with everything inside them. This cannot be undone."
   remoteSideUnavailable: "Remote side is not available"
   transferFailedTitle: "File Transfer Failed"
 sessionFrontend:
@@ -446,6 +474,9 @@ fileTracking:
   columnAutoReupload: "Auto Reupload"
   columnMoveRemote: "Move Remote"
   columnDeleteRemote: "Delete Remote"
+  columnCheckRemote: "Check Server"
+  serverChangedHeader: "Changed on the Server"
+  serverChangedText: "'{}' was changed on the server since it was opened here. Replace the server's version with your local one?\n\nNo keeps the server's version, a later save asks again."
   columnStatus: "Status"
   stopButton: "Stop"
   statusWatching: "Watching"
@@ -720,6 +751,8 @@ settings:
 
       doCleanup: "Do Cleanup"
       doCleanupHelpText: "Perform cleanup after failed downloads (Prevents continuation of previously failed downloads)."
+      markAsDownloaded: "Mark as Downloaded"
+      markAsDownloadedHelpText: "Mark downloaded files as coming from the internet, so Windows (Mark of the Web) and macOS (quarantine) warn before running them. On by default."
       symlinkHandlingHelpText: "How to handle symbolic links during transfers. 'AsSymlink' will transfer symlinks as symlinks (if supported by the filesystem), 'FollowSymlink' will follow the symlink and transfer the target file or directory, and 'SkipSymlink' will skip transferring symlinks entirely."
       symlinkHandling: "Symlink Handling"
       failFastHelpText: "Fail fast on errors during download operations instead of trying to continue."
@@ -982,6 +1015,11 @@ settings:
       preventCreateDirectory: "Prevent Create Directory"
       homeOverrideHelpText: "If set, overrides the default home directory path used by the application."
       homeOverride: "Home Directory Override"
+      openRiskyFilesHelpText: "What happens when a file that can run code (a program, script, installer or shortcut) is opened from the file explorer, including files opened from the server."
+      openRiskyFiles: "Opening Files That Can Run Code"
+      openRiskyFilesAllow: "Always allow"
+      openRiskyFilesWarn: "Ask first"
+      openRiskyFilesNever: "Never"
       temporaryDownloadsDirectoryHelpText: "The directory where downloaded files are temporarily stored. Defaults to %temp%/nui-sftp-downloads."
       temporaryDownloadsDirectory: "Temporary Downloads Directory"
     fileTrackingOptions:
@@ -991,6 +1029,8 @@ settings:
       moveRemoteOnLocalMoveHelpText: "Default for new tracked entries: when a tracked file is moved or renamed locally, perform the same move on the remote."
       deleteRemoteOnLocalDelete: "Delete Remote on Local Delete"
       deleteRemoteOnLocalDeleteHelpText: "Default for new tracked entries: when a tracked file is deleted locally, also delete it on the remote."
+      checkRemoteChanges: "Check Server Before Re-upload"
+      checkRemoteChangesHelpText: "Default for new tracked entries: before an edited file is uploaded again, check whether the copy on the server changed since it was opened and ask before replacing it."
   colorSetting:
     pickButton: "Pick"
 persistence:
@@ -1113,12 +1153,17 @@ terminalPanel:
   saveDialogTitle: "Save terminal contents"
   saveToFile: "Save terminal to file"
 backend:
+  rename:
+    targetExists: "An item with this name already exists."
+    invalidName: "The new name must be a plain name in the same directory."
   rpcFilesystem:
+    fileExists: "'{}' already exists and was not replaced."
     deletionPrevented: "File deletion is prevented by configuration."
     renamePrevented: "File renaming is prevented by configuration."
     createFilePrevented: "File creation is prevented by configuration."
     createDirectoryPrevented: "Directory creation is prevented by configuration."
-    removeFailed: "Failed to remove path '{}': {}"
+    removeSomeFailed: "{} items could not be deleted, the others were:\n{}"
+    removeRefused: "Refusing to delete '{}': it is not an absolute path, it is a root directory, or it contains your home directory."
   opener:
     sessionBusUnavailable: "D-Bus session bus is unavailable."
     sessionBusUnavailableOpenFile: "Session bus is unavailable; cannot open files via xdg-desktop-portal. This typically happens when running as root or without a user D-Bus session."
@@ -1126,9 +1171,13 @@ backend:
     openFileFailed: "Failed to open file: {}"
     openUriUnavailable: "xdg-desktop-portal OpenURI interface is unavailable."
     documentPortalUnavailable: "xdg-document-portal is unavailable; file-descriptor-based opening is not possible in this flatpak."
+    risk:
+      program: "is a program"
+      application: "is an application"
+      dangerousType: "is a type that runs code, like a script, an installer or a shortcut"
+      refused: "'{}' was not opened: opening files that can run code is turned off in the settings."
     mac:
       fileNotFound: "File not found"
-      executable: "The file is a program or application and is not opened from here"
       openFailed: "No application could open '{}'"
     windows:
       outOfResources: "Out of memory or resources"
@@ -1145,8 +1194,6 @@ backend:
       dllNotFound: "DLL not found"
       unknownShellError: "Unknown shell error (code {})"
       shellExecuteExFailed: "ShellExecuteExW failed: {} (code {})"
-      blockedByPolicy: "File type is blocked by attachment policy"
-      binaryExecutable: "File is a binary executable"
   sessionManager:
     connectFailedUnspecified: "Failed to connect to ssh server for unspecified reason."
   persistence:

@@ -1,14 +1,20 @@
 #pragma once
 
+#include <paths/relative_path.hpp>
+
 #include <nlohmann/json.hpp>
 #include <fmt/format.h>
 #include <fmt/chrono.h>
 
 #include <chrono>
+#include <expected>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace SharedData
 {
@@ -81,9 +87,12 @@ namespace SharedData
     {
         using FileType = SharedData::FileType;
 
-        std::filesystem::path path{};
-        std::filesystem::path fullPath{};
-        std::filesystem::path longName{};
+        /**
+         * @brief The name as listed, UTF-8. A server or a hostile local name can be anything, like "..", "x/.." or
+         *        empty, so it only becomes part of a path through Paths::PathSegment::make. Empty for the root of a
+         *        walk and for stat results.
+         */
+        std::string name{};
         std::uint32_t flags{0};
         FileType type{FileType::Unknown};
         std::uint64_t size{0};
@@ -99,9 +108,9 @@ namespace SharedData
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         std::string acl{};
-        // For symlinks: raw value returned by readlink (i.e. the link literal, not the resolved target).
+        // For symlinks: raw value returned by readlink (i.e. the link literal, not the resolved target) as UTF-8.
         // nullopt when not a symlink or when unavailable. This is what the sync diff compares by.
-        std::optional<std::filesystem::path> linkTarget{};
+        std::optional<std::string> linkTarget{};
         // For symlinks: the full entry of the symlink target (if known). nullptr means unknown.
         std::shared_ptr<DirectoryEntry> resolvedTarget{nullptr};
 
@@ -213,33 +222,31 @@ namespace SharedData
         }
     };
 
-    inline std::filesystem::path fullPath(std::vector<DirectoryEntry> const& entries, DirectoryEntry const& entry)
+    /**
+     * @brief The path of @p entry below the root of its walk, following the parent indices. Empty for the root,
+     *        which is the entry without a parent. Refused when a name on the way is no path segment.
+     */
+    inline std::expected<Paths::RelativePath, Paths::PathError>
+    relativePath(std::vector<DirectoryEntry> const& entries, DirectoryEntry const& entry)
     {
-        if (entry.parent)
-        {
-            const auto parentIndex = entry.parent.value();
-            if (parentIndex >= entries.size())
-                throw std::out_of_range("Parent index is out of range");
-            return fullPath(entries, entries[parentIndex]) / entry.path;
-        }
-        else
-            return entry.path;
-    }
-
-    inline std::filesystem::path
-    fullPathRelative(std::vector<DirectoryEntry> const& entries, DirectoryEntry const& entry)
-    {
-        if (entry.parent)
-        {
-            const auto parentIndex = entry.parent.value();
-            if (parentIndex >= entries.size())
-                throw std::out_of_range("Parent index is out of range");
-            if (parentIndex == 0)
-                return entry.path;
-            return fullPathRelative(entries, entries[parentIndex]) / entry.path;
-        }
-        else
-            return entry.path;
+        if (!entry.parent)
+            return Paths::RelativePath{};
+        const auto parentIndex = entry.parent.value();
+        if (parentIndex >= entries.size())
+            throw std::out_of_range("Parent index is out of range");
+        return Paths::PathSegment::make(entry.name)
+            .and_then(
+                [&entries, parentIndex](Paths::PathSegment const& segment)
+                {
+                    return relativePath(entries, entries[parentIndex])
+                        .transform(
+                            [&segment](Paths::RelativePath const& parent)
+                            {
+                                return parent / segment;
+                            }
+                        );
+                }
+            );
     }
 
     void to_json(nlohmann::json& j, DirectoryEntry const& entry);

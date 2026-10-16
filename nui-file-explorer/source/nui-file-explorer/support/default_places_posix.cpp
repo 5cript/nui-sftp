@@ -34,7 +34,8 @@ namespace NuiFileExplorer
             if (!file)
                 return {};
             const std::string content{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-            return Utility::parseUserDirectories(content, home);
+            // POSIX paths are UTF-8 already.
+            return Utility::parseUserDirectories(content, home.native());
         }
 
         /**
@@ -56,7 +57,7 @@ namespace NuiFileExplorer
                 const auto userDirectory =
                     std::ranges::find(userDirectories, definition.userDirectoryName, &Utility::UserDirectory::name);
                 if (userDirectory != userDirectories.end())
-                    return userDirectory->path;
+                    return std::filesystem::path{userDirectory->path};
             }
             if (!userDirectories.empty())
                 return {};

@@ -4,6 +4,7 @@
 
 #include <utility/node/node.hpp>
 #include <ssh/session.hpp>
+#include <paths/remote_path.hpp>
 #include <nui/utility/scope_exit.hpp>
 
 #pragma clang diagnostic push
@@ -16,6 +17,7 @@
 #include <chrono>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
@@ -48,6 +50,14 @@ static const char publicKey[] = {
 
 namespace SecureShell::Test
 {
+    /**
+     * @brief A remote path from a test literal, which is known to be valid.
+     */
+    inline Paths::RemotePath remote(std::string_view path)
+    {
+        return Paths::RemotePath::make(path).value();
+    }
+
     class CommonFixture : public ::testing::Test
     {
       public:
@@ -172,7 +182,7 @@ namespace SecureShell::Test
             );
         }
 
-        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, true};
         boost::asio::thread_pool pool_{1};
         nlohmann::json defaultPackageJson_ = nlohmann::json({
             {"name", "test"},

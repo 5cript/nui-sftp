@@ -23,6 +23,7 @@ using namespace FileTracking;
 using namespace std::chrono_literals;
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -41,7 +42,7 @@ namespace Test
     inline fs::path makeTestTempRoot(std::string const& tag = "base")
     {
         auto suffix = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
-        auto root = programDirectory / "temp" / ("nui_sftp_ft_" + tag + "_" + suffix);
+        auto root = temporaryRoot / ("nui_sftp_ft_" + tag + "_" + suffix);
         fs::create_directories(root);
         return root;
     }
@@ -367,8 +368,7 @@ namespace Test
             metaPath = inst->instanceDir() / "metadata.json";
         }
         ASSERT_TRUE(fs::exists(metaPath));
-        std::ifstream fin{metaPath};
-        auto meta = nlohmann::json::parse(fin);
+        auto const meta = nlohmann::json::parse(std::ifstream{metaPath});
         ASSERT_TRUE(meta.contains("deadAt"));
         EXPECT_FALSE(meta["deadAt"].is_null());
         fs::remove_all(metaPath.parent_path());

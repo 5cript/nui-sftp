@@ -5,7 +5,7 @@
 
 namespace TarArchive
 {
-    EntryReader::EntryReader(Reader* owner, SharedData::DirectoryEntry meta, std::uint64_t size) noexcept
+    EntryReader::EntryReader(Reader* owner, MemberHeader meta, std::uint64_t size) noexcept
         : owner_{owner}
         , meta_{std::move(meta)}
         , size_{size}

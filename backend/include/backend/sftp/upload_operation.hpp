@@ -5,6 +5,8 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <paths/local_path.hpp>
+#include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <filesystem>
@@ -23,8 +25,8 @@ class UploadOperation : public Operation
             std::make_signed_t<std::size_t> bytesPerSecond
         )>
             progressCallback = [](auto, auto, auto, auto) {};
-        std::filesystem::path remotePath{};
-        std::filesystem::path localPath{};
+        Paths::RemotePath remotePath{};
+        Paths::LocalPath localPath{};
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
         bool tryContinue{false};
@@ -75,12 +77,12 @@ class UploadOperation : public Operation
         return SharedData::OperationType::Upload;
     }
 
-    std::filesystem::path remotePath() const
+    Paths::RemotePath const& remotePath() const
     {
         return options_.remotePath;
     }
 
-    std::filesystem::path localPath() const
+    Paths::LocalPath const& localPath() const
     {
         return options_.localPath;
     }
@@ -115,6 +117,11 @@ class UploadOperation : public Operation
     /// Remote-heavy portion of finalize() — runs under a single strand umbrella.
     std::expected<void, Error> finalizeInStrand();
 
+    /**
+     * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
+     */
+    bool tempBelongsToSourceInStrand(std::uint64_t tempSize);
+
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
      *
@@ -122,7 +129,7 @@ class UploadOperation : public Operation
      *  the parent, so deeply-nested missing paths are created in one pass.
      *  Must be called from within the processing thread.
      */
-    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(std::filesystem::path const& dir);
+    std::expected<void, Error> ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& dir);
 
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
@@ -132,6 +139,12 @@ class UploadOperation : public Operation
     SecureShell::SftpSession* sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
     UploadOperationOptions options_;
+    /** @brief options_.remotePath, unset when none was given. */
+    Paths::RemotePath remotePath_{};
+    /** @brief options_.localPath for the filesystem calls, empty when none was given. */
+    std::filesystem::path localNativePath_{};
+    /** @brief Where the upload is written before it replaces remotePath_. */
+    Paths::RemotePath tempPath_{};
     std::ifstream localFile_;
     bool isSymlink_{false};
     std::size_t leftToUpload_{0};

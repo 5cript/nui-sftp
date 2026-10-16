@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <fstream>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class ArchiveDownloadOperationTests : public RealServerTests
@@ -22,7 +24,7 @@ namespace Test
         }
 
       protected:
-        Utility::TemporaryDirectory archiveDir_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory archiveDir_{temporaryRoot, true};
 
         /**
          * @brief Drive an ArchiveDownloadOperation to completion or until it errors.
@@ -57,7 +59,7 @@ namespace Test
         {
             ScanOperation scan{
                 sftp,
-                ScanOperation::ScanOperationOptions{.remotePath = path},
+                ScanOperation::ScanOperationOptions{.remotePath = remote(path.generic_string())},
             };
             while (true)
             {
@@ -92,12 +94,31 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
                 .localArchivePath = {},
             }};
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::InvalidPath);
+    }
+
+    TEST_F(ArchiveDownloadOperationTests, RootWithoutNameIsRefused)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ArchiveDownloadOperation operation{
+            *sftp,
+            {
+                .roots = {makeDirectoryEntry("/")},
+                .localArchivePath = toLocal(archiveDir_.path() / "root.tar"),
+            }
+        };
+        operation.setScanResultForRoot(remote("/"), {SharedData::DirectoryEntry{.type = SharedData::FileType::Directory}}, 0u);
+        const auto result = runToCompletion(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::InvalidPath);
+        EXPECT_FALSE(std::filesystem::exists(archiveDir_.path() / "root.tar"));
     }
 
     TEST_F(ArchiveDownloadOperationTests, NoEntriesFails)
@@ -108,9 +129,10 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {},
-                .localArchivePath = archiveDir_.path() / "empty.tar",
-            }};
+                .roots = {},
+                .localArchivePath = toLocal(archiveDir_.path() / "empty.tar"),
+            }
+        };
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::ImplementationError);
@@ -125,10 +147,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         auto result = runToCompletion(operation);
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(*result, ArchiveDownloadOperation::WorkStatus::Complete);
@@ -150,10 +173,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
                 // Auto: detected from extension.
-            }};
+            }
+        };
         auto result = runToCompletion(operation);
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(*result, ArchiveDownloadOperation::WorkStatus::Complete);
@@ -172,9 +196,10 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
-            }};
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -191,9 +216,10 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
-            }};
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -210,14 +236,15 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries =
+                .roots =
                     {
                         makeFileEntry("/home/test/file1.txt", 17u),
                         makeFileEntry("/home/test/file2.txt", 17u),
                     },
-                .localArchivePath = archivePath,
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -238,11 +265,12 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry(rootPath)},
-                .localArchivePath = archivePath,
+                .roots = {makeDirectoryEntry(rootPath.generic_string())},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
-        operation.setScanResultForRoot(rootPath, std::move(scan.entries), scan.totalBytes);
+            }
+        };
+        operation.setScanResultForRoot(remote(rootPath.generic_string()), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -254,6 +282,36 @@ namespace Test
         EXPECT_EQ(doc1->contents, "Document 1 content");
     }
 
+    TEST_F(ArchiveDownloadOperationTests, EntryShorterThanScannedFailsTheArchive)
+    {
+        // A file that shrank after the scan must fail the archive instead of being zero padded.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const std::filesystem::path rootPath = "/home/test/Documents";
+        auto scan = runScan(*sftp, rootPath);
+        for (auto& entry : scan.entries)
+        {
+            if (entry.name == "doc1.txt")
+                entry.size += 100;
+        }
+
+        const auto archivePath = archiveDir_.path() / "short.tar";
+        ArchiveDownloadOperation operation{
+            *sftp,
+            {
+                .roots = {makeDirectoryEntry(rootPath.generic_string())},
+                .localArchivePath = toLocal(archivePath),
+                .compression = TarArchive::Compression::None,
+            }
+        };
+        operation.setScanResultForRoot(remote(rootPath.generic_string()), std::move(scan.entries), scan.totalBytes + 100);
+        const auto result = runToCompletion(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::SizeMismatch);
+        EXPECT_FALSE(std::filesystem::exists(archivePath));
+    }
+
     TEST_F(ArchiveDownloadOperationTests, DirectoryRootWithoutPrescanErrors)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -263,10 +321,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry("/home/test/Documents")},
-                .localArchivePath = archivePath,
+                .roots = {makeDirectoryEntry("/home/test/Documents")},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         // Intentionally skip setScanResultForRoot — the op must not
         // self-recurse; it has to surface an ImplementationError instead.
         const auto result = runToCompletion(operation);
@@ -288,12 +347,13 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry("/home/test/Documents")},
-                .localArchivePath = archivePath,
+                .roots = {makeDirectoryEntry("/home/test/Documents")},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         operation.setScanResultForRoot(
-            "/home/test/Pictures", std::move(pictures.entries), pictures.totalBytes
+            remote("/home/test/Pictures"), std::move(pictures.entries), pictures.totalBytes
         );
         const auto result = runToCompletion(operation);
         ASSERT_FALSE(result.has_value());
@@ -312,19 +372,20 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries =
+                .roots =
                     {
                         makeDirectoryEntry("/home/test/Documents"),
                         makeDirectoryEntry("/home/test/Pictures"),
                     },
-                .localArchivePath = archivePath,
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         operation.setScanResultForRoot(
-            "/home/test/Documents", std::move(documents.entries), documents.totalBytes
+            remote("/home/test/Documents"), std::move(documents.entries), documents.totalBytes
         );
         operation.setScanResultForRoot(
-            "/home/test/Pictures", std::move(pictures.entries), pictures.totalBytes
+            remote("/home/test/Pictures"), std::move(pictures.entries), pictures.totalBytes
         );
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -346,19 +407,20 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries =
+                .roots =
                     {
                         makeFileEntry("/home/test/file1.txt", 17u),
                         makeDirectoryEntry("/home/test/Documents"),
                     },
-                .localArchivePath = archivePath,
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         // Regular-file roots never receive a setScanResultForRoot call — only
         // the directory root does. This asserts the op still succeeds in that
         // mixed configuration and doesn't treat file1.txt as missing-scan.
         operation.setScanResultForRoot(
-            "/home/test/Documents", std::move(documents.entries), documents.totalBytes
+            remote("/home/test/Documents"), std::move(documents.entries), documents.totalBytes
         );
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
@@ -385,11 +447,12 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeDirectoryEntry("/var")},
-                .localArchivePath = archivePath,
+                .roots = {makeDirectoryEntry("/var")},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
-        operation.setScanResultForRoot("/var", std::move(scan.entries), scan.totalBytes);
+            }
+        };
+        operation.setScanResultForRoot(remote("/var"), std::move(scan.entries), scan.totalBytes);
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -410,10 +473,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/large.txt", 65536u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/large.txt", 65536u)},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation, 2000).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -431,10 +495,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         EXPECT_TRUE(std::filesystem::exists(archivePath));
@@ -455,10 +520,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
                 .mayOverwrite = false,
-            }};
+            }
+        };
         auto result = operation.work();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::FileExists);
@@ -478,11 +544,12 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
                 .mayOverwrite = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         const auto entries = recoverArchiveEntries(archivePath);
@@ -498,10 +565,11 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archiveDir_.path() / "finished.tar",
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archiveDir_.path() / "finished.tar"),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         auto again = operation.work();
@@ -522,14 +590,15 @@ namespace Test
             {
                 .progressCallback =
                     [&](std::uint64_t, std::uint64_t max, std::uint64_t current, std::make_signed_t<std::size_t>)
-                    {
-                        lastMax = max;
-                        lastCurrent = current;
-                    },
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archiveDir_.path() / "with_progress.tar",
+                {
+                    lastMax = max;
+                    lastCurrent = current;
+                },
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archiveDir_.path() / "with_progress.tar"),
                 .compression = TarArchive::Compression::None,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
 
         EXPECT_EQ(lastMax, 17u);
@@ -547,11 +616,12 @@ namespace Test
         ArchiveDownloadOperation operation{
             *sftp,
             {
-                .entries = {makeFileEntry("/home/test/file1.txt", 17u)},
-                .localArchivePath = archivePath,
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
                 .compression = TarArchive::Compression::None,
                 .createMissingDirectories = true,
-            }};
+            }
+        };
         ASSERT_TRUE(runToCompletion(operation).has_value());
         EXPECT_TRUE(std::filesystem::exists(archivePath));
     }

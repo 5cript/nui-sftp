@@ -10,12 +10,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <span>
 #include <sstream>
 #include <string>
 #include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace TarArchive::Test
 {
@@ -23,7 +25,7 @@ namespace TarArchive::Test
     {
         std::filesystem::path gnuInteropDirectory()
         {
-            const auto directory = programDirectory / "temp" / "tar_archive_gnu_interop";
+            const auto directory = temporaryRoot / "tar_archive_gnu_interop";
             std::filesystem::create_directories(directory);
             return directory;
         }
@@ -73,13 +75,12 @@ namespace TarArchive::Test
             return std::system(full.c_str());
         }
 
-        SharedData::DirectoryEntry regularEntryForPath(
+        TarArchive::MemberHeader regularEntryForPath(
             std::string const& archiveName, std::uint64_t size
         )
         {
-            SharedData::DirectoryEntry entry{};
-            entry.path = std::filesystem::path{archiveName};
-            entry.fullPath = entry.path;
+            TarArchive::MemberHeader entry{};
+            entry.path = archiveName;
             entry.type = SharedData::FileType::Regular;
             entry.size = size;
             entry.permissions = static_cast<std::filesystem::perms>(0644u);
@@ -109,6 +110,15 @@ namespace TarArchive::Test
             tarChecked_ = true;
             tarAvailable_ =
                 !tarBinary_.empty() && std::filesystem::exists(tarBinary_);
+            // GNU tar reads "C:/x" as the file x on a remote host named C unless told otherwise.
+            const auto versionOutput = gnuInteropDirectory() / "tar_version.txt";
+            if (tarAvailable_ && runShell(tarBinary_ + " --version", versionOutput) == 0)
+            {
+                std::ifstream stream{versionOutput};
+                const std::string version{std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
+                if (version.find("GNU tar") != std::string::npos)
+                    tarBinary_ += " --force-local";
+            }
         }
 
         void SetUp() override
@@ -149,7 +159,7 @@ namespace TarArchive::Test
         }
 
         const int status = runShell(
-            tarBinary_ + " -tf '" + archivePath.string() + "'", listOutput
+            tarBinary_ + " -tf '" + archivePath.generic_string() + "'", listOutput
         );
         ASSERT_EQ(status, 0) << "tar -tf exited with non-zero status";
 
@@ -184,8 +194,8 @@ namespace TarArchive::Test
         }
 
         const std::string command =
-            tarBinary_ + " -xf '" + archivePath.string() +
-            "' -C '" + extractDir.string() + "'";
+            tarBinary_ + " -xf '" + archivePath.generic_string() +
+            "' -C '" + extractDir.generic_string() + "'";
         const int status = runShell(command, directory / "library_content.log");
         ASSERT_EQ(status, 0) << "tar -xf exited with non-zero status";
 
@@ -218,8 +228,8 @@ namespace TarArchive::Test
 
         const auto archivePath = directory / "tar_produced.tar";
 
-        std::string createCommand = tarBinary_ + " -cf '" + archivePath.string() + "' -C '" +
-                                    sourceTree.string() + "'";
+        std::string createCommand = tarBinary_ + " -cf '" + archivePath.generic_string() + "' -C '" +
+                                    sourceTree.generic_string() + "'";
         for (auto const& fixture : fixtures)
             createCommand += " " + fixture.name;
 
@@ -237,8 +247,8 @@ namespace TarArchive::Test
             ASSERT_TRUE(next->has_value()) << "premature end of archive";
 
             auto entry = std::move(**next);
-            EXPECT_EQ(entry.directoryEntry().path.generic_string(), fixture.name);
-            EXPECT_EQ(entry.directoryEntry().size, fixture.payload.size());
+            EXPECT_EQ(entry.header().path, fixture.name);
+            EXPECT_EQ(entry.header().size, fixture.payload.size());
 
             std::vector<std::byte> accumulator;
             std::array<std::byte, 1024u> scratch{};
@@ -283,7 +293,7 @@ namespace TarArchive::Test
         }
 
         const int status = runShell(
-            tarBinary_ + " -tzf '" + archivePath.string() + "'", listOutput
+            tarBinary_ + " -tzf '" + archivePath.generic_string() + "'", listOutput
         );
         ASSERT_EQ(status, 0) << "tar -tzf exited with non-zero status";
 

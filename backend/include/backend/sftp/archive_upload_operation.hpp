@@ -1,15 +1,20 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/local_scan_operation.hpp>
+#include <backend/sftp/scan_phase.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
+#include <paths/local_path.hpp>
+#include <paths/remote_path.hpp>
 #include <tar_archive/archive.hpp>
 #include <tar_archive/writer.hpp>
 #include <tar_archive/entry_writer.hpp>
 #include <tar_archive/compression.hpp>
 #include <shared_data/directory_entry.hpp>
+#include <tar_archive/member_header.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -50,10 +55,10 @@ class ArchiveUploadOperation : public Operation
             progressCallback = [](auto, auto, auto, auto) {};
 
         /** @brief Local filesystem paths to pack. Each is lstat'd in-strand on start. */
-        std::vector<std::filesystem::path> localPaths{};
+        std::vector<Paths::LocalPath> localPaths{};
 
         /** @brief Destination archive path on the remote side. */
-        std::filesystem::path remoteArchivePath{};
+        Paths::RemotePath remoteArchivePath{};
 
         /** @brief Compression codec; Auto means derive from remoteArchivePath extension. */
         TarArchive::Compression compression{TarArchive::Compression::Auto};
@@ -63,6 +68,9 @@ class ArchiveUploadOperation : public Operation
 
         /** @brief Refuse to overwrite an existing remote file. */
         bool mayOverwrite{false};
+
+        /** @brief The archive is written next to its destination under this suffix and renamed into place. */
+        std::string tempFileSuffix{".filepart"};
 
         std::chrono::seconds futureTimeout{5};
     };
@@ -77,10 +85,27 @@ class ArchiveUploadOperation : public Operation
     std::expected<WorkStatus, Error> work() override;
     std::expected<WorkStatus, Error> workInStrand() override;
 
+    // The scan phase blocks on local filesystem calls, so it runs off the strand like a standalone scan.
+    bool usesStrand() const noexcept override
+    {
+        return scanPhase_ == nullptr;
+    }
+
     bool isBarrier() const noexcept override
     {
-        return false;
+        return scanPhase_ != nullptr;
     }
+
+    /**
+     * @brief Scans the directory root of @p scan before packing; roots are scanned in the order added.
+     */
+    void addScanRoot(std::unique_ptr<LocalScanOperation> scan);
+
+    bool scanning() const noexcept
+    {
+        return scanPhase_ != nullptr;
+    }
+
     int parallelWorkDoable(int) const noexcept override
     {
         return 1;
@@ -111,7 +136,7 @@ class ArchiveUploadOperation : public Operation
      *        passed in the options — prepareInStrand looks up the same key.
      */
     void setScanResultForRoot(
-        std::filesystem::path const& localRootPath,
+        Paths::LocalPath const& localRootPath,
         std::vector<SharedData::DirectoryEntry> entries,
         std::uint64_t totalBytes
     );
@@ -119,13 +144,13 @@ class ArchiveUploadOperation : public Operation
   private:
     /**
      * @brief Archive-relative metadata paired with the full local source path.
-     *        Directory entries have an empty localFullPath since they carry no
+     *        Directory entries have an unset source since they carry no
      *        payload.
      */
     struct ResolvedEntry
     {
-        SharedData::DirectoryEntry tarMeta{};
-        std::filesystem::path localFullPath{};
+        TarArchive::MemberHeader header{};
+        Paths::LocalPath source{};
     };
 
     std::expected<void, Error> prepareInStrand();
@@ -139,8 +164,8 @@ class ArchiveUploadOperation : public Operation
      */
     void appendPrescannedFromScan(
         std::vector<SharedData::DirectoryEntry> const& entries,
-        std::filesystem::path const& localRootFullPath,
-        std::filesystem::path const& archivePrefix
+        Paths::LocalPath const& localRoot,
+        Paths::RelativePath const& archivePrefix
     );
     std::expected<void, Error> openNextEntryInStrand();
     std::expected<bool, Error> readChunkInStrand();
@@ -169,7 +194,7 @@ class ArchiveUploadOperation : public Operation
      *        path. flattenRoots looks each directory root up here and errors
      *        out if none is present — there is no self-contained recurse.
      */
-    std::map<std::filesystem::path, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
+    std::map<Paths::LocalPath, std::pair<std::vector<SharedData::DirectoryEntry>, std::uint64_t>>
         prescannedRoots_{};
     /**
      * @brief Reused purely for its bytes-transferred + B/s meter machinery;
@@ -179,4 +204,13 @@ class ArchiveUploadOperation : public Operation
      */
     std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
         std::make_shared<SecureShell::AsyncTransferContext>()};
+    /** @brief A scanned directory or name that cannot go into the archive, set once the scan delivered it. */
+    std::optional<Error> incompleteScan_{};
+    std::unique_ptr<ScanPhase<LocalScanOperation>> scanPhase_{};
+    /** @brief options_.remoteArchivePath, unset when none was given. */
+    Paths::RemotePath remoteArchivePath_{};
+    /** @brief Where the archive is written before it replaces the destination. */
+    Paths::RemotePath tempPath_{};
+    /** @brief The temp file exists on the server and must go if the upload does not complete. */
+    bool tempCreated_{false};
 };

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <frontend/session_components/operation_queue/operation_card.hpp>
+#include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 #include <frontend/components/svg/arrow_right.hpp>
 
 #include <utility/format_bytes.hpp>
@@ -14,11 +15,12 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         SharedData::OperationType type,
         ConfirmDialog& confirmDialog,
         long long max,
-        std::filesystem::path localPath,
-        std::filesystem::path remotePath,
+        Paths::LocalPath localPath,
+        Paths::RemotePath remotePath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
-        std::function<void()> onCompleteAction
+        std::function<void()> onCompleteAction,
+        bool scanning = false
     )
         : OperationCard{
               type,
@@ -37,6 +39,7 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
           }}
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
+        , scanPhase_{scanning}
     {}
 
     Nui::ElementRenderer body() const override
@@ -50,8 +53,10 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         const bool isDownloadOrientation =
             type_ == SharedData::OperationType::Download ||
             type_ == SharedData::OperationType::ArchiveDownload;
-        const auto& srcPath = isDownloadOrientation ? remotePath_ : localPath_;
-        const auto& dstPath = isDownloadOrientation ? localPath_ : remotePath_;
+        const auto remoteText = remotePath_.value();
+        const auto localText = localPath_.toUtf8();
+        const auto& srcPath = isDownloadOrientation ? remoteText : localText;
+        const auto& dstPath = isDownloadOrientation ? localText : remoteText;
         const bool hasBothPaths = !srcPath.empty() && !dstPath.empty();
         const auto& solePath = srcPath.empty() ? dstPath : srcPath;
 
@@ -60,20 +65,20 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         {
             routeDiv = div{
                 class_ = "opq-transfer-route",
-                alt = fmt::format("{} \u2192 {}", srcPath.generic_string(), dstPath.generic_string())
+                alt = fmt::format("{} \u2192 {}", srcPath, dstPath)
             }(
-                span{class_ = "opq-route-segment"}(srcPath.generic_string()),
+                span{class_ = "opq-route-segment"}(srcPath),
                 span{class_ = "opq-route-arrow"}(Svgs::arrowRight()),
-                span{class_ = "opq-route-segment"}(dstPath.generic_string())
+                span{class_ = "opq-route-segment"}(dstPath)
             );
         }
         else
         {
             routeDiv = div{
                 class_ = "opq-transfer-route",
-                alt = solePath.generic_string()
+                alt = solePath
             }(
-                span{class_ = "opq-route-segment"}(solePath.generic_string())
+                span{class_ = "opq-route-segment"}(solePath)
             );
         }
 
@@ -85,12 +90,14 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
                 div{
                     class_ = "opq-bytes-per-second"
                 }(
-                    observe(bytesPerSecond_).generate(
-                        [](std::make_signed_t<std::size_t> bytesPerSecond)
-                        {
-                            return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
-                        }
-                    )
+                    observe(bytesPerSecond_, scanPhase_.scanning, scanPhase_.totalScanned),
+                    [this]()
+                    {
+                        if (scanPhase_.scanning.value() && !isCompletedState())
+                            return scanPhase_.text();
+                        const auto bytesPerSecond = bytesPerSecond_.value();
+                        return fmt::format("{}/s", Utility::formatBytes(bytesPerSecond, Utility::determineOrderOfMagnitude(bytesPerSecond)));
+                    }
                 )
             ),
             progressBar_()
@@ -98,8 +105,15 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
         // clang-format on
     }
 
+    void setScanProgress(std::uint64_t scannedBytes, std::uint64_t scannedEntries)
+    {
+        scanPhase_.setProgress(scannedBytes, scannedEntries);
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    }
+
     void setProgress(SharedData::TransferProgress progress)
     {
+        scanPhase_.end();
         progressBar_.max(progress.max);
         progressBar_.setProgress(progress.current - progress.min);
         bytesPerSecond_ = progress.bytesPerSecond;
@@ -117,30 +131,35 @@ class DisplayedTransferOperation : public OperationCard<DisplayedTransferOperati
             progressBar_.setZeroAsComplete();
     }
 
+    /**
+     * @brief Whether the transfer may replace its destination, so a resume asks for no more.
+     */
+    void allowOverwrite(bool allow)
+    {
+        allowOverwrite_ = allow;
+    }
+
     std::optional<ResumableOp> resumableDescriptor() const override
     {
         if (isCompletedState())
             return std::nullopt;
-        ResumableOp out;
         if (type_ == SharedData::OperationType::Download)
-        {
-            out.kind = ResumableOp::Kind::Download;
-            out.src = remotePath_;
-            out.dst = localPath_;
-        }
-        else
-        {
-            out.kind = ResumableOp::Kind::Upload;
-            out.src = localPath_;
-            out.dst = remotePath_;
-        }
-        out.allowOverwrite = true;
-        return out;
+            return Resumable::Download{
+                .source = remotePath_, .destination = localPath_, .allowOverwrite = allowOverwrite_
+            };
+        if (type_ == SharedData::OperationType::Upload)
+            return Resumable::Upload{.source = localPath_, .destination = remotePath_, .allowOverwrite = allowOverwrite_};
+        // An archive card does not know the entries it packs, so it cannot be redone.
+        return std::nullopt;
     }
 
   private:
     Components::ProgressBar progressBar_;
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};
-    std::filesystem::path localPath_;
-    std::filesystem::path remotePath_;
+    /** @brief Empty for an archive upload. */
+    Paths::LocalPath localPath_;
+    bool allowOverwrite_{false};
+    /** @brief Unset for an archive download. */
+    Paths::RemotePath remotePath_;
+    ScanPhaseStatus scanPhase_;
 };

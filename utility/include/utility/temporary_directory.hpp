@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility/link_safe_remove.hpp>
+
 #include <filesystem>
 
 #include <boost/uuid/uuid_generators.hpp>
@@ -45,8 +47,9 @@ namespace Utility
         {
             std::error_code error;
 
+            // Never through a link or Windows junction a test left inside.
             if (!path_.empty())
-                std::filesystem::remove_all(path_, error);
+                removeAllNoFollow(path_, error);
         }
 
         TemporaryDirectory(TemporaryDirectory const&) = delete;

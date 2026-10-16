@@ -16,6 +16,7 @@ ScanOperation::ScanOperation(SecureShell::SftpSession& sftp, ScanOperationOption
     , recursive_{options.recursive}
     , ignoreHidden_{options.ignoreHidden}
     , buildTree_{options.buildTree}
+    , excludedSuffixes_{std::move(options.excludedSuffixes)}
 {}
 
 ScanOperation::~ScanOperation() = default;
@@ -23,9 +24,10 @@ ScanOperation::~ScanOperation() = default;
 namespace
 {
     std::optional<std::string>
-    readRemoteFile(SecureShell::SftpSession& sftp, std::filesystem::path const& path, std::chrono::seconds timeout)
+    readRemoteFile(SecureShell::SftpSession& sftp, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
-        auto openFut = sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        auto openFut =
+            sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
         if (openFut.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
         auto openResult = openFut.get();
@@ -54,12 +56,13 @@ namespace
 }
 
 std::expected<std::vector<SharedData::DirectoryEntry>, ScanOperation::Error>
-ScanOperation::scanner(std::filesystem::path const& path)
+ScanOperation::scanner(Paths::RelativePath const& relative)
 {
     if (!recursive_ && rootScanned_)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
+    const auto path = remotePath_ / relative;
     auto fut = sftp_->listDirectory(path);
     fut.wait_for(futureTimeout_);
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
@@ -67,9 +70,22 @@ ScanOperation::scanner(std::filesystem::path const& path)
 
     auto result = fut.get();
     if (!result.has_value())
+    {
+        // A directory below the root that vanished or denies listing has unknown content, a sync tree
+        // keeps it as unreadable instead of failing or treating it as empty.
+        const auto sftpError = result.error().sftpError;
+        const bool deniedOrVanished = sftpError == SSH_FX_PERMISSION_DENIED || sftpError == SSH_FX_NO_SUCH_FILE;
+        if (buildTree_ && !relative.empty() && deniedOrVanished)
+        {
+            Log::warn("ScanOperation: Cannot list '{}': {}", path.value(), result.error().toString());
+            return std::unexpected(
+                Error{.type = ErrorType::DirectoryUnreadable, .sftpError = result.error(), .extraInfo = path.value()}
+            );
+        }
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
             {.type = ErrorType::SftpError, .sftpError = result.error()}
         );
+    }
 
     auto entries = std::move(result).value();
 
@@ -77,8 +93,7 @@ ScanOperation::scanner(std::filesystem::path const& path)
     {
         entries.erase(
             std::remove_if(entries.begin(), entries.end(), [](SharedData::DirectoryEntry const& entry) {
-                const auto name = entry.path.filename().string();
-                return !name.empty() && name.front() == '.';
+                return !entry.name.empty() && entry.name.front() == '.';
             }),
             entries.end()
         );
@@ -87,23 +102,15 @@ ScanOperation::scanner(std::filesystem::path const& path)
     if (!respectIgnoreFiles_)
         return {std::move(entries)};
 
-    const auto relDir = [&]() -> std::filesystem::path {
-        std::error_code errc{};
-        auto rel = std::filesystem::relative(path, remotePath_, errc);
-        if (errc || rel.empty() || rel == std::filesystem::path{"."})
-            return {};
-        return rel;
-    }();
-
     for (auto const& entry : entries)
     {
-        const auto name = entry.path.generic_string();
+        auto const& name = entry.name;
         if (name != ".gitignore" && name != ".ignore")
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*sftp_, path / entry.path, futureTimeout_))
-            ignoreMatcher_.addFile(relDir, *content);
+        if (auto content = readRemoteFile(*sftp_, path / *Paths::PathSegment::make(name), futureTimeout_))
+            ignoreMatcher_.addFile(relative, *content);
     }
 
     if (ignoreMatcher_.empty())
@@ -113,10 +120,10 @@ ScanOperation::scanner(std::filesystem::path const& path)
     filtered.reserve(entries.size());
     for (auto& entry : entries)
     {
-        const auto childRel =
-            relDir.empty() ? std::filesystem::path{entry.path} : (relDir / entry.path);
+        // A name that is no segment cannot match a rule, the walker rejects it.
+        const auto segment = Paths::PathSegment::make(entry.name);
         const bool isDir = entry.type == SharedData::DirectoryEntry::FileType::Directory;
-        if (ignoreMatcher_.isIgnored(childRel, isDir))
+        if (segment && ignoreMatcher_.isIgnored(relative / *segment, isDir))
             continue;
         filtered.push_back(std::move(entry));
     }
@@ -136,8 +143,15 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
     {
         case (NotStarted):
         {
+            if (remotePath_.empty())
+            {
+                Log::error("ScanOperation: No root to scan.");
+                return enterErrorState<WorkStatus>(
+                    {.type = ErrorType::ImplementationError, .extraInfo = "The scan has no root."}
+                );
+            }
             state_ = Running;
-            Log::info("ScanOperation: Starting scan of '{}'.", remotePath_.generic_string());
+            Log::info("ScanOperation: Starting scan of '{}'.", remotePath_.value());
             progressCallback_(0, 0, 0);
             return WorkStatus::MoreWork;
         }
@@ -150,7 +164,7 @@ std::expected<ScanOperation::WorkStatus, ScanOperation::Error> ScanOperation::wo
             {
                 if (walker.completed())
                 {
-                    Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.generic_string());
+                    Log::info("ScanOperation: Scan of '{}' completed.", remotePath_.value());
                     state_ = Completed;
                     return WorkStatus::Complete;
                 }
@@ -204,7 +218,7 @@ std::expected<void, ScanOperation::Error> ScanOperation::cancel(bool adoptCancel
 {
     if (adoptCancelState)
     {
-        Log::info("ScanOperation: Scan of '{}' canceled.", remotePath_.generic_string());
+        Log::info("ScanOperation: Scan of '{}' canceled.", remotePath_.value());
         enterState(OperationState::Canceled);
     }
     return {};

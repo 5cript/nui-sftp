@@ -1,11 +1,15 @@
 #include <backend/dropped_entry.hpp>
 
-SharedData::DirectoryEntry leanDirectoryEntryFromPath(std::filesystem::path const& path)
+std::optional<SharedData::DroppedItem> droppedItemFromPath(std::filesystem::path const& path)
 {
     using FileType = SharedData::DirectoryEntry::FileType;
 
-    return SharedData::DirectoryEntry{
-        .path = path,
+    auto localPath = Paths::LocalPath::make(path);
+    if (!localPath)
+        return std::nullopt;
+    const auto name = localPath->filename();
+    auto entry = SharedData::DirectoryEntry{
+        .name = name ? name->value() : std::string{},
         .type = [&path]()
         {
             std::error_code statusError;
@@ -28,4 +32,5 @@ SharedData::DirectoryEntry leanDirectoryEntryFromPath(std::filesystem::path cons
                 return FileType::Unknown;
         }()
     };
+    return SharedData::DroppedItem{.path = *std::move(localPath), .entry = std::move(entry)};
 }

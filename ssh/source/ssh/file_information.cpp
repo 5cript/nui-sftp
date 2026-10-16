@@ -6,8 +6,7 @@ namespace SecureShell
     {
         return FileInformation{
             SharedData::DirectoryEntry{
-                .path = attributes->name ? std::string{attributes->name} : std::string{},
-                .longName = attributes->longname ? std::string{attributes->longname} : std::string{},
+                .name = attributes->name ? std::string{attributes->name} : std::string{},
                 .flags = attributes->flags,
                 .type = static_cast<SharedData::FileType>(attributes->type),
                 .size = attributes->size,

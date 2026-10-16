@@ -7,6 +7,7 @@
 #include <shared_data/sync/scan_node.hpp>
 #include <shared_data/sync/tree_directory_walker.hpp>
 #include <utility/directory_traversal.hpp>
+#include <paths/paths.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -20,7 +21,7 @@ class ScanOperation : public Operation
     {
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
             progressCallback = [](auto, auto, auto) {};
-        std::filesystem::path remotePath{};
+        Paths::RemotePath remotePath{};
         std::chrono::seconds futureTimeout{5};
         bool respectIgnoreFiles{false};
         /// When false, only the root directory is listed; subdirectories are not descended into.
@@ -31,6 +32,8 @@ class ScanOperation : public Operation
         /// instead of a flat entry vector.  Only one shape is active at a time; use
         /// @ref ejectScanTree() in that case and @ref ejectEntries() otherwise.
         bool buildTree{false};
+        /** @brief Tree mode only: names ending in one of these, the temp files of transfers, stay excluded. */
+        std::vector<std::string> excludedSuffixes{};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -67,7 +70,7 @@ class ScanOperation : public Operation
         return 1;
     }
 
-    std::filesystem::path remotePath() const
+    Paths::RemotePath const& remotePath() const
     {
         return remotePath_;
     }
@@ -76,13 +79,13 @@ class ScanOperation : public Operation
 
     auto withWalkerDo(auto&& fn)
     {
-        auto scan = [this](std::filesystem::path const& path)
+        auto scan = [this](Paths::RelativePath const& relative)
         {
-            return scanner(path);
+            return scanner(relative);
         };
         using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(remotePath_, std::move(scan));
+            walker_ = std::make_unique<WalkerType>(std::move(scan));
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -92,13 +95,22 @@ class ScanOperation : public Operation
      */
     auto withTreeWalkerDo(auto&& fn)
     {
-        auto scan = [this](std::filesystem::path const& path)
+        auto scan = [this](Paths::RelativePath const& relative)
         {
-            return scanner(path);
+            return scanner(relative);
         };
         using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(remotePath_, std::move(scan), recursive_);
+            walker_ = std::make_unique<WalkerType>(
+                std::move(scan),
+                recursive_,
+                [](Error const& error)
+                {
+                    return error.type == ErrorType::DirectoryUnreadable;
+                },
+                /*requireLocalNames=*/true,
+                excludedSuffixes_
+            );
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -112,6 +124,24 @@ class ScanOperation : public Operation
             [](auto& walker)
             {
                 return std::move(walker).ejectEntries();
+            }
+        );
+    }
+
+    /**
+     * @brief Full paths of listed entries whose name is not a valid path segment, for display. Flat scans only,
+     *        the tree of a sync scan keeps them as invalid name nodes.
+     */
+    std::vector<std::string> rejectedPaths()
+    {
+        return withWalkerDo(
+            [this](auto& walker)
+            {
+                std::vector<std::string> paths;
+                const auto root = remotePath_.isRoot() ? std::string{} : remotePath_.value();
+                for (auto const& entry : walker.rejectedEntries())
+                    paths.push_back(root + "/" + walker.describeRejected(entry));
+                return paths;
             }
         );
     }
@@ -136,11 +166,14 @@ class ScanOperation : public Operation
 
     std::uint64_t totalBytes() const;
 
-    std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
+    /**
+     * @brief Lists the directory at @p relative below the scanned root.
+     */
+    std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(Paths::RelativePath const& relative);
 
   private:
     SecureShell::SftpSession* sftp_;
-    std::filesystem::path remotePath_;
+    Paths::RemotePath remotePath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
     std::chrono::seconds futureTimeout_;
@@ -148,6 +181,7 @@ class ScanOperation : public Operation
     bool recursive_;
     bool ignoreHidden_;
     bool buildTree_;
+    std::vector<std::string> excludedSuffixes_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;

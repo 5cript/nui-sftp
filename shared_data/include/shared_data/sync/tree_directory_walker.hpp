@@ -1,8 +1,10 @@
 #pragma once
 
 #include <shared_data/directory_entry.hpp>
+#include <paths/local_path_segment.hpp>
 #include <shared_data/sync/scan_node.hpp>
 #include <utility/directory_traversal.hpp>
+#include <paths/relative_path.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -10,6 +12,7 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -20,7 +23,8 @@ namespace SharedData::Sync
      * @brief Directory walker that produces a sorted @ref ScanNode tree directly.
      *
      * Mirrors the scanner contract of @ref Utility::DeepDirectoryWalker — the caller
-     * supplies a scanner that returns a batch of @ref DirectoryEntry for one directory —
+     * supplies a scanner that returns a batch of @ref DirectoryEntry for one directory, given
+     * relative to the root —
      * but internally stitches results into a nested ScanNode tree with:
      *
      *  - sibling sort by name applied per directory as entries arrive, and
@@ -34,26 +38,40 @@ namespace SharedData::Sync
     requires std::is_invocable_r_v<
         std::expected<std::vector<SharedData::DirectoryEntry>, WalkErrorType>,
         ScannerT,
-        std::filesystem::path const&>
+        Paths::RelativePath const&>
     class TreeDirectoryWalker : public Utility::BaseDirectoryWalker
     {
       public:
         /**
-         * @param rootPath Directory the walk starts at.
-         * @param scanner Lists one directory.
+         * @param scanner Lists one directory, given relative to the root.
          * @param recursive When false only the root is listed. Its subdirectories stay in the tree with
          *        @ref ScanNode::childrenKnown set to false so the diff never deletes what nobody saw.
+         * @param isUnreadable Classifies a scanner error of a directory below the root. A directory it
+         *        accepts stays in the tree as @ref Availability::Unreadable and the walk goes on, every
+         *        other error ends the walk.
+         * @param requireLocalNames Names must be creatable on the local filesystem, set for remote trees whose
+         *        entries may be downloaded. Others are kept as @ref Availability::InvalidName.
+         * @param excludedSuffixes Names ending in one of these, the temp files of transfers, are kept as
+         *        @ref Availability::Excluded so a sync neither copies nor deletes them.
          */
         template <typename ForwardingScannerT = ScannerT>
         requires std::is_same_v<std::decay_t<ForwardingScannerT>, ScannerT>
-        TreeDirectoryWalker(std::filesystem::path rootPath, ForwardingScannerT&& scanner, bool recursive = true)
-            : rootPath_{std::move(rootPath)}
-            , scanner_{std::forward<ForwardingScannerT>(scanner)}
+        explicit TreeDirectoryWalker(
+            ForwardingScannerT&& scanner,
+            bool recursive = true,
+            std::function<bool(WalkErrorType const&)> isUnreadable = {},
+            bool requireLocalNames = false,
+            std::vector<std::string> excludedSuffixes = {}
+        )
+            : scanner_{std::forward<ForwardingScannerT>(scanner)}
             , recursive_{recursive}
+            , requireLocalNames_{requireLocalNames}
+            , excludedSuffixes_{std::move(excludedSuffixes)}
+            , isUnreadable_{std::move(isUnreadable)}
         {
             root_.type = SharedData::FileType::Directory;
             root_.childrenKnown = true;
-            queue_.push_back(QueuedDir{.node = &root_, .fullPath = rootPath_, .depth = 0});
+            queue_.push_back(QueuedDir{.node = &root_, .relativePath = {}, .depth = 0});
             ++totalEntries_;
         }
 
@@ -83,7 +101,7 @@ namespace SharedData::Sync
             root_.type = SharedData::FileType::Directory;
             root_.childrenKnown = true;
             queue_.clear();
-            queue_.push_back(QueuedDir{.node = &root_, .fullPath = rootPath_, .depth = 0});
+            queue_.push_back(QueuedDir{.node = &root_, .relativePath = {}, .depth = 0});
             currentIndex_ = 0;
             totalBytes_ = 0;
             totalEntries_ = 1;
@@ -100,18 +118,25 @@ namespace SharedData::Sync
             const auto pending = queue_.front();
             queue_.pop_front();
 
-            auto result = scanner_(pending.fullPath);
+            auto result = scanner_(pending.relativePath);
             if (!result)
-                return std::unexpected(std::move(result).error());
+            {
+                const bool belowRoot = pending.depth > 0;
+                if (!belowRoot || !isUnreadable_ || !isUnreadable_(result.error()))
+                    return std::unexpected(std::move(result).error());
+                // Unknown content must never look like empty content, the diff would delete the other side.
+                pending.node->availability = Availability::Unreadable;
+                pending.node->childrenKnown = false;
+                ++currentIndex_;
+                return queue_.empty();
+            }
 
             auto rawChildren = std::move(result).value();
 
-            if constexpr (ScannerIncludesDotAndDotDot)
-            {
-                std::erase_if(rawChildren, [](SharedData::DirectoryEntry const& entry) {
-                    return entry.path == "." || entry.path == "..";
-                });
-            }
+            // Every "." and "..", a server may send them more than once.
+            std::erase_if(rawChildren, [](SharedData::DirectoryEntry const& entry) {
+                return entry.name == "." || entry.name == "..";
+            });
 
             std::vector<ScanNode> children;
             children.reserve(rawChildren.size());
@@ -120,9 +145,12 @@ namespace SharedData::Sync
                 if (raw.type == SharedData::FileType::Regular)
                     totalBytes_ += raw.size;
 
+                // The listed name as it is, "x/.." stays an invalid name.
+                std::string nameUtf8 = std::move(raw.name);
+                const auto availability = nameAvailability(nameUtf8, raw.type);
                 children.push_back(
                     ScanNode{
-                        .name = raw.path.filename().generic_string(),
+                        .name = std::move(nameUtf8),
                         .type = raw.type,
                         .size = raw.size,
                         .mtime = raw.mtime,
@@ -135,6 +163,7 @@ namespace SharedData::Sync
                         .subtreeFileCount = 0,
                         .subtreeByteTotal = 0,
                         .childrenKnown = recursive_ || raw.type != SharedData::FileType::Directory,
+                        .availability = availability,
                     }
                 );
                 ++totalEntries_;
@@ -154,12 +183,13 @@ namespace SharedData::Sync
             {
                 for (auto& child : pending.node->children)
                 {
-                    if (child.type != SharedData::FileType::Directory)
+                    if (child.type != SharedData::FileType::Directory || child.availability != Availability::Listed)
                         continue;
                     queue_.push_back(
                         QueuedDir{
                             .node = &child,
-                            .fullPath = pending.fullPath / child.name,
+                            // Listed names are valid segments, see nameAvailability.
+                            .relativePath = pending.relativePath / *Paths::PathSegment::make(child.name),
                             .depth = pending.depth + 1,
                         }
                     );
@@ -192,6 +222,8 @@ namespace SharedData::Sync
             node.subtreeByteTotal = 0;
             for (auto& child : node.children)
             {
+                if (child.availability != Availability::Listed)
+                    continue;
                 if (child.type == SharedData::FileType::Directory)
                 {
                     finalizeCounts(child);
@@ -206,16 +238,41 @@ namespace SharedData::Sync
             }
         }
 
+        static bool isTransferable(SharedData::FileType type)
+        {
+            return type == SharedData::FileType::Regular || type == SharedData::FileType::Directory ||
+                type == SharedData::FileType::Symlink;
+        }
+
+        Availability nameAvailability(std::string const& name, SharedData::FileType type) const
+        {
+            const auto segment = Paths::PathSegment::make(name);
+            if (!segment)
+                return Availability::InvalidName;
+            if (requireLocalNames_ && !Paths::LocalPathSegment::make(*segment).has_value())
+                return Availability::InvalidName;
+            const auto isTempFile = std::ranges::any_of(
+                excludedSuffixes_,
+                [&name](std::string const& suffix)
+                {
+                    return !suffix.empty() && name.size() > suffix.size() && name.ends_with(suffix);
+                }
+            );
+            return isTransferable(type) && !isTempFile ? Availability::Listed : Availability::Excluded;
+        }
+
         struct QueuedDir
         {
             ScanNode* node;
-            std::filesystem::path fullPath;
+            Paths::RelativePath relativePath;
             std::size_t depth;
         };
 
-        std::filesystem::path rootPath_;
         ScannerT scanner_;
         bool recursive_{true};
+        bool requireLocalNames_{false};
+        std::vector<std::string> excludedSuffixes_{};
+        std::function<bool(WalkErrorType const&)> isUnreadable_{};
         ScanNode root_{};
         std::deque<QueuedDir> queue_{};
         std::size_t totalEntries_{0};

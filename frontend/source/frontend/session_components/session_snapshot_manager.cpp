@@ -256,24 +256,16 @@ void SessionSnapshotManager::apply(SessionSnapshot const& snapshot)
     std::vector<std::string> bulkResumeIds;
     for (auto const& op : snapshot.inFlightOps)
     {
-        switch (op.kind)
+        if (auto const* bulk = std::get_if<Resumable::Bulk>(&op); bulk)
         {
-            case ResumableOp::Kind::Download:
-            case ResumableOp::Kind::Upload:
-            case ResumableOp::Kind::Delete:
-            case ResumableOp::Kind::Rename:
-                impl_->operationQueue->enqueueResumable(op);
-                break;
-            case ResumableOp::Kind::BulkDownload:
-            case ResumableOp::Kind::BulkUpload:
-            case ResumableOp::Kind::BulkDelete:
-                if (op.operationId.isValid())
-                {
-                    bulkResumeIds.push_back(op.operationId.value());
-                    impl_->trackedBulkResumes.push_back(op.operationId);
-                }
-                break;
+            if (bulk->operationId.isValid())
+            {
+                bulkResumeIds.push_back(bulk->operationId.value());
+                impl_->trackedBulkResumes.push_back(bulk->operationId);
+            }
+            continue;
         }
+        impl_->operationQueue->enqueueResumable(op);
     }
     if (!bulkResumeIds.empty() && impl_->frontendSessionManager->value() &&
         impl_->frontendSessionManager->value()->engine().engineName() == "ssh")

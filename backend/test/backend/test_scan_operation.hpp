@@ -3,6 +3,8 @@
 #include <backend/sftp/scan_operation.hpp>
 #include "real_server_tests.hpp"
 
+#include <shared_data/sync/diff_tree_store.hpp>
+
 #include <nui/utility/scope_exit.hpp>
 
 #include <algorithm>
@@ -41,7 +43,7 @@ namespace Test
             std::string const& filename)
         {
             return std::any_of(entries.begin(), entries.end(), [&](SharedData::DirectoryEntry const& entry) {
-                return entry.path.filename().generic_string() == filename;
+                return entry.name == filename;
             });
         }
 
@@ -50,7 +52,7 @@ namespace Test
             std::string const& filename)
         {
             auto iter = std::find_if(entries.begin(), entries.end(), [&](SharedData::DirectoryEntry const& entry) {
-                return entry.path.filename().generic_string() == filename;
+                return entry.name == filename;
             });
             return iter == entries.end() ? nullptr : &*iter;
         }
@@ -87,7 +89,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
             }};
 
@@ -106,7 +108,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = false,
             }};
 
@@ -128,7 +130,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = true,
             }};
 
@@ -151,7 +153,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = false,
             }};
 
@@ -186,7 +188,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = true,
             }};
 
@@ -211,7 +213,7 @@ namespace Test
                     [&callbackInvocations](std::uint64_t, std::uint64_t, std::uint64_t) {
                         ++callbackInvocations;
                     },
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
             }};
 
@@ -227,7 +229,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/does_not_exist_dir",
+                .remotePath = remote("/home/test/does_not_exist_dir"),
                 .recursive = false,
             }};
 
@@ -255,7 +257,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/file1.txt",
+                .remotePath = remote("/home/test/file1.txt"),
                 .recursive = false,
             }};
 
@@ -281,7 +283,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
             }};
 
@@ -300,7 +302,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/does_not_exist_dir",
+                .remotePath = remote("/home/test/does_not_exist_dir"),
                 .recursive = false,
             }};
 
@@ -325,7 +327,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test",
+                .remotePath = remote("/home/test"),
                 .recursive = true,
             }};
 
@@ -350,7 +352,7 @@ namespace Test
         ScanOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/Documents",
+                .remotePath = remote("/home/test/Documents"),
                 .recursive = false,
                 .ignoreHidden = true,
             }};
@@ -360,5 +362,66 @@ namespace Test
         auto entries = operation.ejectEntries();
         EXPECT_TRUE(hasEntryNamed(entries, "doc1.txt"));
         EXPECT_TRUE(hasEntryNamed(entries, "doc2.txt"));
+    }
+
+    TEST_F(ScanOperationTests, BuildTreeKeepsDeniedSubdirectoryAsUnreadable)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ScanOperation operation{*sftp, {.remotePath = remote("/home/test"), .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), ScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const* documents = SharedData::Sync::findScanNode(tree, "Documents");
+        ASSERT_NE(documents, nullptr);
+        EXPECT_EQ(documents->availability, SharedData::Sync::Availability::Unreadable);
+        EXPECT_FALSE(documents->childrenKnown);
+        auto const* pictures = SharedData::Sync::findScanNode(tree, "Pictures");
+        ASSERT_NE(pictures, nullptr);
+        EXPECT_EQ(pictures->children.size(), 2u);
+    }
+
+    TEST_F(ScanOperationTests, DeniedSubdirectoryFailsAFlatScan)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("denyDirectory", {{"path", "/home/test/Documents"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // Transfers and deletes use flat scans, an incomplete listing must fail them.
+        ScanOperation operation{*sftp, {.remotePath = remote("/home/test")}};
+        std::expected<ScanOperation::WorkStatus, ScanOperation::Error> result{};
+        for (int iteration = 0; iteration < 100 && result.has_value() &&
+             result.value() != ScanOperation::WorkStatus::Complete;
+             ++iteration)
+            result = operation.work();
+        EXPECT_FALSE(result.has_value());
+    }
+
+    TEST_F(ScanOperationTests, HostileNamesAreRejectedOrMarked)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test/Documents"}, {"name", "x/.."}}));
+        ASSERT_TRUE(serverStartResult->command("rawName", {{"directory", "/home/test/Documents"}, {"name", ".."}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        ScanOperation flat{*sftp, {.remotePath = remote("/home/test/Documents")}};
+        ASSERT_EQ(runScanToCompletion(flat), ScanOperation::WorkStatus::Complete);
+        const auto rejected = flat.rejectedPaths();
+        ASSERT_EQ(rejected.size(), 1u);
+        EXPECT_EQ(rejected.front(), "/home/test/Documents/x/..") << "joined for display only";
+        for (auto const& entry : flat.ejectEntries())
+            EXPECT_NE(entry.name, "x/..");
+
+        ScanOperation tree{*sftp, {.remotePath = remote("/home/test/Documents"), .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(tree), ScanOperation::WorkStatus::Complete);
+        const auto root = tree.ejectScanTree();
+        const auto hostile = std::ranges::find_if(root.children, [](auto const& child) {
+            return child.name == "x/..";
+        });
+        ASSERT_NE(hostile, root.children.end());
+        EXPECT_EQ(hostile->availability, SharedData::Sync::Availability::InvalidName);
+        EXPECT_EQ(std::ranges::count_if(root.children, [](auto const& child) { return child.name == ".."; }), 0);
     }
 }

@@ -3,6 +3,7 @@
 #include <nui/frontend/element_renderer.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace SessionInternal
@@ -15,8 +16,24 @@ namespace SessionInternal
     Nui::ElementRenderer resolveIdentityIcon(std::string const& iconName, bool isLocalShell);
 
     /**
-     * @brief Fires the RPC that writes @p content to @p filePath, with
-     *        user-facing logging consistent with the multi-channel save path.
+     * @brief Writes @p content to @p filePath, which the user picked in a save dialog that confirmed replacing it.
      */
     void writeChannelContentToFile(std::filesystem::path const& filePath, std::string const& content);
+
+    enum class WriteOutcome
+    {
+        Written,
+        /// The file existed and was left alone.
+        Exists,
+        Failed,
+    };
+
+    /**
+     * @brief Writes @p content to the new file @p filePath, an existing file is never replaced.
+     */
+    void writeChannelContentToNewFile(
+        std::filesystem::path const& filePath,
+        std::string const& content,
+        std::function<void(WriteOutcome)> onDone
+    );
 }

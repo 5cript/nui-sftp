@@ -13,6 +13,7 @@
 #include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace TarArchive::Test
 {
@@ -20,7 +21,7 @@ namespace TarArchive::Test
     {
         std::filesystem::path compressionScratchDirectory()
         {
-            const auto directory = programDirectory / "temp" / "tar_archive_compression";
+            const auto directory = temporaryRoot / "tar_archive_compression";
             std::filesystem::create_directories(directory);
             return directory;
         }

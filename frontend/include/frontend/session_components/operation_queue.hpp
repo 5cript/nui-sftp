@@ -17,7 +17,8 @@
 #include <shared_data/file_operations/operation_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operations_reordered.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
@@ -62,11 +63,17 @@ class OperationQueue
     ROAR_PIMPL_SPECIAL_FUNCTIONS(OperationQueue);
 
     void activate(std::shared_ptr<FileEngine> fileEngine, Ids::SessionId sessionId);
+
+    /**
+     * @brief The file engine of the session, empty before @ref activate.
+     */
+    std::shared_ptr<FileEngine> fileEngine() const;
     void deactivate();
 
     void enqueueDownload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
+        Paths::RemotePath const& source,
+        Paths::LocalPath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh,
@@ -74,8 +81,9 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueUpload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
+        Paths::LocalPath const& source,
+        Paths::RemotePath const& destination,
+        std::uint64_t sizeBytes,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         bool allowOverwrite,
         bool insertRefresh,
@@ -83,13 +91,13 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueRename(
-        std::filesystem::path const& oldPath,
-        std::filesystem::path const& newPath,
+        Paths::RemotePath const& oldPath,
+        Paths::RemotePath const& newPath,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
     void enqueueDelete(
-        std::vector<std::filesystem::path> const& paths,
+        std::vector<Paths::RemotePath> const& paths,
         bool recursive,
         std::function<void(std::optional<std::vector<Ids::OperationId>> const&, std::string const& info)> onComplete,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
@@ -117,7 +125,7 @@ class OperationQueue
      *                        transfer-progress callbacks per entry.
      */
     void enqueueBulkDownload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDownloadEntry> entries,
         bool allowOverwrite,
         bool insertRefresh,
         SharedData::OperationMode mode,
@@ -135,8 +143,8 @@ class OperationQueue
      *        user-facing 1..9 slider value, remapped per-codec on the backend.
      */
     void enqueueArchiveDownload(
-        std::vector<SharedData::DirectoryEntry> entries,
-        std::filesystem::path const& localArchivePath,
+        std::vector<SharedData::ArchiveDownloadRoot> roots,
+        Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -146,8 +154,8 @@ class OperationQueue
 
     /** @brief Upload analogue of enqueueArchiveDownload — see its docs. */
     void enqueueArchiveUpload(
-        std::vector<std::filesystem::path> localPaths,
-        std::filesystem::path const& remoteArchivePath,
+        std::vector<Paths::LocalPath> localPaths,
+        Paths::RemotePath const& remoteArchivePath,
         int compressionCodec,
         int compressionLevel,
         bool mayOverwrite,
@@ -157,7 +165,7 @@ class OperationQueue
 
     /** @brief Upload analogue of enqueueBulkDownload — see its docs. */
     void enqueueBulkUpload(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkUploadEntry> entries,
         bool allowOverwrite,
         bool insertRefresh,
         SharedData::OperationMode mode,
@@ -171,7 +179,7 @@ class OperationQueue
      *  @param onEnqueued  Invoked synchronously with the aggregate file-bulk
      *                     OperationId before the RPC dispatches. */
     void enqueueBulkDelete(
-        std::vector<SharedData::BulkAddEntry> entries,
+        std::vector<SharedData::BulkDeleteEntry> entries,
         bool insertRefresh,
         SharedData::OperationMode mode,
         std::function<void(bool success)> onBulkComplete,
@@ -186,7 +194,7 @@ class OperationQueue
      */
     void addFailedEntriesCallback(
         Ids::OperationId const& opId,
-        std::function<void(std::vector<std::filesystem::path> const& failedPaths)> callback
+        std::function<void(std::vector<std::string> const& failedPaths)> callback
     );
     /** @brief Register a callback that receives progress as a 0.0–1.0 fraction for an upload/download.
      *         Automatically removed when the operation completes.
@@ -206,37 +214,8 @@ class OperationQueue
     /** @brief Observable pause state — observe() it to react to pause/unpause changes. */
     Nui::Observed<bool>& pausedState();
 
-    /** @brief Enqueues a priority remote scan and a priority local scan for sync comparison.
-     *         All callbacks are registered before the backend RPC is called to avoid missing progress.
-     *
-     * @param localPath        Local directory root to scan.
-     * @param remotePath       Remote directory root to scan.
-     * @param onRemoteProgress Called on each remote scan progress update.
-     * @param onLocalProgress  Called on each local scan progress update.
-     * @param onRemoteComplete Called with the remote scan result when it finishes.
-     * @param onLocalComplete  Called with the local scan result when it finishes.
-     */
-    /** @brief Fires a remote-side createDirectory RPC.  Used by the sync dialog in
-     *         non-recursive mode where transferring a missing directory must not
-     *         turn into a recursive bulk upload that could clobber existing files.
-     *         Fire-and-forget (no operation ID, no queue entry).
-     */
-    void createRemoteDirectory(
-        std::filesystem::path const& path,
-        std::function<void(bool success, std::string const& info)> onComplete
-    );
-
-    /** @brief Fires a local-side createDirectory RPC (mirror of createRemoteDirectory). */
-    void createLocalDirectory(
-        std::filesystem::path const& path,
-        std::function<void(bool success, std::string const& info)> onComplete
-    );
-
-    /** @brief Removes local paths, directories with their content. Not queued, like @ref createLocalDirectory. */
-    void removeLocalPaths(
-        std::vector<std::filesystem::path> const& paths,
-        std::function<void(bool success, std::string const& info)> onComplete
-    );
+    /** @brief Drops every callback registered for @p opId, for an operation that was never queued. */
+    void removeCallbacks(Ids::OperationId const& opId);
 
     /** @brief Shows a restore button in the queue header for a minimized SyncDialog.
      *         The button pulses once on call (and on subsequent calls) to catch the user's eye.
@@ -269,6 +248,7 @@ class OperationQueue
         std::function<void(SharedData::ScanProgress const&)> onRemoteProgress,
         std::function<void(SharedData::ScanProgress const&)> onLocalProgress,
         std::function<void(/*isLocal=*/bool)> onScanPhaseDone,
+        std::function<void(std::string const& reason)> onScanFailed,
         std::function<void(std::uint64_t compared)> onDiffProgress
     );
 
@@ -298,12 +278,9 @@ class OperationQueue
         std::function<void(std::string const&)> onRejected
     );
 
-    void buildSyncEnqueuePlan(
-        Ids::SyncSessionId syncSessionId,
-        SharedData::Sync::DiffSection section,
-        std::vector<std::string> selectedRelKeys,
-        std::uint64_t generation,
-        std::function<void(std::vector<SharedData::Sync::EnqueuePlanEntry>)> onResolved,
+    void executeSyncSelection(
+        SharedData::Sync::SyncExecutionRequest request,
+        std::function<void(SharedData::Sync::SyncExecutionResult)> onResolved,
         std::function<void(std::string const&)> onRejected
     );
 

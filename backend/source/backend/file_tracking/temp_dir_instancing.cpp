@@ -1,4 +1,6 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <utility/link_safe_remove.hpp>
+#include <paths/native.hpp>
 #include <backend/file_tracking/change_filter.hpp>
 
 #include <efsw/efsw.hpp>
@@ -11,6 +13,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 
@@ -87,7 +90,10 @@ namespace FileTracking
                 return;
 
             std::error_code statusError;
-            const bool isDirectory = std::filesystem::is_directory(std::filesystem::path(dir) / filename, statusError);
+            // efsw reports UTF-8 on every platform.
+            const bool isDirectory = std::filesystem::is_directory(
+                Paths::nativeFromUtf8(dir) / Paths::nativeFromUtf8(filename), statusError
+            );
             const auto change = filterFileChange(
                 {toFileAction(action), filename, std::move(oldFilename)}, isDirectory, downloadTempSuffix_
             );
@@ -96,9 +102,9 @@ namespace FileTracking
 
             nlohmann::json payload = {
                 {"action", Utility::enumToString(change->action)},
-                {"directory", std::filesystem::path(dir).generic_string()},
-                {"filename", std::filesystem::path(change->filename).generic_string()},
-                {"oldFilename", std::filesystem::path(change->oldFilename).generic_string()},
+                {"directory", Paths::nativeToUtf8(Paths::nativeFromUtf8(dir))},
+                {"filename", Paths::nativeToUtf8(Paths::nativeFromUtf8(change->filename))},
+                {"oldFilename", Paths::nativeToUtf8(Paths::nativeFromUtf8(change->oldFilename))},
             };
 
             boost::asio::post(
@@ -127,7 +133,7 @@ namespace FileTracking
         Config config;
         std::string instanceId;
         std::filesystem::path instanceDir;
-        InstanceLock lock;
+        std::optional<InstanceLock> lock;
         boost::asio::strand<boost::asio::any_io_executor> strand;
         Nui::RpcHub* hub;
         std::shared_ptr<efsw::FileWatcher> watcher;
@@ -149,7 +155,7 @@ namespace FileTracking
             : config{std::move(cfg)}
             , instanceId{std::move(instId)}
             , instanceDir{prepareInstanceDir(config.tempRootDir / instanceId)}
-            , lock{instanceDir / (instanceId + ".lock")}
+            , lock{std::in_place, instanceDir / (instanceId + ".lock")}
             , strand{std::move(strd)}
             , hub{hubPtr}
             , watcher{std::make_shared<efsw::FileWatcher>()}
@@ -208,15 +214,19 @@ namespace FileTracking
         absPath = fs::weakly_canonical(absPath);
 
         auto rel = fs::relative(absPath, impl_->instanceDir);
-        if (rel.string().starts_with(".."))
+        if (rel.empty() || *rel.begin() == "..")
         {
-            Log::warn("addWatch: '{}' is outside instance dir '{}'", absPath.string(), impl_->instanceDir.string());
+            Log::warn(
+                "addWatch: '{}' is outside instance dir '{}'",
+                Paths::nativeToUtf8(absPath),
+                Paths::nativeToUtf8(impl_->instanceDir)
+            );
             return std::nullopt;
         }
 
         if (!fs::exists(absPath))
         {
-            Log::warn("addWatch: path '{}' does not exist", absPath.string());
+            Log::warn("addWatch: path '{}' does not exist", Paths::nativeToUtf8(absPath));
             return std::nullopt;
         }
 
@@ -230,10 +240,11 @@ namespace FileTracking
             impl_->instanceId, impl_->strand, impl_->hub, std::move(downloadTempSuffix)
         );
 
-        auto watchId = impl_->watcher->addWatch(absPath.string(), impl_->listener.get(), recursive);
+        // efsw takes UTF-8, a narrow string is the ANSI code page on Windows.
+        auto watchId = impl_->watcher->addWatch(Paths::nativeToUtf8(absPath), impl_->listener.get(), recursive);
         if (watchId < 0)
         {
-            Log::warn("addWatch: efsw rejected watch for '{}'", absPath.string());
+            Log::warn("addWatch: efsw rejected watch for '{}'", Paths::nativeToUtf8(absPath));
             return std::nullopt;
         }
 
@@ -248,9 +259,10 @@ namespace FileTracking
 
         impl_->watcher.reset();
         impl_->listener.reset();
+        impl_->lock.reset();
 
         std::error_code err;
-        std::filesystem::remove_all(impl_->instanceDir, err);
+        Utility::removeAllNoFollow(impl_->instanceDir, err);
         if (err)
             Log::warn("cleanupNow: failed to remove '{}': {}", impl_->instanceDir.string(), err.message());
 

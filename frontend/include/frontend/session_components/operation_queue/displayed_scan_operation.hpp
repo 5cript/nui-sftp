@@ -9,7 +9,7 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
     DisplayedScanOperation(
         Ids::OperationId operationId,
         ConfirmDialog& confirmDialog,
-        std::filesystem::path remotePath,
+        std::string displayPath,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown
     )
@@ -21,7 +21,7 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
               std::move(doDeletionCountdown),
               []() {}
           }
-        , remotePath_{std::move(remotePath)}
+        , displayPath_{std::move(displayPath)}
     {}
 
     Nui::ElementRenderer body() const override
@@ -34,7 +34,7 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
         // clang-format off
         return fragment(
             span{}(
-                fmt::format(fmt::runtime(language->get("operationQueue", "scanCard")), remotePath_.string())
+                fmt::format(fmt::runtime(language->get("operationQueue", "scanCard")), displayPath_)
             ),
             // Spanner
             div{}(),
@@ -67,7 +67,7 @@ class DisplayedScanOperation : public OperationCard<DisplayedScanOperation>
     }
 
   private:
-    std::filesystem::path remotePath_;
+    std::string displayPath_;
     Nui::Observed<std::uint64_t> totalBytes_{0ull};
     Nui::Observed<std::uint64_t> currentIndex_{0ull};
     Nui::Observed<std::uint64_t> totalScanned_{0ull};

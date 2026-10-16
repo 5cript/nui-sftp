@@ -12,6 +12,7 @@
 #include <string>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace TarArchive::Test
 {
@@ -19,16 +20,15 @@ namespace TarArchive::Test
     {
         std::filesystem::path misuseDirectory()
         {
-            const auto directory = programDirectory / "temp" / "tar_archive_misuse";
+            const auto directory = temporaryRoot / "tar_archive_misuse";
             std::filesystem::create_directories(directory);
             return directory;
         }
 
-        SharedData::DirectoryEntry smallRegular(std::uint64_t size)
+        TarArchive::MemberHeader smallRegular(std::uint64_t size)
         {
-            SharedData::DirectoryEntry entry{};
+            TarArchive::MemberHeader entry{};
             entry.path = "x.bin";
-            entry.fullPath = "x.bin";
             entry.type = SharedData::FileType::Regular;
             entry.size = size;
             entry.permissions = static_cast<std::filesystem::perms>(0644u);
@@ -120,9 +120,8 @@ namespace TarArchive::Test
             ASSERT_TRUE(entry->write(std::span<std::byte const>{bytes}).has_value());
             ASSERT_TRUE(std::move(*entry).close().has_value());
 
-            SharedData::DirectoryEntry second = smallRegular(0u);
+            TarArchive::MemberHeader second = smallRegular(0u);
             second.path = "second.bin";
-            second.fullPath = "second.bin";
             auto secondEntry = writer->beginEntry(second);
             ASSERT_TRUE(secondEntry.has_value());
             ASSERT_TRUE(std::move(*secondEntry).close().has_value());

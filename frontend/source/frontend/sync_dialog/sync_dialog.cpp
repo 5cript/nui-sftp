@@ -31,12 +31,13 @@
 #include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 #include <ui5-sap-icons/icons/slim-arrow-right.hpp>
 #include <ui5-sap-icons/icons/refresh.hpp>
+#include <ui5-sap-icons/icons/alert.hpp>
 #include <ui5-sap-icons/icons/play.hpp>
 
 #include <frontend/svgs/decline.hpp>
 
-#include <shared_data/file_operations/bulk_add_request.hpp>
 #include <shared_data/sync/diff.hpp>
+#include <shared_data/sync/sync_execution.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/diff_tree_node.hpp>
@@ -207,7 +208,8 @@ struct SyncDialog::Implementation
     std::filesystem::path localPath_{};
     std::filesystem::path remotePath_{};
 
-    BackendSyncProvider* provider_{nullptr};
+    /** @brief Shared with the session, so a minimized dialog keeps its provider when a new flow starts. */
+    std::shared_ptr<BackendSyncProvider> provider_{};
 
     // Settings
     Nui::Observed<std::string> directionStr_{"Both"s};
@@ -277,6 +279,9 @@ struct SyncDialog::Implementation
     ConfirmDialog* confirmDialog_;
     OperationQueue* operationQueue_;
     std::function<void(SyncDialog::RecompareRequest)> onRecompareRequested_{};
+    std::function<void()> onSynchronized_{};
+    /** @brief When the shown pair was last synchronized, part of every diff. */
+    std::optional<std::uint64_t> lastSyncTime_{};
 
     explicit Implementation(ConfirmDialog* confirmDialog, OperationQueue* operationQueue)
         : confirmDialog_{confirmDialog}
@@ -773,6 +778,7 @@ struct SyncDialog::Implementation
             .actionDelete = actionDelete_.value(),
             .recursive = recursive_.value(),
             .ignoreHidden = ignoreHidden_.value(),
+            .lastSyncTime = lastSyncTime_,
         };
     }
 
@@ -831,6 +837,23 @@ struct SyncDialog::Implementation
         );
     }
 
+    /** @brief Selected items and bytes of one section, from the rows the selection names. */
+    std::pair<std::uint64_t, std::uint64_t> selectedTotalsOf(DiffSection section) const
+    {
+        std::uint64_t items = 0;
+        std::uint64_t bytes = 0;
+        auto const& rows = stateFor(section).rows;
+        for (auto const& key : selectionFor(section)->value())
+        {
+            const auto iter = rows.find(key);
+            if (iter == rows.end())
+                continue;
+            items += SharedData::Sync::itemWeight(iter->second);
+            bytes += iter->second.descendantByteTotal;
+        }
+        return {items, bytes};
+    }
+
     /** @brief Selected items and bytes over all sections, from the rows the selection names. */
     std::pair<std::uint64_t, std::uint64_t> selectedTotals() const
     {
@@ -838,17 +861,98 @@ struct SyncDialog::Implementation
         std::uint64_t bytes = 0;
         for (const auto section : {DiffSection::Upload, DiffSection::Download, DiffSection::Delete})
         {
-            auto const& rows = stateFor(section).rows;
-            for (auto const& key : selectionFor(section)->value())
-            {
-                const auto iter = rows.find(key);
-                if (iter == rows.end())
-                    continue;
-                items += SharedData::Sync::itemWeight(iter->second);
-                bytes += iter->second.descendantByteTotal;
-            }
+            const auto [sectionItems, sectionBytes] = selectedTotalsOf(section);
+            items += sectionItems;
+            bytes += sectionBytes;
         }
         return {items, bytes};
+    }
+
+    /** @brief "on the server" or "locally", for the side the delete section removes from. */
+    std::string deleteSideText() const
+    {
+        return language->get("syncDialog", direction_ == SyncDirection::Upload ? "deleteSideRemote" : "deleteSideLocal");
+    }
+
+    /** @brief Text of the confirmation before synchronizing: names the deletes and their side. */
+    std::string synchronizeConfirmText() const
+    {
+        auto text = fmt::format(
+            fmt::runtime(language->get("syncDialog", "confirmText")),
+            localPath_.filename().string(),
+            remotePath_.filename().string()
+        );
+        const auto [deleteItems, deleteBytes] = selectedTotalsOf(DiffSection::Delete);
+        if (deleteItems == 0)
+            return text;
+        return fmt::format(
+            "{} {}",
+            text,
+            fmt::format(
+                fmt::runtime(language->get("syncDialog", "confirmDeletes")),
+                deleteItems,
+                Utility::formatBytes(static_cast<long long>(deleteBytes)),
+                deleteSideText()
+            )
+        );
+    }
+
+    /** @brief Runs the row arrow, a delete only after the user confirmed it. */
+    void enqueueSingleNodeConfirmed(DiffSection section, std::string const& relKey)
+    {
+        if (section != DiffSection::Delete)
+            return enqueueSingleNode(section, relKey);
+        confirmDialog_->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = language->get("syncDialog", "confirmDeleteRowHeader"),
+            .text = fmt::format(fmt::runtime(language->get("syncDialog", "confirmDeleteRow")), relKey, deleteSideText()),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::No,
+            .onClose =
+                [this, relKey](std::optional<ConfirmDialog::Button> button)
+            {
+                if (button == ConfirmDialog::Button::Yes)
+                    enqueueSingleNode(DiffSection::Delete, relKey);
+            },
+        });
+    }
+
+    /** @brief Names the entries sync leaves alone, one per line. */
+    std::string blockedSamplesText() const
+    {
+        auto const& summary = summary_.value();
+        std::string text;
+        for (auto const& entry : summary.blockedSamples)
+        {
+            if (!text.empty())
+                text.push_back('\n');
+            text += fmt::format(
+                "{} ({})",
+                entry.relKey,
+                language->get("syncDialog", "blockReason", Utility::enumToString(entry.reason).c_str())
+            );
+        }
+        if (summary.blockedCount > summary.blockedSamples.size())
+        {
+            text += '\n';
+            text += fmt::format(
+                fmt::runtime(language->get("confirmDialog", "andMore")),
+                summary.blockedCount - summary.blockedSamples.size()
+            );
+        }
+        return text;
+    }
+
+    /** @brief The entries sync leaves alone in a dialog, its text scrolls however many there are. */
+    void showBlockedEntries()
+    {
+        confirmDialog_->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+            .headerText = language->get("syncDialog", "blockedTitle"),
+            .text = blockedSamplesText(),
+            .buttons = ConfirmDialog::Button::Ok,
+            .focusButton = ConfirmDialog::Button::Ok,
+        });
     }
 
     /** @brief The arrow of a row: plans just that row (a directory with its content) and runs it. */
@@ -869,293 +973,210 @@ struct SyncDialog::Implementation
         }
     }
 
-    /** @brief Asks the backend to turn sparse selection keys into transfers, then dispatches them. */
-    void enqueueSelection(DiffSection section, std::vector<std::string> relKeys, SharedData::OperationMode mode)
+    /**
+     * @brief Progress of one operation of a sync execution. Its rows are only known once the backend answers, and
+     *        the operation can finish before that, so an early completion or early failures wait here.
+     */
+    struct SyncPart
     {
-        if (!provider_)
-            return;
-        provider_->buildEnqueuePlan(
-            section,
-            std::move(relKeys),
-            [this, section, mode](std::vector<SharedData::Sync::EnqueuePlanEntry> plan)
+        /** @brief One observer per entry index; a directory delete lists its content as entries of their own. */
+        std::vector<ProgressObserver> observers{};
+        std::unordered_map<std::string, std::size_t> indexBySource{};
+        std::set<std::uint64_t> seenInFlight{};
+        bool mapped{false};
+        std::optional<bool> completion{};
+        std::vector<std::string> failedSources{};
+
+        void markFailedSources()
+        {
+            for (auto const& source : failedSources)
             {
-                dispatchPlan(section, std::move(plan), mode);
+                if (const auto iter = indexBySource.find(source); iter != indexBySource.end())
+                    *observers[iter->second] = -1.0;
+            }
+            failedSources.clear();
+        }
+
+        void complete()
+        {
+            for (auto const& observer : observers)
+            {
+                // Rows already marked failed stay failed on an otherwise successful operation.
+                if (!(*completion && observer->value() < 0.0))
+                    *observer = *completion ? 1.1 : -1.0;
+            }
+        }
+
+        /** @brief The backend answered with the rows of this part. */
+        void map()
+        {
+            mapped = true;
+            markFailedSources();
+            if (completion)
+                complete();
+        }
+    };
+
+    void watchCompletion(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
+    {
+        operationQueue_->addCompletionCallback(
+            operationId,
+            [part](bool success)
+            {
+                part->completion = success;
+                if (part->mapped)
+                    part->complete();
                 Nui::globalEventContext.executeActiveEventsImmediately();
-            },
-            [](std::string const& msg)
-            {
-                Log::error("buildSyncEnqueuePlan failed: {}", msg);
             }
         );
     }
 
-    /** @brief Files go into one bulk transfer per direction, directories in the plan carry no content
-     *         and are only created, remote deletes become one bulk delete, local deletes one local
-     *         remove call.
-     */
-    void dispatchPlan(
-        DiffSection section,
-        std::vector<SharedData::Sync::EnqueuePlanEntry> plan,
-        SharedData::OperationMode mode
-    )
+    /** @brief Files can finish in any order in a bulk, so rows seen in flight are done once they drop out. */
+    void watchBulkPart(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
     {
-        if (plan.empty())
-            return;
-
-        const auto finishWith = [](std::vector<ProgressObserver> observers)
-        {
-            return [observers = std::move(observers)](bool success, std::string const& info)
+        operationQueue_->addBulkProgressCallback(
+            operationId,
+            [part](SharedData::BulkProgress const& progress)
             {
-                if (!success)
-                    Log::error("Sync step failed: {}", info);
-                for (auto const& observer : observers)
-                    *observer = success ? 1.1 : -1.0;
+                if (!part->mapped)
+                    return;
+                auto& observers = part->observers;
+                for (const auto entryIndex : progress.failedEntryIndices)
+                {
+                    if (entryIndex < observers.size() && observers[entryIndex]->value() >= 0.0)
+                        *observers[entryIndex] = -1.0;
+                }
+                std::set<std::uint64_t> stillInFlight;
+                for (auto const& file : progress.inFlight)
+                {
+                    if (file.entryIndex >= observers.size())
+                        continue;
+                    stillInFlight.insert(file.entryIndex);
+                    part->seenInFlight.insert(file.entryIndex);
+                    if (file.totalBytes > 0)
+                        *observers[file.entryIndex] =
+                            static_cast<double>(file.bytes) / static_cast<double>(file.totalBytes);
+                }
+                std::erase_if(
+                    part->seenInFlight,
+                    [&](std::uint64_t entryIndex)
+                    {
+                        if (stillInFlight.contains(entryIndex))
+                            return false;
+                        auto& observer = observers[entryIndex];
+                        if (observer->value() >= 0.0 && observer->value() < 1.0)
+                            *observer = 1.1;
+                        return true;
+                    }
+                );
                 Nui::globalEventContext.executeActiveEventsImmediately();
-            };
-        };
-        const auto appendCovering = [this, section](std::vector<ProgressObserver>& target, std::string const& relKey)
-        {
-            auto covering = progressCovering(section, relKey);
-            target.insert(target.end(), covering.begin(), covering.end());
-        };
-
-        std::vector<SharedData::BulkAddEntry> uploadEntries;
-        std::vector<ProgressObserver> uploadObservers;
-        std::vector<SharedData::BulkAddEntry> downloadEntries;
-        std::vector<ProgressObserver> downloadObservers;
-        std::vector<SharedData::BulkAddEntry> remoteDeletes;
-        std::vector<ProgressObserver> remoteDeleteObservers;
-        std::vector<std::filesystem::path> localDeletes;
-        std::vector<ProgressObserver> localDeleteObservers;
-
-        for (auto& entry : plan)
-        {
-            auto progress = progressFor(section, entry.relKey);
-            switch (entry.action)
-            {
-                case SharedData::Sync::Action::Upload:
-                {
-                    if (entry.isDirectory)
-                    {
-                        operationQueue_->createRemoteDirectory(
-                            entry.remoteAbsPath, finishWith(progressCovering(section, entry.relKey))
-                        );
-                        break;
-                    }
-                    uploadEntries.push_back(
-                        SharedData::BulkAddEntry{
-                            .src = entry.localAbsPath,
-                            .dst = entry.remoteAbsPath,
-                            .sizeBytes = entry.sizeBytes,
-                            .isDirectory = false,
-                            .mtime = entry.mtime,
-                            .mtimeNsec = entry.mtimeNsec,
-                        }
-                    );
-                    uploadObservers.push_back(progress);
-                    break;
-                }
-                case SharedData::Sync::Action::Download:
-                {
-                    if (entry.isDirectory)
-                    {
-                        operationQueue_->createLocalDirectory(
-                            entry.localAbsPath, finishWith(progressCovering(section, entry.relKey))
-                        );
-                        break;
-                    }
-                    downloadEntries.push_back(
-                        SharedData::BulkAddEntry{
-                            .src = entry.remoteAbsPath,
-                            .dst = entry.localAbsPath,
-                            .sizeBytes = entry.sizeBytes,
-                            .isDirectory = false,
-                            .mtime = entry.mtime,
-                            .mtimeNsec = entry.mtimeNsec,
-                        }
-                    );
-                    downloadObservers.push_back(progress);
-                    break;
-                }
-                case SharedData::Sync::Action::DeleteLocal:
-                {
-                    localDeletes.push_back(entry.localAbsPath);
-                    appendCovering(localDeleteObservers, entry.relKey);
-                    break;
-                }
-                case SharedData::Sync::Action::DeleteRemote:
-                {
-                    remoteDeletes.push_back(
-                        SharedData::BulkAddEntry{
-                            .src = entry.remoteAbsPath,
-                            .dst = {},
-                            .sizeBytes = 0,
-                            .isDirectory = entry.isDirectory,
-                        }
-                    );
-                    appendCovering(remoteDeleteObservers, entry.relKey);
-                    break;
-                }
             }
-        }
-
-        if (!uploadEntries.empty())
-            hookBulkTransfer(std::move(uploadEntries), std::move(uploadObservers), /*isUpload=*/true, mode);
-        if (!downloadEntries.empty())
-            hookBulkTransfer(std::move(downloadEntries), std::move(downloadObservers), /*isUpload=*/false, mode);
-
-        if (!localDeletes.empty())
-        {
-            operationQueue_->removeLocalPaths(
-                localDeletes,
-                [observers = std::move(localDeleteObservers)](bool success, std::string const& info)
-                {
-                    if (!success)
-                        Log::error("Sync local delete failed: {}", info);
-                    for (auto const& observer : observers)
-                        *observer = success ? 1.1 : -1.0;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                }
-            );
-        }
-
-        if (!remoteDeletes.empty())
-        {
-            operationQueue_->enqueueBulkDelete(
-                std::move(remoteDeletes),
-                /*insertRefresh=*/false,
-                mode,
-                [observers = std::move(remoteDeleteObservers)](bool success)
-                {
-                    for (auto const& observer : observers)
-                        *observer = success ? 1.1 : -1.0;
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                },
-                [](bool success, std::string const& info)
-                {
-                    if (!success)
-                        Log::error("Sync bulk delete failed: {}", info);
-                }
-            );
-        }
+        );
+        watchFailedEntries(operationId, std::move(part));
     }
 
-    /** @brief Shared wiring between BulkUpload and BulkDownload of files.  Tracks per-file progress via
-     *         the backend's BulkProgress event stream and marks completed rows green.
-     */
-    void hookBulkTransfer(
-        std::vector<SharedData::BulkAddEntry> entries,
-        std::vector<ProgressObserver> observers,
-        bool isUpload,
-        SharedData::OperationMode mode
-    )
+    /** @brief Failed entries arrive by their source path and mark the rows they belong to; then completion. */
+    void watchFailedEntries(Ids::OperationId const& operationId, std::shared_ptr<SyncPart> part)
     {
-        auto observersShared = std::make_shared<std::vector<ProgressObserver>>(std::move(observers));
-        auto indexBySource = std::make_shared<std::unordered_map<std::string, std::size_t>>();
-        for (std::size_t index = 0; index < entries.size(); ++index)
-            indexBySource->emplace(entries[index].src.generic_string(), index);
-
-        // Files can finish in any order now that bulks transfer several at once, so track
-        // which entries we have seen in flight and mark them done once they drop out. Entries
-        // the backend gave up on are marked failed first so they never count as done.
-        auto seenInFlight = std::make_shared<std::set<std::uint64_t>>();
-        auto onBulkProgress = [observersShared, seenInFlight](SharedData::BulkProgress const& prog)
-        {
-            auto& observersRef = *observersShared;
-            for (const auto entryIndex : prog.failedEntryIndices)
+        operationQueue_->addFailedEntriesCallback(
+            operationId,
+            [part](std::vector<std::string> const& failedPaths)
             {
-                if (entryIndex < observersRef.size() && observersRef[entryIndex]->value() >= 0.0)
-                    *observersRef[entryIndex] = -1.0;
+                for (auto const& path : failedPaths)
+                    part->failedSources.push_back(path);
+                if (part->mapped)
+                    part->markFailedSources();
             }
-            std::set<std::uint64_t> stillInFlight;
-            for (auto const& file : prog.inFlight)
+        );
+        watchCompletion(operationId, std::move(part));
+    }
+
+    /**
+     * @brief Has the backend plan and queue the sparse selection @p relKeys. The operation ids are chosen here and
+     *        listened to before the request goes out, the answer maps them to rows.
+     */
+    void enqueueSelection(DiffSection section, std::vector<std::string> relKeys, SharedData::OperationMode mode)
+    {
+        if (!provider_)
+            return;
+
+        const SharedData::Sync::SyncExecutionRequest request{
+            .section = section,
+            .relKeys = std::move(relKeys),
+            .mode = mode,
+            .uploadId = Ids::generateOperationId(),
+            .downloadId = Ids::generateOperationId(),
+            .remoteDeleteId = Ids::generateOperationId(),
+            .localDeleteId = Ids::generateOperationId(),
+        };
+        auto uploads = std::make_shared<SyncPart>();
+        auto downloads = std::make_shared<SyncPart>();
+        auto remoteDeletes = std::make_shared<SyncPart>();
+        auto localDeletes = std::make_shared<SyncPart>();
+        watchBulkPart(request.uploadId, uploads);
+        watchBulkPart(request.downloadId, downloads);
+        watchFailedEntries(request.remoteDeleteId, remoteDeletes);
+        watchFailedEntries(request.localDeleteId, localDeletes);
+
+        provider_->executeSelection(
+            request,
+            [this, section, request, uploads, downloads, remoteDeletes, localDeletes](
+                SharedData::Sync::SyncExecutionResult result
+            )
             {
-                if (file.entryIndex >= observersRef.size())
-                    continue;
-                stillInFlight.insert(file.entryIndex);
-                seenInFlight->insert(file.entryIndex);
-                if (file.totalBytes > 0)
-                    *observersRef[file.entryIndex] =
-                        static_cast<double>(file.bytes) / static_cast<double>(file.totalBytes);
+                const auto mapBulk = [this, section](
+                                         SyncPart& part,
+                                         std::vector<std::string> const& rows,
+                                         std::vector<std::string> const& sources
+                                     )
+                {
+                    for (std::size_t index = 0; index < rows.size(); ++index)
+                    {
+                        part.observers.push_back(progressFor(section, rows[index]));
+                        if (index < sources.size())
+                            part.indexBySource.emplace(sources[index], index);
+                    }
+                };
+                const auto setCovering = [this, section](std::vector<std::string> const& rows, double value)
+                {
+                    for (auto const& row : rows)
+                    {
+                        for (auto const& observer : progressCovering(section, row))
+                            *observer = value;
+                    }
+                };
+
+                mapBulk(*uploads, result.uploads, result.uploadSources);
+                mapBulk(*downloads, result.downloads, result.downloadSources);
+                mapBulk(*remoteDeletes, result.remoteDeletes, result.remoteDeleteSources);
+                mapBulk(*localDeletes, result.localDeletes, result.localDeleteSources);
+
+                // A part without rows was never queued and will not complete.
+                const std::array parts{
+                    std::pair{request.uploadId, uploads},
+                    std::pair{request.downloadId, downloads},
+                    std::pair{request.remoteDeleteId, remoteDeletes},
+                    std::pair{request.localDeleteId, localDeletes},
+                };
+                for (auto const& [operationId, part] : parts)
+                {
+                    if (part->observers.empty())
+                        operationQueue_->removeCallbacks(operationId);
+                    else
+                        part->map();
+                }
+                setCovering(result.createdDirectories, 1.1);
+                setCovering(result.failed, -1.0);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            },
+            [this, request](std::string const& message)
+            {
+                Log::error("Sync: the backend did not run the selection: {}", message);
+                for (auto const& operationId :
+                     {request.uploadId, request.downloadId, request.remoteDeleteId, request.localDeleteId})
+                    operationQueue_->removeCallbacks(operationId);
             }
-            std::erase_if(
-                *seenInFlight,
-                [&](std::uint64_t entryIndex)
-                {
-                    if (stillInFlight.contains(entryIndex))
-                        return false;
-                    auto& observer = observersRef[entryIndex];
-                    if (observer->value() >= 0.0 && observer->value() < 1.0)
-                        *observer = 1.1;
-                    return true;
-                }
-            );
-            Nui::globalEventContext.executeActiveEventsImmediately();
-        };
-
-        auto onEnqueued = [this, onBulkProgress = std::move(onBulkProgress), observersShared, indexBySource](
-                              std::vector<Ids::OperationId> const& opIds
-                          )
-        {
-            if (opIds.empty())
-                return;
-            operationQueue_->addBulkProgressCallback(opIds.back(), onBulkProgress);
-            operationQueue_->addFailedEntriesCallback(
-                opIds.back(),
-                [observersShared, indexBySource](std::vector<std::filesystem::path> const& failedPaths)
-                {
-                    for (auto const& path : failedPaths)
-                    {
-                        if (const auto iter = indexBySource->find(path.generic_string()); iter != indexBySource->end())
-                            *(*observersShared)[iter->second] = -1.0;
-                    }
-                }
-            );
-            operationQueue_->addCompletionCallback(
-                opIds.back(),
-                [observersShared](bool success)
-                {
-                    for (auto const& observer : *observersShared)
-                    {
-                        // Rows already marked failed stay failed on an otherwise successful bulk.
-                        if (!(success && observer->value() < 0.0))
-                            *observer = success ? 1.1 : -1.0;
-                    }
-                    Nui::globalEventContext.executeActiveEventsImmediately();
-                }
-            );
-        };
-
-        auto onBulkAck = [isUpload](bool success, std::string const& info)
-        {
-            if (!success)
-                Log::error("Sync bulk {} failed: {}", isUpload ? "upload" : "download", info);
-        };
-
-        if (isUpload)
-        {
-            operationQueue_->enqueueBulkUpload(
-                std::move(entries),
-                /*allowOverwrite*/ true,
-                /*insertRefresh*/ false,
-                mode,
-                /*onEachComplete*/ {},
-                std::move(onBulkAck),
-                std::move(onEnqueued)
-            );
-        }
-        else
-        {
-            operationQueue_->enqueueBulkDownload(
-                std::move(entries),
-                /*allowOverwrite*/ true,
-                /*insertRefresh*/ false,
-                mode,
-                /*onEachComplete*/ {},
-                std::move(onBulkAck),
-                std::move(onEnqueued)
-            );
-        }
+        );
     }
 };
 
@@ -1218,7 +1239,7 @@ ScriptNuiComponents::Tree::RowContentRenderer SyncDialog::Implementation::makeTr
             onClick = [this, section, relKey](Nui::val event)
             {
                 event.call<void>("stopPropagation");
-                enqueueSingleNode(section, relKey);
+                enqueueSingleNodeConfirmed(section, relKey);
             },
         }(std::move(arrowIcon));
 
@@ -1297,6 +1318,11 @@ SyncDialog::~SyncDialog()
 SyncDialog::SyncDialog(SyncDialog&&) = default;
 SyncDialog& SyncDialog::operator=(SyncDialog&&) = default;
 
+void SyncDialog::setOnSynchronized(std::function<void()> callback)
+{
+    impl_->onSynchronized_ = std::move(callback);
+}
+
 void SyncDialog::setOnRecompareRequested(std::function<void(RecompareRequest)> callback)
 {
     impl_->onRecompareRequested_ = std::move(callback);
@@ -1308,14 +1334,16 @@ SyncDialog::RecompareRequest SyncDialog::currentSettings() const
 }
 
 void SyncDialog::open(
-    BackendSyncProvider* provider,
+    std::shared_ptr<BackendSyncProvider> provider,
     SharedData::Sync::DiffSnapshot snapshot,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
-    ScanSettings scanned
+    ScanSettings scanned,
+    std::optional<std::uint64_t> lastSyncTime
 )
 {
-    impl_->provider_ = provider;
+    impl_->provider_ = std::move(provider);
+    impl_->lastSyncTime_ = lastSyncTime;
     impl_->localPath_ = std::move(localPath);
     impl_->remotePath_ = std::move(remotePath);
     impl_->scanned_ = scanned;
@@ -1681,6 +1709,24 @@ Nui::ElementRenderer SyncDialog::operator()()
                 )
             ),
 
+            // Entries sync leaves alone, listed in a dialog on click.
+            div{}(
+                observe(impl_->summary_),
+                [this]() -> Nui::ElementRenderer {
+                    using Nui::Elements::div;
+                    const auto blocked = impl_->summary_.value().blockedCount;
+                    if (blocked == 0)
+                        return Nui::nil();
+                    return div{
+                        class_ = "sync-blocked-notice",
+                        onClick = [this]() { impl_->showBlockedEntries(); }
+                    }(
+                        Ui5Icons::alert(),
+                        span{}(fmt::format(fmt::runtime(language->get("syncDialog", "blockedNotice")), blocked))
+                    );
+                }
+            ),
+
             // Footer
             div{class_ = "sync-dialog-footer"}(
                 div{class_ = "sync-footer-actions"}(
@@ -1746,18 +1792,19 @@ Nui::ElementRenderer SyncDialog::operator()()
                         .icon = Ui5Icons::synchronize(),
                         .attributes = {
                             onClick = [this](Nui::val) {
+                                const bool deletes = impl_->selectedTotalsOf(DiffSection::Delete).first > 0;
                                 impl_->confirmDialog_->open({
-                                    .styleVariant = Snc::StyleVariant::Warning,
+                                    .styleVariant = deletes ? Snc::StyleVariant::Danger : Snc::StyleVariant::Warning,
                                     .headerText = language->get("syncDialog", "confirmHeader"),
-                                    .text = fmt::format(
-                                        fmt::runtime(language->get("syncDialog", "confirmText")),
-                                        impl_->localPath_.filename().string(),
-                                        impl_->remotePath_.filename().string()
-                                    ),
+                                    .text = impl_->synchronizeConfirmText(),
                                     .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+                                    .focusButton = deletes ? std::optional{ConfirmDialog::Button::No} : std::nullopt,
                                     .onClose = [this](std::optional<ConfirmDialog::Button> btn) {
-                                        if (btn == ConfirmDialog::Button::Yes)
-                                            impl_->enqueueOperations();
+                                        if (btn != ConfirmDialog::Button::Yes)
+                                            return;
+                                        impl_->enqueueOperations();
+                                        if (impl_->onSynchronized_)
+                                            impl_->onSynchronized_();
                                     }
                                 });
                             }

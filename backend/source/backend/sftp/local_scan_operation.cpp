@@ -1,5 +1,8 @@
 #include <backend/sftp/local_scan_operation.hpp>
+#include <utility/link_safe_remove.hpp>
+#include <utility/permissions.hpp>
 #include <log/log.hpp>
+#include <paths/native.hpp>
 
 #include <ssh/sftp_session.hpp>
 
@@ -32,12 +35,13 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     , recursive_{options.recursive}
     , ignoreHidden_{options.ignoreHidden}
     , buildTree_{options.buildTree}
+    , excludedSuffixes_{std::move(options.excludedSuffixes)}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;
 
 std::expected<std::vector<SharedData::DirectoryEntry>, LocalScanOperation::Error>
-LocalScanOperation::scanner(std::filesystem::path const& path)
+LocalScanOperation::scanner(Paths::RelativePath const& relative)
 {
     // Non-recursive mode: only list the root directory.  The walker still invokes the
     // scanner for each child directory it discovers, but we short-circuit those calls so
@@ -46,28 +50,22 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
-    std::error_code iterErrc{};
-    auto iter = std::filesystem::directory_iterator(
-        path, std::filesystem::directory_options::skip_permission_denied, iterErrc
-    );
-    if (iterErrc)
+    const auto joined = localPath_.join(relative);
+    if (!joined)
     {
-        Log::error(
-            "LocalScanOperation: Failed to open directory '{}': {}", path.generic_string(), iterErrc.message()
-        );
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-            {.type = ErrorType::FilesystemError, .extraInfo = iterErrc.message()}
+            {.type = ErrorType::InvalidName, .extraInfo = joined.error().toString()}
         );
     }
-    const auto end = std::filesystem::directory_iterator();
+    const auto path = joined->native();
 
-    const auto relDir = [&]() -> std::filesystem::path {
-        std::error_code errc{};
-        auto rel = std::filesystem::relative(path, localPath_, errc);
-        if (errc || rel.empty() || rel == std::filesystem::path{"."})
-            return {};
-        return rel;
-    }();
+    // No skip_permission_denied: an unreadable directory would list as empty and sync would delete the
+    // remote copy of its content.
+    std::error_code iterErrc{};
+    auto iter = std::filesystem::directory_iterator(path, iterErrc);
+    if (iterErrc)
+        return listingFailed(path, relative, iterErrc);
+    const auto end = std::filesystem::directory_iterator();
 
     if (respectIgnoreFiles_)
     {
@@ -78,26 +76,36 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
             if (!std::filesystem::is_regular_file(ignorePath, errc))
                 continue;
             if (auto content = readLocalFile(ignorePath))
-                ignoreMatcher_.addFile(relDir, *content);
+                ignoreMatcher_.addFile(relative, *content);
         }
     }
 
     std::vector<SharedData::DirectoryEntry> entries;
 
-    for (; iter != end; ++iter)
+    for (; iter != end; iter.increment(iterErrc))
     {
+        if (iterErrc)
+            return listingFailed(path, relative, iterErrc);
         try
         {
             auto const& entry = *iter;
             const auto status = entry.symlink_status();
             SharedData::DirectoryEntry::FileType type;
+#ifdef _WIN32
+            // A junction is a reparse point that std::filesystem reports as a directory.
+            std::error_code linkError{};
+            const bool isSymlink = std::filesystem::is_symlink(status) || Utility::isLinkOrJunction(entry.path(), linkError);
+#else
             const bool isSymlink = std::filesystem::is_symlink(status);
+#endif
             if (isSymlink)
             {
 #ifdef _WIN32
-                // Windows symlinks require elevated privileges to create and are rarely used by
-                // ordinary users. Skipping them here keeps sync predictable on Windows.
-                continue;
+                // Windows symlinks and junctions are not transferred. A sync tree keeps them as excluded
+                // placeholders, so the name still counts as present and the remote side is left alone.
+                if (!buildTree_)
+                    continue;
+                type = SharedData::DirectoryEntry::FileType::Unknown;
 #else
                 type = SharedData::DirectoryEntry::FileType::Symlink;
 #endif
@@ -108,8 +116,13 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
                 type = SharedData::DirectoryEntry::FileType::Regular;
             else
             {
-                // Dont add anything thats not uploadable:
-                continue;
+                // Sockets, devices and FIFOs are not uploadable, a sync tree keeps them as excluded placeholders.
+                if (!buildTree_)
+                    continue;
+                type = SharedData::fileTypeFromStdFilesystemType(status.type());
+                if (type == SharedData::DirectoryEntry::FileType::Regular ||
+                    type == SharedData::DirectoryEntry::FileType::Directory)
+                    type = SharedData::DirectoryEntry::FileType::Unknown;
             }
 
             std::uint64_t mtimeSecs = 0;
@@ -135,34 +148,33 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
                 }
             }
 
-            std::optional<std::filesystem::path> linkTarget{};
+            std::optional<std::string> linkTarget{};
             if (isSymlink)
             {
                 std::error_code errc{};
-                auto target = std::filesystem::read_symlink(entry.path(), errc);
+                const auto target = std::filesystem::read_symlink(entry.path(), errc);
                 if (!errc)
-                    linkTarget = std::move(target);
+                    linkTarget = Paths::nativeToUtf8(target);
             }
 
-            const auto filename = entry.path().filename();
-            if (ignoreHidden_)
-            {
-                const auto name = filename.string();
-                if (!name.empty() && name.front() == '.')
-                    continue;
-            }
+            const auto name = Paths::nativeToUtf8(entry.path().filename());
+            if (ignoreHidden_ && !name.empty() && name.front() == '.')
+                continue;
             if (respectIgnoreFiles_ && !ignoreMatcher_.empty())
             {
-                const auto childRel = relDir.empty() ? filename : (relDir / filename);
-                if (ignoreMatcher_.isIgnored(childRel, type == SharedData::DirectoryEntry::FileType::Directory))
+                // A name that is no segment cannot match a rule, the walker rejects it.
+                const auto segment = Paths::PathSegment::make(name);
+                if (segment &&
+                    ignoreMatcher_.isIgnored(relative / *segment, type == SharedData::DirectoryEntry::FileType::Directory))
                     continue;
             }
 
             entries.push_back(
                 SharedData::DirectoryEntry{
-                    .path = filename,
+                    .name = name,
                     .type = type,
                     .size = entry.is_regular_file() ? entry.file_size() : 0,
+                    .permissions = Utility::localPermissions(status),
                     .mtime = mtimeSecs,
                     .linkTarget = std::move(linkTarget),
                 }
@@ -179,6 +191,38 @@ LocalScanOperation::scanner(std::filesystem::path const& path)
     return {std::move(entries)};
 }
 
+std::expected<std::vector<SharedData::DirectoryEntry>, LocalScanOperation::Error>
+LocalScanOperation::listingFailed(
+    std::filesystem::path const& path,
+    Paths::RelativePath const& relative,
+    std::error_code const& errorCode
+)
+{
+    const bool belowRoot = !relative.empty();
+    const bool deniedOrVanished =
+        errorCode == std::errc::permission_denied || errorCode == std::errc::no_such_file_or_directory;
+    if (belowRoot && deniedOrVanished)
+    {
+        Log::warn("LocalScanOperation: Cannot list '{}': {}", path.generic_string(), errorCode.message());
+        if (!buildTree_)
+        {
+            // Left out of the entries, the consumer reports it instead of transferring an empty directory.
+            unreadableDirectories_.push_back(Paths::nativeToUtf8(path));
+            return std::vector<SharedData::DirectoryEntry>{};
+        }
+        return std::unexpected(
+            Error{
+                .type = ErrorType::DirectoryUnreadable,
+                .extraInfo = fmt::format("{}: {}", path.generic_string(), errorCode.message()),
+            }
+        );
+    }
+    Log::error("LocalScanOperation: Failed to list '{}': {}", path.generic_string(), errorCode.message());
+    return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
+        {.type = ErrorType::FilesystemError, .extraInfo = errorCode.message()}
+    );
+}
+
 std::uint64_t LocalScanOperation::totalBytes() const
 {
     return walker_->totalBytes();
@@ -192,8 +236,15 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
     {
         case (NotStarted):
         {
+            if (localPath_.empty())
+            {
+                Log::error("LocalScanOperation: No root to scan.");
+                return enterErrorState<WorkStatus>(
+                    {.type = ErrorType::ImplementationError, .extraInfo = "The scan has no root."}
+                );
+            }
             state_ = Running;
-            Log::info("LocalScanOperation: Starting scan of '{}'.", localPath_.generic_string());
+            Log::info("LocalScanOperation: Starting scan of '{}'.", localPath_.toUtf8());
             progressCallback_(0, 0, 0);
             return WorkStatus::MoreWork;
         }
@@ -204,7 +255,7 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
             {
                 if (walker.completed())
                 {
-                    Log::info("LocalScanOperation: Scan of '{}' completed.", localPath_.generic_string());
+                    Log::info("LocalScanOperation: Scan of '{}' completed.", localPath_.toUtf8());
                     state_ = Completed;
                     return WorkStatus::Complete;
                 }
@@ -258,7 +309,7 @@ std::expected<void, LocalScanOperation::Error> LocalScanOperation::cancel(bool a
 {
     if (adoptCancelState)
     {
-        Log::info("LocalScanOperation: Scan of '{}' canceled.", localPath_.generic_string());
+        Log::info("LocalScanOperation: Scan of '{}' canceled.", localPath_.toUtf8());
         enterState(OperationState::Canceled);
     }
     return {};

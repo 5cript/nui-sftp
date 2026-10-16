@@ -5,7 +5,11 @@
 #include <nui/frontend/api/json.hpp>
 #include <nui/frontend/rpc_client.hpp>
 
+#include <cctype>
 #include <climits>
+#include <optional>
+#include <string>
+#include <string_view>
 
 using namespace std::string_literals;
 
@@ -13,20 +17,68 @@ namespace NuiFileExplorer
 {
     namespace
     {
-        bool looksLikeAPath(std::string const& text)
+        /**
+         * @brief Decodes the %XX escapes of a file URL path, other text stays as it is.
+         */
+        std::string percentDecoded(std::string_view text)
+        {
+            const auto hexValue = [](char character) -> int
+            {
+                if (character >= '0' && character <= '9')
+                    return character - '0';
+                if (character >= 'a' && character <= 'f')
+                    return character - 'a' + 10;
+                if (character >= 'A' && character <= 'F')
+                    return character - 'A' + 10;
+                return -1;
+            };
+            std::string decoded;
+            decoded.reserve(text.size());
+            for (std::size_t index = 0; index < text.size(); ++index)
+            {
+                if (text[index] == '%' && index + 2 < text.size())
+                {
+                    const auto high = hexValue(text[index + 1]);
+                    const auto low = hexValue(text[index + 2]);
+                    if (high >= 0 && low >= 0)
+                    {
+                        decoded.push_back(static_cast<char>(high * 16 + low));
+                        index += 2;
+                        continue;
+                    }
+                }
+                decoded.push_back(text[index]);
+            }
+            return decoded;
+        }
+
+        /**
+         * @brief The absolute local path a dropped text token names: a file URL or an absolute path. Any other text,
+         *        like words with a slash in them, is no dropped file.
+         */
+        std::optional<std::string> droppedPathOf(std::string const& text)
         {
             if (text.empty())
-                return false;
-
-            if (text.front() == '/')
-                return true;
-
+                return std::nullopt;
 #ifdef PATH_MAX
             if (text.length() > PATH_MAX)
-                return false;
+                return std::nullopt;
 #endif
-
-            return text.find('/') != std::string::npos || text.find('\\') != std::string::npos;
+            if (text.starts_with("file://"))
+            {
+                auto path = percentDecoded(std::string_view{text}.substr(7));
+                // file:///C:/x carries the drive after the slash.
+                if (path.size() > 3 && path[0] == '/' && path[2] == ':')
+                    path.erase(0, 1);
+                return path;
+            }
+            if (text.front() == '/')
+                return text;
+            const bool hasDrive = text.size() > 2 && std::isalpha(static_cast<unsigned char>(text[0])) &&
+                text[1] == ':' && (text[2] == '\\' || text[2] == '/');
+            if (hasDrive)
+                return text;
+            return std::nullopt;
         }
 
         std::vector<std::string> splitByWhitespace(std::string const& text)
@@ -64,7 +116,7 @@ namespace NuiFileExplorer
                 return {};
             std::string_view fileUrl = html.substr(pos + 1);
             if (fileUrl.starts_with("file://"))
-                return std::string{fileUrl.substr(7)};
+                return std::string{fileUrl};
             return {};
         }
     }
@@ -80,7 +132,7 @@ namespace NuiFileExplorer
 
         DropEventResult result;
         if (droppedOnItem && droppedOnItem->type == Item::Type::Directory)
-            result.internalDropSubdir = droppedOnItem->path.filename().string();
+            result.internalDropSubdir = droppedOnItem->name;
 
         const auto files = dataTransferOpt->files();
         if (files.length() > 0 && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webview2"s)
@@ -203,10 +255,10 @@ namespace NuiFileExplorer
             auto split = splitByWhitespace(text);
             for (auto const& part : split)
             {
-                if (looksLikeAPath(part))
+                if (auto path = droppedPathOf(part); path)
                 {
                     result.externDroppedItems = result.externDroppedItems.value_or(std::vector<Item>{});
-                    result.externDroppedItems->push_back(Item{SharedData::DirectoryEntry{.path = part}});
+                    result.externDroppedItems->push_back(Item::dropped(SharedData::DirectoryEntry{}, *path));
                 }
             }
             return result;
@@ -220,10 +272,10 @@ namespace NuiFileExplorer
             auto extractedLink = extractFromHtmlLink(html);
             if (!extractedLink.empty())
             {
-                if (looksLikeAPath(extractedLink))
+                if (auto path = droppedPathOf(extractedLink); path)
                 {
                     result.externDroppedItems = result.externDroppedItems.value_or(std::vector<Item>{});
-                    result.externDroppedItems->push_back(Item{SharedData::DirectoryEntry{.path = extractedLink}});
+                    result.externDroppedItems->push_back(Item::dropped(SharedData::DirectoryEntry{}, *path));
                     result.issueWebkitWarning = STRINGIZE_EXPANDED(BROWSER_ENGINE) == "webkitgtk"s;
                     return result;
                 }

@@ -1,4 +1,5 @@
 #include <backend/sftp/bulk_transfer_operation.hpp>
+#include <paths/native.hpp>
 #include <log/log.hpp>
 
 #include <algorithm>
@@ -19,6 +20,14 @@ BulkTransferOperation::~BulkTransferOperation()
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::work()
 {
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     auto fut = sftp_->performPromise(
         [this]()
         {
@@ -36,6 +45,14 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::workInStrand()
 {
     using enum OperationState;
+
+    if (scanPhase_)
+    {
+        Log::error("{}: The scan phase cannot run on the processing thread.", logName());
+        return enterErrorState<WorkStatus>(
+            Error{.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
+        );
+    }
 
     switch (state())
     {
@@ -81,8 +98,20 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> BulkTransferOperation::start()
 {
+    if (entrySource_ == EntrySource::None)
+    {
+        Log::error("{}: Started without entries.", logName());
+        return enterErrorState<WorkStatus>(
+            Error{.type = ErrorType::ImplementationError, .extraInfo = "Neither a scan result nor a file list was set."}
+        );
+    }
     if (entries_.empty())
     {
+        if (entrySource_ == EntrySource::Tree)
+        {
+            Log::error("{}: The scan delivered no entries.", logName());
+            return enterErrorState<WorkStatus>(Error{.type = ErrorType::ScanIncomplete});
+        }
         Log::info("{}: No entries to transfer.", logName());
         enterState(OperationState::Completed);
         return WorkStatus::Complete;
@@ -97,11 +126,18 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     else
     {
         auto const& root = entries_[0];
-        if (!root.isDirectory())
+        if (!root.isDirectory() || root.parent)
         {
-            Log::error("{}: First entry is not a directory: {}.", logName(), root.path.string());
+            Log::error("{}: The first entry is not the root directory of the scan.", logName());
             return enterErrorState<WorkStatus>(
                 Error{.type = ErrorType::ImplementationError, .extraInfo = "First entry must be a directory."}
+            );
+        }
+        if (common_.remotePath.empty() || common_.localPath.empty())
+        {
+            Log::error("{}: A scanned tree needs a remote and a local root.", logName());
+            return enterErrorState<WorkStatus>(
+                Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots."}
             );
         }
         const auto result = prepareRootInStrand(root);
@@ -185,13 +221,29 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         }
 
         auto const& entry = entries_[index];
+        const auto paths = entryPaths(index);
+        if (!paths)
+        {
+            Log::warn("{}: Skipping '{}': {}", logName(), displayPath(index), paths.error().toString());
+            failedEntries_.emplace_back(failureSource(index), paths.error());
+            failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
+            completedBytes_ += entry.isRegularFile() ? entry.size : 0u;
+            ++completedEntries_;
+            continue;
+        }
         if (entry.isDirectory())
         {
             // Created inline while the cursor passes it, so files listed after it only start once
             // it exists. Scan order lists parents before children.
-            const auto result = createDirectoryInStrand(index);
+            const auto result = createDirectoryInStrand(index, *paths);
             if (!result.has_value())
-                return std::unexpected(result.error());
+            {
+                if (!isSkippableDirectoryError(result.error()))
+                    return std::unexpected(result.error());
+                Log::warn("{}: Skipping directory '{}': {}", logName(), displayPath(index), result.error().toString());
+                failedEntries_.emplace_back(failureSource(index), result.error());
+                failedEntryIndices_.push_back(static_cast<std::uint32_t>(index));
+            }
             ++completedEntries_;
             ++directoriesCreated;
             continue;
@@ -200,6 +252,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         {
             auto child = makeChild(
                 index,
+                *paths,
                 [this, index](std::uint64_t current, std::uint64_t max)
                 {
                     if (auto* slot = slotFor(index); slot)
@@ -212,7 +265,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
             slots_.push_back(Slot{.entryIndex = index, .child = std::move(child), .totalBytes = entry.size});
             continue;
         }
-        Log::warn("{}: Skipping unsupported file type for entry: {}.", logName(), displayPath(index).string());
+        Log::warn("{}: Skipping unsupported file type for entry: {}.", logName(), displayPath(index));
         ++completedEntries_;
     }
     return {};
@@ -247,13 +300,11 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             continue;
         }
 
-        Log::error(
-            "{}: Transfer failed for: {}: {}", logName(), displayPath(slot.entryIndex).string(), error.toString()
-        );
+        Log::error("{}: Transfer failed for: {}: {}", logName(), displayPath(slot.entryIndex), error.toString());
         if (isSkippableError(error))
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.
-            failedEntries_.emplace_back(SharedData::fullPath(entries_, entries_[slot.entryIndex]), error);
+            failedEntries_.emplace_back(failureSource(slot.entryIndex), error);
             failedEntryIndices_.push_back(static_cast<std::uint32_t>(slot.entryIndex));
             finishSlot(slot);
             if (common_.failFast)
@@ -336,7 +387,7 @@ void BulkTransferOperation::emitProgress(bool force)
             continue;
         update.inFlight.push_back(
             SharedData::BulkFileProgress{
-                .file = displayPath(slot.entryIndex).string(),
+                .file = displayPath(slot.entryIndex),
                 .entryIndex = slot.entryIndex,
                 .bytes = slot.bytes,
                 .totalBytes = slot.totalBytes,
@@ -348,7 +399,7 @@ void BulkTransferOperation::emitProgress(bool force)
     {
         update.inFlight.push_back(
             SharedData::BulkFileProgress{
-                .file = displayPath(entryIndex).string(),
+                .file = displayPath(entryIndex),
                 .entryIndex = entryIndex,
                 .bytes = 0,
                 .totalBytes = entries_[entryIndex].size,
@@ -410,23 +461,121 @@ void BulkTransferOperation::setScanResult(std::vector<SharedData::DirectoryEntry
 {
     entries_ = std::move(entries);
     totalBytes_ = totalBytes;
-    prescannedDestinations_.clear();
+    prescannedPaths_.clear();
+    entrySource_ = EntrySource::Tree;
 }
 
 void BulkTransferOperation::setPrescannedEntries(
     std::vector<SharedData::DirectoryEntry> entries,
-    std::vector<std::filesystem::path> destinations,
+    std::vector<EntryPaths> paths,
     std::uint64_t totalBytes
 )
 {
     entries_ = std::move(entries);
-    prescannedDestinations_ = std::move(destinations);
+    prescannedPaths_ = std::move(paths);
     totalBytes_ = totalBytes;
+    entrySource_ = EntrySource::Flat;
 }
 
-std::vector<std::pair<std::filesystem::path, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
+void BulkTransferOperation::addRejectedEntries(std::vector<std::string> const& paths)
+{
+    for (auto const& path : paths)
+    {
+        Log::warn("{}: Skipping '{}', its name is not a valid path segment.", logName(), path);
+        failedEntries_.emplace_back(
+            path, Error{.type = ErrorType::InvalidName, .extraInfo = "The name is not a valid path segment"}
+        );
+    }
+}
+
+void BulkTransferOperation::addUnreadableDirectories(std::vector<std::string> const& paths)
+{
+    for (auto const& path : paths)
+    {
+        Log::warn("{}: Skipping the content of '{}', it cannot be listed.", logName(), path);
+        failedEntries_.emplace_back(
+            path, Error{.type = ErrorType::DirectoryUnreadable, .extraInfo = "The directory cannot be listed"}
+        );
+    }
+}
+
+std::vector<std::pair<std::string, BulkTransferOperation::Error>> BulkTransferOperation::getFailed() const
 {
     return failedEntries_;
+}
+
+std::expected<BulkTransferOperation::EntryPaths, BulkTransferOperation::Error>
+BulkTransferOperation::entryPaths(std::size_t entryIndex) const
+{
+    if (prescanned())
+        return prescannedPaths_[entryIndex];
+    if (common_.remotePath.empty() || common_.localPath.empty())
+        return std::unexpected(Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots"});
+
+    const auto invalidName = [](Paths::PathError const& error)
+    {
+        return Error{.type = ErrorType::InvalidName, .extraInfo = error.toString()};
+    };
+
+    // The names from the entry up to, but not including, the root.
+    std::vector<std::string const*> names;
+    for (auto const* current = &entries_[entryIndex]; current->parent; current = &entries_[*current->parent])
+    {
+        if (*current->parent >= entries_.size())
+            return std::unexpected(Error{.type = ErrorType::ImplementationError, .extraInfo = "Parent out of range"});
+        names.push_back(&current->name);
+    }
+
+    Paths::RelativePath relative{};
+    for (auto name = names.rbegin(); name != names.rend(); ++name)
+    {
+        auto segment = Paths::PathSegment::make(**name);
+        if (!segment)
+            return std::unexpected(invalidName(segment.error()));
+        relative = relative / *segment;
+    }
+
+    return common_.localPath.join(relative)
+        .transform(
+            [this, &relative](Paths::LocalPath local)
+            {
+                return EntryPaths{.remote = common_.remotePath / relative, .local = std::move(local)};
+            }
+        )
+        .transform_error(invalidName);
+}
+
+std::string BulkTransferOperation::displayPath(std::size_t entryIndex) const
+{
+    if (auto paths = entryPaths(entryIndex); paths)
+        return paths->remote.value();
+    return describeEntry(entryIndex);
+}
+
+std::string BulkTransferOperation::failureSource(std::size_t entryIndex) const
+{
+    if (auto paths = entryPaths(entryIndex); paths)
+        return sourceIsRemote() ? paths->remote.value() : paths->local.toUtf8();
+    return describeEntry(entryIndex);
+}
+
+std::string BulkTransferOperation::describeEntry(std::size_t entryIndex) const
+{
+    // The names as listed, one of them is no path segment or the entry would have paths.
+    std::vector<std::string> names;
+    for (auto const* current = &entries_[entryIndex]; current->parent && *current->parent < entries_.size();
+         current = &entries_[*current->parent])
+    {
+        names.push_back(current->name);
+    }
+    auto root = sourceIsRemote() ? common_.remotePath.value() : common_.localPath.toUtf8();
+    for (auto name = names.rbegin(); name != names.rend(); ++name)
+    {
+        if (!root.ends_with('/'))
+            root.push_back('/');
+        root += *name;
+    }
+    return root;
 }
 
 void BulkTransferOperation::cancelChildrenInStrand(bool adoptCancelState)
@@ -442,6 +591,9 @@ void BulkTransferOperation::cancelChildrenInStrand(bool adoptCancelState)
 
 std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
+
     // Each child's cancel and destructor would block on the processing thread separately;
     // hop once and do all of them there.
     auto* processingStrand = sftp_->strand();

@@ -11,7 +11,7 @@ std::optional<ProgramOptions> parseProgramOptions(int argc, char const* const* a
         boost::program_options::options_description desc("Allowed options");
         desc.add_options()("help", "produce help message")(
             "enable-dev-tools", "Enable developer tools (DevTools in Browser)"
-        );
+        )("console", "Windows: write output to the console the program was started from");
 
         boost::program_options::variables_map vm;
         boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);

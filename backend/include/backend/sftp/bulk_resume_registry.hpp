@@ -1,35 +1,28 @@
 #pragma once
 
 #include <ids/ids.hpp>
-#include <shared_data/file_operations/bulk_add_request.hpp>
+#include <shared_data/file_operations/bulk_delete_request.hpp>
+#include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 
 #include <chrono>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <variant>
 
 /**
  * @brief Carries the state needed to re-enqueue a bulk operation against a
  *        replacement Session after a seamless reconnect.
  *
- *        The kind tracks which addBulk* path to take; the request mirrors
- *        the original BulkAddRequest minus already-completed entries (and
- *        the head entry that was mid-transfer when the connection died, on
- *        the assumption that the per-file resume path is not byte-accurate
- *        across a reconnect).
+ *        One entry per frontend card: the request's type picks the addBulk*
+ *        path. A transfer entry holds either the files of one bulk card or a
+ *        single directory, so adopting it re-issues exactly that card under
+ *        its own id.
  */
 struct BulkResumeEntry
 {
-    enum class Kind
-    {
-        BulkDownload,
-        BulkUpload,
-        BulkDelete,
-    };
-
-    Kind kind;
-    SharedData::BulkAddRequest request;
+    std::variant<SharedData::BulkDownloadRequest, SharedData::BulkUploadRequest, SharedData::BulkDeleteRequest> request;
     std::chrono::steady_clock::time_point storedAt{std::chrono::steady_clock::now()};
 };
 

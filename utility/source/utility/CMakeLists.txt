@@ -21,6 +21,10 @@ else()
         utility
         PRIVATE
         node/node.cpp
+        permissions.cpp
+        rename.cpp
+        link_safe_remove.cpp
+        download_mark.cpp
         resources.cpp
     )
 
@@ -39,6 +43,7 @@ target_compile_definitions(utility PRIVATE -DCMD_EXECUTABLE="${CMD}" -DMSYS2_BAS
 
 target_link_libraries(utility PUBLIC
     core-target
+    paths
     nlohmann_json::nlohmann_json
     gimo::gimo
     fmt::fmt

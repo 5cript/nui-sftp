@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ssh/sftp_session.hpp>
+#include <paths/local_path.hpp>
+#include <paths/remote_path.hpp>
 #include <utility/node/node.hpp>
 
 #include <nui/utility/scope_exit.hpp>
@@ -13,6 +15,23 @@ using namespace std::chrono_literals;
 using namespace std::string_literals;
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
+
+/**
+ * @brief A remote path from a test literal, which is known to be valid.
+ */
+inline Paths::RemotePath remote(std::string_view path)
+{
+    return Paths::RemotePath::make(path).value();
+}
+
+/**
+ * @brief A local path below the test directory, which is known to be valid.
+ */
+inline Paths::LocalPath toLocal(std::filesystem::path const& path)
+{
+    return Paths::LocalPath::make(path).value();
+}
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
@@ -42,7 +61,7 @@ class RealServerTests : public ::testing::Test
   protected:
     void SetUp() override
     {
-        std::ofstream privateKeyFile{programDirectory / "temp" / "key.private", std::ios_base::binary};
+        std::ofstream privateKeyFile{temporaryRoot / "key.private", std::ios_base::binary};
         privateKeyFile.write(privateKey, std::strlen(privateKey));
     }
 
@@ -121,7 +140,7 @@ class RealServerTests : public ::testing::Test
     }
 
   protected:
-    Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", false};
+    Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, false};
     boost::asio::thread_pool pool_{1};
     nlohmann::json defaultPackageJson_ = nlohmann::json({
         {"name", "test"},

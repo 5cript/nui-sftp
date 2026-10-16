@@ -32,25 +32,20 @@ namespace Test
         std::string contents{};
     };
 
-    inline SharedData::DirectoryEntry
-    makeFileEntry(std::filesystem::path const& fullPath, std::uint64_t size)
+    inline SharedData::ArchiveDownloadRoot makeFileEntry(std::string_view path, std::uint64_t size)
     {
-        SharedData::DirectoryEntry entry{};
-        entry.path = fullPath;
-        entry.fullPath = fullPath;
-        entry.type = SharedData::FileType::Regular;
-        entry.size = size;
-        return entry;
+        return SharedData::ArchiveDownloadRoot{
+            .path = remote(path),
+            .entry = SharedData::DirectoryEntry{.type = SharedData::FileType::Regular, .size = size},
+        };
     }
 
-    inline SharedData::DirectoryEntry
-    makeDirectoryEntry(std::filesystem::path const& fullPath)
+    inline SharedData::ArchiveDownloadRoot makeDirectoryEntry(std::string_view path)
     {
-        SharedData::DirectoryEntry entry{};
-        entry.path = fullPath;
-        entry.fullPath = fullPath;
-        entry.type = SharedData::FileType::Directory;
-        return entry;
+        return SharedData::ArchiveDownloadRoot{
+            .path = remote(path),
+            .entry = SharedData::DirectoryEntry{.type = SharedData::FileType::Directory},
+        };
     }
 
     /**
@@ -80,8 +75,8 @@ namespace Test
             auto entry = std::move(**nextResult);
 
             RecoveredEntry recovered{};
-            recovered.path = entry.directoryEntry().path.generic_string();
-            recovered.type = entry.directoryEntry().type;
+            recovered.path = entry.header().path;
+            recovered.type = entry.header().type;
 
             if (recovered.type == SharedData::FileType::Regular)
             {

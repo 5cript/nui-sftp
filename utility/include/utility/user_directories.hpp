@@ -18,7 +18,8 @@ namespace Utility
          */
         std::string name;
 
-        std::filesystem::path path;
+        /** @brief The absolute remote path as UTF-8. */
+        std::string path;
     };
 
     /**
@@ -64,5 +65,5 @@ namespace Utility
      * @param content The content of the file.
      * @param home The home directory that $HOME expands to.
      */
-    std::vector<UserDirectory> parseUserDirectories(std::string_view content, std::filesystem::path const& home);
+    std::vector<UserDirectory> parseUserDirectories(std::string_view content, std::string_view home);
 }

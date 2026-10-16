@@ -6,7 +6,9 @@
 #pragma clang diagnostic pop
 
 #include <boost/asio/deadline_timer.hpp>
+#include <fmt/format.h>
 
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -46,6 +48,46 @@ namespace SecureShell::Test
             std::cerr << "Failed to write command: " << ec.message() << std::endl;
             return;
         }
+        // Node on Windows cannot finish exiting while a read on its stdin pipe is pending.
+        if (command == "exit")
+            stdinPipe.close(ec);
+    }
+
+    bool NodeProcessResult::command(std::string const& command, nlohmann::json const& arguments)
+    {
+        if (port == 0 || killed || code != 0)
+            return false;
+
+        nlohmann::json commandObject = arguments.is_object() ? arguments : nlohmann::json::object();
+        commandObject["command"] = command;
+        commandObject["ack"] = true;
+#ifdef _WIN32
+        const std::string commandWithNewline = commandObject.dump() + "\r\n";
+#else
+        const std::string commandWithNewline = commandObject.dump() + "\n";
+#endif
+
+        boost::system::error_code ec;
+        boost::asio::write(stdinPipe, boost::asio::buffer(commandWithNewline), ec);
+        if (ec)
+        {
+            std::cerr << "Failed to write command: " << ec.message() << std::endl;
+            return false;
+        }
+
+        std::string received{};
+        std::array<char, 256> buffer{};
+        while (received.find('\n') == std::string::npos)
+        {
+            const auto readAmount = stdoutPipe.read_some(boost::asio::buffer(buffer), ec);
+            if (ec || readAmount == 0)
+            {
+                std::cerr << "Failed to read command acknowledgement: " << ec.message() << std::endl;
+                return false;
+            }
+            received.append(buffer.data(), readAmount);
+        }
+        return received.find(fmt::format("\"ack\":\"{}\"", command)) != std::string::npos;
     }
 
     int NodeProcessResult::wait()
@@ -116,6 +158,20 @@ namespace SecureShell::Test
             bp2::process_environment{bp2::environment::current()},
             bp2::process_start_dir{directory.generic_string()}};
         child.wait();
+    }
+
+    void drainStandardError(std::shared_ptr<NodeProcessResult> const& result)
+    {
+        result->stderrPipe.async_read_some(
+            boost::asio::buffer(result->stderrBuffer),
+            [weak = std::weak_ptr{result}](boost::system::error_code const& ec, std::size_t)
+            {
+                if (ec)
+                    return;
+                if (auto result = weak.lock())
+                    drainStandardError(result);
+            }
+        );
     }
 
     std::shared_ptr<NodeProcessResult> nodeProcess(
@@ -197,6 +253,9 @@ namespace SecureShell::Test
             return result;
         }
 
+        // Windows writes to pipes synchronously: once nobody reads stderr and its small buffer is full, the
+        // process blocks for good and only the kill timer ends it.
+        drainStandardError(result);
         return result;
     }
 }

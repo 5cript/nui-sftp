@@ -1,6 +1,9 @@
 #include <backend/sftp/bulk_download_operation.hpp>
+#include <paths/native.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
+#include <utility/link_safe_remove.hpp>
+#include <utility/permissions.hpp>
 
 namespace
 {
@@ -30,41 +33,43 @@ SharedData::OperationType BulkDownloadOperation::type() const
     return SharedData::OperationType::BulkDownload;
 }
 
-std::filesystem::path BulkDownloadOperation::localPathOf(std::size_t entryIndex) const
-{
-    if (prescanned())
-        return prescannedDestination(entryIndex);
-    return (common().localPath / SharedData::fullPathRelative(entries(), entries()[entryIndex])).lexically_normal();
-}
-
-std::filesystem::path BulkDownloadOperation::displayPath(std::size_t entryIndex) const
-{
-    return SharedData::fullPath(entries(), entries()[entryIndex]);
-}
-
 std::expected<void, BulkDownloadOperation::Error>
 BulkDownloadOperation::prepareRootInStrand(SharedData::DirectoryEntry const& root)
 {
     // Base directory of the download, everything after this will be relative to this:
-    const auto path = common().localPath;
-    std::error_code ec;
-    std::filesystem::create_directories(path, ec);
-    if (ec)
-    {
-        Log::error("BulkDownloadOperation: Failed to create local directory: {}: {}", path.string(), ec.message());
-        return std::unexpected(
-            Error{
-                .type = ErrorType::CannotCreateDirectory,
-                .extraInfo = fmt::format("Creating local directory: {}: {}", path.string(), ec.message())
-            }
-        );
-    }
-    return applyPermsToDirectory(path, root);
+    return createLocalDirectory(common().localPath, root);
 }
 
-std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::createDirectoryInStrand(std::size_t entryIndex)
+std::expected<void, BulkDownloadOperation::Error>
+BulkDownloadOperation::createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths)
 {
-    const auto path = localPathOf(entryIndex);
+    // create_directories follows a link planted inside the tree and would create and fill directories outside it.
+    std::error_code error{};
+    const auto link = Utility::firstLinkBelow(common().localPath.native(), paths.local.native(), error);
+    if (error)
+    {
+        return std::unexpected(Error{
+            .type = ErrorType::FileStatFailed,
+            .extraInfo = fmt::format("Inspecting local directory: {}: {}", paths.local.toUtf8(), error.message())
+        });
+    }
+    if (link)
+    {
+        Log::error("BulkDownloadOperation: '{}' runs through the link '{}'.", paths.local.toUtf8(), Paths::nativeToUtf8(*link));
+        return std::unexpected(Error{
+            .type = ErrorType::LinkInLocalPath,
+            .extraInfo = fmt::format("The local path runs through a link: {}", Paths::nativeToUtf8(*link))
+        });
+    }
+    return createLocalDirectory(paths.local, entries()[entryIndex]);
+}
+
+std::expected<void, BulkDownloadOperation::Error>
+BulkDownloadOperation::createLocalDirectory(Paths::LocalPath const& localPath, SharedData::DirectoryEntry const& entry)
+{
+    if (localPath.empty())
+        return std::unexpected(Error{.type = ErrorType::ImplementationError, .extraInfo = "No local directory"});
+    const auto path = localPath.native();
     std::error_code ec;
     std::filesystem::create_directories(path, ec);
     if (ec)
@@ -77,23 +82,28 @@ std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::createD
             }
         );
     }
-    return applyPermsToDirectory(path, entries()[entryIndex]);
+    return applyPermsToDirectory(path, entry);
 }
 
-std::unique_ptr<Operation>
-BulkDownloadOperation::makeChild(std::size_t entryIndex, std::function<void(std::uint64_t, std::uint64_t)> onProgress)
+std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
+    std::size_t entryIndex,
+    EntryPaths const& paths,
+    std::function<void(std::uint64_t, std::uint64_t)> onProgress
+)
 {
     auto const& entry = entries()[entryIndex];
 
     auto downloadOptions = individualOptions_;
-    downloadOptions.remotePath = displayPath(entryIndex);
-    downloadOptions.localPath = localPathOf(entryIndex);
+    downloadOptions.remotePath = paths.remote;
+    downloadOptions.localPath = paths.local;
+    downloadOptions.mayOverwrite = downloadOptions.mayOverwrite || paths.mayOverwrite;
     downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
     downloadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
         onProgress(current, max);
     };
     downloadOptions.entry = entry;
+    downloadOptions.linkFreeRoot = common().localPath;
 
     return std::make_unique<DownloadOperation>(sftp(), std::move(downloadOptions));
 }
@@ -102,11 +112,18 @@ bool BulkDownloadOperation::isSkippableError(Error const& error) const
 {
     // Missing or unreadable single files, and local files that cannot be written, do not compromise
     // the rest of the bulk.
-    if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory)
+    // A destination that appeared after the existence check and may not be replaced fails only its own entry.
+    if (error.type == ErrorType::OpenFailure || error.type == ErrorType::CannotCreateDirectory ||
+        error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists)
         return true;
     return error.sftpError &&
         (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
             error.sftpError->sftpError == SSH_FX_FAILURE);
+}
+
+bool BulkDownloadOperation::isSkippableDirectoryError(Error const& error) const
+{
+    return error.type == ErrorType::LinkInLocalPath;
 }
 
 std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPermsToDirectory(
@@ -114,11 +131,12 @@ std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPe
     SharedData::DirectoryEntry const& entryToInheritFrom
 )
 {
+    // Unknown permissions (the scan root carries none) leave the directory as created.
     std::optional<std::filesystem::perms> toApplyPerms{std::nullopt};
     if (individualOptions_.inheritPermissions)
-        toApplyPerms = entryToInheritFrom.permissions;
+        toApplyPerms = Utility::inheritablePermissions(entryToInheritFrom.permissions);
     else if (individualOptions_.directoryPermissions)
-        toApplyPerms = individualOptions_.directoryPermissions;
+        toApplyPerms = Utility::sanitizePermissions(*individualOptions_.directoryPermissions);
 
     if (!toApplyPerms)
         return {};
@@ -143,24 +161,27 @@ std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::applyPe
 void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> files)
 {
     std::vector<SharedData::DirectoryEntry> entries;
-    std::vector<std::filesystem::path> destinations;
+    std::vector<EntryPaths> paths;
     entries.reserve(files.size());
-    destinations.reserve(files.size());
+    paths.reserve(files.size());
     std::uint64_t totalBytes = 0;
     for (auto& file : files)
     {
         SharedData::DirectoryEntry entry{};
-        // entry.path carries the absolute remote source so SharedData::fullPath returns it
-        // verbatim (flat entry, no parent). The local destination lives in the aligned vector.
-        entry.path = file.remoteSrc;
-        entry.fullPath = file.remoteSrc;
+        // Flat entries carry their name only, the paths come from the prescanned paths.
+        if (const auto name = file.source.filename(); name)
+            entry.name = name->value();
         entry.type = SharedData::FileType::Regular;
         entry.size = file.sizeBytes;
         entry.mtime = file.mtime;
         entry.mtimeNsec = file.mtimeNsec;
         totalBytes += file.sizeBytes;
         entries.push_back(std::move(entry));
-        destinations.push_back(std::move(file.localDst));
+        paths.push_back(
+            EntryPaths{
+                .remote = std::move(file.source), .local = std::move(file.destination), .mayOverwrite = file.mayOverwrite
+            }
+        );
     }
-    setPrescannedEntries(std::move(entries), std::move(destinations), totalBytes);
+    setPrescannedEntries(std::move(entries), std::move(paths), totalBytes);
 }

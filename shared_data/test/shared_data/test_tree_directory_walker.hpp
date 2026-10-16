@@ -24,7 +24,7 @@ namespace SharedData::Sync::Test
         {
             directories[directory].push_back(
                 DirectoryEntry{
-                    .path = name,
+                    .name = name,
                     .type = FileType::Regular,
                     .size = size,
                     .mtime = mtime,
@@ -34,20 +34,21 @@ namespace SharedData::Sync::Test
 
         void addDirectory(std::string const& directory, std::string const& name)
         {
-            directories[directory].push_back(DirectoryEntry{.path = name, .type = FileType::Directory});
+            directories[directory].push_back(DirectoryEntry{.name = name, .type = FileType::Directory});
             directories[directory + "/" + name];
         }
     };
 
     inline auto makeScanner(FakeFilesystem& filesystem)
     {
-        return
-            [&filesystem](std::filesystem::path const& path) -> std::expected<std::vector<DirectoryEntry>, std::string>
+        // The walked root is "/root", the walker names directories relative to it.
+        return [&filesystem](Paths::RelativePath const& relative) -> std::expected<std::vector<DirectoryEntry>, std::string>
         {
-            filesystem.listed.push_back(path.generic_string());
-            const auto iter = filesystem.directories.find(path.generic_string());
+            const auto key = relative.empty() ? std::string{"/root"} : "/root/" + relative.value();
+            filesystem.listed.push_back(key);
+            const auto iter = filesystem.directories.find(key);
             if (iter == filesystem.directories.end())
-                return std::unexpected(std::string{"missing "} + path.generic_string());
+                return std::unexpected(std::string{"missing "} + key);
             return iter->second;
         };
     }
@@ -56,8 +57,7 @@ namespace SharedData::Sync::Test
     inline std::expected<ScanNode, std::string> walkFake(FakeFilesystem& filesystem, bool recursive = true)
     {
         auto scanner = makeScanner(filesystem);
-        TreeDirectoryWalker<std::string, decltype(scanner), IncludesDots> walker{
-            "/root", std::move(scanner), recursive
+        TreeDirectoryWalker<std::string, decltype(scanner), IncludesDots> walker{std::move(scanner), recursive
         };
         auto result = walker.walkAll();
         if (!result)
@@ -159,7 +159,7 @@ namespace SharedData::Sync::Test
     TEST(TreeDirectoryWalkerTests, ScannerErrorsAbortTheWalk)
     {
         FakeFilesystem filesystem;
-        filesystem.directories["/root"].push_back(DirectoryEntry{.path = "unlisted", .type = FileType::Directory});
+        filesystem.directories["/root"].push_back(DirectoryEntry{.name = "unlisted", .type = FileType::Directory});
 
         const auto tree = walkFake(filesystem);
         ASSERT_FALSE(tree.has_value());
@@ -174,7 +174,7 @@ namespace SharedData::Sync::Test
         filesystem.addFile("/root/dir", "b", 50);
 
         auto scanner = makeScanner(filesystem);
-        TreeDirectoryWalker<std::string, decltype(scanner), false> walker{"/root", std::move(scanner)};
+        TreeDirectoryWalker<std::string, decltype(scanner), false> walker{std::move(scanner)};
         ASSERT_TRUE(walker.walkAll().has_value());
         EXPECT_TRUE(walker.completed());
         EXPECT_EQ(walker.totalEntries(), 4u) << "root, a, dir, b";

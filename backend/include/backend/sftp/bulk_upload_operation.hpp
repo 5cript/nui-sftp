@@ -13,8 +13,10 @@ class BulkUploadOperation : public BulkTransferOperation
     struct BulkUploadOperationOptions
     {
         BulkProgressCallback overallProgressCallback = [](SharedData::BulkProgress const&) {};
-        std::filesystem::path remotePath{};
-        std::filesystem::path localPath{};
+        /** @brief Where the scanned directory is created, only a label for a flat list. */
+        Paths::RemotePath remotePath{};
+        /** @brief The scanned local directory, only a label for a flat list. */
+        Paths::LocalPath localPath{};
         UploadOperation::UploadOperationOptions individualOptions = {};
         bool failFast{false};
         // Files transferred at once, bounded by the queue's slot budget.
@@ -34,19 +36,27 @@ class BulkUploadOperation : public BulkTransferOperation
     /** @brief See BulkDownloadOperation::PrescannedFile. */
     struct PrescannedFile
     {
-        std::filesystem::path localSrc;
-        std::filesystem::path remoteDst;
+        Paths::LocalPath source;
+        Paths::RemotePath destination;
         std::uint64_t sizeBytes;
+        bool mayOverwrite{false};
     };
     void setPrescannedFileList(std::vector<PrescannedFile> files);
 
   protected:
     std::expected<void, Error> prepareRootInStrand(SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex) override;
-    std::unique_ptr<Operation>
-    makeChild(std::size_t entryIndex, std::function<void(std::uint64_t, std::uint64_t)> onProgress) override;
-    std::filesystem::path displayPath(std::size_t entryIndex) const override;
+    std::expected<void, Error> createDirectoryInStrand(std::size_t entryIndex, EntryPaths const& paths) override;
+    std::unique_ptr<Operation> makeChild(
+        std::size_t entryIndex,
+        EntryPaths const& paths,
+        std::function<void(std::uint64_t, std::uint64_t)> onProgress
+    ) override;
     bool isSkippableError(Error const& error) const override;
+
+    bool sourceIsRemote() const noexcept override
+    {
+        return false;
+    }
 
     std::string_view logName() const noexcept override
     {
@@ -54,11 +64,9 @@ class BulkUploadOperation : public BulkTransferOperation
     }
 
   private:
-    std::filesystem::path localPathOf(std::size_t entryIndex) const;
-    std::filesystem::path remotePathOf(std::size_t entryIndex) const;
     std::filesystem::perms determinePerms(SharedData::DirectoryEntry const& entry) const;
     std::expected<void, Error>
-    createRemoteDirectoryInStrand(std::filesystem::path const& path, SharedData::DirectoryEntry const& entry);
+    createRemoteDirectoryInStrand(Paths::RemotePath const& path, SharedData::DirectoryEntry const& entry);
 
   private:
     UploadOperation::UploadOperationOptions individualOptions_;

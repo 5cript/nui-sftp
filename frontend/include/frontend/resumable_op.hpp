@@ -1,40 +1,56 @@
 #pragma once
 
 #include <ids/ids.hpp>
+#include <paths/paths.hpp>
 
-#include <filesystem>
+#include <variant>
 
 /**
- * @brief Description of an operation that was in-flight when the SSH transport
- *        died and that we want to re-enqueue against the new session with
- *        tryContinue=true.  Scan/sync operations are not resumable and are
- *        omitted from the snapshot.
+ * @brief Operations that were in flight when the SSH transport died, re-enqueued against the new session with
+ *        tryContinue=true. Scans, sync operations, archives and local deletes are not resumable.
  */
-struct ResumableOp
+namespace Resumable
 {
-    enum class Kind
+    struct Download
     {
-        Download,
-        Upload,
-        Delete,
-        Rename,
-        BulkDownload,
-        BulkUpload,
-        BulkDelete,
+        Paths::RemotePath source{};
+        Paths::LocalPath destination{};
+        /** @brief What the interrupted transfer was allowed, a resume must not replace more. */
+        bool allowOverwrite{false};
     };
 
-    Kind kind;
-    std::filesystem::path src;
-    std::filesystem::path dst;
-    bool recursive{false};
-    bool allowOverwrite{false};
-    bool createMissingDirectories{false};
+    struct Upload
+    {
+        Paths::LocalPath source{};
+        Paths::RemotePath destination{};
+        bool allowOverwrite{false};
+    };
+
+    struct Rename
+    {
+        Paths::RemotePath source{};
+        Paths::RemotePath destination{};
+    };
 
     /**
-     * @brief Backend-side resume key for bulk kinds.  The new session
-     *        passes this id to SessionManager::adoptBulkResume so the
-     *        backend can re-issue the bulk from its own backup of the
-     *        original entry list.  Empty / invalid for single-file kinds.
+     * @brief A delete of one remote item.
      */
-    Ids::OperationId operationId{};
-};
+    struct Delete
+    {
+        Paths::RemotePath target{};
+        /** @brief Only a delete that scanned a directory resumes with its content. */
+        bool recursive{false};
+    };
+
+    /**
+     * @brief A bulk card. The new session passes its id to SessionManager::adoptBulkResume and the backend
+     *        re-issues the bulk from its own backup.
+     */
+    struct Bulk
+    {
+        Ids::OperationId operationId{};
+    };
+}
+
+using ResumableOp =
+    std::variant<Resumable::Download, Resumable::Upload, Resumable::Rename, Resumable::Delete, Resumable::Bulk>;

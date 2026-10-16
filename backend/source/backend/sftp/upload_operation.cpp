@@ -1,8 +1,11 @@
 #include <backend/sftp/upload_operation.hpp>
+#include <backend/sftp/resume_check.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 #include <ssh/sftp_session.hpp>
 
 #include <log/log.hpp>
+#include <utility/permissions.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -16,6 +19,10 @@ UploadOperation::UploadOperation(SecureShell::SftpSession& sftp, UploadOperation
     , localFile_{}
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
+    remotePath_ = options_.remotePath;
+    if (!options_.localPath.empty())
+        localNativePath_ = options_.localPath.native();
+    tempPath_ = remotePath_.withFilenameSuffix(options_.tempFileSuffix).value_or(Paths::RemotePath{});
 }
 
 UploadOperation::~UploadOperation()
@@ -76,12 +83,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 Log::error("UploadOperation: Invalid local path.");
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             }
-            const auto localStatus = std::filesystem::symlink_status(options_.localPath);
+            const auto localStatus = std::filesystem::symlink_status(localNativePath_);
             if (!std::filesystem::is_regular_file(localStatus) && !std::filesystem::is_symlink(localStatus))
             {
                 Log::error(
-                    "UploadOperation: Local path '{}' is not a regular file or symlink.",
-                    options_.localPath.generic_string()
+                    "UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.toUtf8()
                 );
                 return enterErrorState<WorkStatus>({.type = ErrorType::NotAFile});
             }
@@ -92,23 +98,23 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             }
             else
             {
-                if (!std::filesystem::is_regular_file(std::filesystem::status(options_.localPath)))
+                if (!std::filesystem::is_regular_file(std::filesystem::status(localNativePath_)))
                 {
                     Log::error(
                         "UploadOperation: Local path '{}' is a directory, but a file was expected.",
-                        options_.localPath.generic_string()
+                        options_.localPath.toUtf8()
                     );
                     return enterErrorState<WorkStatus>({.type = ErrorType::NotAFile});
                 }
-                if (!std::filesystem::exists(options_.localPath))
+                if (!std::filesystem::exists(localNativePath_))
                 {
-                    Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string());
+                    Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileNotFound});
                 }
-                localFile_.open(options_.localPath, std::ios::binary);
+                localFile_.open(localNativePath_, std::ios::binary);
                 if (!localFile_.is_open())
                 {
-                    Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.generic_string());
+                    Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::OpenFailure});
                 }
                 localFile_.seekg(0, std::ios::end);
@@ -117,9 +123,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 localFile_.seekg(0, std::ios::beg);
                 if (!localFile_.good())
                 {
-                    Log::error(
-                        "UploadOperation: Failed to seek in local file: {}", options_.localPath.generic_string()
-                    );
+                    Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8());
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileSeekFailure});
                 }
                 const auto prepareResult = prepareInStrand();
@@ -158,7 +162,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
                 const auto contextResult = stream->writeAsyncInStrand(
-                    totalSize_,
+                    static_cast<SecureShell::IFileStream::SignedSizeType>(leftToUpload_),
                     buffer_.data(),
                     buffer_.size(),
                     [this](SecureShell::IFileStream::SignedSizeType bytesRead)
@@ -202,6 +206,9 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             {
                 if (asyncTransferContext_->hasEnded())
                 {
+                    if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
+                        return enterErrorState<WorkStatus>(asyncTransferError(*asyncTransferContext_));
+                    leftToUpload_ = 0;
                     options_.progressCallback(0ull, totalSize_, totalSize(), asyncTransferContext_->bytesPerSecond());
                     state_ = Finalizing;
                     [[fallthrough]];
@@ -211,7 +218,8 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     options_.progressCallback(
                         0ull,
                         totalSize_,
-                        asyncTransferContext_->bytesTransferred(),
+                        totalSize_ - leftToUpload_ +
+                            static_cast<std::size_t>(asyncTransferContext_->bytesTransferred()),
                         asyncTransferContext_->bytesPerSecond()
                     );
                     return WorkStatus::MoreWork;
@@ -297,47 +305,44 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
-        Log::info("UploadOperation: Skipping symlink as per options: {}.", options_.localPath.string());
+        Log::info("UploadOperation: Skipping symlink as per options: {}.", options_.localPath.toUtf8());
         return {};
     }
 
-    const auto target = std::filesystem::read_symlink(options_.localPath);
-
-    // sftp_symlink fails if the link path already exists. If we're allowed to overwrite,
-    // remove whatever is there first (file or link — directories are left alone since
-    // that almost certainly isn't what the user wants).
-    if (options_.mayOverwrite)
-    {
-        const auto statResult = sftp_->lstatInStrand(options_.remotePath);
-        if (statResult.has_value() && statResult->type != SharedData::FileType::Directory)
-        {
-            const auto rmResult = sftp_->removeFileInStrand(options_.remotePath);
-            if (!rmResult.has_value())
-            {
-                Log::warn(
-                    "UploadOperation: Could not remove existing '{}' before symlink: {}.",
-                    options_.remotePath.generic_string(),
-                    rmResult.error().message
-                );
-            }
-        }
-    }
+    const auto target = std::filesystem::read_symlink(localNativePath_);
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExistsInStrand(options_.remotePath.parent_path()); !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(*remotePath_.parent()); !res.has_value())
             return std::unexpected(res.error());
     }
 
-    const auto result = sftp_->createSymLinkInStrand(target, options_.remotePath);
+    // The link is created under the temp name and renamed into place, so an existing destination is
+    // never removed before its replacement exists.
+    std::ignore = sftp_->removeFileInStrand(tempPath_);
+    const auto result = sftp_->createSymLinkInStrand(Paths::nativeToUtf8(target), tempPath_);
     if (!result.has_value())
     {
         Log::error(
-            "UploadOperation: Failed to create symlink at '{}': {}.",
-            options_.remotePath.generic_string(),
-            result.error().message
+            "UploadOperation: Failed to create symlink at '{}': {}.", tempPath_.value(), result.error().message
         );
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
+    }
+
+    const auto renameResult = options_.mayOverwrite
+        ? sftp_->renameReplaceInStrand(tempPath_, remotePath_, options_.tempFileSuffix + ".old")
+        : sftp_->renameNoReplaceInStrand(tempPath_, remotePath_);
+    if (!renameResult.has_value())
+    {
+        std::ignore = sftp_->removeFileInStrand(tempPath_);
+        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        Log::error(
+            "UploadOperation: Failed to move symlink to '{}': {}.",
+            options_.remotePath.value(),
+            renameResult.error().message
+        );
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
     }
     return {};
 }
@@ -386,6 +391,11 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
         Log::error("UploadOperation: Read more data than expected.");
         return enterErrorState<bool>({.type = ErrorType::ImplementationError});
     }
+    if (readCount == 0 && leftToUpload_ > 0)
+    {
+        Log::error("UploadOperation: The local file ended before its expected size was read.");
+        return enterErrorState<bool>({.type = ErrorType::SourceFileNotGood});
+    }
     leftToUpload_ -= readCount;
 
     const auto result = stream->writeInStrand(std::string_view{buffer_.data(), readCount});
@@ -402,7 +412,7 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
 
 std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInStrand()
 {
-    const auto result = sftp_->lstatInStrand(options_.remotePath);
+    const auto result = sftp_->lstatInStrand(remotePath_);
     if (!result.has_value())
     {
         const auto err = result.error();
@@ -419,19 +429,18 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         {
             Log::warn(
                 "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                options_.remotePath.generic_string()
+                options_.remotePath.value()
             );
             return std::unexpected(Error{.type = ErrorType::FileExists});
         }
     }
 
-    auto tempPath = options_.remotePath;
-    tempPath += options_.tempFileSuffix;
-    const auto tempResult = sftp_->lstatInStrand(tempPath);
+    const auto tempResult = sftp_->lstatInStrand(tempPath_);
 
-    // local file perms
-    const auto status = std::filesystem::symlink_status(options_.localPath);
-    const auto perms = determinePerms(status.permissions());
+    // Permissions of what is uploaded: the target of a followed symlink, not the link.
+    std::error_code statusError{};
+    const auto status = std::filesystem::status(localNativePath_, statusError);
+    const auto perms = determinePerms(statusError ? std::filesystem::perms::unknown : Utility::localPermissions(status));
 
     // Adoption mechanic for temp file parts:
     if (tempResult.has_value())
@@ -441,11 +450,17 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
             Log::debug("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
             // Do not adopt file
         }
+        else if (options_.tryContinue && !tempBelongsToSourceInStrand(tempResult->size))
+        {
+            Log::info(
+                "UploadOperation: Remote temp file '{}' is not a part of this source, starting over.", tempPath_.value()
+            );
+        }
         else if (options_.tryContinue)
         {
             Log::debug("UploadOperation: Continuing upload to existing temp file.");
 
-            const auto openResult = sftp_->openFileInStrand(tempPath, SecureShell::SftpSession::OpenType::Write, perms);
+            const auto openResult = sftp_->openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Write, perms);
             if (!openResult.has_value())
             {
                 Log::error("Failed to open remote sftp file for continue: {}", openResult.error().message);
@@ -476,14 +491,14 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
 
     if (options_.createMissingDirectories)
     {
-        if (auto res = ensureRemoteDirectoryExistsInStrand(tempPath.parent_path()); !res.has_value())
+        if (auto res = ensureRemoteDirectoryExistsInStrand(*tempPath_.parent()); !res.has_value())
             return std::unexpected(res.error());
     }
 
     // Open temp file part regularly, freshly:
-    Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath.generic_string());
+    Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath_.value());
     const auto openResult = sftp_->openFileInStrand(
-        tempPath,
+        tempPath_,
         SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create |
             SecureShell::SftpSession::OpenType::Truncate,
         perms
@@ -499,10 +514,27 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     return {};
 }
 
-std::expected<void, UploadOperation::Error>
-UploadOperation::ensureRemoteDirectoryExistsInStrand(std::filesystem::path const& dir)
+bool UploadOperation::tempBelongsToSourceInStrand(std::uint64_t tempSize)
 {
-    if (dir.empty() || dir == dir.root_path() || dir == std::filesystem::path{"/"})
+    // Another program's partial file or a part of an older version of the source must not be continued.
+    if (tempSize == 0)
+        return false;
+    const auto opened =
+        sftp_->openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::none);
+    if (!opened)
+        return false;
+    auto stream = opened->lock();
+    if (!stream)
+        return false;
+    const auto matches = ResumeCheck::tailsMatchInStrand(*stream, localNativePath_, tempSize);
+    stream->closeInStrand();
+    return matches.value_or(false);
+}
+
+std::expected<void, UploadOperation::Error>
+UploadOperation::ensureRemoteDirectoryExistsInStrand(Paths::RemotePath const& dir)
+{
+    if (dir.isRoot())
         return {};
 
     const auto statResult = sftp_->lstatInStrand(dir);
@@ -511,7 +543,7 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(std::filesystem::path const
         if (statResult->type == SharedData::FileType::Directory)
             return {};
         Log::error(
-            "UploadOperation: Cannot create parent '{}': path exists and is not a directory.", dir.generic_string()
+            "UploadOperation: Cannot create parent '{}': path exists and is not a directory.", dir.value()
         );
         return std::unexpected(
             Error{
@@ -526,7 +558,8 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(std::filesystem::path const
     if (statResult.error().sftpError != SSH_FX_NO_SUCH_FILE)
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = statResult.error()});
 
-    if (auto parent = ensureRemoteDirectoryExistsInStrand(dir.parent_path()); !parent.has_value())
+    if (auto parent = ensureRemoteDirectoryExistsInStrand(dir.parent().value_or(Paths::RemotePath::root()));
+        !parent.has_value())
         return parent;
 
     const auto dirPerms = options_.directoryPermissions.value_or(
@@ -537,7 +570,7 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(std::filesystem::path const
     if (!mkdirResult.has_value())
     {
         Log::error(
-            "UploadOperation: Failed to create parent dir '{}': {}.", dir.generic_string(), mkdirResult.error().message
+            "UploadOperation: Failed to create parent dir '{}': {}.", dir.value(), mkdirResult.error().message
         );
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = mkdirResult.error()});
     }
@@ -551,12 +584,15 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         Log::error("UploadOperation: Invalid local path.");
         return enterErrorState({.type = ErrorType::InvalidPath});
     }
-    const auto localStatus = std::filesystem::symlink_status(options_.localPath);
+    if (remotePath_.empty() || remotePath_.isRoot() || tempPath_.empty())
+    {
+        Log::error("UploadOperation: Invalid remote path '{}'.", options_.remotePath.value());
+        return enterErrorState({.type = ErrorType::InvalidPath, .extraInfo = options_.remotePath.value()});
+    }
+    const auto localStatus = std::filesystem::symlink_status(localNativePath_);
     if (!std::filesystem::is_regular_file(localStatus) && !std::filesystem::is_symlink(localStatus))
     {
-        Log::error(
-            "UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.generic_string()
-        );
+        Log::error("UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::NotAFile});
     }
 
@@ -567,26 +603,25 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
         return {};
     }
 
-    if (!std::filesystem::is_regular_file(std::filesystem::status(options_.localPath)))
+    if (!std::filesystem::is_regular_file(std::filesystem::status(localNativePath_)))
     {
         Log::error(
-            "UploadOperation: Local path '{}' is a directory, but a file was expected.",
-            options_.localPath.generic_string()
+            "UploadOperation: Local path '{}' is a directory, but a file was expected.", options_.localPath.toUtf8()
         );
         return enterErrorState({.type = ErrorType::NotAFile});
     }
 
     // Initial check. Check again later before rename
-    if (!std::filesystem::exists(options_.localPath))
+    if (!std::filesystem::exists(localNativePath_))
     {
-        Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.generic_string());
+        Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::FileNotFound});
     }
 
-    localFile_.open(options_.localPath, std::ios::binary);
+    localFile_.open(localNativePath_, std::ios::binary);
     if (!localFile_.is_open())
     {
-        Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.generic_string());
+        Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::OpenFailure});
     }
 
@@ -597,7 +632,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 
     if (!localFile_.good())
     {
-        Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.generic_string());
+        Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8());
         return enterErrorState({.type = ErrorType::FileSeekFailure});
     }
 
@@ -620,9 +655,7 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     }
 
     Log::debug(
-        "UploadOperation: Prepared upload of '{}' to '{}'.",
-        options_.localPath.generic_string(),
-        options_.remotePath.generic_string()
+        "UploadOperation: Prepared upload of '{}' to '{}'.", options_.localPath.toUtf8(), options_.remotePath.value()
     );
 
     return {};
@@ -663,8 +696,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
     {
         Log::info(
             "UploadOperation: Upload of '{}' to '{}' canceled.",
-            options_.remotePath.generic_string(),
-            options_.localPath.generic_string()
+            options_.remotePath.value(),
+            options_.localPath.toUtf8()
         );
         state_ = OperationState::Canceled;
     }
@@ -712,9 +745,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
         return result;
 
     Log::debug(
-        "UploadOperation: Finalized upload of '{}' to '{}'.",
-        options_.remotePath.generic_string(),
-        options_.localPath.generic_string()
+        "UploadOperation: Finalized upload of '{}' to '{}'.", options_.remotePath.value(), options_.localPath.toUtf8()
     );
     return {};
 }
@@ -728,38 +759,37 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
-    stream->closeInStrand();
-
-    // Recheck if the destination already exists.
+    // Every byte must have been written before the temp file may replace the destination.
+    if (leftToUpload_ != 0)
     {
-        const auto result = sftp_->statInStrand(options_.remotePath);
-        if (!result.has_value())
-        {
-            // Interpret error as ok — either does not exist or something else is wrong;
-            // try to rename anyway.
-        }
-        else
-        {
-            if (!options_.mayOverwrite)
-            {
-                Log::warn(
-                    "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                    options_.remotePath.generic_string()
-                );
-                return std::unexpected(Error{.type = ErrorType::FileExists});
+        Log::error("UploadOperation: {} bytes were not uploaded.", leftToUpload_);
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SizeMismatch,
+                .extraInfo = fmt::format(
+                    "Sent {} of {} bytes for {}", totalSize_ - leftToUpload_, totalSize_, options_.localPath.toUtf8()
+                ),
             }
-            else
-            {
-                std::ignore = sftp_->removeFileInStrand(options_.remotePath);
-            }
-        }
+        );
     }
 
-    auto tempPath = options_.remotePath;
-    tempPath += options_.tempFileSuffix;
-    const auto renameResult = sftp_->renameInStrand(tempPath, options_.remotePath);
+    stream->closeInStrand();
+
+    // The destination is never deleted ahead of the rename: replacing is atomic or moves it aside, and
+    // without permission to overwrite the rename fails instead of replacing.
+    const auto renameResult = options_.mayOverwrite
+        ? sftp_->renameReplaceInStrand(tempPath_, remotePath_, options_.tempFileSuffix + ".old")
+        : sftp_->renameNoReplaceInStrand(tempPath_, remotePath_);
     if (!renameResult.has_value())
     {
+        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+        {
+            Log::warn(
+                "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
+                options_.remotePath.value()
+            );
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        }
         Log::error("Failed to rename remote sftp file: {}", renameResult.error().message);
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
     }
@@ -768,7 +798,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
     // don't see the file as modified (best-effort; a failure is only a warning).
     {
         std::error_code errc{};
-        const auto ftime = std::filesystem::last_write_time(options_.localPath, errc);
+        const auto ftime = std::filesystem::last_write_time(localNativePath_, errc);
         if (!errc)
         {
             const auto sctime = std::chrono::file_clock::to_sys(ftime);
@@ -779,12 +809,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
             attrs.flags = SSH_FILEXFER_ATTR_ACMODTIME;
             attrs.atime = mtimeSecs;
             attrs.mtime = mtimeSecs;
-            const auto mtimeResult = sftp_->statInStrand(options_.remotePath, &attrs);
+            const auto mtimeResult = sftp_->statInStrand(remotePath_, &attrs);
             if (!mtimeResult.has_value())
             {
                 Log::warn(
                     "UploadOperation: Failed to set mtime on '{}': {}.",
-                    options_.remotePath.generic_string(),
+                    options_.remotePath.value(),
                     mtimeResult.error().message
                 );
             }
@@ -792,9 +822,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand()
         else
         {
             Log::warn(
-                "UploadOperation: Could not read local mtime for '{}': {}.",
-                options_.localPath.generic_string(),
-                errc.message()
+                "UploadOperation: Could not read local mtime for '{}': {}.", options_.localPath.toUtf8(), errc.message()
             );
         }
     }
@@ -807,7 +835,10 @@ std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms lo
     {
         if (options_.inheritPermissions)
         {
-            return localPerms;
+            return Utility::sanitizePermissions(localPerms).value_or(
+                std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                std::filesystem::perms::others_read
+            );
         }
         else
         {

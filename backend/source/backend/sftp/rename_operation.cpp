@@ -30,7 +30,13 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
         }
         case (Running):
         {
-            auto fut = sftp_->rename(sourcePath_, destinationPath_);
+            // A queued rename mirrors a local move and must not replace what is at the destination.
+            auto fut = sftp_->performPromise(
+                [this]()
+                {
+                    return sftp_->renameNoReplaceInStrand(sourcePath_, destinationPath_);
+                }
+            );
             if (fut.wait_for(futureTimeout_) != std::future_status::ready)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
 
@@ -39,7 +45,7 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
                 return enterErrorState<WorkStatus>({
                     .type = ErrorType::RenameFailure,
                     .sftpError = result.error(),
-                    .extraInfo = sourcePath_.generic_string(),
+                    .extraInfo = sourcePath_.value(),
                 });
 
             state_ = Completed;
@@ -79,11 +85,7 @@ std::expected<void, RenameOperation::Error> RenameOperation::cancel(bool adoptCa
 {
     if (adoptCancelState)
     {
-        Log::info(
-            "RenameOperation: Rename of '{}' to '{}' canceled.",
-            sourcePath_.generic_string(),
-            destinationPath_.generic_string()
-        );
+        Log::info("RenameOperation: Rename of '{}' to '{}' canceled.", sourcePath_.value(), destinationPath_.value());
         state_ = OperationState::Canceled;
     }
     return {};

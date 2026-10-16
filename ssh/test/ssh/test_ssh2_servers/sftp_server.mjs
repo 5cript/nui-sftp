@@ -161,6 +161,80 @@ let defaultPath = '/home/test';
 // 'conforming', 'relative', 'empty' or 'failure'. Emulates servers answering REALPATH "." incorrectly.
 let realpathDotMode = 'conforming';
 
+// Fault injection and server behaviour switches, configured over the command line interface.
+const faults = {
+    failReadsAfter: null,
+    failWritesAfter: null,
+    dropAfterBytes: null,
+    failRenames: false,
+    // Renames that still succeed before failRenames applies, null for none.
+    renamesBeforeFailure: null,
+    deniedDirectories: new Set(),
+    deniedStats: new Set(),
+    bytesRead: 0,
+    bytesWritten: 0,
+};
+// Extension name to extension data, announced in the VERSION packet.
+const advertisedExtensions = {};
+
+// True when this rename has to fail. Counts down the renames allowed before failing.
+const renameFails = () => {
+    if (!faults.failRenames)
+        return false;
+    if (faults.renamesBeforeFailure !== null && faults.renamesBeforeFailure > 0) {
+        --faults.renamesBeforeFailure;
+        return false;
+    }
+    return true;
+};
+
+const lengthPrefixed = (text) => {
+    const body = Buffer.from(text, 'utf8');
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(body.length);
+    return Buffer.concat([header, body]);
+};
+
+const readLengthPrefixedStrings = (data, count) => {
+    const strings = [];
+    let offset = 0;
+    for (let index = 0; index < count; ++index) {
+        if (!data || offset + 4 > data.length)
+            return undefined;
+        const length = data.readUInt32BE(offset);
+        offset += 4;
+        if (offset + length > data.length)
+            return undefined;
+        strings.push(data.toString('utf8', offset, offset + length));
+        offset += length;
+    }
+    return strings;
+};
+
+// ssh2 always answers INIT with a VERSION packet without extensions, so the packet is replaced
+// on its way out when extensions are advertised.
+const advertiseExtensions = (sftpStream) => {
+    const names = Object.keys(advertisedExtensions);
+    if (names.length === 0)
+        return;
+    const protocol = sftpStream._protocol;
+    const originalChannelData = protocol.channelData;
+    protocol.channelData = function (id, data) {
+        const versionPacketType = 2;
+        if (id === sftpStream.outgoing.id && data.length === 9 && data[4] === versionPacketType) {
+            protocol.channelData = originalChannelData;
+            const parts = [Buffer.from([versionPacketType, 0, 0, 0, 3])];
+            for (const name of names)
+                parts.push(lengthPrefixed(name), lengthPrefixed(advertisedExtensions[name]));
+            const body = Buffer.concat(parts);
+            const header = Buffer.alloc(4);
+            header.writeUInt32BE(body.length);
+            return originalChannelData.call(protocol, id, Buffer.concat([header, body]));
+        }
+        return originalChannelData.call(protocol, id, data);
+    };
+};
+
 const resolveFileName = (path) => {
     if (path === '.') {
         return defaultPath;
@@ -226,12 +300,18 @@ const server = new Server({
 
                 const handles = new Map();
                 const sftpStream = accept();
+                advertiseExtensions(sftpStream);
                 sftpStream.on('OPEN', (reqid, filename, flags, attrs) => {
                     filename = resolveFileName(filename);
 
                     logMessage('OPEN', filename, flags, attrs);
 
-                    const result = fakeFilesystem.find(filename);
+                    let result = fakeFilesystem.find(filename);
+                    // OPEN follows symlinks like a real server.
+                    if (result !== undefined && result.type === 'symlink') {
+                        filename = result.target;
+                        result = fakeFilesystem.find(filename);
+                    }
                     if (result === undefined) {
                         const anyWriteFlag = flags & (OPEN_MODE.WRITE | OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.APPEND);
                         if (anyWriteFlag) {
@@ -250,6 +330,11 @@ const server = new Server({
                             return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
                         }
                     } else {
+                        // Like a real server: CREAT with EXCL refuses anything that exists.
+                        if ((flags & OPEN_MODE.CREAT) && (flags & OPEN_MODE.EXCL)) {
+                            logMessage('Exists, EXCL given');
+                            return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        }
                         if (result.type !== 'file') {
                             logMessage('Not a file');
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);
@@ -291,6 +376,16 @@ const server = new Server({
                         logMessage('Invalid offset');
                         return sftpStream.status(reqid, STATUS_CODE.EOF);
                     }
+
+                    if (faults.dropAfterBytes !== null && faults.bytesRead + faults.bytesWritten >= faults.dropAfterBytes) {
+                        logMessage('Fault: dropping the connection during WRITE');
+                        return client.end();
+                    }
+                    if (faults.failWritesAfter !== null && faults.bytesWritten >= faults.failWritesAfter) {
+                        logMessage('Fault: failing WRITE');
+                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
+                    faults.bytesWritten += data.length;
 
                     // Simulate writing data to the file at the specified offset.
                     // Keep content as Buffer end-to-end; converting to UTF-8 strings
@@ -340,7 +435,17 @@ const server = new Server({
 
                     // result.content is a Buffer; slice() returns a Buffer view —
                     // send it directly without UTF-8 round-tripping.
+                    if (faults.dropAfterBytes !== null && faults.bytesRead + faults.bytesWritten >= faults.dropAfterBytes) {
+                        logMessage('Fault: dropping the connection during READ');
+                        return client.end();
+                    }
+                    if (faults.failReadsAfter !== null && faults.bytesRead >= faults.failReadsAfter) {
+                        logMessage('Fault: failing READ');
+                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
+
                     const data = result.content.slice(offset, Math.min(offset + length, size));
+                    faults.bytesRead += data.length;
                     logMessage(`Read ${data.length} bytes from offset ${offset}`);
 
                     sftpStream.data(reqid, data);
@@ -417,6 +522,11 @@ const server = new Server({
                     path = resolveFileName(path);
 
                     logMessage('OPENDIR', path);
+
+                    if (faults.deniedDirectories.has(path)) {
+                        logMessage('Fault: permission denied');
+                        return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                    }
 
                     const result = fakeFilesystem.find(path);
                     if (result === undefined || result.type !== 'directory') {
@@ -500,6 +610,11 @@ const server = new Server({
 
                     logMessage('RENAME', oldPath, newPath);
 
+                    if (renameFails()) {
+                        logMessage('Fault: failing RENAME');
+                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
+
                     const oldResult = fakeFilesystem.find(oldPath);
                     if (oldResult === undefined) {
                         logMessage('Old file not found');
@@ -516,7 +631,51 @@ const server = new Server({
                     sftpStream.status(reqid, STATUS_CODE.OK);
                 });
 
-                sftpStream.on('MKDIR', (reqid, path) => {
+                sftpStream.on('EXTENDED', (reqid, name, data) => {
+                    logMessage('EXTENDED', name);
+
+                    if (!Object.hasOwn(advertisedExtensions, name))
+                        return sftpStream.status(reqid, STATUS_CODE.OP_UNSUPPORTED);
+
+                    const paths = readLengthPrefixedStrings(data, 2);
+                    if (paths === undefined)
+                        return sftpStream.status(reqid, STATUS_CODE.BAD_MESSAGE);
+                    const oldPath = resolveFileName(paths[0]);
+                    const newPath = resolveFileName(paths[1]);
+
+                    const oldResult = fakeFilesystem.find(oldPath);
+                    if (oldResult === undefined)
+                        return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                    const newResult = fakeFilesystem.find(newPath);
+
+                    if (name === 'posix-rename@openssh.com') {
+                        if (renameFails()) {
+                            logMessage('Fault: failing posix-rename');
+                            return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        }
+                        if (newResult !== undefined) {
+                            if (newResult.type === 'directory' && (oldResult.type !== 'directory' || newResult.children.length > 0))
+                                return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                            newResult.parent.removeChild(newResult.name);
+                        }
+                        renameInFakeFs(oldResult, newPath);
+                        return sftpStream.status(reqid, STATUS_CODE.OK);
+                    }
+
+                    if (name === 'hardlink@openssh.com') {
+                        if (newResult !== undefined || oldResult.type !== 'file')
+                            return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                        const parent = fakeFilesystem.find(pathUtil.dirname(newPath));
+                        if (parent === undefined || parent.type !== 'directory')
+                            return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                        parent.insert(file(pathUtil.basename(newPath), oldResult.content, oldResult.stat));
+                        return sftpStream.status(reqid, STATUS_CODE.OK);
+                    }
+
+                    return sftpStream.status(reqid, STATUS_CODE.OP_UNSUPPORTED);
+                });
+
+                sftpStream.on('MKDIR', (reqid, path, attrs) => {
                     path = resolveFileName(path);
 
                     logMessage('MKDIR', path);
@@ -534,7 +693,9 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
 
-                    parent.insert(directory({ name: pathUtil.basename(path) }));
+                    // Like mkdir(2): the requested mode, 0755 when none was sent.
+                    const mode = attrs && attrs.mode !== undefined ? attrs.mode : undefined;
+                    parent.insert(directory({ name: pathUtil.basename(path), stat: { mode } }));
 
                     sftpStream.status(reqid, STATUS_CODE.OK);
                 });
@@ -688,6 +849,11 @@ const server = new Server({
 
                     logMessage('LSTAT', path);
 
+                    if (faults.deniedStats.has(path)) {
+                        logMessage('Fault: permission denied');
+                        return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                    }
+
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
                         logMessage('File not found');
@@ -736,7 +902,71 @@ cli.on('removeHome', () => {
     fakeFilesystem.find('/home').removeChild('test');
 });
 
+const nullableBytes = (command) => (command.bytes === undefined || command.bytes === null) ? null : Number(command.bytes);
+cli.on('failReadsAfter', (command) => {
+    faults.failReadsAfter = nullableBytes(command);
+    faults.bytesRead = 0;
+});
+cli.on('failWritesAfter', (command) => {
+    faults.failWritesAfter = nullableBytes(command);
+    faults.bytesWritten = 0;
+});
+cli.on('dropAfterBytes', (command) => {
+    faults.dropAfterBytes = nullableBytes(command);
+    faults.bytesRead = 0;
+    faults.bytesWritten = 0;
+});
+cli.on('failRenames', (command) => {
+    faults.failRenames = command.enabled !== false;
+    faults.renamesBeforeFailure = command.after === undefined ? null : Number(command.after);
+});
+cli.on('denyDirectory', (command) => {
+    faults.deniedDirectories.add(command.path);
+});
+// LSTAT of the path answers permission denied.
+cli.on('denyStat', (command) => {
+    faults.deniedStats.add(command.path);
+});
+cli.on('advertise', (command) => {
+    advertisedExtensions[command.name] = command.data ?? '1';
+});
+// Inserts an entry under a raw name that may be invalid as a path segment, like '..' or 'a/b'.
+cli.on('rawName', (command) => {
+    const parent = fakeFilesystem.find(command.directory);
+    if (parent === undefined || parent.type !== 'directory')
+        return;
+    if (command.type === 'directory')
+        parent.insert(directory({ name: command.name }, []));
+    else
+        parent.insert(file(command.name, command.content ?? ''));
+});
+cli.on('createFile', (command) => {
+    const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
+    if (parent === undefined || parent.type !== 'directory')
+        return;
+    const name = pathUtil.posix.basename(command.path);
+    parent.removeChild(name);
+    const content = command.size !== undefined
+        ? Buffer.alloc(Number(command.size), command.fill ?? 'x')
+        : (command.content ?? '');
+    parent.insert(file(name, content));
+});
+cli.on('createDirectory', (command) => {
+    const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
+    if (parent === undefined || parent.type !== 'directory')
+        return;
+    parent.insert(directory({ name: pathUtil.posix.basename(command.path) }, []));
+});
+cli.on('createSymlink', (command) => {
+    const parent = fakeFilesystem.find(pathUtil.posix.dirname(command.path));
+    if (parent === undefined || parent.type !== 'directory')
+        return;
+    parent.insert(symlink(pathUtil.posix.basename(command.path), command.target));
+});
+
 cli.on('exit', () => {
     logMessage('').end();
     server.close();
+    // Exits even when a handle stays open, like stdin on Windows, which held every test until the kill timer.
+    setTimeout(() => process.exit(0), 200).unref();
 });

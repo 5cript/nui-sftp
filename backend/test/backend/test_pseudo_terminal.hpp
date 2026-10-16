@@ -28,6 +28,7 @@
 #    include <vector>
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -129,7 +130,7 @@ namespace Test
 
         std::filesystem::path pseudoTerminalCaptureFile(std::string const& name)
         {
-            const auto directory = programDirectory / "temp" / "pseudo_terminal";
+            const auto directory = temporaryRoot / "pseudo_terminal";
             std::filesystem::create_directories(directory);
             const auto file = directory / name;
             std::filesystem::remove(file);

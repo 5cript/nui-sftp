@@ -107,9 +107,12 @@ MacWebViewHooks::MacWebViewHooks(Nui::Window& window, Nui::RpcHub& hub)
               {
                   const auto& request = arguments.is_array() && !arguments.empty() ? arguments[0] : arguments;
 
-                  std::vector<SharedData::DirectoryEntry> entries;
+                  std::vector<SharedData::DroppedItem> entries;
                   for (auto const& path : takeDroppedFiles())
-                      entries.push_back(leanDirectoryEntryFromPath(path));
+                  {
+                      if (auto item = droppedItemFromPath(path); item)
+                          entries.push_back(*std::move(item));
+                  }
                   if (entries.empty())
                   {
                       Log::warn("NativeFileDrop::claim: no dropped files are pending.");

@@ -5,6 +5,8 @@
 
 #include <nui/utility/scope_exit.hpp>
 
+extern std::filesystem::path temporaryRoot;
+
 namespace Test
 {
     class UploadOperationTests : public RealServerTests
@@ -16,7 +18,7 @@ namespace Test
         {
             RealServerTests::SetUp();
 
-            std::ofstream testFile{programDirectory / "temp" / "testfile.txt", std::ios_base::binary};
+            std::ofstream testFile{temporaryRoot / "testfile.txt", std::ios_base::binary};
             testFile << testFileContent;
         }
     };
@@ -50,21 +52,50 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "testfile.txt.filepart";
+            return entry.name == "testfile.txt.filepart";
         });
 
         EXPECT_NE(it, listResult.value().end());
+    }
+
+    TEST_F(UploadOperationTests, InvalidRemotePathsAreRefusedBeforeTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // Relative and ".." paths cannot be built as a RemotePath at all, unset and the root remain.
+        for (auto const& remotePath : {Paths::RemotePath{}, Paths::RemotePath::root()})
+        {
+            UploadOperation operation{
+                *sftp,
+                {
+                    .remotePath = remotePath,
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
+            auto prepareResult = operation.prepare();
+            ASSERT_FALSE(prepareResult.has_value()) << remotePath.value();
+            EXPECT_EQ(prepareResult.error().type, Operation::ErrorType::InvalidPath) << remotePath.value();
+        }
+
+        auto fut = sftp->listDirectory(remote("/home"));
+        ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
+        auto listResult = fut.get();
+        ASSERT_TRUE(listResult.has_value());
+        for (auto const& entry : *listResult)
+            EXPECT_NE(entry.name, "testfile.txt.filepart");
     }
 
     TEST_F(UploadOperationTests, CanPrepareUploadByAdoptingFilepart)
@@ -72,7 +103,7 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        auto createFuture = sftp->createFile("/home/test/testfile.txt.filepart");
+        auto createFuture = sftp->createFile(remote("/home/test/testfile.txt.filepart"));
         ASSERT_EQ(createFuture.wait_for(5s), std::future_status::ready);
         auto createResult = createFuture.get();
         ASSERT_TRUE(createResult.has_value());
@@ -80,23 +111,60 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .tryContinue = true,
-            }};
+            }
+        };
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "testfile.txt.filepart";
+            return entry.name == "testfile.txt.filepart";
         });
 
         EXPECT_NE(it, listResult.value().end());
     }
+
+#ifdef _WIN32
+    TEST_F(UploadOperationTests, InheritedWindowsPermissionsAreNeverExecutable)
+    {
+        // std::filesystem reports every Windows file as executable, those bits must not reach the server.
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        std::ofstream{temporaryRoot / "windows.txt"} << "text";
+
+        UploadOperation operation{
+            *sftp,
+            {
+                .remotePath = remote("/home/test/windows.txt"),
+                .localPath = toLocal(temporaryRoot / "windows.txt"),
+                .inheritPermissions = true,
+            }
+        };
+        UploadOperation::WorkStatus workStatus{};
+        for (int workTimes = 0; workTimes < 100; ++workTimes)
+        {
+            auto workResult = operation.work();
+            ASSERT_TRUE(workResult.has_value());
+            workStatus = workResult.value();
+            if (workStatus == UploadOperation::WorkStatus::Complete)
+                break;
+        }
+        ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+        auto statFuture = sftp->stat(remote("/home/test/windows.txt"));
+        ASSERT_EQ(statFuture.wait_for(5s), std::future_status::ready);
+        const auto information = statFuture.get();
+        ASSERT_TRUE(information.has_value());
+        using std::filesystem::perms;
+        EXPECT_EQ(information->permissions & (perms::owner_exec | perms::group_exec | perms::others_exec), perms::none);
+    }
+#endif
 
     TEST_F(UploadOperationTests, CanUploadFile)
     {
@@ -106,9 +174,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -121,12 +190,12 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "testfile.txt";
+            return entry.name == "testfile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
 
@@ -134,7 +203,7 @@ namespace Test
         ASSERT_TRUE(closeResult.has_value());
 
         auto readFut = sftp->openFile(
-            "/home/test/testfile.txt", SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+            remote("/home/test/testfile.txt"), SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
         ASSERT_EQ(readFut.wait_for(5s), std::future_status::ready);
         auto readResult = readFut.get();
 
@@ -163,9 +232,10 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
-                }};
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -187,10 +257,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .mayOverwrite = false,
-                }};
+                }
+            };
 
             auto workResult = operation.work();
             ASSERT_FALSE(workResult.has_value());
@@ -208,9 +279,10 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
-                }};
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -232,10 +304,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .mayOverwrite = true,
-                }};
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -261,7 +334,7 @@ namespace Test
         // First upload, but only part of it
         {
             auto openFut = sftp->openFile(
-                "/home/test/testfile.txt.filepart",
+                remote("/home/test/testfile.txt.filepart"),
                 SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
                 std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
             ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);
@@ -283,10 +356,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .tryContinue = true,
-                }};
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -306,7 +380,84 @@ namespace Test
         // Verify final file content
         {
             auto readFut = sftp->openFile(
-                "/home/test/testfile.txt",
+                remote("/home/test/testfile.txt"),
+                SecureShell::SftpSession::OpenType::Read,
+                std::filesystem::perms::owner_read);
+            ASSERT_EQ(readFut.wait_for(5s), std::future_status::ready);
+            auto readResult = readFut.get();
+
+            ASSERT_TRUE(readResult.has_value());
+            auto fileWeak = std::move(readResult).value();
+            auto file = fileWeak.lock();
+            ASSERT_TRUE(file);
+
+            std::string data(testFileContent.size() + 100, '\0');
+            auto readAllFut = file->readSome(data.data(), data.size());
+            ASSERT_EQ(readAllFut.wait_for(5s), std::future_status::ready);
+            auto readAllResult = readAllFut.get();
+            ASSERT_TRUE(readAllResult.has_value());
+            data.resize(readAllResult.value());
+
+            EXPECT_EQ(data, testFileContent);
+        }
+    }
+
+    TEST_F(UploadOperationTests, PartialFileOfAnotherSourceIsNotContinued)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        // First upload, but only part of it
+        {
+            auto openFut = sftp->openFile(
+                remote("/home/test/testfile.txt.filepart"),
+                SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+            ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);
+            auto openResult = openFut.get();
+            ASSERT_TRUE(openResult.has_value());
+            auto fileWeak = std::move(openResult).value();
+            auto file = fileWeak.lock();
+            ASSERT_TRUE(file);
+
+            // Same length as a real part, but not the source's bytes: a leftover of another program or version.
+            std::string partialContent(testFileContent.size() / 2, '#');
+            auto writeFut = file->write(partialContent);
+            ASSERT_EQ(writeFut.wait_for(5s), std::future_status::ready);
+            (void)writeFut.get();
+            file->close();
+        }
+
+        // Second upload continuing the partial file
+        {
+            UploadOperation operation{
+                *sftp,
+                {
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                    .tryContinue = true,
+                }
+            };
+
+            UploadOperation::WorkStatus workStatus;
+            for (int workTimes = 0; workTimes < 100; ++workTimes)
+            {
+                auto workResult = operation.work();
+                ASSERT_TRUE(workResult.has_value());
+                workStatus = workResult.value();
+                if (workStatus == UploadOperation::WorkStatus::Complete)
+                    break;
+            }
+            ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
+
+            auto closeResult = operation.cancel(false);
+            ASSERT_TRUE(closeResult.has_value());
+        }
+
+        // Verify final file content
+        {
+            auto readFut = sftp->openFile(
+                remote("/home/test/testfile.txt"),
                 SecureShell::SftpSession::OpenType::Read,
                 std::filesystem::perms::owner_read);
             ASSERT_EQ(readFut.wait_for(5s), std::future_status::ready);
@@ -333,15 +484,16 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
-        std::ofstream emptyFile{programDirectory / "temp" / "emptyfile.txt", std::ios_base::binary};
+        std::ofstream emptyFile{temporaryRoot / "emptyfile.txt", std::ios_base::binary};
         emptyFile.close();
 
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/emptyfile.txt",
-                .localPath = programDirectory / "temp" / "emptyfile.txt",
-            }};
+                .remotePath = remote("/home/test/emptyfile.txt"),
+                .localPath = toLocal(temporaryRoot / "emptyfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -354,12 +506,12 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "emptyfile.txt";
+            return entry.name == "emptyfile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -372,9 +524,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -387,13 +540,13 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto filepartIt =
             std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-                return entry.path == "testfile.txt.filepart";
+                return entry.name == "testfile.txt.filepart";
             });
         EXPECT_EQ(filepartIt, listResult.value().end());
     }
@@ -406,9 +559,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -434,9 +588,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "does_not_exist.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "does_not_exist.txt"),
+            }
+        };
 
         auto firstResult = operation.work();
         ASSERT_FALSE(firstResult.has_value());
@@ -454,9 +609,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/nonexistent_dir/file.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
-            }};
+                .remotePath = remote("/home/test/nonexistent_dir/file.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -471,9 +627,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "does_not_exist.txt",
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "does_not_exist.txt"),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -488,9 +645,10 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory,
-            }};
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(programDirectory),
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
@@ -505,16 +663,17 @@ namespace Test
         // File larger than the internal buffer (16384 bytes) to exercise multi-chunk upload
         const std::string largeContent(30000, 'x');
         {
-            std::ofstream largeFile{programDirectory / "temp" / "largefile.txt", std::ios_base::binary};
+            std::ofstream largeFile{temporaryRoot / "largefile.txt", std::ios_base::binary};
             largeFile << largeContent;
         }
 
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/largefile.txt",
-                .localPath = programDirectory / "temp" / "largefile.txt",
-            }};
+                .remotePath = remote("/home/test/largefile.txt"),
+                .localPath = toLocal(temporaryRoot / "largefile.txt"),
+            }
+        };
 
         UploadOperation::WorkStatus workStatus;
         for (int workTimes = 0; workTimes < 100; ++workTimes)
@@ -527,12 +686,12 @@ namespace Test
         }
         ASSERT_EQ(workStatus, UploadOperation::WorkStatus::Complete);
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "largefile.txt";
+            return entry.name == "largefile.txt";
         });
         EXPECT_NE(it, listResult.value().end());
     }
@@ -581,12 +740,12 @@ namespace Test
     TEST_F(UploadOperationTests, UploadLocalSymlinkToRegularFileCreatesRemoteSymlink)
     {
         // Set up: a local symlink to a regular file.
-        const auto targetFile = programDirectory / "temp" / "sym_target_file.txt";
+        const auto targetFile = temporaryRoot / "sym_target_file.txt";
         {
             std::ofstream f{targetFile, std::ios::binary};
             f << "target content";
         }
-        const auto linkPath = makeFreshSymlink(programDirectory / "temp" / "sym_to_file", targetFile);
+        const auto linkPath = makeFreshSymlink(temporaryRoot / "sym_to_file", targetFile);
 
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -594,16 +753,17 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_sym_to_file",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/uploaded_sym_to_file"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
         // The remote entry must be a symlink, not a file copy of the target.
-        auto lstatFut = sftp->lstat("/home/test/uploaded_sym_to_file");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_sym_to_file"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -615,14 +775,14 @@ namespace Test
     {
         // A symlink pointing at a directory must be recreated as a single remote link;
         // the directory contents must NOT be recursively uploaded into it.
-        const auto targetDir = programDirectory / "temp" / "sym_target_dir";
+        const auto targetDir = temporaryRoot / "sym_target_dir";
         std::error_code ec;
         std::filesystem::create_directory(targetDir, ec);
         {
             std::ofstream f{targetDir / "inside.txt", std::ios::binary};
             f << "should not appear on remote";
         }
-        const auto linkPath = makeFreshSymlink(programDirectory / "temp" / "sym_to_dir", targetDir);
+        const auto linkPath = makeFreshSymlink(temporaryRoot / "sym_to_dir", targetDir);
 
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -630,15 +790,16 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_sym_to_dir",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/uploaded_sym_to_dir"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/uploaded_sym_to_dir");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_sym_to_dir"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -651,7 +812,7 @@ namespace Test
         // without trying to open/stat the target. This is the scenario that caused the
         // "Path exists and is not a directory" and FileStatFailed errors before.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "dangling_upload",
+            temporaryRoot / "dangling_upload",
             "/nowhere/this/should/not/exist.txt"
         );
 
@@ -661,15 +822,16 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_dangling",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/uploaded_dangling"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value()) << "dangling symlink upload failed";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/uploaded_dangling");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_dangling"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -678,12 +840,12 @@ namespace Test
 
     TEST_F(UploadOperationTests, UploadSymlinkWithSkipSymlinkDoesNotCreateRemoteEntry)
     {
-        const auto targetFile = programDirectory / "temp" / "sym_skip_target.txt";
+        const auto targetFile = temporaryRoot / "sym_skip_target.txt";
         {
             std::ofstream f{targetFile, std::ios::binary};
             f << "content";
         }
-        const auto linkPath = makeFreshSymlink(programDirectory / "temp" / "sym_skip", targetFile);
+        const auto linkPath = makeFreshSymlink(temporaryRoot / "sym_skip", targetFile);
 
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -691,16 +853,17 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/uploaded_sym_skip",
-                .localPath = linkPath,
+                .remotePath = remote("/home/test/uploaded_sym_skip"),
+                .localPath = toLocal(linkPath),
                 .symlinkHandling = Persistence::SymlinkHandling::SkipSymlink,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/uploaded_sym_skip");
+        auto lstatFut = sftp->lstat(remote("/home/test/uploaded_sym_skip"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         EXPECT_FALSE(entry.has_value()) << "SkipSymlink must not create a remote entry";
@@ -719,30 +882,32 @@ namespace Test
             UploadOperation first{
                 *sftp,
                 {
-                    .remotePath = "/home/test/sym_overwrite_target",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
-                }};
+                    .remotePath = remote("/home/test/sym_overwrite_target"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                }
+            };
             auto s = runToCompletion(first);
             ASSERT_TRUE(s.has_value());
         }
 
         // Now overwrite with a symlink.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "sym_overwrite_link",
-            programDirectory / "temp" / "testfile.txt"
+            temporaryRoot / "sym_overwrite_link",
+            temporaryRoot / "testfile.txt"
         );
         UploadOperation symOp{
             *sftp,
             {
-                .remotePath = "/home/test/sym_overwrite_target",
-                .localPath = linkPath,
+                .remotePath = remote("/home/test/sym_overwrite_target"),
+                .localPath = toLocal(linkPath),
                 .mayOverwrite = true,
-            }};
+            }
+        };
         auto status = runToCompletion(symOp);
         ASSERT_TRUE(status.has_value()) << "symlink-over-file overwrite failed";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/sym_overwrite_target");
+        auto lstatFut = sftp->lstat(remote("/home/test/sym_overwrite_target"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -755,8 +920,8 @@ namespace Test
         // For symlinks, prepare() must not open a .filepart file on the remote — that path
         // is only for regular-file uploads.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "sym_prepare_check",
-            programDirectory / "temp" / "testfile.txt"
+            temporaryRoot / "sym_prepare_check",
+            temporaryRoot / "testfile.txt"
         );
 
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -765,19 +930,20 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/sym_prepare_check",
-                .localPath = linkPath,
-            }};
+                .remotePath = remote("/home/test/sym_prepare_check"),
+                .localPath = toLocal(linkPath),
+            }
+        };
 
         auto prepareResult = operation.prepare();
         ASSERT_TRUE(prepareResult.has_value());
 
-        auto fut = sftp->listDirectory("/home/test");
+        auto fut = sftp->listDirectory(remote("/home/test"));
         ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
         auto listResult = fut.get();
         ASSERT_TRUE(listResult.has_value());
         auto it = std::find_if(listResult.value().begin(), listResult.value().end(), [](const auto& entry) {
-            return entry.path == "sym_prepare_check.filepart";
+            return entry.name == "sym_prepare_check.filepart";
         });
         EXPECT_EQ(it, listResult.value().end()) << ".filepart must not be created for symlink uploads";
     }
@@ -797,20 +963,21 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/newly_created/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/newly_created/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value()) << "upload should succeed when parent is auto-created";
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/newly_created/testfile.txt");
+        auto lstatFut = sftp->lstat(remote("/home/test/newly_created/testfile.txt"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         ASSERT_TRUE(lstatFut.get().has_value()) << "uploaded file should exist at the nested path";
 
-        auto dirFut = sftp->lstat("/home/test/newly_created");
+        auto dirFut = sftp->lstat(remote("/home/test/newly_created"));
         ASSERT_EQ(dirFut.wait_for(5s), std::future_status::ready);
         auto dirEntry = dirFut.get();
         ASSERT_TRUE(dirEntry.has_value());
@@ -825,10 +992,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/a/b/c/d/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/a/b/c/d/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value()) << "deeply nested upload should succeed";
@@ -836,14 +1004,14 @@ namespace Test
 
         for (auto const* path : {"/home/test/a", "/home/test/a/b", "/home/test/a/b/c", "/home/test/a/b/c/d"})
         {
-            auto fut = sftp->lstat(path);
+            auto fut = sftp->lstat(remote(path));
             ASSERT_EQ(fut.wait_for(5s), std::future_status::ready);
             auto entry = fut.get();
             ASSERT_TRUE(entry.has_value()) << "intermediate directory missing: " << path;
             EXPECT_EQ(entry->type, SharedData::FileType::Directory) << path;
         }
 
-        auto fileFut = sftp->lstat("/home/test/a/b/c/d/testfile.txt");
+        auto fileFut = sftp->lstat(remote("/home/test/a/b/c/d/testfile.txt"));
         ASSERT_EQ(fileFut.wait_for(5s), std::future_status::ready);
         EXPECT_TRUE(fileFut.get().has_value());
     }
@@ -857,10 +1025,11 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
@@ -876,16 +1045,17 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/still_missing_dir/testfile.txt",
-                .localPath = programDirectory / "temp" / "testfile.txt",
+                .remotePath = remote("/home/test/still_missing_dir/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
                 .createMissingDirectories = false,
-            }};
+            }
+        };
 
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
         EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::SftpError);
 
-        auto dirFut = sftp->lstat("/home/test/still_missing_dir");
+        auto dirFut = sftp->lstat(remote("/home/test/still_missing_dir"));
         ASSERT_EQ(dirFut.wait_for(5s), std::future_status::ready);
         EXPECT_FALSE(dirFut.get().has_value()) << "parent dir must NOT have been created";
     }
@@ -894,8 +1064,8 @@ namespace Test
     {
         // Symlink path must honour the flag too: createSymLink fails without the parent.
         const auto linkPath = makeFreshSymlink(
-            programDirectory / "temp" / "sym_for_missing_dirs",
-            programDirectory / "temp" / "testfile.txt"
+            temporaryRoot / "sym_for_missing_dirs",
+            temporaryRoot / "testfile.txt"
         );
 
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -904,16 +1074,17 @@ namespace Test
         UploadOperation operation{
             *sftp,
             {
-                .remotePath = "/home/test/missing/for/symlink/uploaded_link",
-                .localPath = linkPath,
+                .remotePath = remote("/home/test/missing/for/symlink/uploaded_link"),
+                .localPath = toLocal(linkPath),
                 .createMissingDirectories = true,
-            }};
+            }
+        };
 
         auto status = runToCompletion(operation);
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(*status, UploadOperation::WorkStatus::Complete);
 
-        auto lstatFut = sftp->lstat("/home/test/missing/for/symlink/uploaded_link");
+        auto lstatFut = sftp->lstat(remote("/home/test/missing/for/symlink/uploaded_link"));
         ASSERT_EQ(lstatFut.wait_for(5s), std::future_status::ready);
         auto entry = lstatFut.get();
         ASSERT_TRUE(entry.has_value());
@@ -928,7 +1099,7 @@ namespace Test
         // First upload, but only part of it
         {
             auto openFut = sftp->openFile(
-                "/home/test/testfile.txt.filepart",
+                remote("/home/test/testfile.txt.filepart"),
                 SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
                 std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
             ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);
@@ -950,10 +1121,11 @@ namespace Test
             UploadOperation operation{
                 *sftp,
                 {
-                    .remotePath = "/home/test/testfile.txt",
-                    .localPath = programDirectory / "temp" / "testfile.txt",
+                    .remotePath = remote("/home/test/testfile.txt"),
+                    .localPath = toLocal(temporaryRoot / "testfile.txt"),
                     .tryContinue = true,
-                }};
+                }
+            };
 
             UploadOperation::WorkStatus workStatus;
             for (int workTimes = 0; workTimes < 100; ++workTimes)

@@ -112,7 +112,7 @@ namespace Ids
             name() \
                 : Id{"INVALID_ID"} \
             {} \
-            name(Id id) \
+            explicit name(Id id) \
                 : Id{std::move(id)} \
             {} \
 \

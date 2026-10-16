@@ -142,21 +142,53 @@ namespace
      * @brief Writes contents[i] to "{stem}_{i}{ext}" alongside @p file for each
      *        entry.  Used by the locked-mode S-key save-all path.
      */
+    /**
+     * @brief Writes each channel's content to {stem}_{index}{extension} next to @p file, skipping names that exist.
+     */
     void saveTerminalContents(
         std::filesystem::path const& file,
         std::vector<std::string> const& contents
     )
     {
-        int indexIncrement = 0;
-        const auto basePath = file.parent_path();
-        const auto extension = file.extension().string();
-        const auto baseName = file.stem().string();
-        for (auto const& textContent : contents)
+        struct SaveState
         {
+            std::filesystem::path directory;
+            std::string stem;
+            std::string extension;
+            std::vector<std::string> contents;
+            std::size_t next{0};
+            int index{0};
+            /// Bounds the search for a free name.
+            int attemptsLeft{1000};
+        };
+        auto state = std::make_shared<SaveState>(SaveState{
+            .directory = file.parent_path(),
+            .stem = file.stem().string(),
+            .extension = file.extension().string(),
+            .contents = contents,
+        });
+        // Each pending reply owns the chain, it ends with the last one.
+        auto writeNext = std::make_shared<std::function<void()>>();
+        *writeNext = [state, weakWriteNext = std::weak_ptr{writeNext}]()
+        {
+            auto self = weakWriteNext.lock();
+            if (!self || state->next >= state->contents.size() || state->attemptsLeft-- <= 0)
+                return;
             const auto filePath =
-                basePath / fmt::format("{}_{}{}", baseName, indexIncrement++, extension);
-            SessionInternal::writeChannelContentToFile(filePath, textContent);
-        }
+                state->directory / fmt::format("{}_{}{}", state->stem, state->index++, state->extension);
+            SessionInternal::writeChannelContentToNewFile(
+                filePath,
+                state->contents[state->next],
+                [state, self](SessionInternal::WriteOutcome outcome)
+                {
+                    // A taken name is skipped, the same content goes to the next one.
+                    if (outcome != SessionInternal::WriteOutcome::Exists)
+                        ++state->next;
+                    (*self)();
+                }
+            );
+        };
+        (*writeNext)();
     }
 }
 

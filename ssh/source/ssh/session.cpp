@@ -1,7 +1,7 @@
 #include <ssh/session.hpp>
 #include <ssh/sequential.hpp>
 #include <ssh/sftp_session.hpp>
-#include <ssh/u8_path.hpp>
+#include <paths/native.hpp>
 #include <ssh/ssh_key.hpp>
 
 #include <fmt/format.h>
@@ -35,13 +35,13 @@ namespace SecureShell
         describeKeyImportFailure(int importResult, std::string_view keyKind, std::filesystem::path const& keyFile)
         {
             if (importResult == SSH_EOF)
-                return fmt::format("Cannot open the {} key file '{}'", keyKind, u8Path(keyFile));
+                return fmt::format("Cannot open the {} key file '{}'", keyKind, Paths::nativeToUtf8(keyFile));
             if (keyKind == "private")
                 return fmt::format(
                     "Cannot load the private key file '{}', it is not a valid key or the passphrase is wrong",
-                    u8Path(keyFile)
+                    Paths::nativeToUtf8(keyFile)
                 );
-            return fmt::format("The public key file '{}' is not a valid key", u8Path(keyFile));
+            return fmt::format("The public key file '{}' is not a valid key", Paths::nativeToUtf8(keyFile));
         }
 
         void removeFromContainer(auto& container, auto* ptr, bool isBackElement)
@@ -550,7 +550,7 @@ namespace SecureShell
                 {
                     lastAttemptedAppliedOption = "Identity Agent";
                     return static_cast<ssh::Session&>(*session).setOption(
-                        SSH_OPTIONS_IDENTITY_AGENT, u8Path(sshOptions.identityAgent.value()).c_str()
+                        SSH_OPTIONS_IDENTITY_AGENT, Paths::nativeToUtf8(sshOptions.identityAgent.value()).c_str()
                     );
                 }
                 return 0;
@@ -635,7 +635,7 @@ namespace SecureShell
                     if (maybeSshKeyPublic)
                     {
                         return ssh_pki_import_pubkey_file(
-                            u8Path(*maybeSshKeyPublic).c_str(), &publicKey.underlyingReferenced()
+                            Paths::nativeToUtf8(*maybeSshKeyPublic).c_str(), &publicKey.underlyingReferenced()
                         );
                     }
                     return SSH_OK;
@@ -655,7 +655,7 @@ namespace SecureShell
                 [&sshKeyPrivate, &privateKey, askPass, askPassUserDataKeyPhrase]()
                 {
                     return ssh_pki_import_privkey_file(
-                        u8Path(sshKeyPrivate).c_str(),
+                        Paths::nativeToUtf8(sshKeyPrivate).c_str(),
                         nullptr,
                         askPass,
                         askPassUserDataKeyPhrase,
@@ -671,7 +671,7 @@ namespace SecureShell
             if (result.index == 1 && result.result != SSH_OK)
                 keyFailure = describeKeyImportFailure(result.result, "public", *maybeSshKeyPublic);
             else if (result.index == 2 && result.result == SSH_AUTH_DENIED)
-                keyFailure = fmt::format("The server does not accept the public key '{}'", u8Path(*maybeSshKeyPublic));
+                keyFailure = fmt::format("The server does not accept the public key '{}'", Paths::nativeToUtf8(*maybeSshKeyPublic));
             else if (result.index == 3 && result.result != SSH_OK)
                 keyFailure = describeKeyImportFailure(result.result, "private", sshKeyPrivate);
         }

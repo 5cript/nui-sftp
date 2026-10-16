@@ -13,6 +13,7 @@
 using namespace std::string_literals;
 
 extern std::filesystem::path programDirectory;
+extern std::filesystem::path temporaryRoot;
 
 namespace Utility::Test
 {
@@ -22,18 +23,25 @@ namespace Utility::Test
         template <bool IncludesDotAndDotDot = false>
         auto withWalkerDo(auto&& fn)
         {
-            auto scan = [this](std::filesystem::path const& path)
+            auto scan = [this](Paths::RelativePath const& relative)
                 -> std::expected<std::vector<SharedData::DirectoryEntry>, std::string> {
                 if (scanner_)
-                    return scanner_(path);
+                    return scanner_(absolutePath(relative));
                 else
                     return std::unexpected("No Scanner Installed In Test"s);
             };
             using WalkerType =
                 DeepDirectoryWalker<SharedData::DirectoryEntry, std::string, decltype(scan), IncludesDotAndDotDot>;
             if (!walker_)
-                walker_ = std::make_unique<WalkerType>(isolateDirectory_.path(), std::move(scan));
+                walker_ = std::make_unique<WalkerType>(std::move(scan));
             return fn(static_cast<WalkerType&>(*walker_));
+        }
+
+        std::filesystem::path absolutePath(Paths::RelativePath const& relative) const
+        {
+            if (relative.empty())
+                return isolateDirectory_.path();
+            return isolateDirectory_.path() / relative.value();
         }
 
         std::filesystem::path createFileIn(std::filesystem::path const& dir, std::size_t size)
@@ -77,7 +85,7 @@ namespace Utility::Test
                 for (auto const& dirEntry : std::filesystem::directory_iterator(path))
                 {
                     SharedData::DirectoryEntry entry{};
-                    entry.path = dirEntry.path().filename();
+                    entry.name = dirEntry.path().filename().string();
                     entry.type =
                         dirEntry.is_directory() ? SharedData::FileType::Directory : SharedData::FileType::Regular;
                     entry.size = dirEntry.is_regular_file() ? dirEntry.file_size() : 0;
@@ -88,7 +96,7 @@ namespace Utility::Test
         }
 
       protected:
-        Utility::TemporaryDirectory isolateDirectory_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, true};
         std::unique_ptr<BaseDirectoryWalker> walker_;
         std::function<std::expected<std::vector<SharedData::DirectoryEntry>, std::string>(std::filesystem::path const&)>
             scanner_;
@@ -336,11 +344,11 @@ namespace Utility::Test
         createSomeFilesIn(subSubDir, fileCount);
 
         std::vector<std::filesystem::path> paths{};
-        const auto walkResult = withWalkerDo([&paths](auto& walker) {
+        const auto walkResult = withWalkerDo([this, &paths](auto& walker) {
             auto res = walker.walkAll();
             auto const& entries = walker.entries();
-            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
-                return walker.fullPath(entry);
+            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
+                return absolutePath(walker.relativePath(entry));
             });
             return res;
         });
@@ -404,30 +412,30 @@ namespace Utility::Test
             [](std::filesystem::path const&) -> std::expected<std::vector<SharedData::DirectoryEntry>, std::string> {
             return std::vector<SharedData::DirectoryEntry>{
                 SharedData::DirectoryEntry{
-                    .path = ".",
+                    .name = ".",
                     .type = SharedData::FileType::Directory,
                 },
                 SharedData::DirectoryEntry{
-                    .path = "..",
+                    .name = "..",
                     .type = SharedData::FileType::Directory,
                 },
                 SharedData::DirectoryEntry{
-                    .path = "file0",
+                    .name = "file0",
                     .type = SharedData::FileType::Regular,
                 },
                 SharedData::DirectoryEntry{
-                    .path = "dir0",
+                    .name = "dir0",
                     .type = SharedData::FileType::Directory,
                 },
             };
         };
 
         std::vector<std::filesystem::path> paths{};
-        const auto walkResult = withWalkerDo<true>([&paths](auto& walker) {
+        const auto walkResult = withWalkerDo<true>([this, &paths](auto& walker) {
             auto res = walker.walk();
             auto const& entries = walker.entries();
-            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
-                return walker.fullPath(entry);
+            std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
+                return absolutePath(walker.relativePath(entry));
             });
             return res;
         });
@@ -448,19 +456,19 @@ namespace Utility::Test
     {
         std::vector<SharedData::DirectoryEntry> results{
             SharedData::DirectoryEntry{
-                .path = "file0",
+                .name = "file0",
                 .type = SharedData::FileType::Regular,
             },
             SharedData::DirectoryEntry{
-                .path = ".",
+                .name = ".",
                 .type = SharedData::FileType::Directory,
             },
             SharedData::DirectoryEntry{
-                .path = "dir0",
+                .name = "dir0",
                 .type = SharedData::FileType::Directory,
             },
             SharedData::DirectoryEntry{
-                .path = "..",
+                .name = "..",
                 .type = SharedData::FileType::Directory,
             },
         };
@@ -480,12 +488,12 @@ namespace Utility::Test
 
         auto doTheWalk = [this, &paths]() {
             paths.clear();
-            const auto walkResult = withWalkerDo<true>([&paths](auto& walker) {
+            const auto walkResult = withWalkerDo<true>([this, &paths](auto& walker) {
                 walker.reset();
                 auto res = walker.walk();
                 auto const& entries = walker.entries();
-                std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [&walker](auto const& entry) {
-                    return walker.fullPath(entry);
+                std::transform(entries.begin(), entries.end(), std::back_inserter(paths), [this, &walker](auto const& entry) {
+                    return absolutePath(walker.relativePath(entry));
                 });
                 return res;
             });

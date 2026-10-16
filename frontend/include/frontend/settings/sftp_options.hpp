@@ -41,6 +41,7 @@ struct SftpOptions : public GroupKeys
         NumberSetting<unsigned short, true> customDirectoryPermissions;
         BoolSetting<true> reserveSpace;
         BoolSetting<true> doCleanup;
+        BoolSetting<true> markAsDownloaded;
         ComboSetting<Persistence::SymlinkHandling, std::string, true> symlinkHandling;
         BoolSetting<true> failFast;
     };

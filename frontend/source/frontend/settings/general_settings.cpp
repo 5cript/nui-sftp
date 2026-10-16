@@ -239,6 +239,29 @@ GeneralSettings::GeneralSettings(
                 onChange();
             },
         },
+        .openRiskyFiles = ComboSetting<Persistence::RiskyFilePolicy, std::string>{
+            {Persistence::RiskyFilePolicy::Warn, Persistence::RiskyFilePolicy::Never, Persistence::RiskyFilePolicy::Allow},
+            localFilesystemFactory_.identity({"general", "localFilesystemOptions", "openRiskyFiles"}),
+            onChange,
+            [this, onChange]()
+            {
+                localFilesystemOptions.openRiskyFiles.value(Persistence::RiskyFilePolicy::Warn);
+                onChange();
+            },
+            [](Persistence::RiskyFilePolicy policy) -> std::string
+            {
+                switch (policy)
+                {
+                    case Persistence::RiskyFilePolicy::Allow:
+                        return language->get("settings", "general", "localFilesystemOptions", "openRiskyFilesAllow");
+                    case Persistence::RiskyFilePolicy::Warn:
+                        return language->get("settings", "general", "localFilesystemOptions", "openRiskyFilesWarn");
+                    case Persistence::RiskyFilePolicy::Never:
+                        return language->get("settings", "general", "localFilesystemOptions", "openRiskyFilesNever");
+                }
+                return "???";
+            },
+        },
     }
     , fileTrackingOptions{
         .autoReupload = BoolSetting<>{
@@ -267,6 +290,15 @@ GeneralSettings::GeneralSettings(
                 fileTrackingOptions.deleteRemoteOnLocalDelete.value(
                     Persistence::FileTrackingOptions{}.deleteRemoteOnLocalDelete
                 );
+                onChange();
+            },
+        },
+        .checkRemoteChanges = BoolSetting<>{
+            fileTrackingFactory_.identity({"general", "fileTrackingOptions", "checkRemoteChanges"}),
+            onChange,
+            [this, onChange]()
+            {
+                fileTrackingOptions.checkRemoteChanges.value(true);
                 onChange();
             },
         },
@@ -331,6 +363,7 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.fileTrackingOptions.autoReupload = fileTrackingOptions.autoReupload.value();
     state.fileTrackingOptions.moveRemoteOnLocalMove = fileTrackingOptions.moveRemoteOnLocalMove.value();
     state.fileTrackingOptions.deleteRemoteOnLocalDelete = fileTrackingOptions.deleteRemoteOnLocalDelete.value();
+    state.fileTrackingOptions.checkRemoteChanges = fileTrackingOptions.checkRemoteChanges.value();
 
     // Local FS
     state.localFilesystemOptions.preventDeletion = localFilesystemOptions.preventDeletion.value();
@@ -340,6 +373,7 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.localFilesystemOptions.homeOverride = localFilesystemOptions.homeOverride.value();
     state.localFilesystemOptions.temporaryDownloadsDirectory =
         localFilesystemOptions.temporaryDownloadsDirectory.value();
+    state.localFilesystemOptions.openRiskyFiles = localFilesystemOptions.openRiskyFiles.value();
 
     logOptions.applyToState(state.logOptions);
 }
@@ -364,6 +398,7 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     fileTrackingOptions.autoReupload.value(state.fileTrackingOptions.autoReupload);
     fileTrackingOptions.moveRemoteOnLocalMove.value(state.fileTrackingOptions.moveRemoteOnLocalMove);
     fileTrackingOptions.deleteRemoteOnLocalDelete.value(state.fileTrackingOptions.deleteRemoteOnLocalDelete);
+    fileTrackingOptions.checkRemoteChanges.value(state.fileTrackingOptions.checkRemoteChanges.value_or(true));
 
     // Local FS
     localFilesystemOptions.preventDeletion.value(state.localFilesystemOptions.preventDeletion);
@@ -371,6 +406,9 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     localFilesystemOptions.preventCreateFile.value(state.localFilesystemOptions.preventCreateFile);
     localFilesystemOptions.preventCreateDirectory.value(state.localFilesystemOptions.preventCreateDirectory);
     localFilesystemOptions.homeOverride.value(state.localFilesystemOptions.homeOverride);
+    localFilesystemOptions.openRiskyFiles.value(
+        state.localFilesystemOptions.openRiskyFiles.value_or(Persistence::RiskyFilePolicy::Warn)
+    );
     localFilesystemOptions.temporaryDownloadsDirectory.value(
         state.localFilesystemOptions.temporaryDownloadsDirectory.value_or("%temp%/nui-sftp-downloads")
     );
@@ -429,13 +467,15 @@ Nui::ElementRenderer GeneralSettings::render(
             localFilesystemOptions.preventCreateFile(),
             localFilesystemOptions.preventCreateDirectory(),
             localFilesystemOptions.homeOverride(),
-            localFilesystemOptions.temporaryDownloadsDirectory()
+            localFilesystemOptions.temporaryDownloadsDirectory(),
+            localFilesystemOptions.openRiskyFiles()
         );
 
         auto fileTrackingOptionsUi = fragment(
             fileTrackingOptions.autoReupload(),
             fileTrackingOptions.moveRemoteOnLocalMove(),
-            fileTrackingOptions.deleteRemoteOnLocalDelete()
+            fileTrackingOptions.deleteRemoteOnLocalDelete(),
+            fileTrackingOptions.checkRemoteChanges()
         );
         // clang-format on
 

@@ -9,6 +9,14 @@ confirmDialog:
   neverShowAgain: "Nicht mehr anzeigen"
   andMore: "... und {} weitere"
 fileExplorer:
+  openRiskyHeader: "Eine Datei öffnen, die Code ausführen kann?"
+  openRiskyText: "'{}' {}. Beim Öffnen kann sie ausgeführt werden, nur tun, wenn ihrer Herkunft vertraut wird.\n\nTrotzdem öffnen?"
+  invalidItemNameHeader: "Ungültiger Name"
+  invalidItemName: "'{}' kann nicht als Name verwendet werden. Ein Name darf nicht leer, '.' oder '..' sein und weder '/' noch '\\' enthalten."
+  renameTargetExistsHeader: "Eintrag existiert"
+  renameTargetExists: "'{}' existiert bereits. Ersetzen?"
+  existenceCheckFailedHeader: "Existenzprüfung fehlgeschlagen"
+  existenceCheckFailed: "Es konnte nicht geprüft werden, welche Ziele bereits existieren, es wurde nichts übertragen: {}"
   contextMenu:
     download: "Herunterladen"
     upload: "Hochladen"
@@ -86,7 +94,7 @@ remoteSideModel:
   failedToCreateDeleteOperation: "Löschoperation konnte nicht erstellt werden: {}"
   deleteMultipleConfirm: "Sind Sie sicher, dass Sie die folgenden {} Elemente löschen möchten?"
   deleteSingleConfirm: "Sind Sie sicher, dass Sie dieses Element '{}' löschen möchten?"
-  deleteItemsQuestion: "Elemente löschen?"
+  deleteRemoteItemsQuestion: "Auf dem Server löschen?"
   failedToDeleteItems: "Fehler beim Löschen einer oder mehrerer Dateien / Verzeichnisse: {}."
   downloadFailed: "Download fehlgeschlagen"
   failedToCreateDownloadOperation: "Download-Operation konnte nicht erstellt werden: {}."
@@ -124,6 +132,8 @@ localSideModel:
   portalUnavailableText: "Das Desktop-Portal zum Öffnen von Dateien in anderen Anwendungen ist nicht verfügbar. \"Öffnen\", \"Öffnen mit\" und \"Im Dateimanager öffnen\" wurden deaktiviert.\n\n{}"
   archiveUploadFailed: "Archiv-Upload fehlgeschlagen"
   deleteSelectedConfirm: "Sind Sie sicher, dass Sie die ausgewählten Elemente löschen möchten?"
+  deleteLocalItemsQuestion: "Auf diesem Computer löschen?"
+  deleteDirectoriesWithContent: "Ordner werden mit ihrem gesamten Inhalt gelöscht. Dies kann nicht rückgängig gemacht werden."
   remoteSideUnavailable: "Die Remote-Seite ist nicht verfügbar"
   transferFailedTitle: "Dateiübertragung fehlgeschlagen"
 operationQueue:
@@ -142,12 +152,14 @@ operationQueue:
   cancelOperationText: "Sind Sie sicher, dass Sie die Operation abbrechen möchten?"
   deletingItem: "Lösche: '{}'"
   deletingSelectedIn: "Lösche ausgewählte Elemente in {}"
+  deletingLocallyIn: "Lösche lokale Elemente in {}"
   entriesFailed: "{} Einträge fehlgeschlagen:\n"
   errorButton: "Fehler!"
   livePage: "Live"
   noError: "Kein Fehler"
   renameCard: "Umbenennen: '{}' -> '{}'"
   scanCard: "Durchsuche '{}'"
+  scanningItems: "Durchsuche... {} Einträge ({})"
   unknownError: "Unbekannter Fehler"
 syncDialog:
   titleFormat: "Synchronisieren: {} / {}"
@@ -180,6 +192,21 @@ syncDialog:
   synchronize: "Synchronisieren"
   confirmHeader: "Verzeichnisse synchronisieren"
   confirmText: "{} mit {} synchronisieren?"
+  confirmDeletes: "Dabei werden {} Einträge ({}) {} gelöscht."
+  deleteSideRemote: "auf dem Server"
+  deleteSideLocal: "lokal"
+  confirmDeleteRowHeader: "Jetzt löschen"
+  confirmDeleteRow: "'{}' {} jetzt löschen?"
+  blockedNotice: "{} Einträge bleiben unverändert, weil sie nicht lesbar oder nicht übertragbar sind, ein Verzeichnis auf einen symbolischen Link trifft sich ihre Namen nur in der Groß- und Kleinschreibung unterscheiden oder sie sich seit der letzten Synchronisation so geändert haben, dass Daten verloren gingen. Zum Anzeigen klicken."
+  blockedTitle: "Unveränderte Einträge"
+  blockReason:
+    Unreadable: "nicht lesbar"
+    Excluded: "nicht übertragbar"
+    InvalidName: "ungültiger Name"
+    TypeConflict: "Verzeichnis gegen symbolischen Link"
+    CaseConflict: "Namen unterscheiden sich nur in der Groß- und Kleinschreibung"
+    ChangedOnBothSides: "seit der letzten Synchronisation auf beiden Seiten geändert"
+    ChangedOnDestination: "seit der letzten Synchronisation auf der Seite geändert, die ersetzt oder gelöscht würde"
   tree:
     loading: "Lädt…"
     loadFailed: "Fehlgeschlagen: {}"
@@ -196,6 +223,7 @@ syncProgressDialog:
   differencesFound: "Unterschiede gefunden"
   hashing: "Hashes werden berechnet..."
   cancel: "Abbrechen"
+  scanFailed: "Auflisten fehlgeschlagen, es wurde nichts verglichen."
 reconnectDialog:
   attempt: "Versuch {}"
   retryIn: "Neuer Versuch in {} s"
@@ -446,6 +474,9 @@ fileTracking:
   columnAutoReupload: "Auto-Hochladen"
   columnMoveRemote: "Remote verschieben"
   columnDeleteRemote: "Remote löschen"
+  columnCheckRemote: "Server prüfen"
+  serverChangedHeader: "Auf dem Server geändert"
+  serverChangedText: "'{}' wurde auf dem Server geändert, seit sie hier geöffnet wurde. Die Version auf dem Server durch die lokale ersetzen?\n\nNein behält die Version auf dem Server, beim nächsten Speichern wird erneut gefragt."
   columnStatus: "Status"
   stopButton: "Stopp"
   statusWatching: "Beobachtend"
@@ -692,6 +723,8 @@ settings:
       reserveSpaceHelpText: "Platz auf dem Zielsystem für Downloads reservieren."
       doCleanup: "Aufräumen durchführen"
       doCleanupHelpText: "Temporäre Dateien nach dem Download entfernen."
+      markAsDownloaded: "Als heruntergeladen markieren"
+      markAsDownloadedHelpText: "Heruntergeladene Dateien als aus dem Internet stammend markieren, damit Windows (Mark of the Web) und macOS (Quarantäne) vor dem Ausführen warnen. Standardmäßig an."
       symlinkHandlingHelpText: "Wie symbolische Links während der Übertragung behandelt werden. 'AsSymlink' überträgt symbolische Links als symbolische Links (sofern vom Dateisystem unterstützt), 'FollowSymlink' folgt dem symbolischen Link und überträgt die Zieldatei oder das Zielverzeichnis, und 'SkipSymlink' überspringt die Übertragung von symbolischen Links vollständig."
       symlinkHandling: "Behandlung von symbolischen Links"
       failFast: "Schnell fehlschlagen"
@@ -980,6 +1013,11 @@ settings:
       preventCreateDirectory: "Verzeichniserstellung verhindern"
       homeOverrideHelpText: "Wenn gesetzt, überschreibt dies den Standardpfad des Heimatverzeichnisses der Anwendung."
       homeOverride: "Heimatverzeichnis überschreiben"
+      openRiskyFilesHelpText: "Was passiert, wenn eine Datei, die Code ausführen kann (Programm, Skript, Installer oder Verknüpfung), aus dem Dateiexplorer geöffnet wird, auch vom Server geöffnete Dateien."
+      openRiskyFiles: "Öffnen von Dateien, die Code ausführen können"
+      openRiskyFilesAllow: "Immer erlauben"
+      openRiskyFilesWarn: "Vorher fragen"
+      openRiskyFilesNever: "Nie"
       temporaryDownloadsDirectoryHelpText: "Das Verzeichnis, in dem heruntergeladene Dateien temporär gespeichert werden. Standardmäßig %temp%/nui-sftp-downloads."
       temporaryDownloadsDirectory: "Temporäres Download-Verzeichnis"
     fileTrackingOptions:
@@ -989,6 +1027,8 @@ settings:
       moveRemoteOnLocalMoveHelpText: "Standardwert für neue überwachte Einträge: Wenn eine überwachte Datei lokal verschoben oder umbenannt wird, die gleiche Aktion auf dem Remote ausführen."
       deleteRemoteOnLocalDelete: "Remote löschen bei lokalem Löschen"
       deleteRemoteOnLocalDeleteHelpText: "Standardwert für neue überwachte Einträge: Wenn eine überwachte Datei lokal gelöscht wird, auch auf dem Remote löschen."
+      checkRemoteChanges: "Server vor erneutem Hochladen prüfen"
+      checkRemoteChangesHelpText: "Standard für neue verfolgte Einträge: Vor dem erneuten Hochladen einer bearbeiteten Datei prüfen, ob sich die Kopie auf dem Server seit dem Öffnen geändert hat, und vor dem Ersetzen fragen."
   colorSetting:
     pickButton: "Wählen"
 persistence:
@@ -1111,12 +1151,17 @@ terminalPanel:
   saveDialogTitle: "Terminalinhalt speichern"
   saveToFile: "Terminal in Datei speichern"
 backend:
+  rename:
+    targetExists: "Ein Eintrag mit diesem Namen existiert bereits."
+    invalidName: "Der neue Name muss ein einfacher Name im selben Verzeichnis sein."
   rpcFilesystem:
+    fileExists: "'{}' existiert bereits und wurde nicht ersetzt."
     deletionPrevented: "Das Löschen von Dateien ist durch die Konfiguration verhindert."
     renamePrevented: "Das Umbenennen von Dateien ist durch die Konfiguration verhindert."
     createFilePrevented: "Das Erstellen von Dateien ist durch die Konfiguration verhindert."
     createDirectoryPrevented: "Das Erstellen von Verzeichnissen ist durch die Konfiguration verhindert."
-    removeFailed: "Pfad '{}' konnte nicht entfernt werden: {}"
+    removeSomeFailed: "{} Elemente konnten nicht gelöscht werden, die übrigen wurden gelöscht:\n{}"
+    removeRefused: "'{}' wird nicht gelöscht: Der Pfad ist nicht absolut, ist ein Wurzelverzeichnis oder enthält Ihr Home-Verzeichnis."
   opener:
     sessionBusUnavailable: "Der D-Bus-Sitzungsbus ist nicht verfügbar."
     sessionBusUnavailableOpenFile: "Der Sitzungsbus ist nicht verfügbar, Dateien können nicht über xdg-desktop-portal geöffnet werden. Das passiert typischerweise bei Ausführung als root oder ohne D-Bus-Benutzersitzung."
@@ -1124,9 +1169,13 @@ backend:
     openFileFailed: "Datei konnte nicht geöffnet werden: {}"
     openUriUnavailable: "Die OpenURI-Schnittstelle von xdg-desktop-portal ist nicht verfügbar."
     documentPortalUnavailable: "xdg-document-portal ist nicht verfügbar, das Öffnen über Dateideskriptoren ist in diesem Flatpak nicht möglich."
+    risk:
+      program: "ist ein Programm"
+      application: "ist eine Anwendung"
+      dangerousType: "ist ein Dateityp, der Code ausführt, etwa ein Skript, ein Installer oder eine Verknüpfung"
+      refused: "'{}' wurde nicht geöffnet: Das Öffnen von Dateien, die Code ausführen können, ist in den Einstellungen abgeschaltet."
     mac:
       fileNotFound: "Datei nicht gefunden"
-      executable: "Die Datei ist ein Programm oder eine Anwendung und wird von hier nicht geöffnet"
       openFailed: "Keine Anwendung konnte '{}' öffnen"
     windows:
       outOfResources: "Nicht genügend Speicher oder Ressourcen"
@@ -1143,8 +1192,6 @@ backend:
       dllNotFound: "DLL nicht gefunden"
       unknownShellError: "Unbekannter Shell-Fehler (Code {})"
       shellExecuteExFailed: "ShellExecuteExW fehlgeschlagen: {} (Code {})"
-      blockedByPolicy: "Der Dateityp ist durch die Anlagenrichtlinie gesperrt"
-      binaryExecutable: "Die Datei ist eine ausführbare Binärdatei"
   sessionManager:
     connectFailedUnspecified: "Verbindung zum SSH-Server aus unbekanntem Grund fehlgeschlagen."
   persistence:

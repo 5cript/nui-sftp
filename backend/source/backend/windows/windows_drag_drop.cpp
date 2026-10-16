@@ -1,10 +1,10 @@
 
 #include <backend/windows/windows_drag_drop.hpp>
+#include <paths/native.hpp>
 #include <backend/windows/cotask_mem_string.hpp>
 #include <backend/dropped_entry.hpp>
 #include <shared_data/directory_entry.hpp>
 
-#include <utility/path_utf.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 
@@ -94,7 +94,7 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
                 objectsCollection->get_Count(&length);
 
                 // Array of file paths to be sent back to the webview as JSON
-                std::vector<SharedData::DirectoryEntry> entries;
+                std::vector<SharedData::DroppedItem> entries;
                 for (unsigned int i = 0; i < length; i++)
                 {
                     winrt::com_ptr<IUnknown> object{
@@ -123,9 +123,8 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
                         // Add the file to message to be sent back to webview
                         CoTaskMemString pathStr{nullptr};
                         file->get_Path(pathStr.recepticle());
-                        entries.emplace_back(leanDirectoryEntryFromPath(
-                            Utility::pathToUtf8Generic(std::filesystem::path{pathStr.toStandardString()})
-                        ));
+                        if (auto item = droppedItemFromPath(std::filesystem::path{pathStr.toStandardString()}); item)
+                            entries.push_back(*std::move(item));
                     }
                 }
 

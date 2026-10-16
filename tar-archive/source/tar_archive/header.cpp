@@ -227,9 +227,8 @@ namespace TarArchive
             return std::nullopt;
         }
 
-        std::string normaliseArchivePath(std::filesystem::path const& source)
+        std::string normaliseArchivePath(std::string value)
         {
-            std::string value = source.generic_string();
             while (!value.empty() && value.front() == '/')
                 value.erase(value.begin());
             std::string collapsed;
@@ -271,7 +270,7 @@ namespace TarArchive
             RawRecord& record,
             std::string const& name,
             std::string const& prefix,
-            SharedData::DirectoryEntry const& meta,
+            MemberHeader const& meta,
             TypeFlag typeflag,
             std::uint64_t payloadSize,
             std::string const& linkTarget
@@ -576,17 +575,16 @@ namespace TarArchive
         return overrides;
     }
 
-    SharedData::DirectoryEntry
-    assembleDirectoryEntry(ParsedUstar const& ustar, PaxOverrides const& overrides)
+    MemberHeader
+    assembleMemberHeader(ParsedUstar const& ustar, PaxOverrides const& overrides)
     {
-        SharedData::DirectoryEntry entry{};
+        MemberHeader entry{};
 
         std::string chosenPath = overrides.path.value_or(ustar.fullName());
         if (ustar.typeflag == TypeFlag::Directory && !chosenPath.empty() &&
             chosenPath.back() == '/')
             chosenPath.pop_back();
-        entry.path = std::filesystem::path{chosenPath};
-        entry.fullPath = entry.path;
+        entry.path = std::move(chosenPath);
         entry.type = fileTypeFromTypeFlag(ustar.typeflag);
         entry.size = overrides.size.value_or(ustar.size);
         entry.uid = overrides.uid.value_or(ustar.uid);
@@ -599,12 +597,12 @@ namespace TarArchive
         if (ustar.typeflag == TypeFlag::SymbolicLink)
         {
             const std::string linkText = overrides.linkPath.value_or(ustar.linkName);
-            entry.linkTarget = std::filesystem::path{linkText};
+            entry.linkTarget = linkText;
         }
         return entry;
     }
 
-    std::expected<BuiltEntry, TarError> buildRecords(SharedData::DirectoryEntry const& meta)
+    std::expected<BuiltEntry, TarError> buildRecords(MemberHeader const& meta)
     {
         const auto typeflagOrError = typeFlagFromFileType(meta.type);
         if (!typeflagOrError)
@@ -613,7 +611,7 @@ namespace TarArchive
 
         const bool isDirectory = (typeflag == TypeFlag::Directory);
         const std::string normalisedPath =
-            normaliseArchivePath(meta.fullPath.empty() ? meta.path : meta.fullPath);
+            normaliseArchivePath(meta.path);
         if (normalisedPath.empty())
             return std::unexpected(makeError(TarErrorCode::InvalidHeader, "entry path is empty"));
 
@@ -624,7 +622,7 @@ namespace TarArchive
                 return std::unexpected(
                     makeError(TarErrorCode::InvalidHeader, "symlink entry has no linkTarget set")
                 );
-            linkTargetText = meta.linkTarget->generic_string();
+            linkTargetText = *meta.linkTarget;
         }
 
         const std::uint64_t payloadSize = isDirectory ? 0u : meta.size;
@@ -658,7 +656,7 @@ namespace TarArchive
         if (!paxEntries.empty())
         {
             const std::string paxPayload = buildPaxPayload(paxEntries);
-            SharedData::DirectoryEntry paxMeta{};
+            MemberHeader paxMeta{};
             paxMeta.permissions = std::filesystem::perms{0644u};
             paxMeta.mtime = meta.mtime;
             paxMeta.owner = meta.owner;

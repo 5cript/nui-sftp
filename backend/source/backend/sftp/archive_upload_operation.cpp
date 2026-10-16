@@ -3,6 +3,7 @@
 #include <tar_archive/error.hpp>
 
 #include <log/log.hpp>
+#include <paths/native.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -69,15 +70,9 @@ namespace
     }
 
     /**
-     * @brief Build a DirectoryEntry from a local filesystem path. The @p archivePath
-     *        is what goes into the tar header (relative to the archive root); the
-     *        payload is read from @p localPath.
+     * @brief The metadata of @p localPath for its tar header.
      */
-    std::optional<SharedData::DirectoryEntry>
-    localPathToEntry(
-        std::filesystem::path const& localPath,
-        std::filesystem::path const& archivePath
-    )
+    std::optional<SharedData::DirectoryEntry> localPathToEntry(std::filesystem::path const& localPath)
     {
         std::error_code statErr{};
         const auto status = std::filesystem::symlink_status(localPath, statErr);
@@ -92,8 +87,6 @@ namespace
         }
 
         SharedData::DirectoryEntry entry{};
-        entry.path = archivePath;
-        entry.fullPath = archivePath;
         entry.permissions = status.permissions();
         entry.type = SharedData::fileTypeFromStdFilesystemType(status.type());
 
@@ -122,14 +115,17 @@ namespace
 
 bool ArchiveUploadOperation::isPayloadEntry(ResolvedEntry const& entry) const noexcept
 {
-    return entry.tarMeta.type == SharedData::FileType::Regular;
+    return entry.header.type == SharedData::FileType::Regular;
 }
 
 ArchiveUploadOperation::ArchiveUploadOperation(SecureShell::SftpSession& sftp, Options options)
     : Operation{}
     , sftp_{&sftp}
     , options_{std::move(options)}
-{}
+{
+    remoteArchivePath_ = options_.remoteArchivePath;
+    tempPath_ = remoteArchivePath_.withFilenameSuffix(options_.tempFileSuffix).value_or(Paths::RemotePath{});
+}
 
 ArchiveUploadOperation::~ArchiveUploadOperation()
 {
@@ -140,6 +136,14 @@ ArchiveUploadOperation::~ArchiveUploadOperation()
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::work()
 {
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     auto future = sftp_->performPromise([this]() { return workInStrand(); });
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
@@ -152,6 +156,19 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::workInStrand()
 {
     using enum OperationState;
+
+    if (scanPhase_)
+    {
+        Log::error("ArchiveUploadOperation: The scan phase cannot run on the processing thread.");
+        return enterErrorState<WorkStatus>(
+            {.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
+        );
+    }
+    if (incompleteScan_ && state_ == OperationState::NotStarted)
+    {
+        Log::error("ArchiveUploadOperation: The scan is incomplete: {}", incompleteScan_->toString());
+        return enterErrorState<WorkStatus>(*incompleteScan_);
+    }
 
     switch (state_)
     {
@@ -247,27 +264,36 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
 
     for (auto const& localRoot : options_.localPaths)
     {
-        const auto basename =
-            localRoot.has_filename() ? localRoot.filename() : localRoot;
-        auto rootEntry = localPathToEntry(localRoot, basename);
+        const auto name = localRoot.filename();
+        if (!name)
+        {
+            Log::error("ArchiveUploadOperation: refusing root '{}', it has no name", localRoot.toUtf8());
+            return std::unexpected(Error{
+                .type = ErrorType::InvalidPath,
+                .extraInfo = fmt::format("'{}' cannot be archived under its own name", localRoot.toUtf8()),
+            });
+        }
+        const auto archivePrefix = Paths::RelativePath{} / *name;
+        auto rootEntry = localPathToEntry(localRoot.native());
         if (!rootEntry)
             continue;
 
         if (rootEntry->type == SharedData::FileType::Regular)
         {
             totalPayloadBytes_ += rootEntry->size;
-            ResolvedEntry resolved{};
-            resolved.tarMeta = std::move(*rootEntry);
-            resolved.localFullPath = localRoot;
-            resolvedEntries_.push_back(std::move(resolved));
+            resolvedEntries_.push_back(
+                ResolvedEntry{
+                    .header = TarArchive::memberHeaderOf(archivePrefix.value(), *rootEntry),
+                    .source = localRoot,
+                }
+            );
         }
         else if (rootEntry->type == SharedData::FileType::Directory)
         {
             rootEntry->size = 0u;
-            ResolvedEntry dirEntry{};
-            dirEntry.tarMeta = std::move(*rootEntry);
-            dirEntry.localFullPath.clear();
-            resolvedEntries_.push_back(std::move(dirEntry));
+            resolvedEntries_.push_back(
+                ResolvedEntry{.header = TarArchive::memberHeaderOf(archivePrefix.value(), *rootEntry)}
+            );
 
             // Directory roots are expanded exclusively from a preceding
             // LocalScanOperation's results — the archive op no longer
@@ -276,24 +302,20 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
             if (it == prescannedRoots_.end())
             {
                 Log::error(
-                    "ArchiveUploadOperation: missing pre-scanned entries for directory root '{}'",
-                    localRoot.generic_string()
+                    "ArchiveUploadOperation: missing pre-scanned entries for directory root '{}'", localRoot.toUtf8()
                 );
                 return std::unexpected(Error{
                     .type = ErrorType::ImplementationError,
-                    .extraInfo = fmt::format(
-                        "no pre-scanned entries for directory root '{}'",
-                        localRoot.generic_string()
-                    ),
+                    .extraInfo = fmt::format("no pre-scanned entries for directory root '{}'", localRoot.toUtf8()),
                 });
             }
-            appendPrescannedFromScan(it->second.first, localRoot, basename);
+            appendPrescannedFromScan(it->second.first, localRoot, archivePrefix);
         }
         else
         {
             Log::warn(
                 "ArchiveUploadOperation: skipping non-regular, non-directory root '{}' (type={})",
-                localRoot.generic_string(),
+                localRoot.toUtf8(),
                 static_cast<int>(rootEntry->type)
             );
         }
@@ -303,8 +325,8 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
 
 void ArchiveUploadOperation::appendPrescannedFromScan(
     std::vector<SharedData::DirectoryEntry> const& entries,
-    std::filesystem::path const& localRootFullPath,
-    std::filesystem::path const& archivePrefix
+    Paths::LocalPath const& localRoot,
+    Paths::RelativePath const& archivePrefix
 )
 {
     // Index 0 is the synthetic scan root (the directory itself); the caller
@@ -314,35 +336,41 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
     for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
         auto const& child = entries[idx];
-        const auto relPath = SharedData::fullPathRelative(entries, child);
-        const auto childArchivePath = archivePrefix / relPath;
-        const auto childLocalFull = localRootFullPath / relPath;
+        auto source = SharedData::relativePath(entries, child)
+                          .and_then(
+                              [&localRoot](Paths::RelativePath const& relative)
+                              {
+                                  return localRoot.join(relative);
+                              }
+                          );
+        if (!source)
+        {
+            Log::warn("ArchiveUploadOperation: skipping pre-scanned child: {}", source.error().toString());
+            continue;
+        }
+        const auto memberPath = archivePrefix / *SharedData::relativePath(entries, child);
 
         if (child.type == SharedData::FileType::Regular)
         {
-            ResolvedEntry resolved{};
-            resolved.tarMeta = child;
-            resolved.tarMeta.path = childArchivePath;
-            resolved.tarMeta.fullPath = childArchivePath;
-            resolved.localFullPath = childLocalFull;
-            totalPayloadBytes_ += resolved.tarMeta.size;
-            resolvedEntries_.push_back(std::move(resolved));
+            totalPayloadBytes_ += child.size;
+            resolvedEntries_.push_back(
+                ResolvedEntry{
+                    .header = TarArchive::memberHeaderOf(memberPath.value(), child),
+                    .source = *std::move(source),
+                }
+            );
         }
         else if (child.type == SharedData::FileType::Directory)
         {
-            ResolvedEntry dirEntry{};
-            dirEntry.tarMeta = child;
-            dirEntry.tarMeta.path = childArchivePath;
-            dirEntry.tarMeta.fullPath = childArchivePath;
-            dirEntry.tarMeta.size = 0u;
-            dirEntry.localFullPath.clear();
+            ResolvedEntry dirEntry{.header = TarArchive::memberHeaderOf(memberPath.value(), child)};
+            dirEntry.header.size = 0u;
             resolvedEntries_.push_back(std::move(dirEntry));
         }
         else
         {
             Log::warn(
                 "ArchiveUploadOperation: skipping non-regular pre-scanned child '{}' (type={})",
-                childLocalFull.generic_string(),
+                source->toUtf8(),
                 static_cast<int>(child.type)
             );
         }
@@ -351,6 +379,16 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
 {
+    if (remoteArchivePath_.empty() || remoteArchivePath_.isRoot() || tempPath_.empty())
+    {
+        return std::unexpected(
+            Error{
+                .type = ErrorType::InvalidPath,
+                .extraInfo = options_.remoteArchivePath.value(),
+            }
+        );
+    }
+
     const auto flattenResult = flattenRoots();
     if (!flattenResult.has_value())
         return std::unexpected(flattenResult.error());
@@ -361,38 +399,39 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand()
             .extraInfo = "no local files could be stat'd",
         });
 
-    using OpenType = SecureShell::SftpSession::OpenType;
-    OpenType openType = OpenType::Write | OpenType::Create | OpenType::Truncate;
-    if (!options_.mayOverwrite)
-        openType = OpenType::Write | OpenType::Create | OpenType::Exclusive;
+    // Fail early instead of packing everything first, the final rename refuses to replace it anyway.
+    if (!options_.mayOverwrite && sftp_->lstatInStrand(remoteArchivePath_).has_value())
+        return std::unexpected(Error{.type = ErrorType::FileExists});
 
+    // Written under the temp name, so a failed or cancelled upload never leaves a truncated destination.
+    using OpenType = SecureShell::SftpSession::OpenType;
     const auto openResult = sftp_->openFileInStrand(
-        options_.remoteArchivePath, openType, std::filesystem::perms{0644u}
+        tempPath_, OpenType::Write | OpenType::Create | OpenType::Truncate, std::filesystem::perms{0644u}
     );
     if (!openResult.has_value())
     {
         Log::error(
             "ArchiveUploadOperation: cannot open remote '{}': {}",
-            options_.remoteArchivePath.generic_string(),
+            options_.remoteArchivePath.value(),
             openResult.error().message
         );
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = openResult.error(),
-            .extraInfo = fmt::format(
-                "Opening remote archive file: {}", options_.remoteArchivePath.generic_string()
-            ),
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .sftpError = openResult.error(),
+                .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
+            }
+        );
     }
     remoteStream_ = openResult.value();
+    tempCreated_ = true;
 
     // Wrap the SFTP terminal sink in the requested codec. Auto means derive
     // from the user-facing remote path so the bytes on the wire match the
     // declared file extension.
-    const auto resolvedCodec =
-        options_.compression == TarArchive::Compression::Auto
-            ? TarArchive::compressionFromExtension(options_.remoteArchivePath)
-            : options_.compression;
+    const auto resolvedCodec = options_.compression == TarArchive::Compression::Auto
+        ? TarArchive::compressionFromExtension(Paths::nativeFromUtf8(options_.remoteArchivePath.value()))
+        : options_.compression;
 
     auto wrappedSink = TarArchive::wrapSinkWithCodec(
         std::make_unique<SftpFileByteSink>(remoteStream_),
@@ -432,12 +471,12 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::openNextEntryInStr
     if (!isPayloadEntry(resolved))
     {
         // Directory entry — emit the tar header only and advance.
-        auto entryOrError = writer_->beginEntry(resolved.tarMeta);
+        auto entryOrError = writer_->beginEntry(resolved.header);
         if (!entryOrError.has_value())
         {
             Log::error(
                 "ArchiveUploadOperation: cannot begin tar entry '{}': {}",
-                resolved.tarMeta.path.generic_string(),
+                resolved.header.path,
                 entryOrError.error().toString()
             );
             return std::unexpected(archiveErrorToOperationError(entryOrError.error()));
@@ -449,25 +488,25 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::openNextEntryInStr
         return {};
     }
 
-    currentLocalFile_.open(resolved.localFullPath, std::ios::binary);
+    currentLocalFile_.open(resolved.source.native(), std::ios::binary);
     if (!currentLocalFile_.is_open())
     {
         Log::error(
             "ArchiveUploadOperation: cannot open local '{}'",
-            resolved.localFullPath.generic_string()
+            resolved.source.toUtf8()
         );
         return std::unexpected(Error{
             .type = ErrorType::OpenFailure,
-            .extraInfo = resolved.localFullPath.generic_string(),
+            .extraInfo = resolved.source.toUtf8(),
         });
     }
 
-    auto entryWriterOrError = writer_->beginEntry(resolved.tarMeta);
+    auto entryWriterOrError = writer_->beginEntry(resolved.header);
     if (!entryWriterOrError.has_value())
     {
         Log::error(
             "ArchiveUploadOperation: cannot begin tar entry '{}': {}",
-            resolved.tarMeta.path.generic_string(),
+            resolved.header.path,
             entryWriterOrError.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(entryWriterOrError.error()));
@@ -480,7 +519,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::openNextEntryInStr
 std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand()
 {
     auto const& resolved = resolvedEntries_[currentEntryIndex_];
-    const std::uint64_t remaining = resolved.tarMeta.size - currentEntryBytesRead_;
+    const std::uint64_t remaining = resolved.header.size - currentEntryBytesRead_;
     if (remaining == 0u)
     {
         const auto closeResult = finaliseEntryInStrand();
@@ -496,15 +535,17 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
     const auto bytesRead = static_cast<std::size_t>(currentLocalFile_.gcount());
     if (bytesRead == 0u)
     {
-        Log::warn(
+        Log::error(
             "ArchiveUploadOperation: local '{}' truncated mid-read (expected {} more bytes)",
-            resolved.localFullPath.generic_string(),
+            resolved.source.toUtf8(),
             remaining
         );
-        const auto closeResult = finaliseEntryInStrand();
-        if (!closeResult.has_value())
-            return std::unexpected(closeResult.error());
-        return true;
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' ended {} bytes early", resolved.source.toUtf8(), remaining
+            ),
+        });
     }
 
     const auto writeResult = currentEntry_->write(std::span<std::byte const>{
@@ -514,7 +555,7 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
     {
         Log::error(
             "ArchiveUploadOperation: tar write failure on '{}': {}",
-            resolved.tarMeta.path.generic_string(),
+            resolved.header.path,
             writeResult.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(writeResult.error()));
@@ -530,7 +571,7 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
         0u, totalPayloadBytes_, totalBytesTransferred_, throughputMeter_->bytesPerSecond()
     );
 
-    if (currentEntryBytesRead_ >= resolved.tarMeta.size)
+    if (currentEntryBytesRead_ >= resolved.header.size)
     {
         const auto closeResult = finaliseEntryInStrand();
         if (!closeResult.has_value())
@@ -549,16 +590,23 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseEntryInStr
     currentLocalFile_.close();
 
     auto const& resolved = resolvedEntries_[currentEntryIndex_];
-    if (currentEntryBytesRead_ != resolved.tarMeta.size)
+    if (currentEntryBytesRead_ != resolved.header.size)
     {
-        Log::warn(
-            "ArchiveUploadOperation: entry '{}' truncated ({} of {} bytes) — archive padded with zeros",
-            resolved.tarMeta.path.generic_string(),
+        Log::error(
+            "ArchiveUploadOperation: entry '{}' is incomplete ({} of {} bytes)",
+            resolved.header.path,
             currentEntryBytesRead_,
-            resolved.tarMeta.size
+            resolved.header.size
         );
-        ++currentEntryIndex_;
-        return {};
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' holds {} of {} bytes",
+                resolved.header.path,
+                currentEntryBytesRead_,
+                resolved.header.size
+            ),
+        });
     }
 
     const auto closeResult = std::move(handle).close();
@@ -566,7 +614,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseEntryInStr
     {
         Log::error(
             "ArchiveUploadOperation: tar entry close failed for '{}': {}",
-            resolved.tarMeta.path.generic_string(),
+            resolved.header.path,
             closeResult.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(closeResult.error()));
@@ -597,11 +645,29 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInS
     if (auto stream = remoteStream_.lock(); stream)
         stream->close(false);
     remoteStream_.reset();
+
+    const auto renameResult = options_.mayOverwrite
+        ? sftp_->renameReplaceInStrand(tempPath_, remoteArchivePath_, options_.tempFileSuffix + ".old")
+        : sftp_->renameNoReplaceInStrand(tempPath_, remoteArchivePath_);
+    if (!renameResult.has_value())
+    {
+        Log::error(
+            "ArchiveUploadOperation: cannot move the archive to '{}': {}",
+            options_.remoteArchivePath.value(),
+            renameResult.error().message
+        );
+        if (renameResult.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = renameResult.error()});
+    }
+    tempCreated_ = false;
     return {};
 }
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
     if (adoptCancelState)
     {
         Log::info(
@@ -616,7 +682,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::cancel(bool adoptC
 }
 
 void ArchiveUploadOperation::setScanResultForRoot(
-    std::filesystem::path const& localRootPath,
+    Paths::LocalPath const& localRootPath,
     std::vector<SharedData::DirectoryEntry> entries,
     std::uint64_t totalBytes
 )
@@ -634,4 +700,43 @@ void ArchiveUploadOperation::cleanup()
     if (auto stream = remoteStream_.lock(); stream)
         stream->close(false);
     remoteStream_.reset();
+
+    if (tempCreated_)
+    {
+        tempCreated_ = false;
+        if (auto* processingStrand = sftp_->strand(); processingStrand && processingStrand->withinProcessingThread())
+            std::ignore = sftp_->removeFileInStrand(tempPath_);
+        else
+            std::ignore = sftp_->removeFile(tempPath_).wait_for(options_.futureTimeout);
+    }
+}
+
+void ArchiveUploadOperation::addScanRoot(std::unique_ptr<LocalScanOperation> scan)
+{
+    if (!scanPhase_)
+    {
+        scanPhase_ = std::make_unique<ScanPhase<LocalScanOperation>>(
+            [this](LocalScanOperation& finished)
+            {
+                const auto scannedBytes = finished.totalBytes();
+                // An archive cannot be partly successful, missing content fails it.
+                if (const auto& unreadable = finished.unreadableDirectories(); !unreadable.empty() && !incompleteScan_)
+                {
+                    incompleteScan_ = Error{
+                        .type = ErrorType::DirectoryUnreadable,
+                        .extraInfo = fmt::format("Cannot list '{}'", unreadable.front()),
+                    };
+                }
+                if (const auto rejected = finished.rejectedPaths(); !rejected.empty() && !incompleteScan_)
+                {
+                    incompleteScan_ = Error{
+                        .type = ErrorType::InvalidName,
+                        .extraInfo = fmt::format("'{}' is not a valid name", rejected.front()),
+                    };
+                }
+                setScanResultForRoot(finished.localPath(), finished.ejectEntries(), scannedBytes);
+            }
+        );
+    }
+    scanPhase_->addRoot(std::move(scan));
 }

@@ -1,8 +1,11 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/scan_operation.hpp>
+#include <backend/sftp/scan_phase.hpp>
 #include <ssh/file_stream.hpp>
 #include <nui/utility/move_detector.hpp>
+#include <paths/remote_path.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -15,7 +18,8 @@ class DeleteOperation : public Operation
     {
         std::function<void(std::string const&, std::uint64_t current, std::uint64_t max)> filesRemovedProgress =
             [](std::string const&, auto, auto) {};
-        std::filesystem::path remotePath{};
+        /** @brief What is deleted, or for a recursive delete the root every scanned entry must lie within. */
+        Paths::RemotePath remotePath{};
         std::chrono::seconds futureTimeout{5};
         bool recursive{false};
     };
@@ -38,11 +42,39 @@ class DeleteOperation : public Operation
 
     std::expected<WorkStatus, Error> work() override;
 
+    /**
+     * @brief The scanned content of remotePath, see @ref appendScanResult.
+     */
     void setScanResult(std::vector<SharedData::DirectoryEntry>&& entries, std::uint64_t /* totalBytes */);
+
+    /**
+     * @brief Adds the scanned content of @p root, which has to lie below it, otherwise nothing is deleted.
+     */
+    void appendScanResult(Paths::RemotePath const& root, std::vector<SharedData::DirectoryEntry> const& entries);
+
+    /**
+     * @brief Deletes exactly @p targets, last first, without a scan. For the files of a bulk delete.
+     */
+    void setTargets(std::vector<Paths::RemotePath> targets);
+
+    /**
+     * @brief Scans with @p scan before deleting; every scanned entry is deleted, deepest first.
+     */
+    void scanFirst(std::unique_ptr<ScanOperation> scan);
+
+    /**
+     * @brief Like @ref scanFirst for one more directory, so one operation deletes several directories.
+     */
+    void addScanRoot(std::unique_ptr<ScanOperation> scan);
+
+    bool scanning() const noexcept
+    {
+        return scanPhase_ != nullptr;
+    }
 
     bool isBarrier() const noexcept override
     {
-        return false;
+        return scanPhase_ != nullptr;
     }
 
     /**
@@ -61,23 +93,37 @@ class DeleteOperation : public Operation
         return SharedData::OperationType::Delete;
     }
 
-    std::filesystem::path remotePath() const
+    Paths::RemotePath const& remotePath() const
     {
         return remotePath_;
     }
 
     std::expected<void, DeleteOperation::Error> cancel(bool adoptCancelState) override;
 
+    /**
+     * @brief Items that could not be deleted, with why. The rest was still deleted.
+     */
+    std::vector<std::pair<std::string, Error>> const& getFailed() const noexcept
+    {
+        return failedEntries_;
+    }
+
   private:
-    std::expected<void, DeleteOperation::Error> removeOnce(std::filesystem::path const& path);
+    std::expected<void, DeleteOperation::Error> removeOnce(Paths::RemotePath const& path);
 
   private:
     SecureShell::SftpSession* sftp_;
-    std::filesystem::path remotePath_;
+    Paths::RemotePath remotePath_;
     std::function<void(std::string const&, std::uint64_t, std::uint64_t)> filesRemovedProgress_;
     std::chrono::seconds futureTimeout_;
     std::size_t deletedThusFar_{0};
     std::size_t totalToDelete_{0};
-    std::vector<SharedData::DirectoryEntry> entries_{};
+    /** @brief Deleted from the back, so a scanned directory goes after its content. */
+    std::vector<Paths::RemotePath> targets_{};
+    /** @brief A scanned entry was not a valid path within remotePath_, nothing may be deleted. */
+    std::optional<std::string> invalidScanEntry_{};
+    std::vector<std::pair<std::string, Error>> failedEntries_{};
+    std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};
+    bool scanDelivered_{false};
     bool recursive_{false};
 };

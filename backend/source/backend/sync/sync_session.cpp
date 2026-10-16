@@ -1,4 +1,5 @@
 #include <backend/sync/sync_session.hpp>
+#include <log/log.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -64,16 +65,32 @@ ScanTrees SyncSession::scanTrees() const
     return ScanTrees{
         .local = localTree_ ? &*localTree_ : nullptr,
         .remote = remoteTree_ ? &*remoteTree_ : nullptr,
-        .localRoot = options_.localRoot,
-        .remoteRoot = options_.remoteRoot,
     };
 }
 
+std::expected<SyncSession::ResolvedPaths, Paths::PathError>
+SyncSession::resolve(Paths::RelativePath const& relative) const
+{
+    return options_.localRoot.join(relative).transform(
+        [this, &relative](Paths::LocalPath local)
+        {
+            return ResolvedPaths{.local = std::move(local), .remote = options_.remoteRoot / relative};
+        }
+    );
+}
+
 DiffSummary SyncSession::recomputeDiffInStrand(
-    DiffOptions const& options,
+    DiffOptions const& requestedOptions,
     std::function<void(std::uint64_t compared)> onProgress
 )
 {
+    auto options = requestedOptions;
+#if defined(_WIN32) || defined(__APPLE__)
+    // NTFS and APFS fold case by default.
+    options.localCaseInsensitive = true;
+#else
+    options.localCaseInsensitive = false;
+#endif
     uploads_.clear(options);
     downloads_.clear(options);
     deletes_.clear(options);
@@ -105,6 +122,8 @@ DiffSummary SyncSession::recomputeDiffInStrand(
     summary.deletes = deletes_.summary();
     summary.entriesCompared = sink.lastCompared();
     summary.cancelled = sink.cancelled();
+    summary.blockedCount = sink.blockedCount();
+    summary.blockedSamples = sink.blockedSamples();
     return summary;
 }
 
@@ -156,4 +175,27 @@ std::vector<EnqueuePlanEntry>
 SyncSession::buildEnqueuePlanInStrand(DiffSection section, std::unordered_set<std::string> const& selectedRelKeys) const
 {
     return storeFor(section).buildPlan(selectedRelKeys, scanTrees());
+}
+
+SyncSession::ResolvedPlan
+SyncSession::resolvePlanInStrand(DiffSection section, std::unordered_set<std::string> const& selectedRelKeys) const
+{
+    ResolvedPlan result;
+    for (auto& entry : buildEnqueuePlanInStrand(section, selectedRelKeys))
+    {
+        auto paths = Paths::RelativePath::make(entry.relKey).and_then(
+            [this](Paths::RelativePath const& relative)
+            {
+                return resolve(relative);
+            }
+        );
+        if (!paths)
+        {
+            Log::warn("SyncSession: '{}' has no path on both sides: {}", entry.relKey, paths.error().toString());
+            result.refused.push_back(std::move(entry.relKey));
+            continue;
+        }
+        result.entries.push_back(ResolvedPlanEntry{.entry = std::move(entry), .paths = *std::move(paths)});
+    }
+    return result;
 }

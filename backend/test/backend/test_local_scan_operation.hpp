@@ -3,14 +3,26 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include "real_server_tests.hpp"
 
+#include <paths/native.hpp>
+#include <shared_data/sync/diff_tree_store.hpp>
 #include <utility/temporary_directory.hpp>
 
+#include <nui/utility/scope_exit.hpp>
+
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
+
+extern std::filesystem::path temporaryRoot;
+
+#ifndef _WIN32
+#    include <sys/stat.h>
+#    include <unistd.h>
+#endif
 
 namespace Test
 {
@@ -61,7 +73,7 @@ namespace Test
             std::string const& filename)
         {
             return std::any_of(entries.begin(), entries.end(), [&](SharedData::DirectoryEntry const& entry) {
-                return entry.path.filename().generic_string() == filename;
+                return entry.name == filename;
             });
         }
 
@@ -70,29 +82,29 @@ namespace Test
             std::string const& filename)
         {
             auto iter = std::find_if(entries.begin(), entries.end(), [&](SharedData::DirectoryEntry const& entry) {
-                return entry.path.filename().generic_string() == filename;
+                return entry.name == filename;
             });
             return iter == entries.end() ? nullptr : &*iter;
         }
 
       protected:
-        Utility::TemporaryDirectory scanRoot_{programDirectory / "temp", true};
+        Utility::TemporaryDirectory scanRoot_{temporaryRoot, true};
     };
 
     TEST_F(LocalScanOperationTests, CanCreateLocalScanOperation)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
     }
 
     TEST_F(LocalScanOperationTests, LocalScanOperationTypeIsLocalScan)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
         EXPECT_EQ(operation.type(), SharedData::OperationType::LocalScan);
     }
 
     TEST_F(LocalScanOperationTests, LocalScanOperationIsBarrier)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
         EXPECT_TRUE(operation.isBarrier());
     }
 
@@ -100,7 +112,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -116,7 +128,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -132,7 +144,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = true,
             }};
 
@@ -150,7 +162,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -173,7 +185,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "subdir",
+                .localPath = toLocal(scanRoot_.path() / "subdir"),
                 .recursive = true,
             }};
 
@@ -194,7 +206,7 @@ namespace Test
                     [&callbackInvocations](std::uint64_t, std::uint64_t, std::uint64_t) {
                         ++callbackInvocations;
                     },
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -206,7 +218,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
                 .ignoreHidden = true,
             }};
@@ -223,7 +235,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
                 .ignoreHidden = false,
             }};
@@ -239,7 +251,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "does_not_exist",
+                .localPath = toLocal(scanRoot_.path() / "does_not_exist"),
                 .recursive = false,
             }};
 
@@ -272,7 +284,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "file1.txt",
+                .localPath = toLocal(scanRoot_.path() / "file1.txt"),
                 .recursive = false,
             }};
 
@@ -304,7 +316,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = false,
             }};
 
@@ -319,7 +331,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path() / "does_not_exist",
+                .localPath = toLocal(scanRoot_.path() / "does_not_exist"),
                 .recursive = false,
             }};
 
@@ -346,7 +358,7 @@ namespace Test
     {
         LocalScanOperation operation{
             {
-                .localPath = scanRoot_.path(),
+                .localPath = toLocal(scanRoot_.path()),
                 .recursive = true,
             }};
 
@@ -362,13 +374,13 @@ namespace Test
 
     TEST_F(LocalScanOperationTests, ScanStrandIsNullForLocalScan)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path()}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path())}};
         EXPECT_EQ(operation.strand(), nullptr);
     }
 
     TEST_F(LocalScanOperationTests, BuildTreeNestsAndSortsEntries)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path(), .recursive = true, .buildTree = true}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
         ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
 
         const auto tree = operation.ejectScanTree();
@@ -383,9 +395,31 @@ namespace Test
         EXPECT_EQ(subdir.subtreeByteTotal, std::string_view{"nested content"}.size() + std::string_view{"leaf"}.size());
     }
 
+    TEST_F(LocalScanOperationTests, BuildTreeExcludesTransferTempFiles)
+    {
+        std::ofstream{scanRoot_.path() / "big.iso.filepart"} << "partial";
+        std::ofstream{scanRoot_.path() / ".filepart"} << "a name, not a temp file";
+
+        LocalScanOperation operation{{
+            .localPath = toLocal(scanRoot_.path()),
+            .recursive = true,
+            .buildTree = true,
+            .excludedSuffixes = {".filepart"},
+        }};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const* temp = SharedData::Sync::findScanNode(tree, "big.iso.filepart");
+        ASSERT_NE(temp, nullptr);
+        EXPECT_EQ(temp->availability, SharedData::Sync::Availability::Excluded);
+        auto const* bare = SharedData::Sync::findScanNode(tree, ".filepart");
+        ASSERT_NE(bare, nullptr);
+        EXPECT_EQ(bare->availability, SharedData::Sync::Availability::Listed);
+    }
+
     TEST_F(LocalScanOperationTests, NonRecursiveBuildTreeMarksSubdirectoriesUnknown)
     {
-        LocalScanOperation operation{{.localPath = scanRoot_.path(), .recursive = false, .buildTree = true}};
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = false, .buildTree = true}};
         ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
 
         const auto tree = operation.ejectScanTree();
@@ -406,7 +440,7 @@ namespace Test
     {
         writeFile(scanRoot_.path() / ".gitignore", "*.md\ndeeper/\n");
         LocalScanOperation operation{
-            {.localPath = scanRoot_.path(),
+            {.localPath = toLocal(scanRoot_.path()),
                 .respectIgnoreFiles = true,
                 .recursive = true,
                 .ignoreHidden = true,
@@ -422,4 +456,110 @@ namespace Test
         ASSERT_EQ(tree.children.back().children.size(), 1u);
         EXPECT_EQ(tree.children.back().children.front().name, "nested.txt");
     }
+
+#ifndef _WIN32
+    TEST_F(LocalScanOperationTests, BuildTreeKeepsUnreadableDirectoryAsUnreadable)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can list any directory";
+        const auto locked = scanRoot_.path() / "subdir" / "deeper";
+        std::filesystem::permissions(locked, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&locked]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(locked, std::filesystem::perms::owner_all, errorCode);
+        }};
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+
+        const auto tree = operation.ejectScanTree();
+        auto const* deeper = SharedData::Sync::findScanNode(tree, "subdir/deeper");
+        ASSERT_NE(deeper, nullptr);
+        EXPECT_EQ(deeper->availability, SharedData::Sync::Availability::Unreadable);
+        EXPECT_FALSE(deeper->childrenKnown) << "unknown content must never look empty";
+    }
+
+    TEST_F(LocalScanOperationTests, FlatScanReportsAnUnreadableDirectory)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can list any directory";
+        const auto locked = scanRoot_.path() / "subdir" / "deeper";
+        std::filesystem::permissions(locked, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&locked]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(locked, std::filesystem::perms::owner_all, errorCode);
+        }};
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        EXPECT_EQ(operation.unreadableDirectories(), (std::vector<std::string>{Paths::nativeToUtf8(locked)}));
+    }
+
+    TEST_F(LocalScanOperationTests, UnreadableRootFailsTheScan)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can list any directory";
+        const auto locked = scanRoot_.path() / "subdir";
+        std::filesystem::permissions(locked, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&locked]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(locked, std::filesystem::perms::owner_all, errorCode);
+        }};
+
+        LocalScanOperation operation{{.localPath = toLocal(locked), .recursive = true, .buildTree = true}};
+        std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> result{};
+        for (int iteration = 0; iteration < 10 && result.has_value() &&
+             result.value() != LocalScanOperation::WorkStatus::Complete;
+             ++iteration)
+            result = operation.work();
+        EXPECT_FALSE(result.has_value());
+    }
+
+    TEST_F(LocalScanOperationTests, BuildTreeKeepsFifoAsExcludedPlaceholder)
+    {
+        const auto fifo = scanRoot_.path() / "pipe";
+        ASSERT_EQ(::mkfifo(fifo.c_str(), 0600), 0);
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        const auto tree = operation.ejectScanTree();
+        auto const* pipe = SharedData::Sync::findScanNode(tree, "pipe");
+        ASSERT_NE(pipe, nullptr);
+        EXPECT_EQ(pipe->availability, SharedData::Sync::Availability::Excluded);
+
+        LocalScanOperation flat{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
+        ASSERT_EQ(runScanToCompletion(flat), LocalScanOperation::WorkStatus::Complete);
+        EXPECT_FALSE(hasEntryNamed(flat.ejectEntries(), "pipe")) << "transfers never see untransferable entries";
+    }
+#endif
+
+#ifdef _WIN32
+    TEST_F(LocalScanOperationTests, JunctionIsExcludedAndNotWalked)
+    {
+        const auto outside = scanRoot_.path().parent_path() / ("junction_target_" + scanRoot_.path().filename().string());
+        std::filesystem::create_directories(outside);
+        std::ofstream{outside / "inside.txt"} << "inside";
+        auto removeOutside = Nui::ScopeExit{[&outside]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::remove_all(outside, errorCode);
+        }};
+        const auto link = scanRoot_.path() / "linked";
+        const auto command = "cmd /c mklink /J \"" + link.string() + "\" \"" + outside.string() + "\" >nul";
+        ASSERT_EQ(std::system(command.c_str()), 0);
+
+        LocalScanOperation operation{{.localPath = toLocal(scanRoot_.path()), .recursive = true, .buildTree = true}};
+        ASSERT_EQ(runScanToCompletion(operation), LocalScanOperation::WorkStatus::Complete);
+        const auto tree = operation.ejectScanTree();
+        auto const* linked = SharedData::Sync::findScanNode(tree, "linked");
+        ASSERT_NE(linked, nullptr);
+        EXPECT_EQ(linked->availability, SharedData::Sync::Availability::Excluded);
+        EXPECT_EQ(SharedData::Sync::findScanNode(tree, "linked/inside.txt"), nullptr) << "a junction is never walked";
+
+        LocalScanOperation flat{{.localPath = toLocal(scanRoot_.path()), .recursive = true}};
+        ASSERT_EQ(runScanToCompletion(flat), LocalScanOperation::WorkStatus::Complete);
+        const auto entries = flat.ejectEntries();
+        EXPECT_FALSE(hasEntryNamed(entries, "linked"));
+        EXPECT_FALSE(hasEntryNamed(entries, "inside.txt")) << "an upload never leaves its tree through a junction";
+    }
+#endif
 }

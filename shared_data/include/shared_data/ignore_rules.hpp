@@ -1,7 +1,8 @@
 #pragma once
 
+#include <paths/relative_path.hpp>
+
 #include <cstddef>
-#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,7 +21,7 @@ namespace SharedData
     /** @brief Rules parsed from one ignore file, tagged with the directory they apply under. */
     struct IgnoreRuleSet
     {
-        std::filesystem::path originDir{};
+        Paths::RelativePath originDir{};
         std::vector<IgnorePattern> patterns{};
     };
 
@@ -46,14 +47,14 @@ namespace SharedData
     {
       public:
         /** @brief Register parsed patterns from one ignore file living at @p relDir. */
-        void addFile(std::filesystem::path const& relDir, std::string_view content);
+        void addFile(Paths::RelativePath const& relDir, std::string_view content);
 
         /** @brief True if @p relPath is ignored under any currently-known rule set.
          *
-         * @param relPath    Entry path relative to the scan root (use '/' separators).
+         * @param relPath    Entry path relative to the scan root.
          * @param isDirectory Whether the entry is a directory (relevant for directoryOnly rules).
          */
-        bool isIgnored(std::filesystem::path const& relPath, bool isDirectory) const;
+        bool isIgnored(Paths::RelativePath const& relPath, bool isDirectory) const;
 
         bool empty() const noexcept
         {

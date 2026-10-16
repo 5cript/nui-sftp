@@ -448,6 +448,27 @@
     border-color: var(--warning-color, #f5a623);
 }
 
+.sync-blocked-notice {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--warning-color, #f5a623);
+    cursor: pointer;
+}
+
+.sync-blocked-notice:hover span {
+    text-decoration: underline;
+}
+
+.sync-blocked-notice svg {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    fill: currentColor;
+}
+
 .sync-footer-summary {
     margin-left: auto;
     font-size: 0.8rem;
@@ -513,6 +534,11 @@
 
 .sync-progress-step-label {
     font-size: 0.95rem;
+}
+
+.sync-progress-failure-reason {
+    color: var(--script-nui-components-toast-error, #d9534f);
+    overflow-wrap: anywhere;
 }
 
 .sync-progress-counters {

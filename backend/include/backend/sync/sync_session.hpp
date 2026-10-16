@@ -1,6 +1,9 @@
 #pragma once
 
 #include <ids/ids.hpp>
+#include <paths/local_path.hpp>
+#include <paths/relative_path.hpp>
+#include <paths/remote_path.hpp>
 #include <shared_data/sync/diff.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 #include <shared_data/sync/diff_summary.hpp>
@@ -50,8 +53,8 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     struct Options
     {
         Ids::SyncSessionId sessionId{};
-        std::filesystem::path localRoot{};
-        std::filesystem::path remoteRoot{};
+        Paths::LocalPath localRoot{};
+        Paths::RemotePath remoteRoot{};
         /// Number of scan entries (sum of both sides) above which
         /// @ref SharedData::Sync::DiffSummary::heavyCompare is set to true.
         std::uint64_t heavyCompareThreshold{5000};
@@ -72,6 +75,31 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
     {
         return generation_;
     }
+
+    Paths::LocalPath const& localRoot() const noexcept
+    {
+        return options_.localRoot;
+    }
+
+    Paths::RemotePath const& remoteRoot() const noexcept
+    {
+        return options_.remoteRoot;
+    }
+
+    /**
+     * @brief Where a row of the diff lives on both sides.
+     */
+    struct ResolvedPaths
+    {
+        Paths::LocalPath local;
+        Paths::RemotePath remote;
+    };
+
+    /**
+     * @brief The local and remote path of @p relative below the session roots. Fails for a name the local
+     *        platform cannot store, nothing can leave the roots since @p relative holds no '..'.
+     */
+    std::expected<ResolvedPaths, Paths::PathError> resolve(Paths::RelativePath const& relative) const;
 
     boost::asio::strand<boost::asio::any_io_executor>& strand()
     {
@@ -138,6 +166,28 @@ class SyncSession : public std::enable_shared_from_this<SyncSession>
      *        @ref SharedData::Sync::DiffTreeStore::buildPlan.  Precondition: running on @ref strand().
      */
     std::vector<SharedData::Sync::EnqueuePlanEntry> buildEnqueuePlanInStrand(
+        SharedData::Sync::DiffSection section,
+        std::unordered_set<std::string> const& selectedRelKeys
+    ) const;
+
+    struct ResolvedPlanEntry
+    {
+        SharedData::Sync::EnqueuePlanEntry entry;
+        ResolvedPaths paths;
+    };
+
+    struct ResolvedPlan
+    {
+        std::vector<ResolvedPlanEntry> entries{};
+        /** @brief Keys of entries that have no path on one side, like a name Windows cannot store. */
+        std::vector<std::string> refused{};
+    };
+
+    /**
+     * @brief @ref buildEnqueuePlanInStrand with every entry resolved below the session roots.
+     *        Precondition: running on @ref strand().
+     */
+    ResolvedPlan resolvePlanInStrand(
         SharedData::Sync::DiffSection section,
         std::unordered_set<std::string> const& selectedRelKeys
     ) const;

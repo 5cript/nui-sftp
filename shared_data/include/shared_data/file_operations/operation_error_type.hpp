@@ -42,6 +42,11 @@ namespace SharedData
         DeleteFailed,
         CannotCreateSymlink,
         SymlinkPointsToDirectory,
-        NotAFile
+        NotAFile,
+        SizeMismatch,
+        ScanIncomplete,
+        DirectoryUnreadable,
+        InvalidName,
+        LinkInLocalPath
     );
 }

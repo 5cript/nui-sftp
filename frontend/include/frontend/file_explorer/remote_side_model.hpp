@@ -14,7 +14,9 @@
 #include <nui-file-explorer/path_suggestion_cache.hpp>
 
 #include <nui/event_system/observed_value.hpp>
+#include <paths/paths.hpp>
 
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -23,6 +25,7 @@
 #include <vector>
 
 class FileTrackingPanel;
+class LocalSideModel;
 
 class RemoteSideModel
     : public SideModel
@@ -99,7 +102,12 @@ class RemoteSideModel
         return false;
     }
     void navigateTo(std::filesystem::path const& path) override;
-    void setLocalModel(SideModel* model);
+    void setLocalModel(LocalSideModel* model);
+
+    /**
+     * @brief The directory the shown items were listed from, an error before the first listing.
+     */
+    std::expected<Paths::RemotePath, Paths::PathError> currentRemotePath() const;
     void setFileTracking(FileTrackingPanel* fileTracking);
     bool isComplete() const override;
 
@@ -112,31 +120,45 @@ class RemoteSideModel
   private:
     void enqueueRefresh(bool otherModel);
 
+    /**
+     * @brief Renames @p from to @p to, asks before replacing an existing item and retries with @p overwrite.
+     */
+    void renameItem(Paths::RemotePath const& from, Paths::RemotePath const& to, bool overwrite);
+
+    /**
+     * @brief Where @p item is on the server, below the directory it was listed from. A listed name that is no
+     *        single path segment, like "..", names no item.
+     */
+    std::expected<Paths::RemotePath, Paths::PathError> remotePathOf(NuiFileExplorer::Item const& item) const;
+
+    /**
+     * @brief @p name directly below the directory the shown items were listed from.
+     */
+    std::expected<Paths::RemotePath, Paths::PathError> childOfCurrentPath(std::string_view name) const;
+
+    /**
+     * @brief Downloads @p candidates, asking per existing destination whether to overwrite it.
+     */
     void downloadItemsConfirmed(
-        std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems,
+        std::vector<SharedData::BulkDownloadEntry> candidates,
         std::shared_ptr<std::vector<bool>> existsResults,
         std::size_t index = 0,
         bool overwriteNever = false,
         bool overwriteAlways = false,
-        std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted = nullptr
+        std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted = nullptr
     );
 
-    void enqueueSingleDownload(
-        NuiFileExplorer::Item const& remoteItem,
-        NuiFileExplorer::Item const& localItem,
-        bool allowOverwrite,
-        bool insertRefresh
-    );
+    void enqueueSingleDownload(SharedData::BulkDownloadEntry const& entry, bool allowOverwrite, bool insertRefresh);
 
     void askNonEmptyDirectoryDeletions(
-        std::vector<std::filesystem::path> confirmedToDelete,
-        std::vector<std::filesystem::path> nonEmpties,
-        std::vector<std::filesystem::path> filesAndEmptyDirs,
+        std::vector<Paths::RemotePath> confirmedToDelete,
+        std::vector<Paths::RemotePath> nonEmpties,
+        std::vector<Paths::RemotePath> filesAndEmptyDirs,
         std::size_t currentNonEmpty
     );
 
     void
-    enqueueDeletes(std::vector<std::filesystem::path> nonEmpties, std::vector<std::filesystem::path> filesAndEmptyDirs);
+    enqueueDeletes(std::vector<Paths::RemotePath> nonEmpties, std::vector<Paths::RemotePath> filesAndEmptyDirs);
 
     void continueDeletion();
     void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith);
@@ -150,18 +172,18 @@ class RemoteSideModel
     );
     void onFileDownloadComplete(
         Ids::InstanceId const& instanceId,
-        std::filesystem::path const& instanceDir,
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        Paths::LocalPath const& instanceDirectory,
+        Paths::RemotePath const& remotePath,
+        Paths::LocalPath const& localPath,
         bool openWith,
         bool synchronize,
         bool success
     );
     void onFileWatchAdded(
         Ids::InstanceId const& instanceId,
-        std::filesystem::path const& instanceDir,
-        std::filesystem::path const& remotePath,
-        std::filesystem::path const& localPath,
+        Paths::LocalPath const& instanceDirectory,
+        Paths::RemotePath const& remotePath,
+        Paths::LocalPath const& localPath,
         bool openWith
     );
 
@@ -185,7 +207,7 @@ class RemoteSideModel
      * @brief Requests waiting for the places request in flight.
      */
     std::vector<std::function<void(std::vector<PlaceEntry>)>> pendingPlacesRequests_;
-    SideModel* localModel_{nullptr};
+    LocalSideModel* localModel_{nullptr};
     FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
     std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_;

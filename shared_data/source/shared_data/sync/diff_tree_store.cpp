@@ -2,6 +2,8 @@
 #include <shared_data/sync/enqueue_minimizer.hpp>
 
 #include <algorithm>
+#include <string>
+#include <unordered_map>
 #include <string_view>
 #include <utility>
 
@@ -192,6 +194,8 @@ namespace SharedData::Sync
         {
             if (options_.ignoreHidden && isHiddenName(child.name))
                 continue;
+            if (child.availability != Availability::Listed)
+                continue;
             auto childKey = joinRelKey(parentRelKey, child.name);
             nodes_.insert_or_assign(childKey, makeOneSidedRow(child, childKey, parent.action, sourceIsLocal));
             order_.push_back(childKey);
@@ -213,8 +217,6 @@ namespace SharedData::Sync
             return EnqueuePlanEntry{
                 .relKey = key,
                 .action = action,
-                .localAbsPath = (trees.localRoot / key).generic_string(),
-                .remoteAbsPath = (trees.remoteRoot / key).generic_string(),
                 .sizeBytes = node.type == FileType::Directory ? 0u : node.size,
                 .mtime = node.mtime,
                 .mtimeNsec = node.mtimeNsec,
@@ -222,10 +224,33 @@ namespace SharedData::Sync
             };
         };
 
+        // Downloaded onto a case folding filesystem, names that differ only in case would meet as one file.
+        std::unordered_map<std::string, int> foldedCounts;
+        const bool foldsCase = action == Action::Download && options_.localCaseInsensitive;
+        const auto folded = [](std::string name)
+        {
+            for (auto& character : name)
+            {
+                if (character >= 'A' && character <= 'Z')
+                    character = static_cast<char>(character - 'A' + 'a');
+            }
+            return name;
+        };
+        if (foldsCase)
+        {
+            for (auto const& child : directory.children)
+                ++foldedCounts[folded(child.name)];
+        }
+
         bool anyChild = false;
         for (auto const& child : directory.children)
         {
             if (options_.ignoreHidden && isHiddenName(child.name))
+                continue;
+            // Unknown or untransferable entries are never planned, not even inside a transferred directory.
+            if (child.availability != Availability::Listed)
+                continue;
+            if (foldsCase && foldedCounts[folded(child.name)] > 1)
                 continue;
             anyChild = true;
             auto childKey = joinRelKey(relKey, child.name);
@@ -237,6 +262,46 @@ namespace SharedData::Sync
         // Files create their parents, so only directories without transferred content need an entry.
         if (!anyChild)
             plan.push_back(makeEntry(directory, relKey));
+    }
+
+    void DiffTreeStore::appendDeletePlan(
+        ScanNode const& directory,
+        std::string const& relKey,
+        Action action,
+        std::vector<EnqueuePlanEntry>& plan
+    ) const
+    {
+        plan.push_back(
+            EnqueuePlanEntry{
+                .relKey = relKey,
+                .action = action,
+                .mtime = directory.mtime,
+                .mtimeNsec = directory.mtimeNsec,
+                .isDirectory = true,
+            }
+        );
+        for (auto const& child : directory.children)
+        {
+            if (options_.ignoreHidden && isHiddenName(child.name))
+                continue;
+            if (child.availability != Availability::Listed)
+                continue;
+            auto childKey = joinRelKey(relKey, child.name);
+            if (child.type == FileType::Directory)
+            {
+                appendDeletePlan(child, childKey, action, plan);
+                continue;
+            }
+            plan.push_back(
+                EnqueuePlanEntry{
+                    .relKey = std::move(childKey),
+                    .action = action,
+                    .sizeBytes = child.size,
+                    .mtime = child.mtime,
+                    .mtimeNsec = child.mtimeNsec,
+                }
+            );
+        }
     }
 
     std::vector<EnqueuePlanEntry>
@@ -263,9 +328,12 @@ namespace SharedData::Sync
             auto const* scan = sourceRoot ? findScanNode(*sourceRoot, node.relKey) : nullptr;
             const bool isDelete = node.action == Action::DeleteLocal || node.action == Action::DeleteRemote;
 
-            if (scan && node.isDirectory && !isDelete && options_.recursive && scan->type == FileType::Directory)
+            if (scan && node.isDirectory && options_.recursive && scan->type == FileType::Directory)
             {
-                appendSubtreePlan(*scan, node.relKey, node.action, trees, plan);
+                if (isDelete)
+                    appendDeletePlan(*scan, node.relKey, node.action, plan);
+                else
+                    appendSubtreePlan(*scan, node.relKey, node.action, trees, plan);
                 continue;
             }
 
@@ -273,8 +341,6 @@ namespace SharedData::Sync
                 EnqueuePlanEntry{
                     .relKey = node.relKey,
                     .action = node.action,
-                    .localAbsPath = (trees.localRoot / node.relKey).generic_string(),
-                    .remoteAbsPath = (trees.remoteRoot / node.relKey).generic_string(),
                     .sizeBytes = node.isDirectory
                         ? 0u
                         : (scan ? scan->size : (sourceIsLocal ? node.localSize : node.remoteSize)),
@@ -314,6 +380,13 @@ namespace SharedData::Sync
     void StoreDiffSink::emitDelete(DiffTreeNode node, std::string const& parentRelKey)
     {
         deletes_->add(std::move(node), parentRelKey);
+    }
+
+    void StoreDiffSink::onBlocked(std::string const& relKey, BlockReason reason)
+    {
+        ++blockedCount_;
+        if (blockedSamples_.size() < maxBlockedSamples)
+            blockedSamples_.push_back(BlockedEntry{.relKey = relKey, .reason = reason});
     }
 
     void StoreDiffSink::onProgress(std::uint64_t entriesCompared)

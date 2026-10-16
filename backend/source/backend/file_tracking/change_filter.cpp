@@ -1,4 +1,5 @@
 #include <backend/file_tracking/change_filter.hpp>
+#include <paths/native.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -35,7 +36,7 @@ namespace FileTracking
 
     bool isTransientFile(std::string const& filename, std::string const& downloadTempSuffix)
     {
-        const auto name = std::filesystem::path{filename}.filename().string();
+        const auto name = Paths::nativeToUtf8(Paths::nativeFromUtf8(filename).filename());
         if (name.starts_with(".goutputstream"))
             return true;
         if (!downloadTempSuffix.empty() && name.size() > downloadTempSuffix.size() &&

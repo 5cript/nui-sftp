@@ -1,9 +1,12 @@
 #include <backend/sftp/archive_download_operation.hpp>
+#include <utility/download_mark.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <tar_archive/error.hpp>
 
 #include <log/log.hpp>
+#include <utility/rename.hpp>
 
 #include <cstddef>
 #include <cstring>
@@ -104,7 +107,7 @@ namespace
      * @brief True for entries whose payload needs to stream over SFTP (regular
      *        files only; directories and other typeflags carry no payload).
      */
-    bool isRegularFile(SharedData::DirectoryEntry const& entry) noexcept
+    bool isRegularFile(TarArchive::MemberHeader const& entry) noexcept
     {
         return entry.type == SharedData::FileType::Regular;
     }
@@ -112,7 +115,7 @@ namespace
 
 bool ArchiveDownloadOperation::isPayloadEntry(ResolvedEntry const& entry) const noexcept
 {
-    return isRegularFile(entry.tarMeta);
+    return isRegularFile(entry.header);
 }
 
 ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sftp, Options options)
@@ -122,8 +125,12 @@ ArchiveDownloadOperation::ArchiveDownloadOperation(SecureShell::SftpSession& sft
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
 
-    tempPath_ = options_.localArchivePath;
-    tempPath_ += options_.tempFileSuffix;
+    if (!options_.localArchivePath.empty())
+    {
+        localArchiveNativePath_ = options_.localArchivePath.native();
+        tempPath_ = localArchiveNativePath_;
+        tempPath_ += options_.tempFileSuffix;
+    }
 }
 
 ArchiveDownloadOperation::~ArchiveDownloadOperation()
@@ -138,6 +145,14 @@ ArchiveDownloadOperation::~ArchiveDownloadOperation()
 
 std::expected<Operation::WorkStatus, Operation::Error> ArchiveDownloadOperation::work()
 {
+    if (scanPhase_)
+    {
+        auto result = stepScanPhase(scanPhase_);
+        if (!result.has_value())
+            return enterErrorState<WorkStatus>(std::move(result).error());
+        return result;
+    }
+
     auto future = sftp_->performPromise([this]() { return workInStrand(); });
     if (future.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
@@ -152,6 +167,14 @@ ArchiveDownloadOperation::workInStrand()
 {
     using enum OperationState;
 
+    if (scanPhase_)
+    {
+        Log::error("ArchiveDownloadOperation: The scan phase cannot run on the processing thread.");
+        return enterErrorState<WorkStatus>(
+            {.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
+        );
+    }
+
     switch (state_)
     {
         case NotStarted:
@@ -163,11 +186,11 @@ ArchiveDownloadOperation::workInStrand()
         {
             if (options_.localArchivePath.empty())
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
-            if (options_.entries.empty())
+            if (options_.roots.empty())
                 return enterErrorState<WorkStatus>(
                     {.type = ErrorType::ImplementationError, .extraInfo = "archive has no roots"}
                 );
-            if (std::filesystem::exists(options_.localArchivePath) && !options_.mayOverwrite)
+            if (std::filesystem::exists(localArchiveNativePath_) && !options_.mayOverwrite)
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
 
             const auto prepareResult = prepareInStrand();
@@ -269,9 +292,15 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
             .extraInfo = "no archivable entries under the selected roots",
         });
 
-    auto sinkOrError = openArchiveSink(
-        tempPath_, options_.localArchivePath, options_.compression, options_.compressionOptions
-    );
+    // Opening for writing follows a symlink planted at the temp path, out of the target directory.
+    if (std::error_code linkError{}; std::filesystem::is_symlink(std::filesystem::symlink_status(tempPath_, linkError)))
+    {
+        Log::error("ArchiveDownloadOperation: temp path '{}' is a symlink.", tempPath_.generic_string());
+        return std::unexpected(Error{.type = ErrorType::OpenFailure, .extraInfo = "The temporary file path is a symlink"});
+    }
+
+    auto sinkOrError =
+        openArchiveSink(tempPath_, localArchiveNativePath_, options_.compression, options_.compressionOptions);
     if (!sinkOrError.has_value())
     {
         Log::error(
@@ -299,58 +328,57 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
 
 std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInStrand()
 {
-    for (auto const& root : options_.entries)
+    for (auto const& root : options_.roots)
     {
-        const auto rootFullPath = root.fullPath.empty() ? root.path : root.fullPath;
-        const auto basename =
-            rootFullPath.has_filename() ? rootFullPath.filename() : rootFullPath;
-
-        if (root.type == SharedData::FileType::Regular)
+        const auto name = root.path.filename();
+        if (!name)
         {
-            ResolvedEntry resolved{};
-            resolved.tarMeta = root;
-            resolved.tarMeta.path = basename;
-            resolved.tarMeta.fullPath = basename;
-            resolved.remoteFullPath = rootFullPath;
-            totalPayloadBytes_ += resolved.tarMeta.size;
+            Log::error("ArchiveDownloadOperation: refusing root '{}', it has no name", root.path.value());
+            return std::unexpected(Error{
+                .type = ErrorType::InvalidPath,
+                .extraInfo = fmt::format("'{}' cannot be archived under its own name", root.path.value()),
+            });
+        }
+        const auto archivePrefix = Paths::RelativePath{} / *name;
+
+        if (root.entry.type == SharedData::FileType::Regular)
+        {
+            ResolvedEntry resolved{
+                .header = TarArchive::memberHeaderOf(archivePrefix.value(), root.entry),
+                .source = root.path,
+            };
+            totalPayloadBytes_ += resolved.header.size;
             resolvedEntries_.push_back(std::move(resolved));
         }
-        else if (root.type == SharedData::FileType::Directory)
+        else if (root.entry.type == SharedData::FileType::Directory)
         {
-            ResolvedEntry dirEntry{};
-            dirEntry.tarMeta = root;
-            dirEntry.tarMeta.path = basename;
-            dirEntry.tarMeta.fullPath = basename;
-            dirEntry.tarMeta.size = 0u;
+            ResolvedEntry dirEntry{.header = TarArchive::memberHeaderOf(archivePrefix.value(), root.entry)};
+            dirEntry.header.size = 0u;
             resolvedEntries_.push_back(std::move(dirEntry));
 
             // Directory roots are expanded exclusively from a preceding
             // ScanOperation's results — there is no self-contained recurse
             // fallback, so a visible scan card is always the source of truth
             // for this op's entry list.
-            const auto it = prescannedRoots_.find(rootFullPath);
+            const auto it = prescannedRoots_.find(root.path);
             if (it == prescannedRoots_.end())
             {
                 Log::error(
-                    "ArchiveDownloadOperation: missing pre-scanned entries for directory root '{}'",
-                    rootFullPath.generic_string()
+                    "ArchiveDownloadOperation: missing pre-scanned entries for directory root '{}'", root.path.value()
                 );
                 return std::unexpected(Error{
                     .type = ErrorType::ImplementationError,
-                    .extraInfo = fmt::format(
-                        "no pre-scanned entries for directory root '{}'",
-                        rootFullPath.generic_string()
-                    ),
+                    .extraInfo = fmt::format("no pre-scanned entries for directory root '{}'", root.path.value()),
                 });
             }
-            appendPrescannedInStrand(it->second.first, rootFullPath, basename);
+            appendPrescannedInStrand(it->second.first, root.path, archivePrefix);
         }
         else
         {
             Log::warn(
                 "ArchiveDownloadOperation: skipping non-regular, non-directory root '{}' (type={})",
-                rootFullPath.generic_string(),
-                static_cast<int>(root.type)
+                root.path.value(),
+                static_cast<int>(root.entry.type)
             );
         }
     }
@@ -359,8 +387,8 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
 
 void ArchiveDownloadOperation::appendPrescannedInStrand(
     std::vector<SharedData::DirectoryEntry> const& entries,
-    std::filesystem::path const& remoteRootFullPath,
-    std::filesystem::path const& archivePrefix
+    Paths::RemotePath const& remoteRoot,
+    Paths::RelativePath const& archivePrefix
 )
 {
     // Index 0 is the synthetic scan root (the directory itself); the caller
@@ -369,34 +397,35 @@ void ArchiveDownloadOperation::appendPrescannedInStrand(
     for (std::size_t idx = 1u; idx < entries.size(); ++idx)
     {
         auto const& child = entries[idx];
-        const auto relPath = SharedData::fullPathRelative(entries, child);
-        const auto childArchivePath = archivePrefix / relPath;
-        const auto childFullRemote = remoteRootFullPath / relPath;
+        const auto relative = SharedData::relativePath(entries, child);
+        if (!relative)
+        {
+            Log::warn("ArchiveDownloadOperation: skipping pre-scanned child: {}", relative.error().toString());
+            continue;
+        }
+        const auto memberPath = archivePrefix / *relative;
+        const auto source = remoteRoot / *relative;
 
         if (child.type == SharedData::FileType::Regular)
         {
-            ResolvedEntry resolved{};
-            resolved.tarMeta = child;
-            resolved.tarMeta.path = childArchivePath;
-            resolved.tarMeta.fullPath = childArchivePath;
-            resolved.remoteFullPath = childFullRemote;
-            totalPayloadBytes_ += resolved.tarMeta.size;
+            ResolvedEntry resolved{
+                .header = TarArchive::memberHeaderOf(memberPath.value(), child),
+                .source = source,
+            };
+            totalPayloadBytes_ += resolved.header.size;
             resolvedEntries_.push_back(std::move(resolved));
         }
         else if (child.type == SharedData::FileType::Directory)
         {
-            ResolvedEntry dirEntry{};
-            dirEntry.tarMeta = child;
-            dirEntry.tarMeta.path = childArchivePath;
-            dirEntry.tarMeta.fullPath = childArchivePath;
-            dirEntry.tarMeta.size = 0u;
+            ResolvedEntry dirEntry{.header = TarArchive::memberHeaderOf(memberPath.value(), child)};
+            dirEntry.header.size = 0u;
             resolvedEntries_.push_back(std::move(dirEntry));
         }
         else
         {
             Log::warn(
                 "ArchiveDownloadOperation: skipping non-regular pre-scanned child '{}' (type={})",
-                childFullRemote.generic_string(),
+                source.value(),
                 static_cast<int>(child.type)
             );
         }
@@ -417,12 +446,12 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
     {
         // Directory (or other payload-less) entry — just emit the tar header
         // and move on without opening a remote stream.
-        auto entryOrError = writer_->beginEntry(resolved.tarMeta);
+        auto entryOrError = writer_->beginEntry(resolved.header);
         if (!entryOrError.has_value())
         {
             Log::error(
                 "ArchiveDownloadOperation: cannot begin tar entry '{}': {}",
-                resolved.tarMeta.path.generic_string(),
+                resolved.header.path,
                 entryOrError.error().toString()
             );
             return std::unexpected(archiveErrorToOperationError(entryOrError.error()));
@@ -435,7 +464,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
     }
 
     const auto streamOpenResult = sftp_->openFileInStrand(
-        resolved.remoteFullPath,
+        resolved.source,
         SecureShell::SftpSession::OpenType::Read,
         std::filesystem::perms::unknown
     );
@@ -443,25 +472,25 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
     {
         Log::error(
             "ArchiveDownloadOperation: cannot open remote '{}': {}",
-            resolved.remoteFullPath.generic_string(),
+            resolved.source.value(),
             streamOpenResult.error().message
         );
         return std::unexpected(Error{
             .type = ErrorType::SftpError,
             .sftpError = streamOpenResult.error(),
             .extraInfo = fmt::format(
-                "Opening remote file: {}", resolved.remoteFullPath.generic_string()
+                "Opening remote file: {}", resolved.source.value()
             ),
         });
     }
     currentStream_ = streamOpenResult.value();
 
-    auto entryWriterOrError = writer_->beginEntry(resolved.tarMeta);
+    auto entryWriterOrError = writer_->beginEntry(resolved.header);
     if (!entryWriterOrError.has_value())
     {
         Log::error(
             "ArchiveDownloadOperation: cannot begin tar entry '{}': {}",
-            resolved.tarMeta.path.generic_string(),
+            resolved.header.path,
             entryWriterOrError.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(entryWriterOrError.error()));
@@ -486,7 +515,7 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
         });
 
     auto const& resolved = resolvedEntries_[currentEntryIndex_];
-    const std::uint64_t remaining = resolved.tarMeta.size - currentEntryBytesRead_;
+    const std::uint64_t remaining = resolved.header.size - currentEntryBytesRead_;
     if (remaining == 0u)
     {
         const auto closeResult = finaliseEntryInStrand();
@@ -503,29 +532,31 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
     {
         Log::error(
             "ArchiveDownloadOperation: read failure on '{}': {}",
-            resolved.remoteFullPath.generic_string(),
+            resolved.source.value(),
             readResult.error().message
         );
         return std::unexpected(Error{
             .type = ErrorType::SftpError,
             .sftpError = readResult.error(),
             .extraInfo = fmt::format(
-                "Reading remote file: {}", resolved.remoteFullPath.generic_string()
+                "Reading remote file: {}", resolved.source.value()
             ),
         });
     }
     const auto bytesRead = readResult.value();
     if (bytesRead == 0)
     {
-        Log::warn(
+        Log::error(
             "ArchiveDownloadOperation: premature EOF on '{}' (expected {} more bytes)",
-            resolved.remoteFullPath.generic_string(),
+            resolved.source.value(),
             remaining
         );
-        const auto closeResult = finaliseEntryInStrand();
-        if (!closeResult.has_value())
-            return std::unexpected(closeResult.error());
-        return true;
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' ended {} bytes early", resolved.source.value(), remaining
+            ),
+        });
     }
 
     const auto writeResult = currentEntry_->write(std::span<std::byte const>{
@@ -536,7 +567,7 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
     {
         Log::error(
             "ArchiveDownloadOperation: tar write failure on '{}': {}",
-            resolved.tarMeta.path.generic_string(),
+            resolved.header.path,
             writeResult.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(writeResult.error()));
@@ -552,7 +583,7 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
         0u, totalPayloadBytes_, totalBytesTransferred_, throughputMeter_->bytesPerSecond()
     );
 
-    if (currentEntryBytesRead_ >= resolved.tarMeta.size)
+    if (currentEntryBytesRead_ >= resolved.header.size)
     {
         const auto closeResult = finaliseEntryInStrand();
         if (!closeResult.has_value())
@@ -576,16 +607,23 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseEntryInS
     currentStream_.reset();
 
     auto const& resolved = resolvedEntries_[currentEntryIndex_];
-    if (currentEntryBytesRead_ != resolved.tarMeta.size)
+    if (currentEntryBytesRead_ != resolved.header.size)
     {
-        Log::warn(
-            "ArchiveDownloadOperation: entry '{}' truncated ({} of {} bytes) — archive padded with zeros",
-            resolved.tarMeta.path.generic_string(),
+        Log::error(
+            "ArchiveDownloadOperation: entry '{}' is incomplete ({} of {} bytes)",
+            resolved.header.path,
             currentEntryBytesRead_,
-            resolved.tarMeta.size
+            resolved.header.size
         );
-        ++currentEntryIndex_;
-        return {};
+        return std::unexpected(Error{
+            .type = ErrorType::SizeMismatch,
+            .extraInfo = fmt::format(
+                "'{}' holds {} of {} bytes",
+                resolved.header.path,
+                currentEntryBytesRead_,
+                resolved.header.size
+            ),
+        });
     }
 
     const auto closeResult = std::move(handle).close();
@@ -593,7 +631,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseEntryInS
     {
         Log::error(
             "ArchiveDownloadOperation: tar entry close failed for '{}': {}",
-            resolved.tarMeta.path.generic_string(),
+            resolved.header.path,
             closeResult.error().toString()
         );
         return std::unexpected(archiveErrorToOperationError(closeResult.error()));
@@ -621,11 +659,20 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
         return std::unexpected(archiveErrorToOperationError(finaliseResult.error()));
     }
 
-    if (std::filesystem::exists(options_.localArchivePath) && !options_.mayOverwrite)
-        return std::unexpected(Error{.type = ErrorType::FileExists});
+    if (options_.markAsDownloaded)
+    {
+        if (const auto marked = Utility::markAsDownloaded(tempPath_); marked)
+            Log::warn("ArchiveDownloadOperation: Cannot mark the archive as downloaded: {}", marked.message());
+    }
 
+    // Without permission to overwrite, the rename itself refuses an existing archive: no check-then-rename race.
     std::error_code renameErr{};
-    std::filesystem::rename(tempPath_, options_.localArchivePath, renameErr);
+    if (options_.mayOverwrite)
+        std::filesystem::rename(tempPath_, localArchiveNativePath_, renameErr);
+    else if (auto renamed = Utility::renameNoReplace(tempPath_, localArchiveNativePath_); !renamed.has_value())
+        renameErr = renamed.error();
+    if (renameErr == std::errc::file_exists)
+        return std::unexpected(Error{.type = ErrorType::FileExists});
     if (renameErr)
     {
         Log::error("ArchiveDownloadOperation: rename failed: {}", renameErr.message());
@@ -636,11 +683,13 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
 
 std::expected<void, Operation::Error> ArchiveDownloadOperation::cancel(bool adoptCancelState)
 {
+    if (scanPhase_)
+        scanPhase_->cancel(adoptCancelState);
     if (adoptCancelState)
     {
         Log::info(
             "ArchiveDownloadOperation: cancelled ({} roots, {} bytes planned).",
-            options_.entries.size(),
+            options_.roots.size(),
             totalPayloadBytes_
         );
         state_ = OperationState::Canceled;
@@ -650,7 +699,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::cancel(bool adop
 }
 
 void ArchiveDownloadOperation::setScanResultForRoot(
-    std::filesystem::path const& remoteRootPath,
+    Paths::RemotePath const& remoteRootPath,
     std::vector<SharedData::DirectoryEntry> entries,
     std::uint64_t totalBytes
 )
@@ -673,4 +722,19 @@ void ArchiveDownloadOperation::cleanup()
         std::error_code removeErr{};
         std::filesystem::remove(tempPath_, removeErr);
     }
+}
+
+void ArchiveDownloadOperation::addScanRoot(std::unique_ptr<ScanOperation> scan)
+{
+    if (!scanPhase_)
+    {
+        scanPhase_ = std::make_unique<ScanPhase<ScanOperation>>(
+            [this](ScanOperation& finished)
+            {
+                const auto scannedBytes = finished.totalBytes();
+                setScanResultForRoot(finished.remotePath(), finished.ejectEntries(), scannedBytes);
+            }
+        );
+    }
+    scanPhase_->addRoot(std::move(scan));
 }

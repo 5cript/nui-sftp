@@ -45,6 +45,9 @@ struct SyncProgressDialog::Implementation
     // Comparing counter — will be populated when the diff step is added
     Nui::Observed<std::uint64_t> compared_{0ull};
 
+    /** @brief Why a scan failed, shown in the Failed phase. */
+    std::string failureReason_{};
+
     // Hashing progress bar — total becomes known when comparing finishes
     Components::ProgressBar hashProgressBar_{Components::ProgressBar::Settings{
         .height = "10px",
@@ -56,7 +59,7 @@ struct SyncProgressDialog::Implementation
     std::filesystem::path localPath_{};
     std::filesystem::path remotePath_{};
 
-    BackendSyncProvider* provider_{nullptr};
+    std::shared_ptr<BackendSyncProvider> provider_{};
     SharedData::Sync::DiffOptions initialOptions_{};
     std::function<void(SharedData::Sync::DiffSnapshot)> onDone_{};
 
@@ -76,7 +79,7 @@ SyncProgressDialog::SyncProgressDialog(SyncProgressDialog&&) = default;
 SyncProgressDialog& SyncProgressDialog::operator=(SyncProgressDialog&&) = default;
 
 void SyncProgressDialog::open(
-    BackendSyncProvider* provider,
+    std::shared_ptr<BackendSyncProvider> provider,
     std::filesystem::path localPath,
     std::filesystem::path remotePath,
     bool respectIgnoreFiles,
@@ -151,6 +154,15 @@ void SyncProgressDialog::open(
                         impl_->onDone_(std::move(snapshot));
                 }
             );
+        },
+        // onScanFailed
+        [this, token](std::string const& reason)
+        {
+            if (*token)
+                return;
+            impl_->failureReason_ = reason;
+            impl_->phase_ = SharedData::SyncPhase::Failed;
+            Nui::globalEventContext.executeActiveEventsImmediately();
         },
         // onDiffProgress
         [this, token](std::uint64_t compared)
@@ -247,6 +259,16 @@ Nui::ElementRenderer SyncProgressDialog::operator()()
                                     span{class_ = "sync-progress-counter-value"}(impl_->remoteListed_)
                                 )
                             )
+                        );
+                    }
+
+                    if (phase == SharedData::SyncPhase::Failed)
+                    {
+                        return div{class_ = "sync-progress-step sync-progress-failed"}(
+                            div{class_ = "sync-progress-step-header"}(
+                                span{class_ = "sync-progress-step-label"}(language->getObserved("syncProgressDialog", "scanFailed"))
+                            ),
+                            div{class_ = "sync-progress-failure-reason"}(impl_->failureReason_)
                         );
                     }
 

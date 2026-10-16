@@ -1,4 +1,6 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
+#include <frontend/file_explorer/open_local_file.hpp>
+#include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
 #include <frontend/session_components/file_tracking.hpp>
@@ -73,7 +75,7 @@ RemoteSideModel::RemoteSideModel(
                       for (auto&& entry : std::move(*entries))
                       {
                           if (entry.isDirectory())
-                              listing.emplace_back(std::move(entry).path);
+                              listing.emplace_back(std::move(entry).name);
                       }
 
                       onResultsAvailable(listing);
@@ -149,7 +151,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
 
     std::vector<NuiFileExplorer::ContextMenuItem> items;
 
-    if (singleItem && selectedItems.front().isDirectoryLike() && selectedItems.front().path.filename() != "..")
+    if (singleItem && selectedItems.front().isDirectoryLike() && !selectedItems.front().isParentLink)
     {
         const auto& selPath = selectedItems.front().fullPath;
         const auto& favs = favorites_->value();
@@ -265,7 +267,7 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
     return items;
 }
 
-void RemoteSideModel::setLocalModel(SideModel* model)
+void RemoteSideModel::setLocalModel(LocalSideModel* model)
 {
     localModel_ = model;
 }
@@ -273,6 +275,39 @@ void RemoteSideModel::setLocalModel(SideModel* model)
 void RemoteSideModel::setFileTracking(FileTrackingPanel* fileTracking)
 {
     fileTracking_ = fileTracking;
+}
+
+std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::currentRemotePath() const
+{
+    return Paths::RemotePath::make(listedPath_.generic_string());
+}
+
+std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::remotePathOf(NuiFileExplorer::Item const& item) const
+{
+    if (item.isParentLink)
+        return std::unexpected(Paths::PathError{.reason = Paths::PathRejection::DotOrDotDot, .input = ".."});
+    return Paths::PathSegment::make(item.name)
+        .and_then(
+            [&item](Paths::PathSegment const&)
+            {
+                return Paths::RemotePath::make(item.fullPath.generic_string());
+            }
+        );
+}
+
+std::expected<Paths::RemotePath, Paths::PathError> RemoteSideModel::childOfCurrentPath(std::string_view name) const
+{
+    return currentRemotePath().and_then(
+        [name](Paths::RemotePath const& directory)
+        {
+            return Paths::PathSegment::make(name).transform(
+                [&directory](Paths::PathSegment const& segment)
+                {
+                    return directory / segment;
+                }
+            );
+        }
+    );
 }
 
 bool RemoteSideModel::isComplete() const
@@ -292,13 +327,9 @@ void RemoteSideModel::onActivateItem(NuiFileExplorer::Item const& item)
         return;
     }
 
-    if (item.path == ".")
-        return;
-    if (item.path == "..")
-        return navigateTo(currentPath_.value().parent_path());
-
-    Log::debug("Remote onActivateItem: {}.", item.path.generic_string());
-    navigateTo(currentPath_.value() / item.path);
+    // The item's own path, the side may already be loading another directory.
+    Log::debug("Remote onActivateItem: {}.", item.displayName());
+    navigateTo(item.fullPath.empty() ? currentPath_.value() / item.name : item.fullPath);
 }
 
 void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
@@ -318,14 +349,14 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                 if (!name)
                     return;
 
-                Log::info("Creating new directory: {}", *name);
-                if (name->find('/') != std::string::npos)
-                {
-                    Log::error("Invalid directory name (cannot contain slashes): {}", *name);
-                    return;
-                }
+                if (!isValidItemName(*name))
+                    return showInvalidItemName(*name);
+                auto path = childOfCurrentPath(*name);
+                if (!path)
+                    return showPathRefused(language->get("remoteSideModel", "createNewDirectory"), path.error());
+                Log::info("Creating new directory: {}", path->value());
                 fileEngine_->createDirectory(
-                    currentPath_.value() / *name,
+                    *path,
                     [this](bool success, std::string const& info)
                     {
                         if (!success)
@@ -358,14 +389,14 @@ void RemoteSideModel::onNewItem(NuiFileExplorer::Item::Type type)
                 if (!name)
                     return;
 
-                Log::info("Creating new file: {}", *name);
-                if (name->find('/') != std::string::npos)
-                {
-                    Log::error("Invalid file name (cannot contain slashes): {}", *name);
-                    return;
-                }
+                if (!isValidItemName(*name))
+                    return showInvalidItemName(*name);
+                auto path = childOfCurrentPath(*name);
+                if (!path)
+                    return showPathRefused(language->get("remoteSideModel", "createNewFile"), path.error());
+                Log::info("Creating new file: {}", path->value());
                 fileEngine_->createFile(
-                    currentPath_.value() / *name,
+                    *path,
                     [this](bool success, std::string const& info)
                     {
                         if (!success)
@@ -405,9 +436,9 @@ void RemoteSideModel::onError(NuiFileExplorer::Error const& fileExplorerError)
 }
 
 void RemoteSideModel::askNonEmptyDirectoryDeletions(
-    std::vector<std::filesystem::path> confirmedToDelete,
-    std::vector<std::filesystem::path> nonEmpties,
-    std::vector<std::filesystem::path> filesAndEmptyDirs,
+    std::vector<Paths::RemotePath> confirmedToDelete,
+    std::vector<Paths::RemotePath> nonEmpties,
+    std::vector<Paths::RemotePath> filesAndEmptyDirs,
     std::size_t currentNonEmpty
 )
 {
@@ -422,7 +453,7 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
     confirmDialog_->open(
         {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
             .headerText = language->get("remoteSideModel", "nonEmptyDirectoriesFound"),
-            .text = fmt::format(fmt::runtime(language->get("remoteSideModel", "nonEmptyDeleteAsk")), dir.string()),
+            .text = fmt::format(fmt::runtime(language->get("remoteSideModel", "nonEmptyDeleteAsk")), dir.value()),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::None |
                 ConfirmDialog::Button::All | ConfirmDialog::Button::Cancel,
             .focusButton = ConfirmDialog::Button::No,
@@ -479,38 +510,20 @@ void RemoteSideModel::askNonEmptyDirectoryDeletions(
 }
 
 void RemoteSideModel::enqueueDeletes(
-    std::vector<std::filesystem::path> nonEmpties,
-    std::vector<std::filesystem::path> filesAndEmptyDirs
+    std::vector<Paths::RemotePath> nonEmpties,
+    std::vector<Paths::RemotePath> filesAndEmptyDirs
 )
 {
     // Combine into a single bulk-delete request.  File / empty-dir entries
     // become one bulk-delete card; non-empty directories become individual
     // Scan+Delete pairs (their isDirectory=true triggers the recursive flow
     // backend-side).  One RPC for the whole user action.
-    std::vector<SharedData::BulkAddEntry> entries;
+    std::vector<SharedData::BulkDeleteEntry> entries;
     entries.reserve(filesAndEmptyDirs.size() + nonEmpties.size());
-    for (auto const& path : filesAndEmptyDirs)
-    {
-        entries.push_back(
-            SharedData::BulkAddEntry{
-                .src = path,
-                .dst = {},
-                .sizeBytes = 0,
-                .isDirectory = false,
-            }
-        );
-    }
-    for (auto const& path : nonEmpties)
-    {
-        entries.push_back(
-            SharedData::BulkAddEntry{
-                .src = path,
-                .dst = {},
-                .sizeBytes = 0,
-                .isDirectory = true,
-            }
-        );
-    }
+    for (auto& path : filesAndEmptyDirs)
+        entries.push_back({.target = std::move(path), .isDirectory = false});
+    for (auto& path : nonEmpties)
+        entries.push_back({.target = std::move(path), .isDirectory = true});
 
     if (entries.empty())
         return;
@@ -558,21 +571,21 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
         confirmText = fmt::format(fmt::runtime(language->get("remoteSideModel", "deleteMultipleConfirm")), itemSize);
     else
         confirmText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().path.generic_string()
+            fmt::runtime(language->get("remoteSideModel", "deleteSingleConfirm")), items.front().name
         );
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
     for (const auto& item : items)
     {
-        listItems.push_back({item.path.generic_string(), ""});
+        listItems.push_back({item.name, item.fullPath.generic_string()});
     }
 
     confirmDialog_->open(
-        {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
-            .headerText = language->get("remoteSideModel", "deleteItemsQuestion"),
+        {.styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+            .headerText = language->get("remoteSideModel", "deleteRemoteItemsQuestion"),
             .text = confirmText,
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
-            .focusButton = ConfirmDialog::Button::Yes,
+            .focusButton = ConfirmDialog::Button::No,
             .listItems = listItems,
             .onClose = [this, items](std::optional<ConfirmDialog::Button> button)
             {
@@ -582,21 +595,36 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                     return;
                 }
 
-                std::vector<NuiFileExplorer::Item> directories;
-                std::vector<NuiFileExplorer::Item> files;
-                for (auto item : items)
+                std::vector<Paths::RemotePath> directories;
+                std::vector<Paths::RemotePath> files;
+                for (auto const& item : items)
                 {
-                    item.path = currentPath_.value() / item.path;
+                    // A name like "x/.." or ".." must not turn into another delete target.
+                    auto path = remotePathOf(item);
+                    if (!path)
+                    {
+                        Log::error("Refusing to delete '{}': not an item of the current directory.", item.name);
+                        confirmDialog_->open({
+                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                            .headerText = language->get("remoteSideModel", "deleteFailed"),
+                            .text = fmt::format(
+                                fmt::runtime(language->get("remoteSideModel", "failedToDeleteItems")),
+                                item.name
+                            ),
+                            .buttons = ConfirmDialog::Button::Ok,
+                        });
+                        return;
+                    }
                     if (item.type == NuiFileExplorer::Item::Type::Directory)
-                        directories.push_back(item);
+                        directories.push_back(*std::move(path));
                     else
-                        files.push_back(item);
+                        files.push_back(*std::move(path));
                 }
 
                 Log::info("Deleting items");
                 fileEngine_->remove(
-                    files,
-                    directories,
+                    std::move(files),
+                    std::move(directories),
                     [this](bool success, std::string const& info)
                     {
                         if (!success)
@@ -615,10 +643,7 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                         // Refresh list from server:
                         onRefresh();
                     },
-                    [this](
-                        std::vector<std::filesystem::path> filesAndEmptyDirs,
-                        std::vector<std::filesystem::path> nonEmpties
-                    )
+                    [this](std::vector<Paths::RemotePath> filesAndEmptyDirs, std::vector<Paths::RemotePath> nonEmpties)
                     {
                         askNonEmptyDirectoryDeletions({}, std::move(nonEmpties), std::move(filesAndEmptyDirs), 0);
                     }
@@ -628,15 +653,15 @@ void RemoteSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
 }
 
 void RemoteSideModel::enqueueSingleDownload(
-    NuiFileExplorer::Item const& remoteItem,
-    NuiFileExplorer::Item const& localItem,
+    SharedData::BulkDownloadEntry const& entry,
     bool allowOverwrite,
     bool insertRefresh
 )
 {
     operationQueue_->enqueueDownload(
-        remoteItem,
-        localItem,
+        entry.source,
+        entry.destination,
+        entry.sizeBytes,
         [this](std::optional<Ids::OperationId> const& opId, std::string const& info)
         {
             if (!opId)
@@ -659,13 +684,26 @@ void RemoteSideModel::enqueueSingleDownload(
     );
 }
 
+namespace
+{
+    /**
+     * @brief @p entry with the user's consent to replace its existing destination.
+     */
+    template <typename EntryT>
+    EntryT approvedForOverwrite(EntryT entry)
+    {
+        entry.mayOverwrite = true;
+        return entry;
+    }
+}
+
 void RemoteSideModel::downloadItemsConfirmed(
-    std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems,
+    std::vector<SharedData::BulkDownloadEntry> candidates,
     std::shared_ptr<std::vector<bool>> existsResults,
     std::size_t index,
     bool overwriteNever,
     bool overwriteAlways,
-    std::shared_ptr<std::vector<SharedData::BulkAddEntry>> accepted
+    std::shared_ptr<std::vector<SharedData::BulkDownloadEntry>> accepted
 )
 {
     // Lazily allocate the accumulator on the first (top-level) call.  All
@@ -673,28 +711,10 @@ void RemoteSideModel::downloadItemsConfirmed(
     // confirmations land in one batch that's flushed as a single bulk RPC at
     // the terminal recursion.
     if (!accepted)
-        accepted = std::make_shared<std::vector<SharedData::BulkAddEntry>>();
+        accepted = std::make_shared<std::vector<SharedData::BulkDownloadEntry>>();
 
-    auto pushEntry = [](std::vector<SharedData::BulkAddEntry>& bucket,
-                         NuiFileExplorer::Item const& remoteItem,
-                         NuiFileExplorer::Item const& localItem)
-    {
-        bucket.push_back(
-            SharedData::BulkAddEntry{
-                .src = !remoteItem.fullPath.empty() ? remoteItem.fullPath : remoteItem.path,
-                .dst = !localItem.fullPath.empty() ? localItem.fullPath : localItem.path,
-                .sizeBytes = remoteItem.size,
-                .isDirectory = remoteItem.isDirectory(),
-                .mtime = remoteItem.mtime,
-                .mtimeNsec = remoteItem.mtimeNsec,
-            }
-        );
-    };
-
-    // Every entry in `accepted` is either a non-existing destination or an
-    // item the user explicitly approved for overwrite (Yes / All); the "No"
-    // and "None" branches skip the push.  So allowOverwrite=true at flush
-    // time is semantically correct regardless of the overwriteAlways flag.
+    // Only entries the user approved (Yes / All) may replace their destination. The others did not exist when
+    // probed, one that appears before the transfer runs fails instead of being replaced.
     auto flushAccepted = [this, &accepted]()
     {
         if (accepted->empty())
@@ -705,20 +725,9 @@ void RemoteSideModel::downloadItemsConfirmed(
         // the bulk path because they need the Scan+Bulk pair.
         if (accepted->size() == 1 && !accepted->front().isDirectory)
         {
-            auto const& entry = accepted->front();
-            SharedData::DirectoryEntry remoteEntry{};
-            remoteEntry.path = entry.src;
-            remoteEntry.size = entry.sizeBytes;
-            remoteEntry.type = SharedData::FileType::Regular;
-            remoteEntry.mtime = entry.mtime;
-            remoteEntry.mtimeNsec = entry.mtimeNsec;
-            SharedData::DirectoryEntry localEntry{};
-            localEntry.path = entry.dst;
-            localEntry.type = SharedData::FileType::Regular;
             enqueueSingleDownload(
-                NuiFileExplorer::Item{remoteEntry},
-                NuiFileExplorer::Item{localEntry},
-                /*allowOverwrite=*/true,
+                accepted->front(),
+                /*allowOverwrite=*/accepted->front().mayOverwrite,
                 /*insertRefresh=*/true
             );
             accepted->clear();
@@ -730,7 +739,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         // RPCs with one.
         operationQueue_->enqueueBulkDownload(
             std::move(*accepted),
-            /*allowOverwrite*/ true,
+            /*allowOverwrite*/ false,
             /*insertRefresh*/ true,
             SharedData::OperationMode::Queued,
             /*onEachComplete*/ {},
@@ -752,7 +761,7 @@ void RemoteSideModel::downloadItemsConfirmed(
         );
     };
 
-    if (index == downloadItems.size())
+    if (index == candidates.size())
     {
         flushAccepted();
         return;
@@ -760,8 +769,8 @@ void RemoteSideModel::downloadItemsConfirmed(
 
     if (overwriteAlways)
     {
-        for (; index < downloadItems.size(); ++index)
-            pushEntry(*accepted, downloadItems[index].first, downloadItems[index].second);
+        for (; index < candidates.size(); ++index)
+            accepted->push_back(approvedForOverwrite(candidates[index]));
         flushAccepted();
         return;
     }
@@ -769,19 +778,18 @@ void RemoteSideModel::downloadItemsConfirmed(
     // Iterate synchronously until we hit either end-of-list or a conflict
     // that requires an async confirmation dialog.  Recursing per-item would
     // blow WASM's ~64KB stack at ~175 deep for a 1000-file batch, since each
-    // frame holds a moved copy of downloadItems.
-    while (index < downloadItems.size())
+    // frame holds a moved copy of the candidates.
+    while (index < candidates.size())
     {
-        auto const& item = downloadItems[index];
+        auto const& candidate = candidates[index];
         // existsResults was filled by a single batched RpcFilesystem::existsBatch
         // call before the loop started, so this adds zero RPC round-trips.
-        // Defensive: if results are missing or shorter than expected, treat
-        // the file as not-existing.
-        const bool exists = (existsResults && index < existsResults->size()) ? (*existsResults)[index] : false;
+        // Without an answer the destination counts as existing, so the user is asked.
+        const bool exists = !existsResults || index >= existsResults->size() || (*existsResults)[index];
 
         if (!exists)
         {
-            pushEntry(*accepted, item.first, item.second);
+            accepted->push_back(candidate);
             ++index;
             continue;
         }
@@ -799,18 +807,18 @@ void RemoteSideModel::downloadItemsConfirmed(
         break;
     }
 
-    if (index >= downloadItems.size())
+    if (index >= candidates.size())
     {
         // All items processed without needing further prompts — flush.
         flushAccepted();
         return;
     }
 
-    auto const& item = downloadItems[index];
-    Log::info("Downloading '{}' to '{}'.", item.first.path.generic_string(), item.second.path.generic_string());
+    auto const& candidate = candidates[index];
+    Log::info("Downloading '{}' to '{}'.", candidate.source.value(), candidate.destination.toUtf8());
 
     {
-        Log::info("File already exists: {}", item.second.path.generic_string());
+        Log::info("File already exists: {}", candidate.destination.toUtf8());
         confirmDialog_->open(
             {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
                 .headerText = language->get("remoteSideModel", "fileAlreadyExistsOverwrite"),
@@ -818,21 +826,20 @@ void RemoteSideModel::downloadItemsConfirmed(
                 .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::All |
                     ConfirmDialog::Button::None | ConfirmDialog::Button::Cancel,
                 .focusButton = ConfirmDialog::Button::No,
-                .listItems = {{.text = item.second.path.generic_string(), .description = language->get("fileExplorer", "fileAlreadyExists")}},
+                .listItems = {{.text = candidate.destination.toUtf8(), .description = language->get("fileExplorer", "fileAlreadyExists")}},
                 .onClose = [this,
-                               downloadItems = std::move(downloadItems),
+                               candidates = std::move(candidates),
                                existsResults,
                                index,
                                overwriteNever,
                                overwriteAlways,
-                               accepted,
-                               pushEntry](std::optional<ConfirmDialog::Button> button) mutable
+                               accepted](std::optional<ConfirmDialog::Button> button) mutable
                 {
                     if (button && button == ConfirmDialog::Button::Yes)
                     {
-                        pushEntry(*accepted, downloadItems[index].first, downloadItems[index].second);
+                        accepted->push_back(approvedForOverwrite(candidates[index]));
                         downloadItemsConfirmed(
-                            std::move(downloadItems),
+                            std::move(candidates),
                             std::move(existsResults),
                             index + 1,
                             overwriteNever,
@@ -843,10 +850,10 @@ void RemoteSideModel::downloadItemsConfirmed(
                     else if (button && button == ConfirmDialog::Button::No)
                     {
                         Log::info(
-                            "Skipping download of existing file: {}", downloadItems[index].second.path.generic_string()
+                            "Skipping download of existing file: {}", candidates[index].destination.toUtf8()
                         );
                         downloadItemsConfirmed(
-                            std::move(downloadItems),
+                            std::move(candidates),
                             std::move(existsResults),
                             index + 1,
                             overwriteNever,
@@ -857,9 +864,9 @@ void RemoteSideModel::downloadItemsConfirmed(
                     else if (button && button == ConfirmDialog::Button::All)
                     {
                         Log::info("Overwriting all existing files from now on.");
-                        pushEntry(*accepted, downloadItems[index].first, downloadItems[index].second);
+                        accepted->push_back(approvedForOverwrite(candidates[index]));
                         downloadItemsConfirmed(
-                            std::move(downloadItems),
+                            std::move(candidates),
                             std::move(existsResults),
                             index + 1,
                             overwriteNever,
@@ -871,7 +878,7 @@ void RemoteSideModel::downloadItemsConfirmed(
                     {
                         Log::info("Skipping all existing files from now on.");
                         downloadItemsConfirmed(
-                            std::move(downloadItems),
+                            std::move(candidates),
                             std::move(existsResults),
                             index + 1,
                             /*overwriteNever*/ true,
@@ -883,9 +890,9 @@ void RemoteSideModel::downloadItemsConfirmed(
                     {
                         // Cancel — flush whatever the user has already
                         // accepted so far and stop iterating.
-                        const auto terminalIndex = downloadItems.size();
+                        const auto terminalIndex = candidates.size();
                         downloadItemsConfirmed(
-                            std::move(downloadItems),
+                            std::move(candidates),
                             std::move(existsResults),
                             terminalIndex,
                             overwriteNever,
@@ -925,35 +932,86 @@ void RemoteSideModel::onTransfer(
         return;
     }
 
-    const auto itemsSize = items.size();
+    if (!localModel_)
+    {
+        Log::error("Cannot download items: local model is not set");
+        return;
+    }
 
-    auto destinationDir = localModel_->currentPath().value();
-    if (subDir)
-        destinationDir /= *subDir;
+    const auto refuse = [this](Paths::PathError const& error)
+    {
+        showPathRefused(language->get("remoteSideModel", "downloadFailed"), error);
+    };
+    const auto destinationDirectory = localModel_->currentLocalPath().and_then(
+        [&subDir](Paths::LocalPath const& directory) -> std::expected<Paths::LocalPath, Paths::PathError>
+        {
+            if (!subDir)
+                return directory;
+            return Paths::LocalPathSegment::make(*subDir).transform(
+                [&directory](Paths::LocalPathSegment const& segment)
+                {
+                    return directory / segment;
+                }
+            );
+        }
+    );
+    if (!destinationDirectory)
+        return refuse(destinationDirectory.error());
 
+    std::vector<SharedData::BulkDownloadEntry> candidates;
+    candidates.reserve(items.size());
+    for (auto const& item : items)
+    {
+        // A name this platform cannot hold is refused before anything is written.
+        auto source = remotePathOf(item);
+        auto destination = source.and_then(
+            [&destinationDirectory](Paths::RemotePath const& path)
+            {
+                return Paths::LocalPathSegment::make(*path.filename())
+                    .transform(
+                        [&destinationDirectory](Paths::LocalPathSegment const& segment)
+                        {
+                            return *destinationDirectory / segment;
+                        }
+                    );
+            }
+        );
+        if (!destination)
+            return refuse(destination.error());
+        candidates.push_back(
+            SharedData::BulkDownloadEntry{
+                .source = *std::move(source),
+                .destination = *std::move(destination),
+                .sizeBytes = item.size,
+                .isDirectory = item.isDirectory(),
+                .mtime = item.mtime,
+                .mtimeNsec = item.mtimeNsec,
+            }
+        );
+    }
+
+    const auto itemsSize = candidates.size();
     std::string confirmText;
     if (itemsSize > 1)
     {
         confirmText = fmt::format(
             fmt::runtime(language->get("remoteSideModel", "downloadConfirmIfMultiple")),
             itemsSize,
-            destinationDir.generic_string()
+            destinationDirectory->toUtf8()
         );
     }
     else
     {
         confirmText = fmt::format(
             fmt::runtime(language->get("remoteSideModel", "downloadConfirmIfSingle")),
-            items.front().path.generic_string(),
-            destinationDir.generic_string()
+            candidates.front().source.value(),
+            destinationDirectory->toUtf8()
         );
     }
 
     std::vector<ConfirmDialog::OpenOptions::ListElement> listItems;
-    for (const auto& item : items)
-    {
-        listItems.push_back({item.path.generic_string(), ""});
-    }
+    for (const auto& candidate : candidates)
+        listItems.push_back({candidate.source.value(), ""});
 
     confirmDialog_->open(
         {.styleVariant = ScriptNuiComponents::StyleVariant::Primary,
@@ -962,7 +1020,7 @@ void RemoteSideModel::onTransfer(
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::Yes,
             .listItems = listItems,
-            .onClose = [this, items, destinationDir](std::optional<ConfirmDialog::Button> button)
+            .onClose = [this, candidates = std::move(candidates)](std::optional<ConfirmDialog::Button> button) mutable
             {
                 if (!button || *button != ConfirmDialog::Button::Yes)
                 {
@@ -970,61 +1028,45 @@ void RemoteSideModel::onTransfer(
                     return;
                 }
 
-                std::vector<std::pair<NuiFileExplorer::Item, NuiFileExplorer::Item>> downloadItems;
-                std::transform(
-                    items.begin(),
-                    items.end(),
-                    std::back_inserter(downloadItems),
-                    [this, destinationDir](auto const& item)
-                    {
-                        NuiFileExplorer::Item localItem = item;
-                        NuiFileExplorer::Item remoteItem = item;
-                        localItem.path = destinationDir / item.path.filename();
-                        localItem.fullPath = localItem.path;
-                        remoteItem.path = currentPath_.value() / item.path;
-                        remoteItem.fullPath = remoteItem.path;
-                        return std::make_pair(remoteItem, localItem);
-                    }
-                );
-
                 Log::info("Downloading items.");
 
-                // Batched existence probe: one RPC for the whole batch
-                // instead of N.  The recursion below then walks the cached
-                // result vector with zero further round-trips.
-                std::vector<std::string> destPathStrings;
-                destPathStrings.reserve(downloadItems.size());
-                for (auto const& pair : downloadItems)
-                    destPathStrings.push_back(pair.second.path.generic_string());
+                // Batched existence probe: one RPC for the whole batch instead of N. The recursion below then walks
+                // the cached result vector with zero further round-trips.
+                std::vector<std::string> destinations;
+                destinations.reserve(candidates.size());
+                for (auto const& candidate : candidates)
+                    destinations.push_back(candidate.destination.toUtf8());
 
                 Nui::RpcClient::callWithBackChannel(
                     "RpcFilesystem::existsBatch",
-                    [this, downloadItems = std::move(downloadItems)](Nui::val response) mutable
+                    [this, candidates = std::move(candidates)](Nui::val response) mutable
                     {
-                        auto existsResults = std::make_shared<std::vector<bool>>();
-
+                        // An unknown destination is never taken for absent, the batch overwrites what it accepts.
                         if (!response.hasOwnProperty("success") || !response["success"].as<bool>() ||
                             !response.hasOwnProperty("exists"))
                         {
-                            Log::warn("RpcFilesystem::existsBatch failed; assuming nothing exists yet");
-                            existsResults->assign(downloadItems.size(), false);
-                        }
-                        else
-                        {
-                            auto arr = response["exists"];
-                            const auto length = arr["length"].as<long long>();
-                            existsResults->reserve(static_cast<std::size_t>(length));
-                            for (long long idx = 0; idx < length; ++idx)
-                                existsResults->push_back(arr[static_cast<int>(idx)].as<bool>());
-                            // Defensive padding in case the backend returned
-                            // fewer entries than requested.
-                            while (existsResults->size() < downloadItems.size())
-                                existsResults->push_back(false);
+                            return showExistenceCheckFailed(
+                                response.hasOwnProperty("error") ? language->translate(response["error"].as<std::string>())
+                                                                 : std::string{"RpcFilesystem::existsBatch"}
+                            );
                         }
 
-                        downloadItemsConfirmed(std::move(downloadItems), std::move(existsResults));
+                        auto existsResults = std::make_shared<std::vector<bool>>();
+                        auto arr = response["exists"];
+                        const auto length = arr["length"].as<long long>();
+                        existsResults->reserve(static_cast<std::size_t>(length));
+                        for (long long idx = 0; idx < length; ++idx)
+                            existsResults->push_back(arr[static_cast<int>(idx)].as<bool>());
+                        if (existsResults->size() != candidates.size())
+                        {
+                            return showExistenceCheckFailed(
+                                fmt::format("{} of {} answers", existsResults->size(), candidates.size())
+                            );
+                        }
+
+                        downloadItemsConfirmed(std::move(candidates), std::move(existsResults));
                     },
-                    destPathStrings
+                    destinations
                 );
             }}
     );
@@ -1076,30 +1118,28 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         Log::error("Cannot download as archive: local model is not wired");
         return;
     }
-    if (!localModel_->currentPath().value().empty() == false)
-    {
-        Log::error("Local side has no active path; cannot pick a destination");
-        return;
-    }
 
     // Root entries: files go straight in, directories are flattened on the
     // backend via a recursive SFTP listDirectory in the archive op's
     // prepareInStrand step. Symlinks and other non-regular / non-directory
     // types are logged and dropped there too.
-    std::vector<SharedData::DirectoryEntry> rootEntries;
-    rootEntries.reserve(items.size());
+    std::vector<SharedData::ArchiveDownloadRoot> roots;
+    roots.reserve(items.size());
     for (auto const& item : items)
     {
-        SharedData::DirectoryEntry entry = item;
-        entry.fullPath = currentPath_.value() / item.path;
-        rootEntries.push_back(std::move(entry));
+        auto path = remotePathOf(item);
+        if (!path)
+            return showPathRefused(language->get("remoteSideModel", "archiveDownloadFailed"), path.error());
+        roots.push_back(
+            SharedData::ArchiveDownloadRoot{
+                .path = *std::move(path),
+                .entry = static_cast<SharedData::DirectoryEntry const&>(item),
+            }
+        );
     }
 
-    if (rootEntries.empty())
-        return;
-
     const auto defaultStem =
-        items.size() == 1 ? items.front().path.filename().generic_string() : language->get("fileExplorer", "archiveDefaultName");
+        items.size() == 1 ? items.front().name : language->get("fileExplorer", "archiveDefaultName");
 
     archiveTransferDialog_->open({
         .headerText = language->get("fileExplorer", "contextMenu", "downloadAsArchive"),
@@ -1107,7 +1147,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         .initialCodec = ArchiveCodec::Gzip,
         .initialCompressionLevel = 5,
         .onConfirm =
-            [this, entries = std::move(rootEntries)](std::optional<ArchiveTransferResult> const& result) mutable
+            [this, roots = std::move(roots)](std::optional<ArchiveTransferResult> const& result) mutable
         {
             if (!result)
             {
@@ -1118,10 +1158,23 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                 return;
 
             const std::string filename = result->fileStem + ".tar" + archiveCodecExtension(result->codec);
-            const auto localPath = localModel_->currentPath().value() / filename;
+            auto archivePath = localModel_->currentLocalPath().and_then(
+                [&filename](Paths::LocalPath const& directory)
+                {
+                    return Paths::LocalPathSegment::make(filename).transform(
+                        [&directory](Paths::LocalPathSegment const& segment)
+                        {
+                            return directory / segment;
+                        }
+                    );
+                }
+            );
+            if (!archivePath)
+                return showPathRefused(language->get("remoteSideModel", "archiveDownloadFailed"), archivePath.error());
+            const auto localPath = *std::move(archivePath);
 
             operationQueue_->enqueueArchiveDownload(
-                std::move(entries),
+                std::move(roots),
                 localPath,
                 backendCompressionCode(result->codec),
                 result->compressionLevel,
@@ -1140,77 +1193,89 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                         });
                         return;
                     }
-                    Log::info(
-                        "Archive download queued as {} (destination {})", opId->value(), localPath.generic_string()
-                    );
+                    Log::info("Archive download queued as {} (destination {})", opId->value(), localPath.toUtf8());
                 }
             );
         },
     });
 }
 
+void RemoteSideModel::renameItem(Paths::RemotePath const& from, Paths::RemotePath const& to, bool overwrite)
+{
+    fileEngine_->rename(
+        from,
+        to,
+        overwrite,
+        [this, from, to, overwrite](bool success, std::string const& info)
+        {
+            if (!success)
+            {
+                if (info == "backend.rename.targetExists" && !overwrite)
+                {
+                    confirmReplaceOnRename(
+                        std::string{to.filename()->view()},
+                        [this, from, to]()
+                        {
+                            renameItem(from, to, true);
+                        }
+                    );
+                    return;
+                }
+                Log::error("Failed to rename item '{}' to '{}': {}", from.value(), to.value(), info);
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = "",
+                    .text = fmt::format(
+                        fmt::runtime(language->get("remoteSideModel", "failedToRenameItem")),
+                        from.value(),
+                        to.value(),
+                        language->translate(info)
+                    ),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+            Log::info("Renamed item '{}' to '{}'", from.value(), to.value());
+            onRefresh();
+        }
+    );
+}
+
 void RemoteSideModel::onRename(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
 
-    Log::info("Rename item requested: {}", item.path.generic_string());
+    Log::info("Rename item requested: {}", item.name);
+
+    // The item's own path: the explorer may already show another directory.
+    auto from = remotePathOf(item);
+    if (!from)
+        return showPathRefused(language->get("remoteSideModel", "rename"), from.error());
 
     inputDialog_->open({
         .whatFor = language->get("remoteSideModel", "rename"),
         .prompt =
-            fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.path.filename().string()),
+            fmt::format(fmt::runtime(language->get("remoteSideModel", "renamePrompt")), item.name),
         .headerText = fmt::format(
-            fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.path.filename().string()
+            fmt::runtime(language->get("remoteSideModel", "renameWithItem")), item.name
         ),
-        .initialValue = item.path.filename().string(),
+        .initialValue = item.name,
         .isPassword = false,
-        .onConfirm = [this, item](std::optional<std::string> const& name)
+        .onConfirm = [this, from = *std::move(from), item](std::optional<std::string> const& name)
         {
             if (!name || name->empty())
                 return;
-            if (*name == item.path.filename().string())
+            if (*name == item.name)
                 return;
-            if (name->find('/') != std::string::npos)
-            {
-                Log::error("Invalid name (cannot contain slashes): {}", *name);
-                return;
-            }
+            if (!isValidItemName(*name))
+                return showInvalidItemName(*name);
+            const auto segment = Paths::PathSegment::make(*name);
+            const auto directory = from.parent();
+            if (!segment || !directory)
+                return showInvalidItemName(*name);
 
             Log::info("Renaming item to: {}", *name);
-
-            std::filesystem::path fullFrom = currentPath_.value() / item.path;
-            std::filesystem::path fullTo = currentPath_.value() / *name;
-
-            fileEngine_->rename(
-                fullFrom,
-                fullTo,
-                [this, fullFrom, fullTo](bool success, std::string const& info)
-                {
-                    if (!success)
-                    {
-                        Log::error(
-                            "Failed to rename item '{}' to '{}': {}",
-                            fullFrom.generic_string(),
-                            fullTo.generic_string(),
-                            info
-                        );
-                        confirmDialog_->open({
-                            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                            .headerText = "",
-                            .text = fmt::format(
-                                fmt::runtime(language->get("remoteSideModel", "failedToRenameItem")),
-                                fullFrom.generic_string(),
-                                fullTo.generic_string(),
-                                info
-                            ),
-                            .buttons = ConfirmDialog::Button::Ok,
-                        });
-                        return;
-                    }
-                    Log::info("Renamed item '{}' to '{}'", fullFrom.generic_string(), fullTo.generic_string());
-                    onRefresh();
-                }
-            );
+            renameItem(from, *directory / *segment, false);
         },
     });
 }
@@ -1219,9 +1284,14 @@ void RemoteSideModel::onProperties(NuiFileExplorer::Item const& item)
 {
     CHECK_COMPLETE();
 
-    Log::info("Properties requested: {}", item.path.generic_string());
+    Log::info("Properties requested: {}", item.name);
 
-    filePropertyDialog_->open(static_cast<SharedData::DirectoryEntry const&>(item));
+    const auto path = remotePathOf(item);
+    filePropertyDialog_->open(
+        static_cast<SharedData::DirectoryEntry const&>(item),
+        path ? path->value() : item.displayName(),
+        item.linkTarget.value_or(std::string{})
+    );
 }
 
 void RemoteSideModel::navigateTo(std::filesystem::path const& path)
@@ -1234,7 +1304,12 @@ void RemoteSideModel::navigateTo(std::filesystem::path const& path)
     currentPath_ = lexicallyNormal;
     fileEngine_->listDirectory(
         currentPath_.value(),
-        std::bind(&RemoteSideModel::onDirectoryListing, this, std::placeholders::_1, std::placeholders::_2)
+        [this, directory = currentPath_.value()](
+            std::optional<std::vector<SharedData::DirectoryEntry>> const& entries, std::string const& info
+        )
+        {
+            onDirectoryListing(directory, entries, info);
+        }
     );
 }
 
@@ -1338,32 +1413,41 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
     std::string const& instanceDirStr
 )
 {
-    std::string normalizedDirStr = instanceDirStr;
-    std::replace(normalizedDirStr.begin(), normalizedDirStr.end(), '\\', '/');
-    std::filesystem::path instanceDir{normalizedDirStr};
-
     Log::info("FileTracking: createInstance succeeded, id={}, dir={}", instanceId.value(), instanceDirStr);
 
-    std::filesystem::path remotePath = currentPath_.value() / item.path;
-    std::filesystem::path localPath = instanceDir / item.path.filename();
-
-    NuiFileExplorer::Item remoteItem = item;
-    remoteItem.path = remotePath;
-    remoteItem.fullPath = remotePath;
-    NuiFileExplorer::Item localItem = item;
-    localItem.path = localPath;
-    // FileEngine::addDownload prefers `fullPath` over `path` when serializing
-    // the destination. Without overwriting it here, `localItem.fullPath` would
-    // still hold the source item's *remote* fullPath (carried over by the
-    // copy-construction above), and the backend would receive the remote path
-    // as both source and destination — making it try to write
-    // `<remotePath>.filepart` next to the remote file (permission denied).
-    localItem.fullPath = localPath;
+    const auto instanceDirectory = Paths::LocalPath::fromUtf8(instanceDirStr);
+    const auto remotePath = remotePathOf(item);
+    const auto localPath = remotePath.and_then(
+        [&instanceDirectory](Paths::RemotePath const& path)
+        {
+            return Paths::LocalPathSegment::make(*path.filename())
+                .and_then(
+                    [&instanceDirectory](Paths::LocalPathSegment const& segment)
+                    {
+                        return instanceDirectory.transform(
+                            [&segment](Paths::LocalPath const& directory)
+                            {
+                                return directory / segment;
+                            }
+                        );
+                    }
+                );
+        }
+    );
+    if (!localPath)
+        return showPathRefused(language->get("remoteSideModel", "downloadFailed"), localPath.error());
 
     operationQueue_->enqueueDownload(
-        remoteItem,
-        localItem,
-        [this, instanceId, instanceDir, remotePath, localPath, openWith, synchronize](
+        *remotePath,
+        *localPath,
+        item.size,
+        [this,
+            instanceId,
+            instanceDirectory = *instanceDirectory,
+            remotePath = *remotePath,
+            localPath = *localPath,
+            openWith,
+            synchronize](
             std::optional<Ids::OperationId> const& opId, std::string const& info
         )
         {
@@ -1374,10 +1458,10 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
             }
             operationQueue_->addCompletionCallback(
                 *opId,
-                [this, instanceId, instanceDir, remotePath, localPath, openWith, synchronize](bool success)
+                [this, instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize](bool success)
                 {
                     onFileDownloadComplete(
-                        instanceId, instanceDir, remotePath, localPath, openWith, synchronize, success
+                        instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize, success
                     );
                 }
             );
@@ -1391,9 +1475,9 @@ void RemoteSideModel::onFileTrackingInstanceCreated(
 
 void RemoteSideModel::onFileDownloadComplete(
     Ids::InstanceId const& instanceId,
-    std::filesystem::path const& instanceDir,
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    Paths::LocalPath const& instanceDirectory,
+    Paths::RemotePath const& remotePath,
+    Paths::LocalPath const& localPath,
     bool openWith,
     bool synchronize,
     bool success
@@ -1401,30 +1485,21 @@ void RemoteSideModel::onFileDownloadComplete(
 {
     if (!success)
     {
-        Log::error("FileTracking: download failed for {}", localPath.generic_string());
+        Log::error("FileTracking: download failed for {}", localPath.toUtf8());
         return;
     }
-    Log::info("FileTracking: download completed for {}", localPath.generic_string());
+    Log::info("FileTracking: download completed for {}", localPath.toUtf8());
 
     if (!synchronize)
     {
-        Log::info("FileTracking: opening {} (openWith={}, no sync)", localPath.generic_string(), openWith);
-        Nui::RpcClient::callWithBackChannel(
-            "RpcFilesystem::open",
-            [](Nui::val result)
-            {
-                if (!result.hasOwnProperty("success") || !result["success"].as<bool>())
-                    Log::error("RpcFilesystem::open failed");
-            },
-            localPath.generic_string(),
-            openWith
-        );
+        Log::info("FileTracking: opening {} (openWith={}, no sync)", localPath.toUtf8(), openWith);
+        FileExplorer::openLocalFile(*confirmDialog_, localPath, openWith);
         return;
     }
 
     Nui::RpcClient::callWithBackChannel(
         "FileTracking::addWatch",
-        [this, instanceId, instanceDir, remotePath, localPath, openWith](Nui::val watchResponse)
+        [this, instanceId, instanceDirectory, remotePath, localPath, openWith](Nui::val watchResponse)
         {
             if (!watchResponse.hasOwnProperty("success") || !watchResponse["success"].as<bool>())
             {
@@ -1432,10 +1507,10 @@ void RemoteSideModel::onFileDownloadComplete(
                 return;
             }
             Log::info("FileTracking: addWatch succeeded for instance {}", instanceId.value());
-            onFileWatchAdded(instanceId, instanceDir, remotePath, localPath, openWith);
+            onFileWatchAdded(instanceId, instanceDirectory, remotePath, localPath, openWith);
         },
         instanceId.value(),
-        instanceDir.generic_string(),
+        instanceDirectory.toUtf8(),
         true,
         fileTracking_ ? fileTracking_->downloadTempSuffix() : std::string{Persistence::defaultTempFileSuffix}
     );
@@ -1443,26 +1518,17 @@ void RemoteSideModel::onFileDownloadComplete(
 
 void RemoteSideModel::onFileWatchAdded(
     Ids::InstanceId const& instanceId,
-    std::filesystem::path const& instanceDir,
-    std::filesystem::path const& remotePath,
-    std::filesystem::path const& localPath,
+    Paths::LocalPath const& instanceDirectory,
+    Paths::RemotePath const& remotePath,
+    Paths::LocalPath const& localPath,
     bool openWith
 )
 {
-    fileTracking_->startWatching(instanceId, instanceDir, remotePath, localPath);
+    fileTracking_->startWatching(instanceId, instanceDirectory, remotePath, localPath);
 
-    Log::info("FileTracking: opening {} (openWith={})", localPath.generic_string(), openWith);
+    Log::info("FileTracking: opening {} (openWith={})", localPath.toUtf8(), openWith);
 
-    Nui::RpcClient::callWithBackChannel(
-        "RpcFilesystem::open",
-        [](Nui::val result)
-        {
-            if (!result.hasOwnProperty("success") || !result["success"].as<bool>())
-                Log::error("RpcFilesystem::open failed");
-        },
-        localPath.generic_string(),
-        openWith
-    );
+    FileExplorer::openLocalFile(*confirmDialog_, localPath, openWith);
 }
 
 // --- IPlacesProvider ---
@@ -1540,7 +1606,7 @@ void RemoteSideModel::placesFromHomeListing()
                     {
                         const bool isDirectory = entry.isDirectory() ||
                             (entry.resolvedTarget != nullptr && entry.resolvedTarget->isDirectory());
-                        return isDirectory && entry.path.filename().generic_string() == place.directoryName;
+                        return isDirectory && entry.name == place.directoryName;
                     }
                 );
                 if (exists)

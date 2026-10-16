@@ -64,7 +64,7 @@ struct DisplayedOperation
         return dynamic_cast<T*>(card_.get());
     }
 
-    void failedEntries(std::vector<std::pair<std::filesystem::path, SharedData::OperationError>> entries)
+    void failedEntries(std::vector<std::pair<std::string, SharedData::OperationError>> entries)
     {
         if (auto* specificCard = getCardSpecifically<OperationCardInterface>())
         {

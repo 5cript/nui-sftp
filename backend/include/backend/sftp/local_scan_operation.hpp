@@ -7,6 +7,7 @@
 #include <shared_data/sync/scan_node.hpp>
 #include <shared_data/sync/tree_directory_walker.hpp>
 #include <utility/directory_traversal.hpp>
+#include <paths/paths.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -22,7 +23,7 @@ class LocalScanOperation : public Operation
     {
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
             progressCallback = [](auto, auto, auto) {};
-        std::filesystem::path localPath{};
+        Paths::LocalPath localPath{};
         bool respectIgnoreFiles{false};
         /// When false, only the root directory is listed; subdirectories are not descended into.
         bool recursive{true};
@@ -31,6 +32,8 @@ class LocalScanOperation : public Operation
         /// When true, the operation builds a sorted @ref SharedData::Sync::ScanNode tree
         /// instead of a flat entry vector.
         bool buildTree{false};
+        /** @brief Tree mode only: names ending in one of these, the temp files of transfers, stay excluded. */
+        std::vector<std::string> excludedSuffixes{};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -67,7 +70,7 @@ class LocalScanOperation : public Operation
         return 1;
     }
 
-    std::filesystem::path localPath() const
+    Paths::LocalPath const& localPath() const
     {
         return localPath_;
     }
@@ -76,13 +79,13 @@ class LocalScanOperation : public Operation
 
     auto withWalkerDo(auto&& fn)
     {
-        auto scan = [this](std::filesystem::path const& path)
+        auto scan = [this](Paths::RelativePath const& relative)
         {
-            return scanner(path);
+            return scanner(relative);
         };
         using WalkerType = Utility::DeepDirectoryWalker<SharedData::DirectoryEntry, Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(localPath_, std::move(scan));
+            walker_ = std::make_unique<WalkerType>(std::move(scan));
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -92,13 +95,22 @@ class LocalScanOperation : public Operation
      */
     auto withTreeWalkerDo(auto&& fn)
     {
-        auto scan = [this](std::filesystem::path const& path)
+        auto scan = [this](Paths::RelativePath const& relative)
         {
-            return scanner(path);
+            return scanner(relative);
         };
         using WalkerType = SharedData::Sync::TreeDirectoryWalker<Error, decltype(scan), true>;
         if (!walker_)
-            walker_ = std::make_unique<WalkerType>(localPath_, std::move(scan), recursive_);
+            walker_ = std::make_unique<WalkerType>(
+                std::move(scan),
+                recursive_,
+                [](Error const& error)
+                {
+                    return error.type == ErrorType::DirectoryUnreadable;
+                },
+                /*requireLocalNames=*/false,
+                excludedSuffixes_
+            );
         return fn(static_cast<WalkerType&>(*walker_));
     }
 
@@ -114,6 +126,35 @@ class LocalScanOperation : public Operation
                 return std::move(walker).ejectEntries();
             }
         );
+    }
+
+    /**
+     * @brief Full paths of listed entries whose name is not a valid path segment, for display. Flat scans only,
+     *        the tree of a sync scan keeps them as invalid name nodes.
+     */
+    std::vector<std::string> rejectedPaths()
+    {
+        return withWalkerDo(
+            [this](auto& walker)
+            {
+                std::vector<std::string> paths;
+                auto root = localPath_.toUtf8();
+                if (!root.ends_with('/'))
+                    root.push_back('/');
+                for (auto const& entry : walker.rejectedEntries())
+                    paths.push_back(root + walker.describeRejected(entry));
+                return paths;
+            }
+        );
+    }
+
+    /**
+     * @brief Full paths of directories below the root that could not be listed. Flat scans only, they are left out
+     *        of the entries; the tree of a sync scan keeps them as unreadable nodes.
+     */
+    std::vector<std::string> const& unreadableDirectories() const noexcept
+    {
+        return unreadableDirectories_;
     }
 
     /**
@@ -136,16 +177,32 @@ class LocalScanOperation : public Operation
 
     std::uint64_t totalBytes() const;
 
-    std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(std::filesystem::path const& path);
+    /**
+     * @brief Lists the directory at @p relative below the scanned root.
+     */
+    std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(Paths::RelativePath const& relative);
 
   private:
-    std::filesystem::path localPath_;
+    /**
+     * @brief A directory below the root that vanished or denies listing is unreadable, a sync tree keeps
+     *        it as such. Any other listing error fails the scan.
+     */
+    std::expected<std::vector<SharedData::DirectoryEntry>, Error> listingFailed(
+        std::filesystem::path const& path,
+        Paths::RelativePath const& relative,
+        std::error_code const& errorCode
+    );
+
+  private:
+    std::vector<std::string> unreadableDirectories_{};
+    Paths::LocalPath localPath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;
     bool respectIgnoreFiles_;
     bool recursive_;
     bool ignoreHidden_;
     bool buildTree_;
+    std::vector<std::string> excludedSuffixes_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;

@@ -1,7 +1,14 @@
 #include <backend/sftp/download_operation.hpp>
+#include <backend/sftp/resume_check.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <log/log.hpp>
+#include <utility/permissions.hpp>
+#include <utility/download_mark.hpp>
+#include <utility/link_safe_remove.hpp>
+#include <utility/rename.hpp>
+
 #include <tuple>
 
 using namespace std::chrono_literals;
@@ -13,6 +20,9 @@ DownloadOperation::DownloadOperation(SecureShell::SftpSession& sftp, DownloadOpe
     , localFile_{}
 {
     options_.tempFileSuffix = Persistence::effectiveTempFileSuffix(options_.tempFileSuffix);
+    remotePath_ = options_.remotePath;
+    if (!options_.localPath.empty())
+        localNativePath_ = options_.localPath.native();
 }
 
 DownloadOperation::~DownloadOperation()
@@ -66,11 +76,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 Log::error("DownloadOperation: Invalid local path.");
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             }
-            if (std::filesystem::exists(options_.localPath) && !options_.mayOverwrite)
+            if (std::filesystem::exists(localNativePath_) && !options_.mayOverwrite)
             {
                 Log::error(
                     "DownloadOperation: File '{}' already exists and may not be overwritten.",
-                    options_.localPath.generic_string()
+                    options_.localPath.toUtf8()
                 );
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
             }
@@ -99,6 +109,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 options_.progressCallback(1, 1, 1, 0);
                 return WorkStatus::Complete;
             }
+            if (transferComplete_)
+            {
+                state_ = Finalizing;
+                return WorkStatus::MoreWork;
+            }
             if (options_.bigFileOptimized)
             {
                 auto stream = fileStream_.lock();
@@ -108,7 +123,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
                 const auto contextResult = stream->readAsyncInStrand(
-                    options_.entry->size,
+                    static_cast<SecureShell::IFileStream::SignedSizeType>(options_.entry->size - resumeOffset_),
                     buffer_.data(),
                     buffer_.size(),
                     [this](SecureShell::IFileStream::SignedSizeType bytesRead)
@@ -153,6 +168,8 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             {
                 if (asyncTransferContext_->hasEnded())
                 {
+                    if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
+                        return enterErrorState<WorkStatus>(asyncTransferError(*asyncTransferContext_));
                     options_.progressCallback(
                         0ull, options_.entry->size, options_.entry->size, asyncTransferContext_->bytesPerSecond()
                     );
@@ -164,7 +181,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     options_.progressCallback(
                         0ull,
                         options_.entry->size,
-                        asyncTransferContext_->bytesTransferred(),
+                        resumeOffset_ + static_cast<std::uint64_t>(asyncTransferContext_->bytesTransferred()),
                         asyncTransferContext_->bytesPerSecond()
                     );
                     return WorkStatus::MoreWork;
@@ -231,39 +248,46 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
-        Log::info("DownloadOperation: Skipping symlink as per options: {}.", options_.remotePath.string());
+        Log::info("DownloadOperation: Skipping symlink as per options: {}.", options_.remotePath.value());
         return {};
     }
 
-    const auto readResult = readSymlinkInStrand(options_.remotePath);
+    const auto readResult = readSymlinkInStrand(remotePath_);
     if (!readResult.has_value())
         return std::unexpected(readResult.error());
     auto const& linkEntry = readResult.value().targetInfo;
 
+    // An existing link at the leaf makes creating the new one fail, only the directories above it matter.
+    if (!options_.linkFreeRoot.empty())
+    {
+        if (const auto refused = refuseLinkedPath(localNativePath_.parent_path()); !refused)
+            return refused;
+    }
+
     std::error_code ec{};
     if (options_.createMissingDirectories)
     {
-        std::filesystem::create_directories(options_.localPath.parent_path(), ec);
+        std::filesystem::create_directories(localNativePath_.parent_path(), ec);
         if (ec)
         {
             Log::error(
                 "DownloadOperation: Failed to create parent dirs for symlink '{}': {}.",
-                options_.localPath.generic_string(),
+                options_.localPath.toUtf8(),
                 ec.message()
             );
             return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
         }
     }
+    // The copy keeps the link's own content, so a relative link still points into the downloaded tree.
+    const auto linkContent = Paths::nativeFromUtf8(readResult.value().linkContent);
     if (linkEntry && linkEntry->isDirectory())
-        std::filesystem::create_directory_symlink(readResult.value().linkTarget, options_.localPath, ec);
+        std::filesystem::create_directory_symlink(linkContent, localNativePath_, ec);
     else
-        std::filesystem::create_symlink(readResult.value().linkTarget, options_.localPath, ec);
+        std::filesystem::create_symlink(linkContent, localNativePath_, ec);
     if (ec)
     {
         Log::error(
-            "DownloadOperation: Failed to create symlink at '{}': {}.",
-            options_.localPath.generic_string(),
-            ec.message()
+            "DownloadOperation: Failed to create symlink at '{}': {}.", options_.localPath.toUtf8(), ec.message()
         );
         return std::unexpected(Error{.type = ErrorType::CannotCreateSymlink});
     }
@@ -328,15 +352,14 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
         return false;
     }
 
-    std::uint64_t tellp = 0;
     std::uint64_t fileSize = 0;
     bool good = true;
     {
         localFile_.write(buffer_.data(), static_cast<std::streamsize>(readAmount));
-        tellp = static_cast<uint64_t>(localFile_.tellp());
+        bytesInFile_ += static_cast<std::uint64_t>(readAmount);
         fileSize = options_.entry->size;
         good = localFile_.good();
-        options_.progressCallback(0ull, fileSize, tellp, 0);
+        options_.progressCallback(0ull, fileSize, bytesInFile_, 0);
     }
     if (!good)
     {
@@ -346,7 +369,7 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
         });
         return false;
     }
-    return good && tellp < fileSize;
+    return good && bytesInFile_ < fileSize;
 }
 
 bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead)
@@ -364,10 +387,41 @@ bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeT
 }
 
 std::expected<void, DownloadOperation::Error>
+DownloadOperation::refuseLinkedPath(std::filesystem::path const& path) const
+{
+    std::error_code error{};
+    std::optional<std::filesystem::path> link{};
+    if (!options_.linkFreeRoot.empty())
+        link = Utility::firstLinkBelow(options_.linkFreeRoot.native(), path, error);
+    else if (Utility::isLinkOrJunction(path, error))
+        link = path;
+    if (error)
+    {
+        Log::error("DownloadOperation: Cannot inspect '{}': {}.", Paths::nativeToUtf8(path), error.message());
+        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .extraInfo = Paths::nativeToUtf8(path)});
+    }
+    if (link)
+    {
+        Log::error("DownloadOperation: '{}' runs through the link '{}'.", Paths::nativeToUtf8(path), Paths::nativeToUtf8(*link));
+        return std::unexpected(
+            Error{
+                .type = ErrorType::LinkInLocalPath,
+                .extraInfo = fmt::format("The local path runs through a link: {}", Paths::nativeToUtf8(*link))
+            }
+        );
+    }
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error>
 DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 {
-    auto tempPath = options_.localPath;
+    auto tempPath = localNativePath_;
     tempPath += options_.tempFileSuffix;
+
+    // Opening for writing follows a link planted at the temp path or above it, out of the target directory.
+    if (const auto refused = refuseLinkedPath(tempPath); !refused)
+        return refused;
 
     if (options_.createMissingDirectories)
     {
@@ -386,35 +440,56 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 
     if (options_.tryContinue && std::filesystem::exists(tempPath))
     {
-        localFile_.open(tempPath, std::ios::binary | std::ios::app);
-        if (!localFile_.is_open())
+        // The size on disk, tellp right after opening in append mode reports 0 on Windows.
+        std::error_code sizeError{};
+        const auto existingSize = std::filesystem::file_size(tempPath, sizeError);
+        if (sizeError)
         {
-            Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath.generic_string());
-            return std::unexpected(Error{.type = ErrorType::OpenFailure});
+            Log::error("DownloadOperation: Cannot read the size of '{}': {}", tempPath.generic_string(), sizeError.message());
+            return std::unexpected(Error{.type = ErrorType::FileStatFailed});
         }
 
-        if (static_cast<std::uint64_t>(localFile_.tellp()) == options_.entry->size)
+        // A leftover of another program or of an older version of the source must not be continued.
+        bool belongsToSource = existingSize > 0 && existingSize <= options_.entry->size;
+        if (belongsToSource)
+        {
+            const auto matches = ResumeCheck::tailsMatchInStrand(stream, tempPath, existingSize);
+            if (!matches)
+                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = matches.error()});
+            belongsToSource = *matches;
+        }
+
+        if (belongsToSource && existingSize == options_.entry->size)
         {
             Log::info(
                 "DownloadOperation: File '{}' already complete, will be renamed in finalize() step.",
                 tempPath.generic_string()
             );
-            localFile_.close();
+            transferComplete_ = true;
             return {};
         }
-        else if (static_cast<std::uint64_t>(localFile_.tellp()) > options_.entry->size)
+        else if (!belongsToSource)
         {
             Log::info(
-                "DownloadOperation: File '{}' is larger than expected, discarding and starting over.",
+                "DownloadOperation: File '{}' is not a part of this source, discarding and starting over.",
                 tempPath.generic_string()
             );
-            localFile_.close();
+            if (auto rewound = stream.seekInStrand(0); !rewound)
+                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
             localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
         }
         else
         {
             Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", tempPath.generic_string());
-            auto seekResult = stream.seekInStrand(localFile_.tellp());
+            localFile_.open(tempPath, std::ios::binary | std::ios::app);
+            if (!localFile_.is_open())
+            {
+                Log::error("DownloadOperation: Failed to open file for appending: {}", tempPath.generic_string());
+                return std::unexpected(Error{.type = ErrorType::OpenFailure});
+            }
+            resumeOffset_ = existingSize;
+            bytesInFile_ = existingSize;
+            auto seekResult = stream.seekInStrand(resumeOffset_);
             if (!seekResult.has_value())
                 return std::unexpected(Error{.type = ErrorType::FileStatFailed});
         }
@@ -434,7 +509,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
 }
 
 std::expected<SecureShell::SftpSession::DeepLinkResult, DownloadOperation::Error>
-DownloadOperation::readSymlinkInStrand(std::filesystem::path const& remoteFullPath)
+DownloadOperation::readSymlinkInStrand(Paths::RemotePath const& remoteFullPath)
 {
     auto deepLinkResult = sftp_->readLinkDeepInStrand(remoteFullPath);
     if (!deepLinkResult.has_value())
@@ -442,13 +517,13 @@ DownloadOperation::readSymlinkInStrand(std::filesystem::path const& remoteFullPa
         Log::error(
             "DownloadOperation: Failed to read symlink target: {} for entry: {}.",
             deepLinkResult.error().toString(),
-            remoteFullPath.generic_string()
+            remoteFullPath.value()
         );
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
                 .sftpError = deepLinkResult.error(),
-                .extraInfo = fmt::format("Reading symlink target for entry: {}", remoteFullPath.generic_string())
+                .extraInfo = fmt::format("Reading symlink target for entry: {}", remoteFullPath.value())
             }
         );
     }
@@ -464,13 +539,12 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
     }
 
     // Initial check. Check again later before rename.
-    if (std::filesystem::exists(options_.localPath))
+    if (std::filesystem::exists(localNativePath_))
     {
         if (!options_.mayOverwrite)
         {
             Log::error(
-                "DownloadOperation: File '{}' already exists and may not be overwritten.",
-                options_.localPath.generic_string()
+                "DownloadOperation: File '{}' already exists and may not be overwritten.", options_.localPath.toUtf8()
             );
             return enterErrorState({.type = ErrorType::FileExists});
         }
@@ -495,9 +569,15 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand()
 {
+    if (remotePath_.empty() || remotePath_.isRoot())
+    {
+        Log::error("DownloadOperation: Invalid remote path '{}'.", options_.remotePath.value());
+        return std::unexpected(Error{.type = ErrorType::InvalidPath, .extraInfo = options_.remotePath.value()});
+    }
+
     if (!options_.entry)
     {
-        const auto fileInfo = sftp_->lstatInStrand(options_.remotePath);
+        const auto fileInfo = sftp_->lstatInStrand(remotePath_);
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");
@@ -511,7 +591,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return {};
 
     const auto streamOpenResult = sftp_->openFileInStrand(
-        options_.remotePath, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
+        remotePath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown
     );
     if (!streamOpenResult.has_value())
     {
@@ -520,7 +600,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
             Error{
                 .type = ErrorType::SftpError,
                 .sftpError = streamOpenResult.error(),
-                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.string())
+                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value())
             }
         );
     }
@@ -533,15 +613,30 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
+    if (options_.entry->isSymlink())
+    {
+        // Following a link transfers its target, so the target's size and times apply.
+        const auto targetInfo = stream->statInStrand();
+        if (!targetInfo.has_value())
+        {
+            Log::error("DownloadOperation: Failed to stat the symlink target.");
+            return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = targetInfo.error()});
+        }
+        if (!targetInfo->isRegularFile())
+            return std::unexpected(Error{.type = ErrorType::NotAFile});
+        options_.entry->type = targetInfo->type;
+        options_.entry->size = targetInfo->size;
+        options_.entry->mtime = targetInfo->mtime;
+        options_.entry->mtimeNsec = targetInfo->mtimeNsec;
+        options_.entry->permissions = targetInfo->permissions;
+    }
+
     auto openResult = openOrAdoptFileInStrand(*stream);
     if (!openResult.has_value())
     {
         Log::error("DownloadOperation: Failed to open file.");
         return std::unexpected(openResult.error());
     }
-
-    if (options_.entry->isSymlink())
-        return {};
 
     buffer_ = sftp_->bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
     if (buffer_.empty())
@@ -580,8 +675,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::cancel(bool ado
     {
         Log::info(
             "DownloadOperation: Download of '{}' to '{}' canceled.",
-            options_.remotePath.generic_string(),
-            options_.localPath.generic_string()
+            options_.remotePath.value(),
+            options_.localPath.toUtf8()
         );
         state_ = OperationState::Canceled;
     }
@@ -602,7 +697,7 @@ void DownloadOperation::cleanup()
 
     localFile_.close();
 
-    auto tempPath = options_.localPath;
+    auto tempPath = localNativePath_;
     tempPath += options_.tempFileSuffix;
     if (options_.doCleanup && std::filesystem::exists(tempPath))
         std::filesystem::remove(tempPath);
@@ -640,19 +735,54 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
 
     localFile_.close();
 
-    if (std::filesystem::exists(options_.localPath) && !options_.mayOverwrite)
+    auto tempPath = localNativePath_;
+    tempPath += options_.tempFileSuffix;
+
+    // A short file must never replace the destination.
+    std::error_code sizeError{};
+    const auto writtenSize = std::filesystem::file_size(tempPath, sizeError);
+    if (sizeError || writtenSize != options_.entry->size)
     {
         Log::error(
-            "DownloadOperation: File '{}' already exists and may not be overwritten.",
-            options_.localPath.generic_string()
+            "DownloadOperation: '{}' holds {} bytes instead of {}.",
+            tempPath.generic_string(),
+            sizeError ? 0u : writtenSize,
+            options_.entry->size
+        );
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SizeMismatch,
+                .extraInfo = fmt::format(
+                    "Received {} of {} bytes for {}",
+                    sizeError ? 0u : writtenSize,
+                    options_.entry->size,
+                    options_.remotePath.value()
+                ),
+            }
+        );
+    }
+
+    // Marked before the rename, so the final file never exists without the mark. A filesystem without streams or
+    // extended attributes, FAT for one, cannot carry it.
+    if (options_.markAsDownloaded)
+    {
+        if (const auto marked = Utility::markAsDownloaded(tempPath); marked)
+            Log::warn("DownloadOperation: Cannot mark '{}' as downloaded: {}", Paths::nativeToUtf8(tempPath), marked.message());
+    }
+
+    // Without permission to overwrite, the rename itself refuses an existing file: no check-then-rename race.
+    std::error_code ec{};
+    if (options_.mayOverwrite)
+        std::filesystem::rename(tempPath, localNativePath_, ec);
+    else if (auto renamed = Utility::renameNoReplace(tempPath, localNativePath_); !renamed.has_value())
+        ec = renamed.error();
+    if (ec == std::errc::file_exists)
+    {
+        Log::error(
+            "DownloadOperation: File '{}' already exists and may not be overwritten.", options_.localPath.toUtf8()
         );
         return std::unexpected(Error{.type = ErrorType::FileExists});
     }
-
-    std::error_code ec{};
-    auto tempPath = options_.localPath;
-    tempPath += options_.tempFileSuffix;
-    std::filesystem::rename(tempPath, options_.localPath, ec);
     if (ec)
     {
         Log::error("DownloadOperation: Failed to rename file: {}", ec.message());
@@ -675,8 +805,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
             return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
         }
 
+        // Special bits never travel and the umask applies, like for a file created locally.
         std::error_code permissionsError{};
-        std::filesystem::permissions(options_.localPath, fileInfo->permissions, permissionsError);
+        if (const auto inherited = Utility::inheritablePermissions(fileInfo->permissions); inherited)
+            std::filesystem::permissions(localNativePath_, *inherited, permissionsError);
         if (permissionsError)
         {
             Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());
@@ -686,7 +818,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     else if (options_.filePermissions)
     {
         std::error_code permissionsError{};
-        std::filesystem::permissions(options_.localPath, *options_.filePermissions, permissionsError);
+        if (const auto configured = Utility::sanitizePermissions(*options_.filePermissions); configured)
+            std::filesystem::permissions(localNativePath_, *configured, permissionsError);
         if (permissionsError)
         {
             Log::error("DownloadOperation: Failed to set permissions: {}", permissionsError.message());
@@ -706,13 +839,11 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         )};
         const auto fileTime = std::chrono::file_clock::from_sys(sysTime);
         std::error_code mtimeError{};
-        std::filesystem::last_write_time(options_.localPath, fileTime, mtimeError);
+        std::filesystem::last_write_time(localNativePath_, fileTime, mtimeError);
         if (mtimeError)
         {
             Log::warn(
-                "DownloadOperation: Failed to set mtime on '{}': {}.",
-                options_.localPath.generic_string(),
-                mtimeError.message()
+                "DownloadOperation: Failed to set mtime on '{}': {}.", options_.localPath.toUtf8(), mtimeError.message()
             );
         }
     }

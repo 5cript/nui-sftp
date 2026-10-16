@@ -1,12 +1,14 @@
 #pragma once
 
 #include <shared_data/shared_data.hpp>
+#include <shared_data/sync/diff_summary.hpp>
 #include <shared_data/sync/scan_node.hpp>
 
 #include <utility/describe.hpp>
 #include <utility/enum_string_convert.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -31,11 +33,17 @@ namespace SharedData::Sync
         bool recursive{true};
         /// When true, entries with any path segment starting with '.' are dropped.
         bool ignoreHidden{false};
+        /// The local filesystem folds case (Windows, macOS), set by the backend. Remote names that differ only in
+        /// case would land on one local file then.
+        bool localCaseInsensitive{false};
+        /// When this pair was last synchronized (seconds since the epoch); a side whose modification time is later
+        /// changed since. Unset for the first sync, newest wins then.
+        std::optional<std::uint64_t> lastSyncTime{};
     };
     BOOST_DESCRIBE_STRUCT(
         DiffOptions,
         (),
-        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden)
+        (direction, actionUpload, actionDownload, actionDelete, recursive, ignoreHidden, localCaseInsensitive, lastSyncTime)
     )
 
     /**
@@ -53,6 +61,12 @@ namespace SharedData::Sync
         virtual void emitUpload(DiffTreeNode node, std::string const& parentRelKey) = 0;
         virtual void emitDownload(DiffTreeNode node, std::string const& parentRelKey) = 0;
         virtual void emitDelete(DiffTreeNode node, std::string const& parentRelKey) = 0;
+
+        /**
+         * @brief An entry the diff leaves alone, so nothing is transferred or deleted for it or below it.
+         */
+        virtual void onBlocked(std::string const& /* relKey */, BlockReason /* reason */)
+        {}
 
         /**
          * @brief Called periodically with the running compare count. Implementations
