@@ -58,5 +58,11 @@ std::optional<SharedData::DroppedItem> droppedItemFromPath(std::filesystem::path
         .name = name ? name->value() : std::string{},
         .type = droppedTypeOf(path, status),
     };
+    if (entry.isRegularFile())
+    {
+        std::error_code sizeError{};
+        const auto size = std::filesystem::file_size(path, sizeError);
+        entry.size = sizeError ? 0u : size;
+    }
     return SharedData::DroppedItem{.path = *std::move(localPath), .entry = std::move(entry)};
 }
