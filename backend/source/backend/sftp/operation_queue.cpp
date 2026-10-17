@@ -1,4 +1,5 @@
 #include <backend/sftp/operation_queue.hpp>
+#include <constants/sftp.hpp>
 #include <utility/error_message.hpp>
 #include <utility/localized_message.hpp>
 #include <backend/rpc_helper.hpp>
@@ -33,6 +34,16 @@ using namespace std::chrono_literals;
 
 namespace
 {
+    /**
+     * @brief The size of the file at @p path, 0 when it cannot be read.
+     */
+    std::uintmax_t localFileSize(std::filesystem::path const& path)
+    {
+        std::error_code error{};
+        const auto size = std::filesystem::file_size(path, error);
+        return error ? 0u : size;
+    }
+
     /**
      * @brief No path instead of an unset one, which the frontend would refuse to read.
      */
@@ -881,7 +892,8 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         auto opts = resolveDownloadOptions(transferOptions, resolvedTimeout);
         opts.remotePath = remotePath;
         opts.localPath = localPath;
-        opts.bigFileOptimized = isBigFile;
+        // The caller's size can be missing, the slow path reports no speed.
+        opts.bigFileOptimized = isBigFile || result->size >= Constants::bigFileCutOff;
         opts.entry = result.value();
         opts.createMissingDirectories = createMissingDirectories;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onDownloadProgress")](
@@ -1444,7 +1456,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         auto opts = resolveUploadOptions(transferOptions, resolvedTimeout);
         opts.remotePath = remotePath;
         opts.localPath = localPath;
-        opts.bigFileOptimized = isBigFile;
+        // A dropped or tracked file comes without a size, the slow path reports no speed.
+        opts.bigFileOptimized = isBigFile || (!isSymlink && localFileSize(localNativePath) >= Constants::bigFileCutOff);
         opts.createMissingDirectories = createMissingDirectories;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
