@@ -23,6 +23,7 @@
 #include <utility/resources.hpp>
 #include <version.hpp>
 #include <nui/backend/filesystem/special_paths.hpp>
+#include <nui/backend/webkit_gtk_rendering.hpp>
 
 #include <nui/core.hpp>
 #include <nui/rpc.hpp>
@@ -467,6 +468,8 @@ int main(int const argc, char const* const* argv)
 {
     // Reading the umask changes it for a moment on macOS, so it is read before any thread creates files.
     static_cast<void>(Utility::processUmask());
+    // Before any thread exists, it uses setenv.
+    const auto webKitGtkRendering = Nui::configureWebKitGtkRendering();
 #ifdef _WIN32
     // A GUI program has no console; --console, the help and parse errors write to the one it was started from.
     const auto arguments = std::span{argv, static_cast<std::size_t>(argc)} | std::views::drop(1);
@@ -532,7 +535,6 @@ int main(int const argc, char const* const* argv)
 #endif
 
 #ifdef __linux__
-    setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
     // GTK 4 does not take it from argv like GTK 3, it names the X11 WM_CLASS and the Wayland app id.
     // In a flatpak WebKit has to use the app id, the portal refuses to spawn its sandboxed web process otherwise.
     const char* const flatpakApplicationId = std::getenv("FLATPAK_ID");
@@ -543,6 +545,8 @@ int main(int const argc, char const* const* argv)
 
     {
         Main m{std::move(*options), forkPoolPtr};
+        if (webKitGtkRendering.decision != Nui::DmabufRendererDecision::NotApplicable)
+            Log::info("WebKitGTK DMA-BUF renderer: {}", webKitGtkRendering.reason);
         m.startChildSignalTimer();
         m.show();
     }

@@ -196,9 +196,10 @@ Two caveats worth knowing about:
   handle SIGXCPU nostop noprint pass
   ```
 
-- On some WebKitGTK driver setups the DMABUF renderer crashes the webview.
-  Export `WEBKIT_DISABLE_DMABUF_RENDERER=1` before launching if you see GPU
-  process failures.
+- The WebKitGTK DMABUF renderer is disabled at startup unless every GPU uses
+  amdgpu, i915 or xe (see `Nui::configureWebKitGtkRendering`), the log states
+  why. Export `WEBKIT_DISABLE_DMABUF_RENDERER=0` to force it on or `=1` to
+  force it off.
 
 Test binaries live under `build/clang_debug/test/` and can be launched the
 same way.
