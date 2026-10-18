@@ -21,6 +21,7 @@ namespace
     constexpr char const* portalService = "org.freedesktop.portal.Desktop";
     constexpr char const* portalObjectPath = "/org/freedesktop/portal/desktop";
     constexpr char const* openUriInterface = "org.freedesktop.portal.OpenURI";
+    constexpr char const* registryInterface = "org.freedesktop.host.portal.Registry";
     constexpr char const* documentsService = "org.freedesktop.portal.Documents";
     constexpr char const* documentsObjectPath = "/org/freedesktop/portal/documents";
     constexpr char const* documentsInterface = "org.freedesktop.portal.Documents";
@@ -132,6 +133,77 @@ namespace
     }
 
     /**
+     * @brief A session bus connection of the opener's own, so the portal registration is its first portal call.
+     * @details GLib's GDBus rather than sd-bus: Ubuntu 24.04's xdg-dbus-proxy mangles the one-shot "AUTH EXTERNAL <uid>"
+     *          handshake of sd_bus_open_user(), but accepts GDBus's multi-step flow unchanged.
+     */
+    Utility::GObjectPtr<GDBusConnection> openSessionBus()
+    {
+        GError* rawError = nullptr;
+        const Utility::GcharPtr address{g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SESSION, nullptr, &rawError)};
+        if (address)
+        {
+            Utility::GObjectPtr<GDBusConnection> connection{g_dbus_connection_new_for_address_sync(
+                address.get(),
+                static_cast<GDBusConnectionFlags>(
+                    G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT | G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION
+                ),
+                nullptr,
+                nullptr,
+                &rawError
+            )};
+            if (connection)
+                return connection;
+        }
+        Log::warn(
+            "Opener: could not connect to session bus ({}). Opening files via xdg-desktop-portal will be unavailable.",
+            Utility::consumeGError(rawError, "(no error object)")
+        );
+        return {};
+    }
+
+    /**
+     * @brief Tells xdg-desktop-portal the app id behind the connection's calls (portal 1.19 and later).
+     * @details Without it the portal derives the id from the systemd scope, which Chromium renames to
+     *          app-org.chromium.Chromium-<pid>.scope, so permissions and dialogs would belong to Chromium. Inside
+     *          Flatpak the sandbox identifies the app.
+     */
+    void registerPortalApplication(GDBusConnection* connection)
+    {
+        if (runningInFlatpak())
+            return;
+
+        char const* const applicationId = g_get_prgname();
+        if (applicationId == nullptr)
+            return;
+
+        GError* rawError = nullptr;
+        const Utility::GVariantPtr result{g_dbus_connection_call_sync(
+            connection,
+            portalService,
+            portalObjectPath,
+            registryInterface,
+            "Register",
+            g_variant_new("(sa{sv})", applicationId, nullptr),
+            nullptr,
+            G_DBUS_CALL_FLAGS_NONE,
+            /*timeout_msec*/ 2000,
+            /*cancellable*/ nullptr,
+            &rawError
+        )};
+        if (!result)
+        {
+            Log::info(
+                "Opener: registering '{}' with xdg-desktop-portal failed, it identifies the app by its scope: {}",
+                applicationId,
+                Utility::consumeGError(rawError, "(no error object)")
+            );
+            return;
+        }
+        Log::info("Opener: registered as '{}' with xdg-desktop-portal", applicationId);
+    }
+
+    /**
      *  @brief Launch context that starts programs with the host environment instead of the AppImage one.
      */
     Utility::GObjectPtr<GAppLaunchContext> hostLaunchContext()
@@ -186,21 +258,10 @@ struct Opener::Implementation
 
     explicit Implementation(std::string portalParentWindow)
         : parentWindow{std::move(portalParentWindow)}
+        , connection{openSessionBus()}
     {
-        // Use GLib's GDBus rather than sd-bus: Ubuntu 24.04's xdg-dbus-proxy mangles the AUTH
-        // handshake that sd-bus's sd_bus_open_user() performs (one-shot "AUTH EXTERNAL <uid>"),
-        // but accepts GDBus's multi-step flow unchanged. The shared session-bus connection
-        // returned by g_bus_get_sync() is the same one GTK/WebKit are already using, so this
-        // doesn't open a second socket.
-        GError* rawErr = nullptr;
-        connection.reset(g_bus_get_sync(G_BUS_TYPE_SESSION, /*cancellable*/ nullptr, &rawErr));
-        if (!connection)
-        {
-            Log::warn(
-                "Opener: could not connect to session bus ({}). "
-                "Opening files via xdg-desktop-portal will be unavailable.",
-                Utility::consumeGError(rawErr, "(no error object)"));
-        }
+        if (connection)
+            registerPortalApplication(connection.get());
         Log::info("Opener: initialized with parentWindow='{}'", parentWindow);
     }
 };
