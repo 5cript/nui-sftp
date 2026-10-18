@@ -157,6 +157,7 @@ target_link_libraries(
 
 nui_set_target_output_directories(${PROJECT_NAME})
 
+# The frontend is compiled per engine and per platform.
 set(BROWSER_ENGINE "")
 if (WIN32)
     set(BROWSER_ENGINE "webview2")
@@ -164,6 +165,13 @@ elseif(APPLE)
     set(BROWSER_ENGINE "wkwebview")
 else()
     set(BROWSER_ENGINE "webkitgtk")
+endif()
+if (WIN32)
+    set(NUI_SFTP_PLATFORM "windows")
+elseif (APPLE)
+    set(NUI_SFTP_PLATFORM "macos")
+else()
+    set(NUI_SFTP_PLATFORM "linux")
 endif()
 
 include(ProcessorCount)
@@ -191,6 +199,7 @@ if (NOT OMIT_FRONTEND_BUILD)
             -DNUI_FETCH_FMT=ON
             -DNUI_FIND_FMT=OFF
             -DBROWSER_ENGINE=${BROWSER_ENGINE}
+            -DNUI_SFTP_PLATFORM=${NUI_SFTP_PLATFORM}
             # -DXML_TO_NUI_TOOL=$<TARGET_FILE:xml-to-nui>
             -DOFFLINE_BUILD=${OFFLINE_BUILD}
             -DBACKEND_BUILD_TYPE=${BACKEND_BUILD_TYPE}
