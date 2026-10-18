@@ -9,11 +9,13 @@ how changes are validated in CI.
 nui-sftp is a cross-platform (Linux and Windows) SSH/SFTP workbench. The
 frontend is written in C++ and compiled to WebAssembly via Emscripten using
 [Nui](https://github.com/NuiCpp/Nui); the backend is a native C++ application
-that hosts a WebKit/WebView2 webview and talks to libssh. Frontend and backend
-communicate through Nui's RPC bridge.
+that hosts the page in Chromium (Nui's CEF engine) on Linux and macOS and in
+WebView2 on Windows, and talks to libssh. Frontend and backend communicate
+through Nui's RPC bridge.
 
 Submodules pin most C++ dependencies. System packages (libssh, boost, fmt,
-crypto++, webkitgtk on Linux) are pulled from the distro or MSYS2.
+crypto++) are pulled from the distro or MSYS2. CEF is downloaded by the
+configure step, see [Browser engine](#browser-engine).
 
 ## Reporting bugs and asking questions
 
@@ -47,9 +49,11 @@ minimum packages CI installs are:
 
 ```
 cmake ninja clang lld git python nodejs
-webkitgtk-6.0 curl crypto++ libssh fmt boost boost-libs
+curl crypto++ libssh fmt boost boost-libs glib2
 nlohmann-json zlib bzip2 zstd xz
 ```
+
+`webkitgtk-6.0` is only needed for `-DNUI_BROWSER_ENGINE=native`.
 
 Node.js 24 is required for the frontend build (Nui invokes `parcel` and
 `npm`).
@@ -120,7 +124,26 @@ cmake --build   build/clang_release --target nui-sftp
 ./scripts/deploy.sh
 ```
 
-The release configure omits tests and the XML tool by default.
+The release configure omits tests and the XML tool by default. On Linux and
+macOS `deploy.sh` runs `cmake --install`: `bin/nui-sftp` with `frontend/`,
+`assets/` and `themes/` next to `bin/` and the CEF runtime in `lib/nui-sftp/`
+(libcef is stripped while installing), on macOS `nui-sftp.app`.
+
+### Browser engine
+
+`NUI_BROWSER_ENGINE` is `cef` on Linux and macOS and `native` (WebView2) on
+Windows. `-DNUI_BROWSER_ENGINE=native` builds the Linux and macOS versions with
+WebKitGTK or WKWebView instead. The engine is described in
+[dependencies/Nui/docs/cef_engine.md](dependencies/Nui/docs/cef_engine.md).
+
+- CEF: the configure step downloads the pinned minimal distribution once into
+  `~/.cache/nui/cef` (SHA256 checked) and shares it between build trees.
+  Offline builds pass `-DNUI_FETCH_CEF=OFF` with `-DNUI_CEF_ARCHIVE=<file>` or
+  `-DNUI_CEF_SYSTEM=ON` (Arch: the `cef` package).
+- All Chromium child processes run `nui-cef-helper`, built next to libcef in
+  `build/<dir>/nui-cef/`. The main process never runs in a child, so option
+  parsing and the ForkPool stay as they are.
+- On macOS the build tree has `bin/nui-sftp.app`, run the executable inside it.
 
 ### Standalone marketing webpage
 
@@ -175,7 +198,8 @@ are sensible; override them only when needed.
 | `OFFLINE_BUILD` | `OFF` | Adjust dependency fetching for sandboxed builds (Flatpak, Yocto) |
 | `BUILD_WEBPAGE` | `OFF` | Build the marketing webpage module |
 | `FETCH_YAML_CPP` / `FETCH_RAPIDFUZZ` / `FETCH_SPDLOG` / `FETCH_EFSW` | `ON` | Fetch vs. use system version |
-| `WEBKIT_PATH` | "" | Use a custom WebKit build instead of system pkg-config |
+| `NUI_BROWSER_ENGINE` | `cef` (`native` on Windows) | Chromium through CEF, or the platform webview |
+| `WEBKIT_PATH` | "" | Use a custom WebKit build instead of system pkg-config (native engine) |
 | `TAR_ARCHIVE_HAS_XZ` | `ON` | Enable liblzma compression in the tar-archive library |
 
 ## Debugging
@@ -186,20 +210,26 @@ The backend is a normal native binary; debug it directly with gdb or lldb:
 gdb --args build/clang_debug/bin/nui-sftp
 ```
 
-Two caveats worth knowing about:
+Worth knowing:
 
-- Tell the debugger to ignore `SIGUSR1` and `SIGXCPU`, otherwise the WebKit
-  and JS runtimes will repeatedly trip it. For gdb:
+- DevTools: debug builds (and release builds started with `--enable-dev-tools`)
+  serve the Chrome DevTools Protocol on the port in
+  `NUI_CEF_REMOTE_DEBUGGING_PORT`, open `http://127.0.0.1:<port>` or
+  `chrome://inspect`. Extra Chromium switches go into `NUI_CEF_ARGUMENTS`, for
+  example `--ozone-platform=headless` for runs without a display.
+
+- With the native engine, tell the debugger to ignore `SIGUSR1` and `SIGXCPU`,
+  otherwise the WebKit and JS runtimes will repeatedly trip it. For gdb:
 
   ```
   handle SIGUSR1 nostop noprint
   handle SIGXCPU nostop noprint pass
   ```
 
-- The WebKitGTK DMABUF renderer is disabled at startup unless every GPU uses
-  amdgpu, i915 or xe (see `Nui::configureWebKitGtkRendering`), the log states
-  why. Export `WEBKIT_DISABLE_DMABUF_RENDERER=0` to force it on or `=1` to
-  force it off.
+- With the native engine, the WebKitGTK DMABUF renderer is disabled at startup
+  unless every GPU uses amdgpu, i915 or xe (see
+  `Nui::configureWebKitGtkRendering`), the log states why. Export
+  `WEBKIT_DISABLE_DMABUF_RENDERER=0` to force it on or `=1` to force it off.
 
 Test binaries live under `build/clang_debug/test/` and can be launched the
 same way.

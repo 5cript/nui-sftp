@@ -147,7 +147,7 @@ You can download and upload files and folders directly as tar archives, no manua
 - Box drag select for icon view.
 - Auto refresh after operation complete.
 - Resize left vs right.
-- Upload drag and drop (within view and into the app (Linux caveat: only a single file, bug in webkitgtk)).
+- Upload drag and drop (within view and into the app).
 - Download drag and drop (within view).
 - Searching files.
 - Sorting files.
@@ -161,4 +161,3 @@ You can download and upload files and folders directly as tar archives, no manua
 # Known Problems
 
 - Cannot use mouse side keys for history navigation (yet) because of a bug in WebKit that shows them as "button 0".
-- On WebKit Systems (Linux), the drag and drop from the desktop only supports single files and folders, not a list of items, because WebKit removed the functionality entirely because of an unfixed security issue.
