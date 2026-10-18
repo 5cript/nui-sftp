@@ -27,9 +27,9 @@ OMIT_FRONTEND="${OMIT_FRONTEND:-false}"
 
 NOLINK="${NOLINK:-false}"
 
-BROWSER_ENGINE=$(sed -n 's/^NUI_BROWSER_ENGINE:[A-Z]*=//p' "${BUILD_DIRECTORY}/CMakeCache.txt")
+PLATFORM="$(uname -s)"
 
-if [ "$(uname -s)" = "Darwin" ] && [ "${BROWSER_ENGINE}" != "cef" ]; then
+if [ "${PLATFORM}" = "Darwin" ] && ! grep -qs '^NUI_BROWSER_ENGINE:[A-Z]*=cef$' "${BUILD_DIRECTORY}/CMakeCache.txt"; then
     INSTALL_TARGET="${INSTALL_TARGET}" BUILD_DIRECTORY="${BUILD_DIRECTORY}" SOURCE_DIRECTORY="${SOURCE_DIRECTORY}" \
         OMIT_FRONTEND="${OMIT_FRONTEND}" bash "${SCRIPT_DIR}/deploy_macos.sh"
     exit 0
@@ -37,10 +37,10 @@ fi
 
 # Linux, and macOS with CEF: the install rules of the CMake project (nui_install). They leave out the frontend when the
 # build has OMIT_FRONTEND_BUILD.
-if [ ! -f "${BUILD_DIRECTORY}/bin/nui-sftp.exe" ]; then
+if [[ "${PLATFORM}" != *_NT-* ]]; then
     echo -e "Installing to \e[32m${INSTALL_TARGET}\e[0m"
     cmake --install "${BUILD_DIRECTORY}" --prefix "${INSTALL_TARGET}"
-    if [ "$NOLINK" = false ] && [ "$(uname -s)" != "Darwin" ]; then
+    if [ "$NOLINK" = false ] && [ "${PLATFORM}" != "Darwin" ]; then
         ln -sfn "./bin/nui-sftp" "${INSTALL_TARGET}/nui-sftp"
     fi
     exit 0
