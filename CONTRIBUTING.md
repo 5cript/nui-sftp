@@ -196,6 +196,7 @@ are sensible; override them only when needed.
 | `NUI_BUILD_XML_TOOL` | (via Nui) | Build the `xml-to-nui` SVG/XML converter |
 | `OMIT_FRONTEND_BUILD` | `OFF` | Skip the Emscripten frontend |
 | `OFFLINE_BUILD` | `OFF` | Adjust dependency fetching for sandboxed builds (Flatpak, Yocto) |
+| `NUI_SFTP_FLATPAK` | `OFF` | Install for Flatpak: the executable next to CEF in `lib/nui-sftp`, `bin/nui-sftp` starts it through zypak |
 | `BUILD_WEBPAGE` | `OFF` | Build the marketing webpage module |
 | `FETCH_YAML_CPP` / `FETCH_RAPIDFUZZ` / `FETCH_SPDLOG` / `FETCH_EFSW` | `ON` | Fetch vs. use system version |
 | `NUI_BROWSER_ENGINE` | `cef` (`native` on Windows) | Chromium through CEF, or the platform webview |

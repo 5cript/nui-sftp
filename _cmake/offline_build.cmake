@@ -23,6 +23,7 @@ if(NOT EMSCRIPTEN)
     set(FETCH_EFSW OFF CACHE BOOL "Do not fetch efsw, assume it is in dependencies/efsw" FORCE)
 
     set(OMIT_FRONTEND_BUILD ON CACHE BOOL "Do not build the frontend, in offline environments emscripten is hard to use" FORCE)
+    set(NUI_FETCH_CEF OFF CACHE BOOL "Do not download CEF, pass NUI_CEF_ARCHIVE, NUI_CEF_ROOT or NUI_CEF_SYSTEM instead" FORCE)
 
     find_package(nlohmann_json REQUIRED)
     find_package(fmt REQUIRED)
@@ -33,7 +34,9 @@ if(NOT EMSCRIPTEN)
     add_library(boost_mp11 INTERFACE IMPORTED GLOBAL)
 
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/portable-file-dialogs" EXCLUDE_FROM_ALL)
-    add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/webview" EXCLUDE_FROM_ALL)
+    if (NOT NUI_BROWSER_ENGINE STREQUAL "cef")
+        add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/webview" EXCLUDE_FROM_ALL)
+    endif()
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/yaml-cpp" EXCLUDE_FROM_ALL)
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/rapidfuzz" EXCLUDE_FROM_ALL)
     add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/spdlog" EXCLUDE_FROM_ALL)
