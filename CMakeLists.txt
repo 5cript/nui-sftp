@@ -218,6 +218,20 @@ else()
         )
     endif()
 
+    # On macOS with CEF nui-sftp.app carries everything. Elsewhere bin/nui-sftp with frontend, assets and themes next to
+    # bin/ and the CEF runtime in lib/nui-sftp. Windows packages and WKWebView bundles are assembled by
+    # scripts/deploy.sh.
+    if (APPLE AND NUI_BROWSER_ENGINE STREQUAL "cef")
+        nui_install(TARGETS ${PROJECT_NAME})
+    elseif (NOT WIN32)
+        nui_install(TARGETS ${PROJECT_NAME} DESTINATION bin ENGINE_DESTINATION lib/${PROJECT_NAME})
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/assets/" DESTINATION assets)
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/themes/" DESTINATION themes)
+        if (NOT OMIT_FRONTEND_BUILD)
+            install(DIRECTORY "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin/" DESTINATION frontend)
+        endif()
+    endif()
+
     if (NUI_SFTP_ENABLE_TESTING)
         include(./_cmake/dependencies/gtest.cmake)
         enable_testing()

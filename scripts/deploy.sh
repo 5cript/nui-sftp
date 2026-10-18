@@ -27,47 +27,42 @@ OMIT_FRONTEND="${OMIT_FRONTEND:-false}"
 
 NOLINK="${NOLINK:-false}"
 
-if [ "$(uname -s)" = "Darwin" ]; then
+BROWSER_ENGINE=$(sed -n 's/^NUI_BROWSER_ENGINE:[A-Z]*=//p' "${BUILD_DIRECTORY}/CMakeCache.txt")
+
+if [ "$(uname -s)" = "Darwin" ] && [ "${BROWSER_ENGINE}" != "cef" ]; then
     INSTALL_TARGET="${INSTALL_TARGET}" BUILD_DIRECTORY="${BUILD_DIRECTORY}" SOURCE_DIRECTORY="${SOURCE_DIRECTORY}" \
         OMIT_FRONTEND="${OMIT_FRONTEND}" bash "${SCRIPT_DIR}/deploy_macos.sh"
     exit 0
 fi
 
-# On Windows executeable is called nui-sftp.exe, look if that exsists and then use that as the source for the executable
-# Also set a variable for future reference.
-
-if [ -f "${BUILD_DIRECTORY}/bin/nui-sftp.exe" ]; then
-    EXECUTABLE="${BUILD_DIRECTORY}/bin/nui-sftp.exe"
-    EXECUTABLE_NAME="nui-sftp.exe"
-    IS_WINDOWS=true
-else
-    EXECUTABLE="${BUILD_DIRECTORY}/bin/nui-sftp"
-    EXECUTABLE_NAME="nui-sftp"
-    IS_WINDOWS=false
+# Linux, and macOS with CEF: the install rules of the CMake project (nui_install). They leave out the frontend when the
+# build has OMIT_FRONTEND_BUILD.
+if [ ! -f "${BUILD_DIRECTORY}/bin/nui-sftp.exe" ]; then
+    echo -e "Installing to \e[32m${INSTALL_TARGET}\e[0m"
+    cmake --install "${BUILD_DIRECTORY}" --prefix "${INSTALL_TARGET}"
+    if [ "$NOLINK" = false ] && [ "$(uname -s)" != "Darwin" ]; then
+        ln -sfn "./bin/nui-sftp" "${INSTALL_TARGET}/nui-sftp"
+    fi
+    exit 0
 fi
+
+# Windows (MSYS2): the executable with the clang runtime libraries of MSYS2 next to it.
+EXECUTABLE="${BUILD_DIRECTORY}/bin/nui-sftp.exe"
 
 echo -e "Installing to \e[32m${INSTALL_TARGET}\e[0m"
 
-# Create the install directory if it doesn't exist
-mkdir -p "${INSTALL_TARGET}"
 mkdir -p "${INSTALL_TARGET}/bin"
 mkdir -p "${INSTALL_TARGET}/frontend"
-mkdir -p "${INSTALL_TARGET}/assets"
-mkdir -p "${INSTALL_TARGET}/themes"
 mkdir -p "${INSTALL_TARGET}/assets/icons"
+mkdir -p "${INSTALL_TARGET}/themes"
 
-cp "${EXECUTABLE}" "${INSTALL_TARGET}/bin/${EXECUTABLE_NAME}"
-if [ "$IS_WINDOWS" = true ]; then
-    # use ldd to copy dependencies from msys2 into the bin dir
-    ldd "${EXECUTABLE}" | grep "clang" | awk 'NF == 4 { system("cp " $3 " '"${INSTALL_TARGET}/bin/"'") }'
-fi
+cp "${EXECUTABLE}" "${INSTALL_TARGET}/bin/nui-sftp.exe"
+ldd "${EXECUTABLE}" | grep "clang" | awk 'NF == 4 { system("cp " $3 " '"${INSTALL_TARGET}/bin/"'") }'
 
 # Assets (Images, icons, language files)...
 cp -r "${SOURCE_DIRECTORY}/static/assets/." "${INSTALL_TARGET}/assets"
-cp "${SOURCE_DIRECTORY}/static/assets/icons/nui-sftp-logo.svg" "${INSTALL_TARGET}/assets/icons/"
 
-# Generated Windows .ico (only present on Windows builds; used by the Inno Setup
-# installer as SetupIconFile and Start Menu shortcut icon).
+# Generated .ico, used by the Inno Setup installer as SetupIconFile and Start Menu shortcut icon.
 if [ -f "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" ]; then
     cp "${BUILD_DIRECTORY}/generated/icons/nui-sftp.ico" "${INSTALL_TARGET}/assets/icons/"
 fi
@@ -75,14 +70,4 @@ fi
 cp -r "${SOURCE_DIRECTORY}/themes/." "${INSTALL_TARGET}/themes"
 if [ "$OMIT_FRONTEND" = false ]; then
     cp -r "${BUILD_DIRECTORY}/module_nui-sftp/bin/." "${INSTALL_TARGET}/frontend"
-fi
-
-if [ "$NOLINK" = false ]; then
-    if [ "$IS_WINDOWS" = false ]; then
-        # Dont create a symlink on windows or if NOLINK is true
-        ln -s "./bin/${EXECUTABLE_NAME}" "${INSTALL_TARGET}/${EXECUTABLE_NAME}"
-    else
-        # TODO?
-        :
-    fi
 fi
