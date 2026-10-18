@@ -116,7 +116,8 @@ if (WIN32)
     )
     add_dependencies(${PROJECT_NAME} nui-sftp-icon)
 elseif (APPLE AND NOT EMSCRIPTEN)
-    # scripts/deploy.sh assembles nui-sftp.app from these, the build tree keeps the plain bin/ layout.
+    # With CEF the build tree has nui-sftp.app (nui_configure_application), with WKWebView the plain bin/ layout, from
+    # which scripts/deploy_macos.sh assembles the bundle.
     # Uint8Array.fromBase64 in static/source/index.js needs the WebKit of macOS 15.2.
     if (NOT CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "15.2")
         message(FATAL_ERROR "nui-sftp needs CMAKE_OSX_DEPLOYMENT_TARGET 15.2 or later, use _cmake/macos/toolchain.cmake.")
@@ -129,6 +130,14 @@ elseif (APPLE AND NOT EMSCRIPTEN)
         @ONLY
     )
     add_dependencies(${PROJECT_NAME} nui-sftp-icon)
+    nui_configure_application(
+        TARGET ${PROJECT_NAME}
+        NAME nui-sftp
+        IDENTIFIER org.nuicpp.nui_sftp
+        INFO_PLIST "${CMAKE_BINARY_DIR}/generated/Info.plist"
+        ICON "${NUI_SFTP_ICNS}"
+        RESOURCES static/assets themes
+    )
 endif()
 
 # Third-party license drift check: fails the build if a CMake-declared dep
@@ -196,10 +205,15 @@ else()
         )
     endif()
 
-    # Copy module bin to frontend.
+    # Copy module bin to frontend, next to bin/ or into the resources of the app bundle.
+    if (APPLE AND NUI_BROWSER_ENGINE STREQUAL "cef")
+        set(NUI_SFTP_FRONTEND_DIRECTORY "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/frontend")
+    else()
+        set(NUI_SFTP_FRONTEND_DIRECTORY "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../frontend")
+    endif()
     if (NOT OMIT_FRONTEND_BUILD)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../frontend"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/module_${PROJECT_NAME}/bin" "${NUI_SFTP_FRONTEND_DIRECTORY}"
             VERBATIM
         )
     endif()
