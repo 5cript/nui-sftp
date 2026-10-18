@@ -9,7 +9,8 @@ bool isCanonical(std::filesystem::path const& path);
 
 /**
  * @brief Directory holding frontend, assets and themes for the running program.
- * @details This is the parent of the program directory, or Contents/Resources inside a macOS app bundle.
+ * @details This is the parent of the program directory, Contents/Resources inside a macOS app bundle, or the prefix
+ * when the program is in lib/nui-sftp (Flatpak).
  * @param programDirectory Directory of the executable.
  */
 std::filesystem::path resourceRoot(std::filesystem::path const& programDirectory);

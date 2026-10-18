@@ -214,10 +214,13 @@ findFilesInSearchPaths(std::filesystem::path const& relativeRoot, std::filesyste
 
 std::filesystem::path resourceRoot(std::filesystem::path const& programDirectory)
 {
-    const auto contents = programDirectory.parent_path();
-    if (programDirectory.filename() == "MacOS" && contents.filename() == "Contents")
-        return contents / "Resources";
-    return contents;
+    const auto parent = programDirectory.parent_path();
+    if (programDirectory.filename() == "MacOS" && parent.filename() == "Contents")
+        return parent / "Resources";
+    // Flatpak: nui_install(FLATPAK_ZYPAK) puts the executable next to CEF in lib/nui-sftp, its launcher in bin.
+    if (programDirectory.filename() == Constants::appName && parent.filename() == "lib")
+        return parent.parent_path();
+    return parent;
 }
 
 std::optional<std::filesystem::path>
