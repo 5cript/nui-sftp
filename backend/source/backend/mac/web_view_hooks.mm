@@ -119,15 +119,7 @@ MacWebViewHooks::MacWebViewHooks(Nui::Window& window, Nui::RpcHub& hub)
                       return;
                   }
 
-                  auto reply = nlohmann::json{
-                      {"entries", entries},
-                      {"dropMetadata", request.value("dropMetadata", "")},
-                  };
-                  if (request.contains("isLeft"))
-                      reply["isLeft"] = request["isLeft"];
-                  if (request.contains("subdir"))
-                      reply["subdir"] = request["subdir"];
-                  hub.callRemote("SessionArea::onFilesDropped", reply);
+                  hub.callRemote("SessionArea::onFilesDropped", droppedFilesMessage(request, entries));
               }
           ),
       })}
