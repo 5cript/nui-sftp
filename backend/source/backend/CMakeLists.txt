@@ -66,9 +66,7 @@ elseif(APPLE)
             file_tracking/instance_lock_nix.cpp
             pty/posix/pty.cpp
             pty/posix/process_list.cpp
-            mac/main_mac.mm
             mac/opener_mac.mm
-            mac/web_view_hooks.mm
             process/fork_pool.cpp
     )
     set_source_files_properties(
@@ -81,9 +79,12 @@ elseif(APPLE)
         backend
         PRIVATE
             "-framework AppKit"
-            "-framework WebKit"
             "-framework UniformTypeIdentifiers"
     )
+    if (NOT NUI_BROWSER_ENGINE STREQUAL "cef")
+        target_sources(backend PRIVATE mac/main_mac.mm mac/web_view_hooks.mm)
+        target_link_libraries(backend PRIVATE "-framework WebKit")
+    endif()
 else()
     target_sources(
         backend
@@ -91,22 +92,30 @@ else()
             file_tracking/instance_lock_nix.cpp
             pty/posix/pty.cpp
             pty/posix/process_list.cpp
-            linux/gtk_portal_parent_window.cpp
-            linux/main_linux.cpp
             linux/opener_linux.cpp
             process/fork_pool.cpp
     )
+    if (NOT NUI_BROWSER_ENGINE STREQUAL "cef")
+        target_sources(backend PRIVATE linux/main_linux.cpp linux/gtk_portal_parent_window.cpp)
+    endif()
     # GLib's GDBus replaces sd-bus for portal calls: Ubuntu 24.04's xdg-dbus-proxy
     # mangles sd-bus's one-shot AUTH EXTERNAL handshake but accepts GDBus's multi-step
     # negotiation, so the app can talk to portals without --socket=session-bus.
     # gio-unix-2.0 brings in GUnixFDList for file-descriptor passing.
+    # Public: main.cpp names the app with g_set_prgname. WebKitGTK brought GLib along, CEF does not.
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(gio REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
     target_link_libraries(
         backend
-        PRIVATE
+        PUBLIC
             PkgConfig::gio
     )
+endif()
+
+# Chromium on Linux and macOS: the hooks of the main window.
+if (NUI_BROWSER_ENGINE STREQUAL "cef")
+    target_sources(backend PRIVATE cef/main_cef.cpp cef/cef_hooks.cpp)
+    target_link_libraries(backend PUBLIC Nui::cef)
 endif()
 
 target_sources(

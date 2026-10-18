@@ -28,7 +28,7 @@ option(NUI_SFT_ENABLE_LANGUAGE_TOOLING "Enable building language tooling, which 
 option(TAR_ARCHIVE_HAS_XZ "Enable xz (liblzma) compression in the tar-archive library" ON)
 
 # Webkit from custom build
-if (NOT EMSCRIPTEN)
+if (NOT EMSCRIPTEN AND NOT NUI_BROWSER_ENGINE STREQUAL "cef")
     if (WEBKIT_PATH)
         message(STATUS "Using custom WebKit build from ${WEBKIT_PATH}")
         set(ENV{PKG_CONFIG_PATH} "${WEBKIT_PATH}/lib/pkgconfig")
@@ -49,7 +49,7 @@ endif()
 
 # Nui and webview both look up WebKitGTK, with different preferences they linked GTK 3 and GTK 4 at once.
 # One API for both: webkitgtk-6.0 (GTK 4) where it is installed, otherwise webkit2gtk-4.1 (GTK 3).
-if (NOT EMSCRIPTEN AND UNIX AND NOT APPLE)
+if (NOT EMSCRIPTEN AND UNIX AND NOT APPLE AND NOT NUI_BROWSER_ENGINE STREQUAL "cef")
     find_package(PkgConfig REQUIRED)
     if (WEBKIT_PATH)
         pkg_search_module(webkit REQUIRED IMPORTED_TARGET ${WEBKIT_PACKAGE_NAME})
