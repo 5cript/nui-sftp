@@ -166,11 +166,12 @@ target_link_libraries(
 
 nui_set_target_output_directories(${PROJECT_NAME})
 
-# The frontend is compiled per engine and per platform.
-set(BROWSER_ENGINE "")
-if (WIN32)
+# The frontend is compiled per engine and per platform, the macOS frontend also runs in Chromium.
+if (NUI_BROWSER_ENGINE STREQUAL "cef")
+    set(BROWSER_ENGINE "cef")
+elseif (WIN32)
     set(BROWSER_ENGINE "webview2")
-elseif(APPLE)
+elseif (APPLE)
     set(BROWSER_ENGINE "wkwebview")
 else()
     set(BROWSER_ENGINE "webkitgtk")

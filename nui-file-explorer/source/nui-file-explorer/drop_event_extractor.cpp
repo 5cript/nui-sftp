@@ -4,6 +4,7 @@
 #include <nui-file-explorer/transfer_target.hpp>
 
 #include <nui/frontend/api/console.hpp>
+#include <nui/frontend/api/file_list.hpp>
 #include <nui/frontend/api/json.hpp>
 #include <nui/frontend/rpc_client.hpp>
 
@@ -15,6 +16,23 @@ using namespace std::string_literals;
 
 namespace NuiFileExplorer
 {
+    namespace
+    {
+        /**
+         * @brief Names of the dropped files, the backend checks them against the paths it remembered for the drag.
+         */
+        nlohmann::json droppedFileNames(Nui::WebApi::FileList const& files)
+        {
+            auto names = nlohmann::json::array();
+            for (int index = 0; index < files.length(); ++index)
+            {
+                if (const auto file = files.item(index); file)
+                    names.push_back(file->name());
+            }
+            return names;
+        }
+    }
+
     std::optional<DropEventResult>
     extractDropEvent(Nui::WebApi::DragEvent event, ISideModel& sideModel, std::optional<Item> const& droppedOnItem)
     {
@@ -54,12 +72,14 @@ namespace NuiFileExplorer
             return result;
         }
 
-        // WKWebView hides the paths, the backend read them from the dragging pasteboard.
-        if (files.length() > 0 && STRINGIZE_EXPANDED(BROWSER_ENGINE) == "wkwebview"s)
+        // WKWebView and Chromium hide the paths, the backend read them from the dragging pasteboard or the drag data.
+        if (files.length() > 0 &&
+            (STRINGIZE_EXPANDED(BROWSER_ENGINE) == "wkwebview"s || STRINGIZE_EXPANDED(BROWSER_ENGINE) == "cef"s))
         {
             nlohmann::json claim = {
                 {"isLeft", sideModel.isLeft()},
                 {"dropMetadata", sideModel.dropMetadata()},
+                {"names", droppedFileNames(files)},
             };
             if (result.internalDropSubdir)
                 claim["subdir"] = *result.internalDropSubdir;
