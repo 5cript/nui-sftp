@@ -66,3 +66,16 @@ std::optional<SharedData::DroppedItem> droppedItemFromPath(std::filesystem::path
     }
     return SharedData::DroppedItem{.path = *std::move(localPath), .entry = std::move(entry)};
 }
+
+nlohmann::json droppedFilesMessage(nlohmann::json const& request, std::vector<SharedData::DroppedItem> const& entries)
+{
+    auto message = nlohmann::json{
+        {"entries", entries},
+        {"dropMetadata", request.value("dropMetadata", "")},
+    };
+    if (request.contains("isLeft"))
+        message["isLeft"] = request["isLeft"];
+    if (request.contains("subdir"))
+        message["subdir"] = request["subdir"];
+    return message;
+}
