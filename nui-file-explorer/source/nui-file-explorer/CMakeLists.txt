@@ -78,9 +78,14 @@ else()
         target_sources(
             nui-file-explorer-support
             PRIVATE
-                support/recent_files_linux.cpp
                 support/default_places_posix.cpp
         )
+        # GtkRecentManager needs GTK, which only WebKitGTK brings along.
+        if (NUI_BROWSER_ENGINE STREQUAL "cef")
+            target_sources(nui-file-explorer-support PRIVATE support/recent_files_unsupported.cpp)
+        else()
+            target_sources(nui-file-explorer-support PRIVATE support/recent_files_linux.cpp)
+        endif()
     endif()
 
     target_include_directories(

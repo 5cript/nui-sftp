@@ -3,6 +3,9 @@
 
 #ifdef _WIN32
 #    include <backend/windows/main_windows.hpp>
+#elif defined(NUI_ENGINE_CEF)
+#    include <backend/cef/main_cef.hpp>
+#    include <backend/process/fork_pool.hpp>
 #elif defined(__APPLE__)
 #    include <backend/mac/main_mac.hpp>
 #    include <backend/process/fork_pool.hpp>
@@ -10,7 +13,9 @@
 #    include <backend/linux/gtk_portal_parent_window.hpp>
 #    include <backend/linux/main_linux.hpp>
 #    include <backend/process/fork_pool.hpp>
+#endif
 
+#ifdef __linux__
 #    include <glib.h>
 #endif
 
@@ -29,6 +34,9 @@
 #include <nui/core.hpp>
 #include <nui/rpc.hpp>
 #include <nui/window.hpp>
+#ifdef NUI_ENGINE_CEF
+#    include <nui/cef/client_hooks.hpp>
+#endif
 #include <roar/mime_type.hpp>
 #include <efsw/efsw.hpp>
 #include <log/log.hpp>
@@ -70,7 +78,9 @@ namespace
      */
     std::string portalParentWindow([[maybe_unused]] Nui::Window& window)
     {
-#if defined(__linux__)
+#if defined(NUI_ENGINE_CEF)
+        return Nui::Cef::portalParentWindow(window);
+#elif defined(__linux__)
         return gtkPortalParentWindow(window.getNativeWindow());
 #else
         return {};
@@ -551,8 +561,8 @@ int main(int const argc, char const* const* argv)
 #endif
 
 #ifdef __linux__
-    // GTK 4 does not take it from argv like GTK 3, it names the X11 WM_CLASS and the Wayland app id.
-    // In a flatpak WebKit has to use the app id, the portal refuses to spawn its sandboxed web process otherwise.
+    // Names the X11 WM_CLASS and the Wayland app id: GTK 4 does not take it from argv like GTK 3, and Nui passes it to
+    // Chromium. In a flatpak WebKit has to use the app id, the portal refuses to spawn its sandboxed web process otherwise.
     const char* const flatpakApplicationId = std::getenv("FLATPAK_ID");
     g_set_prgname(flatpakApplicationId != nullptr && *flatpakApplicationId != '\0' ? flatpakApplicationId : "nui-sftp");
 #endif
