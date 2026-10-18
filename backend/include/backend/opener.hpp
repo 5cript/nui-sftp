@@ -11,7 +11,12 @@
 class Opener
 {
   public:
-    explicit Opener(void* nativeWindow = nullptr);
+    /**
+     * @brief Connects to the platform's facilities for opening files.
+     * @param portalParentWindow Parent window of xdg-desktop-portal dialogs on Linux ("wayland:<handle>",
+     *        "x11:<id>" or empty), ignored on the other platforms.
+     */
+    explicit Opener(std::string portalParentWindow = {});
     ~Opener();
     Opener(Opener const&) = delete;
     Opener& operator=(Opener const&) = delete;

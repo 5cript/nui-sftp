@@ -96,7 +96,7 @@ std::optional<std::string> Opener::riskOf(std::filesystem::path const& path) con
 struct Opener::Implementation
 {};
 
-Opener::Opener(void* /*nativeWindow*/)
+Opener::Opener(std::string /*portalParentWindow*/)
     : impl_{std::make_unique<Implementation>()}
 {}
 

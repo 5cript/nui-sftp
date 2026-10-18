@@ -7,6 +7,7 @@
 #    include <backend/mac/main_mac.hpp>
 #    include <backend/process/fork_pool.hpp>
 #else
+#    include <backend/linux/gtk_portal_parent_window.hpp>
 #    include <backend/linux/main_linux.hpp>
 #    include <backend/process/fork_pool.hpp>
 
@@ -64,6 +65,18 @@ volatile sig_atomic_t sigchld[10] = {0};
 
 namespace
 {
+    /**
+     * @brief Parent window of the xdg-desktop-portal dialogs of the opener, empty where there is none.
+     */
+    std::string portalParentWindow([[maybe_unused]] Nui::Window& window)
+    {
+#if defined(__linux__)
+        return gtkPortalParentWindow(window.getNativeWindow());
+#else
+        return {};
+#endif
+    }
+
     auto makeResponse(int code, std::string const& reason, std::string body, std::string const& mimeType = ""s)
     {
         std::unordered_multimap<std::string, std::string> headers = {
@@ -300,7 +313,7 @@ void Main::registerRpc()
                 }
             );
 
-            opener_ = std::make_unique<Opener>(window_.getNativeWindow());
+            opener_ = std::make_unique<Opener>(portalParentWindow(window_));
             rpcSystem_ = std::make_unique<RpcSystem>(window_.getExecutor(), window_, hub_);
             tempDirInstanceManager_ = std::make_unique<FileTracking::TempDirInstanceManager>(
                 window_.getExecutor(),
