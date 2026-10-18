@@ -27,6 +27,16 @@ option(FETCH_EFSW "Fetch efsw" ON)
 option(NUI_SFT_ENABLE_LANGUAGE_TOOLING "Enable building language tooling, which includes a command line tool for checking language files" OFF)
 option(TAR_ARCHIVE_HAS_XZ "Enable xz (liblzma) compression in the tar-archive library" ON)
 
+# Chromium (CEF) on Linux and macOS, WebView2 on Windows. native selects WebKitGTK or WKWebView instead.
+if (NOT EMSCRIPTEN)
+    if (WIN32)
+        set(NUI_SFTP_DEFAULT_BROWSER_ENGINE native)
+    else()
+        set(NUI_SFTP_DEFAULT_BROWSER_ENGINE cef)
+    endif()
+    set(NUI_BROWSER_ENGINE "${NUI_SFTP_DEFAULT_BROWSER_ENGINE}" CACHE STRING "Browser engine: cef or native")
+endif()
+
 # Webkit from custom build
 if (NOT EMSCRIPTEN AND NOT NUI_BROWSER_ENGINE STREQUAL "cef")
     if (WEBKIT_PATH)
