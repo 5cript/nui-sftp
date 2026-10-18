@@ -196,6 +196,9 @@ namespace
             // Windows: Do urls to this custom scheme have an authority component? (For portability reasons, they
             // usually should have).
             .hasAuthorityComponent = true,
+
+            // CEF: the handler only reads files, requests are served in parallel off the UI thread.
+            .handlerThread = SchemeHandlerThread::Any,
         };
     }
 }
