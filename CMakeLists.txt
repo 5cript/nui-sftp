@@ -131,13 +131,24 @@ elseif (APPLE AND NOT EMSCRIPTEN)
         @ONLY
     )
     add_dependencies(${PROJECT_NAME} nui-sftp-icon)
+    # The licenses of CEF and of the Chromium components in it go into the bundle, the Linux packages install them.
+    set(NUI_SFTP_CEF_LICENSES "")
+    if (NUI_BROWSER_ENGINE STREQUAL "cef")
+        get_filename_component(NUI_SFTP_CEF_ROOT "${NUI_CEF_LIBRARY_DIR}" DIRECTORY)
+        configure_file("${NUI_SFTP_CEF_ROOT}/LICENSE.txt" "${CMAKE_BINARY_DIR}/generated/cef/CEF-LICENSE.txt" COPYONLY)
+        configure_file("${NUI_SFTP_CEF_ROOT}/CREDITS.html" "${CMAKE_BINARY_DIR}/generated/cef/CEF-CREDITS.html" COPYONLY)
+        set(NUI_SFTP_CEF_LICENSES
+            "${CMAKE_BINARY_DIR}/generated/cef/CEF-LICENSE.txt"
+            "${CMAKE_BINARY_DIR}/generated/cef/CEF-CREDITS.html"
+        )
+    endif()
     nui_configure_application(
         TARGET ${PROJECT_NAME}
         NAME nui-sftp
         IDENTIFIER org.nuicpp.nui_sftp
         INFO_PLIST "${CMAKE_BINARY_DIR}/generated/Info.plist"
         ICON "${NUI_SFTP_ICNS}"
-        RESOURCES static/assets themes
+        RESOURCES static/assets themes ${NUI_SFTP_CEF_LICENSES}
     )
 endif()
 
