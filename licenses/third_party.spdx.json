@@ -281,6 +281,32 @@
 
     {
       "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/cef",
+      "creationInfo": "_:creationInfo",
+      "name": "Chromium Embedded Framework",
+      "software_packageVersion": "154.0.34",
+      "software_downloadLocation": "https://cef-builds.spotifycdn.com/index.html",
+      "software_homePage": "https://github.com/chromiumembedded/cef",
+      "software_copyrightText": "Copyright (c) 2008-2020 Marshall A. Greenblatt. Portions Copyright (c) 2006-2009 Google Inc.",
+      "simplelicensing_declaredLicense": "BSD-3-Clause",
+      "extension_licenseTextFile": "texts/cef-LICENSE.txt",
+      "extension_role": "fetched"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/chromium",
+      "creationInfo": "_:creationInfo",
+      "name": "Chromium",
+      "software_packageVersion": "154.0.8037.98",
+      "software_downloadLocation": "https://source.chromium.org/chromium",
+      "software_homePage": "https://www.chromium.org",
+      "software_copyrightText": "Copyright 2015 The Chromium Authors",
+      "simplelicensing_declaredLicense": "BSD-3-Clause",
+      "extension_licenseTextFile": "texts/chromium-LICENSE.txt",
+      "extension_role": "fetched"
+    },
+    {
+      "type": "software_Package",
       "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/openssl",
       "creationInfo": "_:creationInfo",
       "name": "OpenSSL",
