@@ -38,7 +38,8 @@ jobs:
             tar \
             python \
             nodejs \
-            webkitgtk-6.0 \
+            glib2 \
+            sqlite \
             curl \
             crypto++ \
             libssh \
@@ -53,7 +54,26 @@ jobs:
             zstd \
             xz \
             docker \
-            docker-buildx
+            docker-buildx \
+            alsa-lib \
+            at-spi2-core \
+            cairo \
+            dbus \
+            expat \
+            libcups \
+            libx11 \
+            libxcb \
+            libxcomposite \
+            libxdamage \
+            libxext \
+            libxfixes \
+            libxkbcommon \
+            libxrandr \
+            mesa \
+            nspr \
+            nss \
+            pango \
+            systemd-libs
 
       - uses: actions/checkout@v6
         with:

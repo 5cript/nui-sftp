@@ -53,7 +53,10 @@ curl crypto++ libssh fmt boost boost-libs glib2
 nlohmann-json zlib bzip2 zstd xz
 ```
 
-`webkitgtk-6.0` is only needed for `-DNUI_BROWSER_ENGINE=native`.
+`webkitgtk-6.0` is only needed for `-DNUI_BROWSER_ENGINE=native`. The CEF
+library needs `nss`, `alsa-lib`, `at-spi2-core`, `libcups`, `mesa` and a few X11
+libraries, which desktop systems have; the full list for a bare container is
+in [.github/workflows/archlinux.yml](.github/workflows/archlinux.yml).
 
 Node.js 24 is required for the frontend build (Nui invokes `parcel` and
 `npm`).
