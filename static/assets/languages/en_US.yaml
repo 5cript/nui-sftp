@@ -1089,6 +1089,9 @@ rootWarning:
 toolbar:
   cannotUpdateLayouts: "Cannot update layouts."
   defaultLayout: "Default layout"
+  serverLabel: "Server"
+  layoutLabel: "Layout"
+  userLabel: "User"
   newSession: "Add Server"
   connect: "Connect"
   endSession: "End Session"
