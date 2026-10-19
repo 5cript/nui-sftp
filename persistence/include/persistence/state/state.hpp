@@ -58,6 +58,10 @@ namespace Persistence
         LocalizationOptions localizationOptions{};
         std::optional<SshSessionOptions> lastDirectConnect{};
         std::optional<InheritableReferences> lastDirectConnectInheritables{};
+        /**
+         * @brief The names of the one-time migrations already applied, so a value set afterwards is kept.
+         */
+        std::optional<std::vector<std::string>> appliedMigrations{};
 
         State fullyResolve() const;
 
@@ -71,6 +75,13 @@ namespace Persistence
          * to one keeps the servers usable.
          */
         void writeLegacyUsers();
+
+        /**
+         * @brief Moves the terminal renderer from DOM to WebGL once. Earlier Linux versions had to default to DOM.
+         *
+         * @return Whether the migration ran and the state has to be saved.
+         */
+        bool migrateTerminalRendererFromDom();
     };
 
     BOOST_DESCRIBE_STRUCT(
@@ -89,6 +100,7 @@ namespace Persistence
             fileTrackingOptions,
             localFilesystemOptions,
             lastDirectConnect,
-            lastDirectConnectInheritables)
+            lastDirectConnectInheritables,
+            appliedMigrations)
     )
 }
