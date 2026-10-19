@@ -189,6 +189,11 @@
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
 
+    --nui-file-grid-tile-background: rgba(255, 255, 255, 0.10);
+    --nui-file-grid-tile-border: rgba(255, 255, 255, 0.22);
+    --nui-file-grid-tile-hover-background: rgba(255, 255, 255, 0.16);
+    --nui-file-grid-tile-hover-border: rgba(255, 255, 255, 0.35);
+
     /* Loading placeholder — flat grayscale plate with slight transparency (dark default). */
     --nui-file-grid-loading-placeholder-background: rgba(255, 255, 255, 0.08);
     --nui-file-grid-loading-placeholder-border: rgba(255, 255, 255, 0.18);
@@ -227,13 +232,6 @@
         background-image: var(--background-image, url("data-url:../../../styles/nui-file-explorer/file_grid_background_light.png"));
     }
 
-    & .nui-file-grid-item-icons:is(.selected)::after {
-        background:
-            linear-gradient(145deg,
-                color-mix(in srgb, var(--theme-color) 80%, rgba(0, 0, 0, 0.1)),
-                color-mix(in srgb, var(--theme-color) 80%, rgba(0, 0, 0, 0.3)));
-    }
-
     --script-nui-components-switch-color-inactive: var(--border-color-fields);
     --script-nui-components-checkbox-border-color: var(--anti-brightness-mixin);
 
@@ -241,6 +239,11 @@
     --nui-file-grid-item-highlight: color-mix(in srgb, var(--theme-color) 80%, var(--brightness-mixin) var(--brightness-mixin-percent));
     --nui-file-grid-symbolic-link-color: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
     --nui-file-grid-places-highlight-contrast: var(--color);
+
+    --nui-file-grid-tile-background: rgba(255, 255, 255, 0.55);
+    --nui-file-grid-tile-border: rgba(0, 0, 0, 0.14);
+    --nui-file-grid-tile-hover-background: rgba(255, 255, 255, 0.75);
+    --nui-file-grid-tile-hover-border: rgba(0, 0, 0, 0.28);
 
     /* Loading placeholder (light mode). */
     --nui-file-grid-loading-placeholder-background: rgba(0, 0, 0, 0.05);
