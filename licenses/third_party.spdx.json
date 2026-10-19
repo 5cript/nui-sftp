@@ -185,7 +185,8 @@
       "software_copyrightText": "Copyright (c) 2017 Serge Zaitsev",
       "simplelicensing_declaredLicense": "MIT",
       "extension_licenseTextFile": "texts/webview-LICENSE.txt",
-      "extension_role": "vendored"
+      "extension_role": "vendored",
+      "extension_browserEngines": ["webkitgtk", "webview2", "wkwebview"]
     },
 
     {
@@ -193,8 +194,8 @@
       "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/interval-tree",
       "creationInfo": "_:creationInfo",
       "name": "interval-tree",
-      "software_packageVersion": "v2.3.2",
-      "software_downloadLocation": "https://github.com/5cript/interval-tree/archive/refs/tags/v2.3.2.tar.gz",
+      "software_packageVersion": "v3.1.1",
+      "software_downloadLocation": "https://github.com/5cript/interval-tree/archive/refs/tags/v3.1.1.tar.gz",
       "software_homePage": "https://github.com/5cript/interval-tree",
       "simplelicensing_declaredLicense": "BSL-1.0",
       "extension_licenseTextFile": "texts/interval-tree-LICENSE.txt",
@@ -290,7 +291,8 @@
       "software_copyrightText": "Copyright (c) 2008-2020 Marshall A. Greenblatt. Portions Copyright (c) 2006-2009 Google Inc.",
       "simplelicensing_declaredLicense": "BSD-3-Clause",
       "extension_licenseTextFile": "texts/cef-LICENSE.txt",
-      "extension_role": "fetched"
+      "extension_role": "fetched",
+      "extension_browserEngines": ["cef"]
     },
     {
       "type": "software_Package",
@@ -303,7 +305,22 @@
       "software_copyrightText": "Copyright 2015 The Chromium Authors",
       "simplelicensing_declaredLicense": "BSD-3-Clause",
       "extension_licenseTextFile": "texts/chromium-LICENSE.txt",
-      "extension_role": "fetched"
+      "extension_role": "fetched",
+      "extension_browserEngines": ["cef"]
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/nui-sftp/Package/webview2-sdk",
+      "creationInfo": "_:creationInfo",
+      "name": "Microsoft WebView2 SDK",
+      "software_packageVersion": "latest",
+      "software_downloadLocation": "https://www.nuget.org/packages/Microsoft.Web.WebView2",
+      "software_homePage": "https://developer.microsoft.com/microsoft-edge/webview2/",
+      "software_copyrightText": "Copyright (C) Microsoft Corporation",
+      "simplelicensing_declaredLicense": "BSD-3-Clause",
+      "extension_licenseTextFile": "texts/webview2-sdk-LICENSE.txt",
+      "extension_role": "fetched",
+      "extension_browserEngines": ["webview2"]
     },
     {
       "type": "software_Package",
@@ -446,7 +463,8 @@
       "software_copyrightText": "Copyright (c) Apple Inc., Igalia S.L., and the WebKit contributors",
       "simplelicensing_declaredLicense": "LGPL-2.0-or-later AND BSD-2-Clause",
       "extension_licenseTextFile": "texts/webkitgtk-LICENSE.txt",
-      "extension_role": "system"
+      "extension_role": "system",
+      "extension_browserEngines": ["webkitgtk"]
     }
   ]
 }

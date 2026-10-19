@@ -57,7 +57,7 @@ SKIP_NORM = {
 # Use this when the variant names don't collapse equal under normalisation.
 ALIASES = {
     "webview_raw": "webview",
-    "webview-binary-nui": "webview",
+    "webview-binary-nui": "Microsoft WebView2 SDK",
     "promise": "promise-cpp",
     "traits-library": "traits",
     "CryptoPP": "Crypto++",
@@ -77,6 +77,9 @@ NO_CMAKE_DECLARATION_NORM = {
     "chromiumembeddedframework",  # downloaded by Nui's cef.cmake, not FetchContent
     "chromium",                   # part of the CEF distribution
 }
+
+# Values of extension_browserEngines: the entry ships only with these engines (BROWSER_ENGINE of the frontend).
+BROWSER_ENGINES = {"cef", "webkitgtk", "webview2", "wkwebview"}
 
 FIND_PACKAGE_RE = re.compile(r"\bfind_package\s*\(\s*([A-Za-z0-9_\-]+)")
 FETCH_CONTENT_RE = re.compile(
@@ -174,6 +177,16 @@ def main() -> int:
 
     for name, element in sorted(spdx_packages.items()):
         display = element.get("name", name)
+        engines = element.get("extension_browserEngines", [])
+        if not isinstance(engines, list) or not engines and "extension_browserEngines" in element:
+            errors.append(f"  - {display!r}: extension_browserEngines must be a non-empty list.")
+        else:
+            for engine in engines:
+                if engine not in BROWSER_ENGINES:
+                    errors.append(
+                        f"  - {display!r}: unknown browser engine {engine!r} in extension_browserEngines, "
+                        f"expected one of {sorted(BROWSER_ENGINES)}."
+                    )
         text_ref = element.get("extension_licenseTextFile")
         if not text_ref:
             errors.append(f"  - {display!r} has no extension_licenseTextFile field.")

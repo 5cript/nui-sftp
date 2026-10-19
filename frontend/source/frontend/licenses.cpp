@@ -2,6 +2,7 @@
 
 #include <licenses_data.hpp>
 
+#include <nui-file-explorer/preprocessor.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
 #include <script-nui-components/tabs.hpp>
@@ -46,6 +47,23 @@ namespace
         return it->get<std::string>();
     }
 
+    /**
+     * @brief Whether the entry ships with this build: entries without browserEngines ship with every engine.
+     */
+    bool shipsWithThisEngine(nlohmann::json const& entry)
+    {
+        const auto engines = entry.find("browserEngines");
+        if (engines == entry.end() || !engines->is_array() || engines->empty())
+            return true;
+        return std::ranges::any_of(
+            *engines,
+            [](nlohmann::json const& engine)
+            {
+                return engine.is_string() && engine.get<std::string>() == STRINGIZE_EXPANDED(BROWSER_ENGINE);
+            }
+        );
+    }
+
     std::vector<LicenseEntry> parseSection(nlohmann::json const& arr, std::string const& defaultRole)
     {
         std::vector<LicenseEntry> out;
@@ -54,6 +72,8 @@ namespace
         out.reserve(arr.size());
         for (auto const& e : arr)
         {
+            if (!shipsWithThisEngine(e))
+                continue;
             LicenseEntry entry{
                 readString(e, "name"),
                 readString(e, "version"),
