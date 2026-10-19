@@ -83,13 +83,16 @@ struct MainPage::Implementation
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
         , notificationCenter{events}
-        , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, themeController}
+        , toolbar{stateHolder, events, &confirmDialog, &directConnectDialog, &newItemAskDialog, themeController}
         , commandStoreClient{}
         , snippetImportDialog{"SnippetImportDialog", &commandStoreClient}
         , snippetPresetsDialog{"SnippetPresetsDialog", &commandStoreClient, &snippetImportDialog}
         , sessionArea{stateHolder, events, &newItemAskDialog, &confirmDialog, &filePropertyDialog, &archiveTransferDialog, &snippetImportDialog, &snippetPresetsDialog, &toolbar, &commandStoreClient}
-        , settings{stateHolder, events, [this](){
-            return sessionArea.getActiveSessionLayout();
+        , settings{stateHolder, events, [this](Persistence::TerminalEngineType type) -> std::optional<nlohmann::json> {
+            Session* session = sessionArea.getActiveSession();
+            if (!session || session->engineOptions().type != type)
+                return std::nullopt;
+            return session->getLayout();
         }, newItemAskDialog, confirmDialog, multiInputDialog, newSessionDialog}
         , licenses{events}
         , onboarding{stateHolder, events}

@@ -22,6 +22,7 @@
 #include "test_ui_options.hpp"
 #include "test_legacy_migration.hpp"
 #include "test_terminal_renderer_migration.hpp"
+#include "test_session_layouts.hpp"
 #include "test_ssh_user_selection.hpp"
 #include "test_environment.hpp"
 #include "test_termios.hpp"

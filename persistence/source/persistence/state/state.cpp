@@ -1,5 +1,6 @@
 #include <persistence/state/state.hpp>
 #include <nlohmann/json.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <string_view>
@@ -81,6 +82,31 @@ namespace Persistence
         for (auto& [name, session] : sessions)
             moveToWebgl(session.terminalOptions.value());
 #endif
+        return true;
+    }
+
+    bool State::gatherSessionLayouts()
+    {
+        if (sessionLayouts)
+            return false;
+        sessionLayouts = SessionLayouts{};
+
+        for (auto const& [serverName, session] : sessions)
+        {
+            if (!session.layouts)
+                continue;
+            auto& layouts = sessionLayouts->of(session.type);
+            for (auto const& [layoutName, layout] : *session.layouts)
+            {
+                auto name = layoutName;
+                for (int attempt = 1; layouts.contains(name) && layouts[name] != layout; ++attempt)
+                {
+                    name = attempt == 1 ? fmt::format("{} ({})", layoutName, serverName)
+                                        : fmt::format("{} ({}) {}", layoutName, serverName, attempt);
+                }
+                layouts.emplace(name, layout);
+            }
+        }
         return true;
     }
 }

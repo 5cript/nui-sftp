@@ -50,9 +50,9 @@ void SessionOptions::loadLayoutNames()
             impl_->layoutNames.value().clear();
 
             if (const auto iter = state.sessions.find(*impl_->persistenceSessionName);
-                iter != end(state.sessions) && iter->second.layouts)
+                iter != end(state.sessions) && state.sessionLayouts)
             {
-                for (const auto& [name, session] : *iter->second.layouts)
+                for (const auto& [name, layout] : state.sessionLayouts->of(iter->second.type))
                 {
                     impl_->layoutNames.value().push_back(name);
                 }

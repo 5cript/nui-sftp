@@ -532,6 +532,7 @@ settings:
   globalInheritables: "Inheritable Settings"
   localFilesystemOptionsGroupHeader: "Local Filesystem Options"
   fileTrackingOptionsGroupHeader: "File Tracking Defaults"
+  layoutsGroupHeader: "Layouts"
   errorLoadingSettings: "Error occured while loading in the settings menu."
   errorSavingSettingsHeader: "Could not save settings"
   errorSavingSettings: "Error occured while saving in the settings menu."
@@ -590,7 +591,6 @@ settings:
     logDirectoryHelpText: "The directory where log files are stored. if the string starts with %key% it is replaced with a special path. The following keys map to the following directories: ~, %userprofile%: home directory. %appdata%: AppData/Roaming on windows, home on linux. %localappdata%: AppData/Local on windows, home on linux. %temp%: Temp directory. %config_home%, %config_home2%, %config_home3%: Configuration directory (1,2,3 is Home, Documents, AppData on windows). %state_home%, %state_home2%, %state_home3%: State directory. %data_home%, %data_home2%, %data_home3%: Data directory. On macOS the configuration, state and data directories are ~/Library/Application Support."
     disableFileLoggingHelpText: "When enabled, logging to files is disabled. Logs will only be output to the console."
   layoutSetting:
-    layoutKeysLabel: "Saved layouts"
     deleteLayoutKey: "Delete layout"
 
     saveCurrentLayout: "Save current layout"
@@ -608,7 +608,6 @@ settings:
     removeLayoutKeyConfirmText: "Are you sure you want to remove the following layout"
   sessionOptions:
     terminalEngineType: "Session Type"
-    layoutHelpText: "Layout configuration for this session. Here you can save and delete layouts."
     icon: "Session Icon"
     orderBy: "Sort by this instead"
     isStartupSession: "Is Startup Session"
@@ -656,7 +655,7 @@ settings:
     maxReconnectBackoffMsHelpText: "The longest wait between two reconnect attempts, in milliseconds. The wait doubles with every attempt, starting at one second, until it reaches this cap."
     maxReconnectBackoffMsSearchTags: "retry, reconnect, delay, wait"
     users: "Users"
-    usersHelpText: "The users to log in to this server with. Pick one in the toolbar next to the layout before connecting; the first user is the default one."
+    usersHelpText: "The users to log in to this server with. Pick one in the toolbar next to the server before connecting; the first user is the default one."
     usersSearchTags: "login, account, credentials, key"
     userWithoutName: "(no user name)"
     resetUsersConfirmHeader: "Remove all users?"
@@ -1058,6 +1057,11 @@ settings:
       deleteRemoteOnLocalDeleteHelpText: "Default for new tracked entries: when a tracked file is deleted locally, also delete it on the remote."
       checkRemoteChanges: "Check Remote Before Reupload"
       checkRemoteChangesHelpText: "Default for new tracked entries: before re-uploading an edited file, check whether the remote copy changed since it was opened or last uploaded, and ask before replacing it."
+    layouts:
+      ssh: "SSH Layouts"
+      sshHelpText: "Layouts shared by all SSH servers. Saving takes the layout of the open SSH tab."
+      shell: "Local Shell Layouts"
+      shellHelpText: "Layouts shared by all local shells. Saving takes the layout of the open local shell tab."
   colorSetting:
     pickButton: "Pick"
 persistence:
@@ -1084,9 +1088,17 @@ rootWarning:
   text: "nui-sftp is running with root privileges.\n\nThis is dangerous and unnecessary:\n  - Files transferred or created will be owned by root.\n  - A bug, a malicious server, or a compromised remote can damage your entire system.\n  - The user D-Bus session is unavailable, so opening files with external applications will not work.\n  - SSH keys, agents and configuration normally found in your real home directory will not be picked up.\n\nClose the application and restart it as your normal user. Use sudo only when you genuinely need to manipulate files that require it, and prefer changing file ownership over running the whole GUI as root."
 toolbar:
   cannotUpdateLayouts: "Cannot update layouts."
+  defaultLayout: "Default layout"
   newSession: "Add Server"
   connect: "Connect"
   endSession: "End Session"
+  saveLayout: "Save Layout"
+  deleteLayout: "Delete Layout"
+  saveLayoutForSsh: "Enter a name. The layout is saved for all SSH servers."
+  saveLayoutForShell: "Enter a name. The layout is saved for all local shells."
+  layoutNameReserved: "This name is reserved for the default layout. Please choose a different name."
+  overwriteLayoutHeader: "Replace layout"
+  overwriteLayout: "A layout with this name already exists. Replace it"
   directConnect: "Direct Connect"
   userSelect: "User to log in as"
   errorSavingSettingsHeader: "Could not save settings"

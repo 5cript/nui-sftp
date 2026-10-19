@@ -4,6 +4,7 @@
 #include <persistence/state_core.hpp>
 
 #include <persistence/state/session_options.hpp>
+#include <persistence/state/session_layouts.hpp>
 #include <persistence/state/termios.hpp>
 #include <persistence/state/ssh_options.hpp>
 #include <persistence/state/ui_options.hpp>
@@ -62,6 +63,10 @@ namespace Persistence
          * @brief The names of the one-time migrations already applied, so a value set afterwards is kept.
          */
         std::optional<std::vector<std::string>> appliedMigrations{};
+        /**
+         * @brief The layouts shared by the sessions of a type. Missing until gathered from the servers.
+         */
+        std::optional<SessionLayouts> sessionLayouts{};
 
         State fullyResolve() const;
 
@@ -82,6 +87,15 @@ namespace Persistence
          * @return Whether the migration ran and the state has to be saved.
          */
         bool migrateTerminalRendererFromDom();
+
+        /**
+         * @brief Gathers the layouts earlier versions saved per server into the layouts of their type, if not done
+         * yet. A name used with a different layout by another server of the type gets the server name appended.
+         * The layouts of the servers stay for earlier versions.
+         *
+         * @return Whether the layouts were gathered and the state has to be saved.
+         */
+        bool gatherSessionLayouts();
     };
 
     BOOST_DESCRIBE_STRUCT(
@@ -101,6 +115,7 @@ namespace Persistence
             localFilesystemOptions,
             lastDirectConnect,
             lastDirectConnectInheritables,
-            appliedMigrations)
+            appliedMigrations,
+            sessionLayouts)
     )
 }

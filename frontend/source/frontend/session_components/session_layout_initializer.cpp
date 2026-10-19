@@ -369,10 +369,11 @@ void SessionLayoutInitializer::initialize()
 
     if (!layout && impl_->layoutName != Constants::defaultLayoutName)
     {
-        if (impl_->engineOptions->layouts && impl_->layoutName)
+        auto const& sessionLayouts = impl_->stateHolder->stateCache().sessionLayouts;
+        if (sessionLayouts && impl_->layoutName)
         {
-            if (auto iter = impl_->engineOptions->layouts->find(*impl_->layoutName);
-                iter != impl_->engineOptions->layouts->end())
+            auto const& layouts = sessionLayouts->of(impl_->engineOptions->type);
+            if (auto iter = layouts.find(*impl_->layoutName); iter != layouts.end())
             {
                 layout = iter->second;
             }

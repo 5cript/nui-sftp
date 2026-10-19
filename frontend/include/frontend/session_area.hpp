@@ -54,11 +54,15 @@ class SessionArea
     void removeActiveSession();
 
     Session* getActiveSession();
-    std::optional<nlohmann::json> getActiveSessionLayout();
+    /**
+     * @brief Whether a session is selected, whose layout can be saved.
+     */
+    Nui::Observed<bool> const& hasActiveSession() const;
     Session* getSessionByLayoutId(std::string const& layoutId);
 
   private:
     std::optional<std::size_t> findSessionIndexByTabId(int tabId) const;
+    void updateHasActiveSession();
 
     /**
      * @brief Reconnect entry point invoked from a Session's requestReconnect

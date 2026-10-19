@@ -70,6 +70,7 @@ struct SessionArea::Implementation
     Nui::Observed<std::vector<std::unique_ptr<Session>>> sessions;
     Nui::RpcClient::AutoUnregister dropHandlerUnregister_;
     ScriptNuiComponents::Tabs tabs;
+    Nui::Observed<bool> hasActiveSession{false};
     Nui::ListenRemover<decltype(FrontendEvents::onNewSession)> newSessionListener{};
 
     /// Active reconnect cycles, keyed by outer tabId.  Each cycle preserves
@@ -265,6 +266,7 @@ void SessionArea::removeSession(int tabId)
         {
             impl_->sessions.erase(impl_->sessions.begin() + index);
             impl_->tabs.remove(tabId);
+            updateHasActiveSession();
             Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
@@ -293,6 +295,19 @@ void SessionArea::setSelected(int tabId)
     }
     Log::info("Selected session: {}", *newIndex);
     impl_->sessions.value()[*newIndex]->visible(true);
+    updateHasActiveSession();
+}
+
+Nui::Observed<bool> const& SessionArea::hasActiveSession() const
+{
+    return impl_->hasActiveSession;
+}
+
+void SessionArea::updateHasActiveSession()
+{
+    const bool hasSession = getActiveSession() != nullptr;
+    if (impl_->hasActiveSession.value() != hasSession)
+        impl_->hasActiveSession = hasSession;
 }
 
 std::optional<std::size_t> SessionArea::findSessionIndexByTabId(int tabId) const
@@ -835,14 +850,6 @@ void SessionArea::cancelReconnectTimers(int tabId)
         Nui::val::global("clearTimeout")(rc->second.countdownTimerHandle);
         rc->second.countdownTimerHandle = Nui::val::undefined();
     }
-}
-
-std::optional<nlohmann::json> SessionArea::getActiveSessionLayout()
-{
-    Session* activeSession = getActiveSession();
-    if (activeSession)
-        return activeSession->getLayout();
-    return std::nullopt;
 }
 
 Session* SessionArea::getActiveSession()

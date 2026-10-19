@@ -25,7 +25,7 @@ class Settings
     Settings(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
+        std::function<std::optional<nlohmann::json>(Persistence::TerminalEngineType)> const& obtainCurrentLayout,
         InputDialog& inputDialog,
         ConfirmDialog& confirmDialog,
         MultiInputDialog& multiInputDialog,

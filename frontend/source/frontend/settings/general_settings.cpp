@@ -8,6 +8,8 @@ GeneralSettings::GeneralSettings(
     SettingFactory const& factory,
     std::function<void()> const& onChange,
     FrontendEvents* events,
+    std::function<std::optional<nlohmann::json>(Persistence::TerminalEngineType)> const& obtainCurrentLayout,
+    ConfirmDialog& confirmDialog,
     InputDialog& inputDialog,
     MultiInputDialog& multiInputDialog
 )
@@ -15,6 +17,7 @@ GeneralSettings::GeneralSettings(
     , userInterfaceFactory_{factory.within({"userInterfaceGroupHeader"})}
     , localFilesystemFactory_{factory.within({"localFilesystemOptionsGroupHeader"})}
     , fileTrackingFactory_{factory.within({"fileTrackingOptionsGroupHeader"})}
+    , layoutsFactory_{factory.within({"layoutsGroupHeader"})}
     , localization{
         .language = {
             {"en_US", "de_DE"},
@@ -303,6 +306,26 @@ GeneralSettings::GeneralSettings(
             },
         },
     }
+    , layouts{
+        .ssh = LayoutSetting{
+            layoutsFactory_.identity({"general", "layouts", "ssh"}),
+            onChange,
+            [obtainCurrentLayout]() {
+                return obtainCurrentLayout(Persistence::TerminalEngineType::ssh);
+            },
+            confirmDialog,
+            inputDialog,
+        },
+        .shell = LayoutSetting{
+            layoutsFactory_.identity({"general", "layouts", "shell"}),
+            onChange,
+            [obtainCurrentLayout]() {
+                return obtainCurrentLayout(Persistence::TerminalEngineType::shell);
+            },
+            confirmDialog,
+            inputDialog,
+        },
+    }
     , logOptions(factory.within({"loggingAndErrorReportingGroupHeader"}), onChange)
     , availableThemesListener{
         Nui::smartListen(
@@ -376,6 +399,11 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     state.localFilesystemOptions.openRiskyFiles = localFilesystemOptions.openRiskyFiles.value();
 
     logOptions.applyToState(state.logOptions);
+
+    if (!state.sessionLayouts)
+        state.sessionLayouts.emplace();
+    state.sessionLayouts->ssh = layouts.ssh.value();
+    state.sessionLayouts->shell = layouts.shell.value();
 }
 void GeneralSettings::loadFromState(Persistence::State const& state)
 {
@@ -414,6 +442,10 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     );
 
     logOptions.loadFromState(state.logOptions);
+
+    const auto sessionLayouts = state.sessionLayouts.value_or(Persistence::SessionLayouts{});
+    layouts.ssh.value(sessionLayouts.ssh);
+    layouts.shell.value(sessionLayouts.shell);
 }
 void GeneralSettings::assumeDefaultsFrom(Persistence::State const&)
 {
@@ -477,6 +509,11 @@ Nui::ElementRenderer GeneralSettings::render(
             fileTrackingOptions.deleteRemoteOnLocalDelete(),
             fileTrackingOptions.checkRemoteChanges()
         );
+
+        auto layoutsUi = fragment(
+            layouts.ssh(),
+            layouts.shell()
+        );
         // clang-format on
 
         // clang-format off
@@ -517,6 +554,14 @@ Nui::ElementRenderer GeneralSettings::render(
                 .isCollapsed = collapsibleStates.fileTrackingOptions,
                 .content = std::move(fileTrackingOptionsUi),
                 .headerTitle = language->getObserved("settings", "fileTrackingOptionsGroupHeader"),
+                .addGroup = addGroup,
+                .removeGroup = removeGroup,
+                .onChangeGroup = onChange,
+            }),
+            group({
+                .isCollapsed = collapsibleStates.layouts,
+                .content = std::move(layoutsUi),
+                .headerTitle = language->getObserved("settings", "layoutsGroupHeader"),
                 .addGroup = addGroup,
                 .removeGroup = removeGroup,
                 .onChangeGroup = onChange,

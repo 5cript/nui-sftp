@@ -3,6 +3,7 @@ add_library(
     STATIC
         state/state.cpp
         state/session_options.cpp
+        state/session_layouts.cpp
         state/termios.cpp
         state/ui_options.cpp
         legacy_migration.cpp

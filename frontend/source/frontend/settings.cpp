@@ -193,7 +193,7 @@ struct Settings::Implementation
     Implementation(
         Persistence::StateHolder* stateHolder,
         FrontendEvents* events,
-        std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
+        std::function<std::optional<nlohmann::json>(Persistence::TerminalEngineType)> const& obtainCurrentLayout,
         InputDialog& inputDialog,
         ConfirmDialog& confirmDialog,
         MultiInputDialog& multiInputDialog,
@@ -207,7 +207,15 @@ struct Settings::Implementation
         , confirmDialog{&confirmDialog}
         , multiInputDialog{&multiInputDialog}
         , newSessionDialog{&newSessionDialog}
-        , generalSettings{SettingFactory{&searchIndex, SettingScope::General}, onChange, events, inputDialog, multiInputDialog}
+        , generalSettings{
+              SettingFactory{&searchIndex, SettingScope::General},
+              onChange,
+              events,
+              obtainCurrentLayout,
+              confirmDialog,
+              inputDialog,
+              multiInputDialog
+          }
         , termiosSettings{inheritable().within({"termiosGroupName"}), [onChange, reloadInheritance]()
               {
                   onChange();
@@ -241,7 +249,6 @@ struct Settings::Implementation
         , currentSessionOptions{
               SettingFactory{&searchIndex, SettingScope::Session},
               onChange,
-              obtainCurrentLayout,
               confirmDialog,
               inputDialog,
               multiInputDialog
@@ -257,7 +264,7 @@ struct Settings::Implementation
 Settings::Settings(
     Persistence::StateHolder* stateHolder,
     FrontendEvents* events,
-    std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
+    std::function<std::optional<nlohmann::json>(Persistence::TerminalEngineType)> const& obtainCurrentLayout,
     InputDialog& inputDialog,
     ConfirmDialog& confirmDialog,
     MultiInputDialog& multiInputDialog,
@@ -1717,8 +1724,7 @@ Nui::ElementRenderer Settings::currentSession()
                 )
             ),
             impl_->currentSessionOptions.orderBy(),
-            impl_->currentSessionOptions.isStartupSession(),
-            impl_->currentSessionOptions.layout()
+            impl_->currentSessionOptions.isStartupSession()
         );
 
         return fragment(

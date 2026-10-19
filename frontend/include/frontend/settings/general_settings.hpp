@@ -2,6 +2,8 @@
 
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
+#include <frontend/dialog/confirm_dialog.hpp>
+#include <frontend/settings/layout_setting.hpp>
 #include <frontend/settings/log_options.hpp>
 #include <frontend/settings/search/setting_factory.hpp>
 #include <shared_data/theme.hpp>
@@ -40,6 +42,11 @@ struct GeneralSettings
      */
     SettingFactory fileTrackingFactory_;
 
+    /**
+     * @brief Creates the identities of the layout settings.
+     */
+    SettingFactory layoutsFactory_;
+
   public:
     struct Collapsibles
     {
@@ -48,6 +55,7 @@ struct GeneralSettings
         Nui::Observed<bool> userInterface{true};
         Nui::Observed<bool> localFilesystemOptions{true};
         Nui::Observed<bool> fileTrackingOptions{true};
+        Nui::Observed<bool> layouts{true};
     } collapsibleStates;
 
     struct Localization
@@ -91,6 +99,12 @@ struct GeneralSettings
         BoolSetting<> checkRemoteChanges;
     } fileTrackingOptions;
 
+    struct Layouts
+    {
+        LayoutSetting ssh;
+        LayoutSetting shell;
+    } layouts;
+
     LogOptions logOptions;
     Nui::ListenRemover<decltype(AppWideEvents::availableThemes)> availableThemesListener;
     bool darkLightEventOriginatesHere{false};
@@ -100,6 +114,8 @@ struct GeneralSettings
         SettingFactory const& factory,
         std::function<void()> const& onChange,
         FrontendEvents* events,
+        std::function<std::optional<nlohmann::json>(Persistence::TerminalEngineType)> const& obtainCurrentLayout,
+        ConfirmDialog& confirmDialog,
         InputDialog& inputDialog,
         MultiInputDialog& multiInputDialog
     );
