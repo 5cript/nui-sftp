@@ -136,6 +136,8 @@ void MainPage::onSetupComplete()
                 .version = response["version"].as<std::string>(),
                 .gitTag = response["gitTag"].as<std::string>(),
                 .gitBranch = response["gitBranch"].as<std::string>(),
+                .browserEngine = response.hasOwnProperty("browserEngine") ? response["browserEngine"].as<std::string>()
+                                                                          : std::string{},
             };
             Nui::globalEventContext.executeActiveEventsImmediately();
         }

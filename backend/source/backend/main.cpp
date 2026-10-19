@@ -19,6 +19,7 @@
 #    include <glib.h>
 #endif
 
+#include <backend/browser_engine.hpp>
 #include <backend/inspector_environment.hpp>
 #include <paths/local_path_segment.hpp>
 #include <paths/native.hpp>
@@ -451,6 +452,7 @@ void Main::registerVersionGetter()
                     {"gitBranch", GIT_BRANCH},
                     {"localPlatform",
                      Paths::compiledLocalPlatform() == Paths::LocalPlatform::Windows ? "windows" : "posix"},
+                    {"browserEngine", browserEngineDescription()},
                 }
             );
         }

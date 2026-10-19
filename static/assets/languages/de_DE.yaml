@@ -1115,6 +1115,7 @@ licenses:
   aboutTab: "Über"
   gitTag: "Tag"
   gitBranch: "Branch"
+  browserEngine: "Browser-Engine"
   allLicenses: "Alle Lizenzen"
   close: "Schließen"
   filterPlaceholder: "Pakete filtern..."
