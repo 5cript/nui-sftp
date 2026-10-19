@@ -25,6 +25,8 @@
 #include <ui5-sap-icons/icons/search.hpp>
 #include <ui5-sap-icons/icons/menu.hpp>
 #include <ui5-sap-icons/icons/synchronize.hpp>
+#include <ui5-sap-icons/icons/laptop.hpp>
+#include <ui5-sap-icons/icons/it-host.hpp>
 
 using namespace std::string_literals;
 
@@ -712,6 +714,11 @@ namespace NuiFileExplorer
         return impl_->texts.value();
     }
 
+    void Side::originHost(std::string value)
+    {
+        impl_->originHost = std::move(value);
+    }
+
     void Side::setOnSynchronize(
         std::function<void(std::filesystem::path, std::filesystem::path)> callback
     )
@@ -733,6 +740,94 @@ namespace NuiFileExplorer
             }
         );
         return result;
+    }
+
+    Nui::ElementRenderer Side::originIconAndKind()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::span;
+        using Nui::Elements::fragment;
+
+        const bool isLocal = *impl_->settings.origin == SideOrigin::Local;
+
+        // clang-format off
+        return fragment(
+            isLocal ? Ui5Icons::laptop() : Ui5Icons::it_host(),
+            span{class_ = "nui-file-grid-origin-kind"}(
+                observe(impl_->texts).generate([this, isLocal]() {
+                    return isLocal ? impl_->texts.value().origin.local : impl_->texts.value().origin.remote;
+                })
+            )
+        );
+        // clang-format on
+    }
+
+    std::string Side::originClass(std::string const& baseClass) const
+    {
+        return fmt::format(
+            "{} {}",
+            baseClass,
+            *impl_->settings.origin == SideOrigin::Local ? "nui-file-grid-origin-local" : "nui-file-grid-origin-remote"
+        );
+    }
+
+    Nui::ElementRenderer Side::originChip()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::span;
+
+        if (!impl_->settings.origin)
+            return Nui::nil();
+
+        // clang-format off
+        return span{
+            class_ = originClass("nui-file-grid-origin-chip"),
+            Nui::Attributes::title = observe(impl_->originHost).generate([this]() {
+                return impl_->originHost.value();
+            }),
+        }(
+            originIconAndKind()
+        );
+        // clang-format on
+    }
+
+    Nui::ElementRenderer Side::originCard()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+
+        if (!impl_->settings.origin)
+            return Nui::nil();
+
+        // clang-format off
+        return div{
+            class_ = originClass("nui-file-grid-origin-card"),
+        }(
+            div{class_ = "nui-file-grid-origin-card-kind"}(
+                originIconAndKind()
+            ),
+            div{
+                class_ = "nui-file-grid-origin-host",
+                Nui::Attributes::title = observe(impl_->originHost).generate([this]() {
+                    return impl_->originHost.value();
+                }),
+            }(
+                observe(impl_->originHost),
+                [this]() -> Nui::ElementRenderer {
+                    // User and host on their own lines keep both cards equally tall.
+                    const auto noBreakSpace = std::string{" "};
+                    auto const& userAndHost = impl_->originHost.value();
+                    const auto at = userAndHost.find('@');
+                    const auto user = at == std::string::npos ? noBreakSpace : userAndHost.substr(0, at + 1);
+                    const auto host = at == std::string::npos ? userAndHost : userAndHost.substr(at + 1);
+                    return Nui::Elements::fragment(
+                        div{}(user),
+                        div{}(host.empty() ? noBreakSpace : host)
+                    );
+                }
+            )
+        );
+        // clang-format on
     }
 
     Nui::ElementRenderer Side::headMenu()
@@ -820,6 +915,7 @@ namespace NuiFileExplorer
                 event.call<void>("stopPropagation");
             }
         }(
+            originCard(),
             (*places_)()
         );
         // clang-format on
@@ -937,6 +1033,7 @@ namespace NuiFileExplorer
                     }
                 }
             }),
+            originChip(),
             ScriptNuiComponents::textInput({
                 .value = "",
                 .attributes = {

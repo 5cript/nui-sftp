@@ -65,6 +65,12 @@ namespace NuiFileExplorer
             std::string synchronizeHint{"Select exactly one directory on each side to synchronize."};
         };
 
+        struct Origin
+        {
+            std::string local{"Local"};
+            std::string remote{"Remote"};
+        };
+
         Toolbar toolbar{};
         NewMenu newMenu{};
         SortMenu sortMenu{};
@@ -72,5 +78,6 @@ namespace NuiFileExplorer
         Columns columns{};
         Places places{};
         ContextMenu contextMenu{};
+        Origin origin{};
     };
 }

@@ -19,6 +19,7 @@
 #include <nui/event_system/observed_value_combinator.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
+#include <nui/frontend/rpc_client.hpp>
 
 #include <algorithm>
 #include <iterator>
@@ -30,6 +31,40 @@ using namespace Nui::Attributes;
 
 namespace
 {
+    std::string stringProperty(Nui::val const& response, char const* name)
+    {
+        if (!response.hasOwnProperty(name))
+            return {};
+        return response[name].as<std::string>();
+    }
+
+    /**
+     * @brief Names the user and hostname of this machine as the origin of the local side.
+     *
+     * @param side The local side.
+     * @param alive Expires with the panel, so late replies are dropped.
+     */
+    void requestLocalOrigin(NuiFileExplorer::Side* side, std::weak_ptr<bool> alive)
+    {
+        Nui::RpcClient::callWithBackChannel(
+            "RpcSystem::getUsername",
+            [side, alive](Nui::val usernameResponse)
+            {
+                Nui::RpcClient::callWithBackChannel(
+                    "RpcSystem::getHostname",
+                    [side, alive, username = stringProperty(usernameResponse, "username")](Nui::val hostnameResponse)
+                    {
+                        if (alive.expired())
+                            return;
+                        const auto hostname = stringProperty(hostnameResponse, "hostname");
+                        side->originHost(username.empty() ? hostname : fmt::format("{}@{}", username, hostname));
+                        Nui::globalEventContext.executeActiveEventsImmediately();
+                    }
+                );
+            }
+        );
+    }
+
     NuiFileExplorer::FileGrid
     buildFileGrid(FileExplorerPanel::Params& params, Persistence::SessionOptions const& engineOptions)
     {
@@ -58,6 +93,7 @@ namespace
                     },
                     .pageSize = uiOptions.fileGridPageSize,
                     .texts = fileExplorerTexts(),
+                    .origin = NuiFileExplorer::SideOrigin::Local,
                 },
                 {
                     .pathBarOnTop = uiOptions.fileGridPathBarOnTop,
@@ -74,6 +110,7 @@ namespace
                     },
                     .pageSize = uiOptions.fileGridPageSize,
                     .texts = fileExplorerTexts(),
+                    .origin = NuiFileExplorer::SideOrigin::Remote,
                 },
                 std::make_unique<LocalSideModel>(
                     uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog
@@ -106,6 +143,7 @@ namespace
                 },
                 .pageSize = uiOptions.fileGridPageSize,
                 .texts = fileExplorerTexts(),
+                .origin = NuiFileExplorer::SideOrigin::Local,
             },
             std::make_unique<LocalSideModel>(
                 uiOptions, confirmDialog, inputDialog, filePropertyDialog, archiveTransferDialog
@@ -130,6 +168,7 @@ struct FileExplorerPanel::Implementation
     NuiFileExplorer::FileGrid fileGrid;
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileExplorerElement{};
     LanguageChangeListener languageListener{};
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
     explicit Implementation(Params&& params)
         : stateHolder{params.stateHolder}
@@ -231,6 +270,14 @@ void FileExplorerPanel::setup()
     {
         localSideModel().setRemoteModel(nullptr);
     }
+
+    requestLocalOrigin(&localFileGridSide(), impl_->alive);
+}
+
+void FileExplorerPanel::setRemoteOrigin(std::string userAndHost)
+{
+    if (auto* remote = remoteFileGridSide(); remote)
+        remote->originHost(std::move(userAndHost));
 }
 
 void FileExplorerPanel::setOnSynchronize(std::function<void(std::filesystem::path, std::filesystem::path)> onSync)

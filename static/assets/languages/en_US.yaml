@@ -77,6 +77,9 @@ fileExplorer:
     devices: "Devices"
     drives: "Drives"
     root: "Root"
+  origin:
+    local: "Local"
+    remote: "Remote"
   errors:
     dropOnSameSide: "Moving items by drag and drop within the same side is not supported."
     dropDataUnreadable: "Failed to read the drag and drop data: {}"

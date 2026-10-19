@@ -41,6 +41,20 @@ using namespace Nui;
 using namespace Nui::Elements;
 using namespace Nui::Attributes;
 
+namespace
+{
+    /**
+     * @brief Formats the address of an SSH session as user@host:port, with brackets around IPv6 hosts.
+     */
+    std::string sshAddress(std::string const& user, Persistence::SshSessionOptions const& options)
+    {
+        auto host = options.host;
+        if (host.find(':') != std::string::npos)
+            host = "[" + host + "]";
+        return fmt::format("{}@{}:{}", user, host, options.port.value_or(22));
+    }
+}
+
 struct Session::Implementation
 {
     // Prop-drill
@@ -802,11 +816,9 @@ void Session::onOpenSession(bool success, std::string const& info)
             {
                 const auto& snapshot = impl_->snapshotManager->pending();
                 const auto& user = snapshot.remoteUsername;
-                auto host = sshSessionOptions.host;
-                const auto port = sshSessionOptions.port.value_or(22);
-                if (host.find(":") != std::string::npos)
-                    host = "[" + host + "]";
-                *impl_->tabTitle = impl_->disambiguateTitle(this, fmt::format("{}@{}:{}", user, host, port));
+                const auto address = sshAddress(user, sshSessionOptions);
+                *impl_->tabTitle = impl_->disambiguateTitle(this, address);
+                impl_->fileExplorerPanel.setRemoteOrigin(address);
                 impl_->snapshotManager->setRemoteUsername(user);
                 const bool sftpWasOpen = snapshot.sftpWasOpen;
                 if (sftpWasOpen)
@@ -832,13 +844,9 @@ void Session::onOpenSession(bool success, std::string const& info)
                     Log::info("Retrieved username: {}", username);
 
                     const auto user = sshSessionOptions.loginUser().name.value_or(username);
-                    auto host = sshSessionOptions.host;
-                    const auto port = sshSessionOptions.port.value_or(22);
-
-                    // assume ipv6 when finding ':' in host
-                    if (host.find(":") != std::string::npos)
-                        host = "[" + host + "]";
-                    *impl_->tabTitle = impl_->disambiguateTitle(this, fmt::format("{}@{}:{}", user, host, port));
+                    const auto address = sshAddress(user, sshSessionOptions);
+                    *impl_->tabTitle = impl_->disambiguateTitle(this, address);
+                    impl_->fileExplorerPanel.setRemoteOrigin(address);
                     impl_->snapshotManager->setRemoteUsername(user);
 
                     openSftp(user);

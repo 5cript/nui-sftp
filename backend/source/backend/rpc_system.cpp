@@ -2,6 +2,8 @@
 #include <log/log.hpp>
 #include <paths/utf8.hpp>
 
+#include <boost/asio/ip/host_name.hpp>
+
 #ifdef _WIN32
 #    include <windows.h>
 #    include <Lmcons.h>
@@ -26,6 +28,7 @@ RpcSystem::RpcSystem(boost::asio::any_io_executor executor, Nui::Window& wnd, Nu
     : RpcHelper::StrandRpc{executor, wnd, hub}
 {
     registerGetUsername();
+    registerGetHostname();
 }
 
 void RpcSystem::registerGetUsername()
@@ -37,6 +40,33 @@ void RpcSystem::registerGetUsername()
                 reply({{"username", username()}, {"success", true}});
             }
         );
+}
+
+void RpcSystem::registerGetHostname()
+{
+    on("RpcSystem::getHostname")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                reply({{"hostname", hostname()}, {"success", true}});
+            }
+        );
+}
+
+std::string RpcSystem::hostname() const
+{
+    if (!hostnameMemo_.empty())
+        return hostnameMemo_;
+
+    boost::system::error_code error;
+    auto name = boost::asio::ip::host_name(error);
+    if (error)
+    {
+        Log::error("RpcSystem::hostname: {}", error.message());
+        return "unknown";
+    }
+    hostnameMemo_ = Paths::sanitizedUtf8(name);
+    return hostnameMemo_;
 }
 
 std::string RpcSystem::username() const

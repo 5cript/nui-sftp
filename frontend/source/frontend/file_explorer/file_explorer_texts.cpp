@@ -54,6 +54,11 @@ NuiFileExplorer::Texts fileExplorerTexts()
                 .synchronize = language->get("fileExplorer", "contextMenu", "synchronize"),
                 .synchronizeHint = language->get("fileExplorer", "contextMenu", "synchronizeHint"),
             },
+        .origin =
+            {
+                .local = language->get("fileExplorer", "origin", "local"),
+                .remote = language->get("fileExplorer", "origin", "remote"),
+            },
     };
 }
 

@@ -143,6 +143,11 @@ namespace NuiFileExplorer
         Texts const& texts() const;
 
         /**
+         * @brief Sets the user and host the origin card names. Syncing the change is left to the caller.
+         */
+        void originHost(std::string value);
+
+        /**
          * @brief Sets a callback invoked when both sides have exactly one directory-like item
          *        selected and the user triggers the "Synchronize..." context menu entry.
          *        The callback receives (localPath, remotePath) regardless of which side's
@@ -199,6 +204,10 @@ namespace NuiFileExplorer
         Nui::ElementRenderer operator()();
 
       private:
+        Nui::ElementRenderer originIconAndKind();
+        std::string originClass(std::string const& baseClass) const;
+        Nui::ElementRenderer originChip();
+        Nui::ElementRenderer originCard();
         Nui::ElementRenderer headMenu();
         Nui::ElementRenderer pathBar();
         Nui::ElementRenderer filter();

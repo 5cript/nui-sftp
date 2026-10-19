@@ -10,8 +10,11 @@ class RpcSystem : public RpcHelper::StrandRpc
 
   private:
     void registerGetUsername();
+    void registerGetHostname();
 
     std::string username() const;
+    std::string hostname() const;
 
     mutable std::string usernameMemo_;
+    mutable std::string hostnameMemo_;
 };
