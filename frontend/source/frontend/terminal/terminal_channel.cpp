@@ -27,17 +27,24 @@ globalThis.terminalUtility.stringToUint8Array = (str) => {
     return new TextEncoder().encode(str);
 };
 globalThis.terminalUtility.terminals = new Map();
-globalThis.terminalUtility.createTerminal = (host, options) => {
-
-    let renderer = undefined;
-    if (options.hasOwnProperty("renderer")) {
-        if (options.renderer === "dom") {
-            renderer = undefined;
-        } else if (options.renderer === "webgl") {
-            renderer = new WebglAddon();
-        }
+// The WebGL addon activates on open and throws there without WebGL2, so it is loaded after opening.
+// Without it, or once its context is lost, xterm renders with the DOM renderer.
+const loadWebglRenderer = (terminal, addons) => {
+    const webgl = new WebglAddon();
+    try {
+        terminal.loadAddon(webgl);
+    } catch (error) {
+        webgl.dispose();
+        return;
     }
+    webgl.onContextLoss(() => {
+        webgl.dispose();
+        addons.rendererAddon = undefined;
+    });
+    addons.rendererAddon = webgl;
+};
 
+globalThis.terminalUtility.createTerminal = (host, options) => {
     const defaultedOptions = {
         cursorBlink: true,
         fontSize: 14,
@@ -54,7 +61,7 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
     const terminal = new Terminal(defaultedOptions);
     const addons = {
         fitAddon: new FitAddon(),
-        rendererAddon: renderer,
+        rendererAddon: undefined,
         serializeAddon: new SerializeAddon()
     };
     for (const [key, value] of Object.entries(addons))
@@ -89,6 +96,8 @@ globalThis.terminalUtility.createTerminal = (host, options) => {
 
     const openAndObserve = () => {
         terminal.open(host);
+        if (options.renderer === "webgl")
+            loadWebglRenderer(terminal, addons);
         resizeObserver.observe(host);
         terminal.focus();
     };
