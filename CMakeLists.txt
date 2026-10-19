@@ -92,6 +92,15 @@ include (${CMAKE_CURRENT_LIST_DIR}/_cmake/common_options.cmake)
 # Nui Dependency
 add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/Nui" EXCLUDE_FROM_ALL)
 
+# The CEF distribution of this build. The release publishes it for the packages that fetch CEF themselves.
+if (NOT EMSCRIPTEN AND NUI_BROWSER_ENGINE STREQUAL "cef")
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/_cmake/configured_files/cef_distribution.json.in"
+        "${CMAKE_BINARY_DIR}/text/cef_distribution.json"
+        @ONLY
+    )
+endif()
+
 # Add executable (sources are added later, depending on frontend/backend)
 add_executable(${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME} PUBLIC core-target)
