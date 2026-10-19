@@ -199,6 +199,12 @@ namespace Persistence
             }
         }
 
+        if (stateCache_.migrateTerminalRendererFromDom())
+        {
+            Log::info("Applied the one-time move of the terminal renderer from DOM to WebGL.");
+            mustSave = true;
+        }
+
         bool hasMissingDefaults = false;
         auto termiosDefault = stateCache_.termios.find("default");
         if (termiosDefault == stateCache_.termios.end())
@@ -225,11 +231,7 @@ namespace Persistence
                 .fontSize = 12,
                 .lineHeight = 1,
                 .cursorBlink = false,
-#ifdef __linux__
-                .renderer = "dom",
-#else
                 .renderer = "webgl",
-#endif
                 .letterSpacing = 0,
                 .theme = TerminalTheme{
                     .background = "#202020",
@@ -256,11 +258,7 @@ namespace Persistence
                 .fontSize = 14,
                 .lineHeight = 1.0,
                 .cursorBlink = false,
-#ifdef __linux__
-                .renderer = "dom",
-#else
                 .renderer = "webgl",
-#endif
                 .letterSpacing = 0,
                 .theme = TerminalTheme{
                     .background = "#0e0e14",

@@ -1,6 +1,9 @@
 #include <persistence/state/state.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <string_view>
+
 namespace Persistence
 {
     void InheritableReferences::applyTo(SessionOptions& session) const
@@ -56,5 +59,28 @@ namespace Persistence
         }
         if (lastDirectConnect)
             lastDirectConnect->writeLegacyUser();
+    }
+
+    bool State::migrateTerminalRendererFromDom()
+    {
+        constexpr std::string_view migration = "terminalRendererFromDom";
+        if (!appliedMigrations)
+            appliedMigrations = std::vector<std::string>{};
+        if (std::ranges::find(*appliedMigrations, migration) != appliedMigrations->end())
+            return false;
+        appliedMigrations->emplace_back(migration);
+
+#ifdef __linux__
+        const auto moveToWebgl = [](TerminalOptions& options)
+        {
+            if (options.renderer == "dom")
+                options.renderer = "webgl";
+        };
+        for (auto& [name, options] : terminalOptions)
+            moveToWebgl(options);
+        for (auto& [name, session] : sessions)
+            moveToWebgl(session.terminalOptions.value());
+#endif
+        return true;
     }
 }
