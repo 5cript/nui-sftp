@@ -596,7 +596,7 @@ Nui::ElementRenderer Toolbar::operator()()
             },
             .styleVariant = Nui::observe(impl_->terminalEngines).generate(
                 [](auto const& engines) {
-                    return engines.empty() ? Snc::StyleVariant::Primary : Snc::StyleVariant::Regular;
+                    return engines.empty() ? Snc::StyleVariant::Primary : Snc::StyleVariant::Transparent;
                 }
             ),
         }),
@@ -620,6 +620,7 @@ Nui::ElementRenderer Toolbar::operator()()
                     });
                 },
             },
+            .styleVariant = Snc::StyleVariant::Transparent,
         }),
         div{class_ = "toolbar-separator"}(),
         Snc::select(Snc::SelectOptions<decltype(impl_->selectedLayout), decltype(impl_->layouts)>{
@@ -644,9 +645,9 @@ Nui::ElementRenderer Toolbar::operator()()
             }
         }),
         Snc::button({
-            .text = language->get("toolbar", "saveLayout"),
             .icon = Ui5Icons::save(),
             .attributes = {
+                Nui::Attributes::title = language->get("toolbar", "saveLayout"),
                 disabled = Nui::observe(impl_->sessionArea->hasActiveSession()).generate(
                     [](bool hasSession) -> std::optional<bool> {
                         return hasSession ? std::nullopt : std::optional<bool>{true};
@@ -658,9 +659,9 @@ Nui::ElementRenderer Toolbar::operator()()
             },
         }),
         Snc::button({
-            .text = language->get("toolbar", "deleteLayout"),
             .icon = GeneratedSvgs::delete_(),
             .attributes = {
+                Nui::Attributes::title = language->get("toolbar", "deleteLayout"),
                 disabled = Nui::observe(impl_->selectedLayout).generate(
                     [](std::string const& layoutName) -> std::optional<bool> {
                         return layoutName == Constants::defaultLayoutName ? std::optional<bool>{true} : std::nullopt;
