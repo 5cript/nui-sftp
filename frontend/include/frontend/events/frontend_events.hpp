@@ -18,6 +18,8 @@ struct AppVersion
     std::string version{};
     std::string gitTag{};
     std::string gitBranch{};
+    /// Name and version of the browser engine, for example "Chromium 154.0.8037.98 (CEF 154.0.34)".
+    std::string browserEngine{};
 };
 
 /**

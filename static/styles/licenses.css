@@ -276,16 +276,16 @@
 }
 
 .licenses-about-details {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: max-content max-content;
+    column-gap: 12px;
+    row-gap: 4px;
+    color: gray;
 }
 
+/* The rows share the columns of the details grid, so labels and values line up. */
 .licenses-about-detail {
-    display: grid;
-    grid-template-columns: auto auto;
-    column-gap: 12px;
-    color: gray;
+    display: contents;
 }
 
 .licenses-about-detail-value {

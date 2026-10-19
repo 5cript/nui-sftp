@@ -334,7 +334,8 @@ Nui::ElementRenderer Licenses::about()
                 const auto& version = impl_->events->appVersion.value();
                 return Nui::Elements::fragment(
                     detailRow(language->get("licenses", "gitTag"), version.gitTag),
-                    detailRow(language->get("licenses", "gitBranch"), version.gitBranch)
+                    detailRow(language->get("licenses", "gitBranch"), version.gitBranch),
+                    detailRow(language->get("licenses", "browserEngine"), version.browserEngine)
                 );
             }
         ),
