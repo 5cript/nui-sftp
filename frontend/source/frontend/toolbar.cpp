@@ -290,6 +290,7 @@ Nui::ElementRenderer Toolbar::Implementation::userSelect()
                 return indices.size() < 2u ? "display: none;" : "";
             }),
         },
+        .label = language->get("toolbar", "userLabel"),
         .activeRenderer = [this](auto const&) -> Nui::ElementRenderer {
             return span{}(Nui::observe(selectedUser, userIndices), [this]() -> std::string {
                 if (selectedUser.value() >= userLabels.size())
@@ -533,6 +534,7 @@ Nui::ElementRenderer Toolbar::operator()()
         Snc::select(Snc::SelectOptions<decltype(impl_->activeTerminalEngine), decltype(impl_->terminalEngines)>{
             .activeOption = impl_->activeTerminalEngine,
             .options = impl_->terminalEngines,
+            .label = language->get("toolbar", "serverLabel"),
             .onChange = [this](auto const&, Nui::WebApi::MouseEvent const&) {
                 reloadLayouts();
             },
@@ -628,6 +630,7 @@ Nui::ElementRenderer Toolbar::operator()()
                     connectLayoutsChanged();
                 })),
             },
+            .label = language->get("toolbar", "layoutLabel"),
             .activeRenderer = [this](auto const&) -> Nui::ElementRenderer {
                 return Nui::Elements::span{}(Nui::observe(impl_->selectedLayout), [this]() {
                     return impl_->layoutLabel(impl_->selectedLayout.value());
