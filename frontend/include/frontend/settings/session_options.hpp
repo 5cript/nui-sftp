@@ -5,10 +5,8 @@
 #include <frontend/settings/terminal_options.hpp>
 #include <frontend/settings/queue_options.hpp>
 #include <frontend/settings/history_options.hpp>
-#include <frontend/settings/layout_setting.hpp>
 #include <frontend/settings/executing_session_options.hpp>
 #include <frontend/settings/ssh_session_options.hpp>
-#include <frontend/settings/layout_setting.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 
@@ -28,7 +26,6 @@ struct SessionOptions
     ComboSetting<std::string> icon;
     TextSetting<true> orderBy;
     BoolSetting<> isStartupSession;
-    LayoutSetting layout;
 
     TerminalOptions terminalOptions;
     TermiosSettings termios;
@@ -46,7 +43,6 @@ struct SessionOptions
     SessionOptions(
         SettingFactory const& factory,
         std::function<void()> const& onChange,
-        std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
         ConfirmDialog& confirmDialog,
         InputDialog& newItemDialog,
         MultiInputDialog& multiInputDialog

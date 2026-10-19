@@ -11,6 +11,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 class LayoutSetting : public Setting<false, std::map<std::string, nlohmann::json>>
 {
@@ -32,13 +33,7 @@ class LayoutSetting : public Setting<false, std::map<std::string, nlohmann::json
     {
         state_ = value;
         engaged_ = true;
-        if (!state_.value().empty())
-        {
-            if (!state_.value().contains(*selected_))
-                selected_ = state_.value().begin()->first;
-        }
-        else
-            selected_ = "";
+        refreshNames();
     }
     OutfacingValueType value() const override
     {
@@ -50,12 +45,22 @@ class LayoutSetting : public Setting<false, std::map<std::string, nlohmann::json
         if (value)
             this->value(*value);
         else
+        {
             state_ = ValueType{};
+            refreshNames();
+        }
     }
+
+  private:
+    /**
+     * @brief Lists the layout names for the dropdown and keeps the selection on an existing layout.
+     */
+    void refreshNames();
 
   private:
     ConfirmDialog* confirmDialog_;
     InputDialog* newItemDialog_;
     Nui::Observed<std::string> selected_;
+    Nui::Observed<std::vector<std::string>> names_;
     std::function<std::optional<nlohmann::json>()> obtainCurrentLayout_;
 };

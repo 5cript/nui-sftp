@@ -1,6 +1,7 @@
 #include <frontend/toolbar.hpp>
 #include <frontend/classes.hpp>
 #include <frontend/session_area.hpp>
+#include <frontend/session.hpp>
 #include <frontend/settings.hpp>
 #include <frontend/notification_center.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
@@ -21,6 +22,7 @@
 #include <frontend/brand_mark.hpp>
 #include <frontend/svgs/add.hpp>
 #include <frontend/svgs/decline.hpp>
+#include <frontend/svgs/delete.hpp>
 #include <frontend/svgs/settings.hpp>
 #include <ui5-sap-icons/icons/light-mode.hpp>
 #include <ui5-sap-icons/icons/dark-mode.hpp>
@@ -28,6 +30,7 @@
 #include <ui5-sap-icons/icons/begin.hpp>
 #include <ui5-sap-icons/icons/signature.hpp>
 #include <ui5-sap-icons/icons/bell.hpp>
+#include <ui5-sap-icons/icons/save.hpp>
 
 #include <nui/event_system/observed_value.hpp>
 #include <nui/frontend/elements.hpp>
@@ -44,6 +47,7 @@ struct Toolbar::Implementation
     NotificationCenter* notificationCenter{nullptr};
     ConfirmDialog* confirmDialog;
     DirectConnectDialog* directConnectDialog;
+    InputDialog* inputDialog;
     ThemeController* themeController;
     Nui::Observed<std::string> activeTerminalEngine{};
     Nui::Observed<std::string> selectedLayout{};
@@ -62,12 +66,14 @@ struct Toolbar::Implementation
         FrontendEvents* events,
         ConfirmDialog* confirmDialog,
         DirectConnectDialog* directConnectDialog,
+        InputDialog* inputDialog,
         ThemeController& themeController
     )
         : stateHolder{stateHolder}
         , events{events}
         , confirmDialog{confirmDialog}
         , directConnectDialog{directConnectDialog}
+        , inputDialog{inputDialog}
         , themeController{&themeController}
         , terminalEngines{}
         , layouts{}
@@ -84,6 +90,22 @@ struct Toolbar::Implementation
      * @brief Names the users of the selected server in the current language, keeping the picked one.
      */
     void loadUserLabels();
+    /**
+     * @brief Names a layout in the dropdown, the default layout in the current language.
+     *
+     * @param name The layout name as stored, Constants::defaultLayoutName for the default layout.
+     */
+    std::string layoutLabel(std::string const& name) const;
+    /**
+     * @brief The type of the server selected in the toolbar, nothing if it is not in the settings.
+     */
+    std::optional<Persistence::TerminalEngineType> selectedServerType() const;
+    /**
+     * @brief Tells the user that the settings could not be saved.
+     *
+     * @param error The error the state holder reported.
+     */
+    void showSaveError(std::string const& error);
     Nui::ElementRenderer notificationsButton();
     Nui::ElementRenderer userSelect();
 };
@@ -135,9 +157,17 @@ Toolbar::Toolbar(
     FrontendEvents* events,
     ConfirmDialog* confirmDialog,
     DirectConnectDialog* directConnectDialog,
+    InputDialog* inputDialog,
     ThemeController& themeController
 )
-    : impl_(std::make_unique<Implementation>(stateHolder, events, confirmDialog, directConnectDialog, themeController))
+    : impl_(std::make_unique<Implementation>(
+          stateHolder,
+          events,
+          confirmDialog,
+          directConnectDialog,
+          inputDialog,
+          themeController
+      ))
 {
     Log::info("Toolbar::Toolbar");
     impl_->updateSessionsList(
@@ -151,6 +181,8 @@ Toolbar::Toolbar(
         [this](std::string const&)
         {
             impl_->loadUserLabels();
+            impl_->layouts.modifyNow();
+            impl_->selectedLayout.modifyNow();
         }
     );
 
@@ -214,6 +246,34 @@ void Toolbar::Implementation::loadUserLabels()
     userIndices = std::move(indices);
 }
 
+std::optional<Persistence::TerminalEngineType> Toolbar::Implementation::selectedServerType() const
+{
+    auto const& sessions = stateHolder->stateCache().sessions;
+    const auto iter = sessions.find(activeTerminalEngine.value());
+    if (iter == sessions.end())
+        return std::nullopt;
+    return iter->second.type;
+}
+
+std::string Toolbar::Implementation::layoutLabel(std::string const& name) const
+{
+    if (name == Constants::defaultLayoutName)
+        return language->get("toolbar", "defaultLayout");
+    return name;
+}
+
+void Toolbar::Implementation::showSaveError(std::string const& error)
+{
+    confirmDialog->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = language->get("toolbar", "errorSavingSettingsHeader"),
+        .text = fmt::format(
+            fmt::runtime(language->get("toolbar", "errorSavingSettings") + ": {}"), language->translate(error)
+        ),
+        .buttons = ConfirmDialog::Button::Ok,
+    });
+}
+
 Nui::ElementRenderer Toolbar::Implementation::userSelect()
 {
     using namespace Nui::Attributes;
@@ -253,23 +313,154 @@ void Toolbar::reloadLayouts()
 {
     impl_->reloadUsers();
 
-    impl_->selectedLayout = "";
     impl_->layouts.value().clear();
     impl_->layouts.value().push_back(std::string{Constants::defaultLayoutName});
-    if (const auto iter = impl_->stateHolder->stateCache().sessions.find(impl_->activeTerminalEngine.value());
-        iter != impl_->stateHolder->stateCache().sessions.end())
+    auto const& sessionLayouts = impl_->stateHolder->stateCache().sessionLayouts;
+    if (const auto type = impl_->selectedServerType(); type && sessionLayouts)
     {
-        if (iter->second.layouts)
-        {
-            for (auto const& [name, layout] : iter->second.layouts.value())
-                impl_->layouts.value().push_back(name);
-
-            if (!impl_->layouts.value().empty())
-                impl_->selectedLayout = impl_->layouts.value().front();
-
-            impl_->layouts.modifyNow();
-        }
+        for (auto const& [name, layout] : sessionLayouts->of(*type))
+            impl_->layouts.value().push_back(name);
     }
+    impl_->selectedLayout = std::string{Constants::defaultLayoutName};
+    impl_->layouts.modifyNow();
+}
+
+void Toolbar::saveLayout()
+{
+    Session* session = impl_->sessionArea ? impl_->sessionArea->getActiveSession() : nullptr;
+    auto layout = session ? session->getLayout() : std::nullopt;
+    if (!layout)
+    {
+        impl_->confirmDialog->open({
+            .headerText = language->get("settings", "layoutSetting", "saveLayoutErrorHeader"),
+            .text = language->get("settings", "layoutSetting", "saveLayoutErrorText"),
+            .buttons = ConfirmDialog::Button::Ok,
+        });
+        return;
+    }
+
+    const auto type = session->engineOptions().type;
+    const auto& selected = impl_->selectedLayout.value();
+    impl_->inputDialog->open({
+        .whatFor = language->get(
+            "toolbar", type == Persistence::TerminalEngineType::shell ? "saveLayoutForShell" : "saveLayoutForSsh"
+        ),
+        .headerText = language->get("settings", "layoutSetting", "addLayoutKeyHeader"),
+        .initialValue = selected == Constants::defaultLayoutName ? std::string{} : selected,
+        .onConfirm =
+            [this, type, layout = std::move(*layout)](std::optional<std::string> const& layoutName)
+        {
+            if (!layoutName || layoutName->empty())
+                return;
+
+            if (*layoutName == Constants::defaultLayoutName)
+            {
+                impl_->confirmDialog->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = language->get("settings", "layoutSetting", "saveLayoutErrorHeader"),
+                    .text = language->get("toolbar", "layoutNameReserved"),
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
+                return;
+            }
+
+            auto const& sessionLayouts = impl_->stateHolder->stateCache().sessionLayouts;
+            if (!sessionLayouts || !sessionLayouts->of(type).contains(*layoutName))
+            {
+                storeLayout(type, *layoutName, layout);
+                return;
+            }
+
+            impl_->confirmDialog->open({
+                .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+                .headerText = language->get("toolbar", "overwriteLayoutHeader"),
+                .text = fmt::format(fmt::runtime(language->get("toolbar", "overwriteLayout") + ": {}"), *layoutName),
+                .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
+                .onClose =
+                    [this, type, layoutName = *layoutName, layout](std::optional<ConfirmDialog::Button> button)
+                {
+                    if (button == ConfirmDialog::Button::Ok)
+                        storeLayout(type, layoutName, layout);
+                },
+            });
+        },
+    });
+}
+
+void Toolbar::storeLayout(
+    Persistence::TerminalEngineType type,
+    std::string const& layoutName,
+    nlohmann::json const& layout
+)
+{
+    modifyLayouts(
+        type,
+        [layoutName, layout](std::map<std::string, nlohmann::json>& layouts)
+        {
+            layouts[layoutName] = layout;
+        },
+        layoutName
+    );
+}
+
+void Toolbar::deleteLayout()
+{
+    const auto type = impl_->selectedServerType();
+    const auto layoutName = impl_->selectedLayout.value();
+    if (!type || layoutName == Constants::defaultLayoutName)
+        return;
+
+    impl_->confirmDialog->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+        .headerText = language->get("settings", "layoutSetting", "removeLayoutKeyConfirmHeader"),
+        .text = fmt::format(
+            fmt::runtime(language->get("settings", "layoutSetting", "removeLayoutKeyConfirmText") + ": {}"), layoutName
+        ),
+        .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
+        .onClose =
+            [this, type = *type, layoutName](std::optional<ConfirmDialog::Button> button)
+        {
+            if (button != ConfirmDialog::Button::Ok)
+                return;
+            modifyLayouts(
+                type,
+                [layoutName](std::map<std::string, nlohmann::json>& layouts)
+                {
+                    layouts.erase(layoutName);
+                },
+                std::string{Constants::defaultLayoutName}
+            );
+        },
+    });
+}
+
+void Toolbar::modifyLayouts(
+    Persistence::TerminalEngineType type,
+    std::function<void(std::map<std::string, nlohmann::json>&)> modifier,
+    std::string const& selectAfterwards
+)
+{
+    impl_->stateHolder->loadModifySave(
+        [type, modifier = std::move(modifier)](Persistence::State& state)
+        {
+            if (!state.sessionLayouts)
+                state.sessionLayouts.emplace();
+            modifier(state.sessionLayouts->of(type));
+        },
+        [this, type, selectAfterwards](std::optional<std::string> const& error)
+        {
+            if (error)
+            {
+                impl_->showSaveError(*error);
+                return;
+            }
+            if (impl_->selectedServerType() != type)
+                return;
+            reloadLayouts();
+            impl_->selectedLayout.value() = selectAfterwards;
+            impl_->selectedLayout.modifyNow();
+        }
+    );
 }
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(Toolbar);
@@ -349,18 +540,6 @@ Nui::ElementRenderer Toolbar::operator()()
                 return Nui::val::global("generateId")().as<std::string>();
             }
         }),
-        Snc::select(Snc::SelectOptions<decltype(impl_->selectedLayout), decltype(impl_->layouts)>{
-            .activeOption = impl_->selectedLayout,
-            .options = impl_->layouts,
-            .attributes = {
-                !(reference.onMaterialize([this](auto){
-                    connectLayoutsChanged();
-                }))
-            },
-            .makeId = [](){
-                return Nui::val::global("generateId")().as<std::string>();
-            }
-        }),
         impl_->userSelect(),
         Snc::button({
             .text = language->get("toolbar", "connect"),
@@ -400,6 +579,7 @@ Nui::ElementRenderer Toolbar::operator()()
                 },
             },
         }),
+        div{class_ = "toolbar-separator"}(),
         Snc::button({
             .text = language->get("toolbar", "newSession"),
             .icon = GeneratedSvgs::add(),
@@ -436,6 +616,55 @@ Nui::ElementRenderer Toolbar::operator()()
                             impl_->sessionArea->addDirectConnectSession(result.sshOptions, result.inheritables);
                         },
                     });
+                },
+            },
+        }),
+        div{class_ = "toolbar-separator"}(),
+        Snc::select(Snc::SelectOptions<decltype(impl_->selectedLayout), decltype(impl_->layouts)>{
+            .activeOption = impl_->selectedLayout,
+            .options = impl_->layouts,
+            .attributes = {
+                !(reference.onMaterialize([this](auto){
+                    connectLayoutsChanged();
+                })),
+            },
+            .activeRenderer = [this](auto const&) -> Nui::ElementRenderer {
+                return Nui::Elements::span{}(Nui::observe(impl_->selectedLayout), [this]() {
+                    return impl_->layoutLabel(impl_->selectedLayout.value());
+                });
+            },
+            .elementRenderer = [this](std::string const& name) -> Nui::ElementRenderer {
+                return Nui::Elements::span{}(impl_->layoutLabel(name));
+            },
+            .makeId = [](){
+                return Nui::val::global("generateId")().as<std::string>();
+            }
+        }),
+        Snc::button({
+            .text = language->get("toolbar", "saveLayout"),
+            .icon = Ui5Icons::save(),
+            .attributes = {
+                disabled = Nui::observe(impl_->sessionArea->hasActiveSession()).generate(
+                    [](bool hasSession) -> std::optional<bool> {
+                        return hasSession ? std::nullopt : std::optional<bool>{true};
+                    }
+                ),
+                onClick = [this]() {
+                    saveLayout();
+                },
+            },
+        }),
+        Snc::button({
+            .text = language->get("toolbar", "deleteLayout"),
+            .icon = GeneratedSvgs::delete_(),
+            .attributes = {
+                disabled = Nui::observe(impl_->selectedLayout).generate(
+                    [](std::string const& layoutName) -> std::optional<bool> {
+                        return layoutName == Constants::defaultLayoutName ? std::optional<bool>{true} : std::nullopt;
+                    }
+                ),
+                onClick = [this]() {
+                    deleteLayout();
                 },
             },
         }),
@@ -476,16 +705,7 @@ Nui::ElementRenderer Toolbar::operator()()
                         [this](std::optional<std::string> const& error)
                         {
                             if (error)
-                            {
-                                impl_->confirmDialog->open({
-                                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                                    .headerText = language->get("toolbar", "errorSavingSettingsHeader"),
-                                    .text = fmt::format(
-                                        fmt::runtime(language->get("toolbar", "errorSavingSettings") + ": {}"), language->translate(*error)
-                                    ),
-                                    .buttons = ConfirmDialog::Button::Ok,
-                                });
-                            }
+                                impl_->showSaveError(*error);
                         }
                     );
                 },

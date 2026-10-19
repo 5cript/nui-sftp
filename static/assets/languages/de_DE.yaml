@@ -536,6 +536,7 @@ settings:
   unknownSession: "Unbekannte Sitzung"
   localFilesystemOptionsGroupHeader: "Optionen für das lokale Dateisystem"
   fileTrackingOptionsGroupHeader: "Dateiüberwachung Standardwerte"
+  layoutsGroupHeader: "Layouts"
   saving: "Speichern..."
   addNew: "Neu hinzufügen!"
   configuration: "Konfiguration"
@@ -590,7 +591,6 @@ settings:
     logDirectoryHelpText: "Das Verzeichnis, in dem die Protokolldateien gespeichert werden. Wenn der String mit %key% beginnt, wird er durch einen speziellen Pfad ersetzt. Die folgenden Schlüssel werden den folgenden Verzeichnissen zugeordnet: ~, %userprofile%: Heimatverzeichnis. %appdata%: AppData/Roaming unter Windows, Heimatverzeichnis unter Linux. %localappdata%: AppData/Local unter Windows, Heimatverzeichnis unter Linux. %temp%: Temp-Verzeichnis. %config_home%, %config_home2%, %config_home3%: Konfigurationsverzeichnis (1,2,3 ist Home, Dokumente, AppData unter Windows). %state_home%, %state_home2%, %state_home3%: Zustandsverzeichnis. %data_home%, %data_home2%, %data_home3%: Datenverzeichnis. Unter macOS sind Konfigurations-, Zustands- und Datenverzeichnis ~/Library/Application Support."
     disableFileLoggingHelpText: "Wenn aktiviert, wird die Protokollierung in Dateien deaktiviert. Protokolle werden nur in der Konsole ausgegeben."
   layoutSetting:
-    layoutKeysLabel: "Gespeicherte Layouts"
     deleteLayoutKey: "Layout löschen"
 
     saveCurrentLayout: "Aktuelles Layout speichern"
@@ -608,7 +608,6 @@ settings:
     removeLayoutKeyConfirmText: "Möchten Sie das folgende Layout wirklich entfernen"
   sessionOptions:
     terminalEngineType: "Sitzungs Typ"
-    layoutHelpText: "Layout Konfiguration für diese Sitzung. Hier können Layouts gespeichert und gelöscht werden."
     icon: "Sitzungssymbol"
     orderBy: "Sondersortierung"
     isStartupSession: "Starte Sitzung bei Programmstart?"
@@ -656,7 +655,7 @@ settings:
     maxReconnectBackoffMsHelpText: "Die längste Wartezeit zwischen zwei Reconnect-Versuchen in Millisekunden. Die Wartezeit verdoppelt sich mit jedem Versuch, beginnend bei einer Sekunde, bis sie diese Grenze erreicht."
     maxReconnectBackoffMsSearchTags: "Wiederholen, Neu verbinden, Verzögerung, warten"
     users: "Benutzer"
-    usersHelpText: "Die Benutzer, mit denen man sich an diesem Server anmelden kann. Vor dem Verbinden wird einer in der Werkzeugleiste neben dem Layout ausgewählt; der erste Benutzer ist der Standard."
+    usersHelpText: "Die Benutzer, mit denen man sich an diesem Server anmelden kann. Vor dem Verbinden wird einer in der Werkzeugleiste neben dem Server ausgewählt; der erste Benutzer ist der Standard."
     usersSearchTags: "Anmeldung, Konto, Zugangsdaten, Schlüssel"
     userWithoutName: "(kein Benutzername)"
     resetUsersConfirmHeader: "Alle Benutzer entfernen?"
@@ -1056,6 +1055,11 @@ settings:
       deleteRemoteOnLocalDeleteHelpText: "Standardwert für neue überwachte Einträge: Wenn eine überwachte Datei lokal gelöscht wird, auch auf dem Remote löschen."
       checkRemoteChanges: "Remote vor erneutem Hochladen prüfen"
       checkRemoteChangesHelpText: "Standardwert für neue überwachte Einträge: Vor dem erneuten Hochladen einer bearbeiteten Datei prüfen, ob sich die Kopie auf dem Remote seit dem Öffnen oder dem letzten Hochladen geändert hat, und vor dem Ersetzen fragen."
+    layouts:
+      ssh: "SSH-Layouts"
+      sshHelpText: "Layouts, die alle SSH-Server teilen. Beim Speichern wird das Layout des offenen SSH-Tabs übernommen."
+      shell: "Lokale Shell-Layouts"
+      shellHelpText: "Layouts, die alle lokalen Shells teilen. Beim Speichern wird das Layout des offenen lokalen Shell-Tabs übernommen."
   colorSetting:
     pickButton: "Wählen"
 persistence:
@@ -1082,9 +1086,17 @@ rootWarning:
   text: "nui-sftp läuft mit Root-Rechten.\n\nDas ist gefährlich und unnötig:\n  - Übertragene oder neu erstellte Dateien gehören anschließend root.\n  - Ein Fehler, ein bösartiger Server oder ein kompromittiertes Gegenüber kann Ihr gesamtes System beschädigen.\n  - Die Benutzer-D-Bus-Sitzung ist nicht verfügbar, daher funktioniert das Öffnen von Dateien mit externen Anwendungen nicht.\n  - SSH-Schlüssel, Agents und Konfiguration aus Ihrem eigentlichen Heimatverzeichnis werden nicht verwendet.\n\nBitte schließen Sie die Anwendung und starten Sie sie als normaler Benutzer neu. Verwenden Sie sudo nur, wenn Sie wirklich Dateien bearbeiten müssen, die das erfordern, und ändern Sie lieber Dateiberechtigungen als die gesamte Oberfläche als root zu starten."
 toolbar:
   cannotUpdateLayouts: "Layouts können nicht aktualisiert werden."
+  defaultLayout: "Standard-Layout"
   newSession: "Server Hinzufügen"
   connect: "Verbinden"
   endSession: "Sitzung Beenden"
+  saveLayout: "Layout Speichern"
+  deleteLayout: "Layout Löschen"
+  saveLayoutForSsh: "Geben Sie einen Namen ein. Das Layout wird für alle SSH-Server gespeichert."
+  saveLayoutForShell: "Geben Sie einen Namen ein. Das Layout wird für alle lokalen Shells gespeichert."
+  layoutNameReserved: "Dieser Name ist für das Standard-Layout reserviert. Bitte wählen Sie einen anderen Namen."
+  overwriteLayoutHeader: "Layout ersetzen"
+  overwriteLayout: "Ein Layout mit diesem Namen existiert bereits. Ersetzen"
   directConnect: "Direktverbindung"
   userSelect: "Anmelden als Benutzer"
   errorSavingSettingsHeader: "Einstellungen konnten nicht gespeichert werden"

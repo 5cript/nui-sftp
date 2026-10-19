@@ -13,7 +13,6 @@ using namespace std::string_literals;
 SessionOptions::SessionOptions(
     SettingFactory const& factory,
     std::function<void()> const& onChange,
-    std::function<std::optional<nlohmann::json>()> const& obtainCurrentLayout,
     ConfirmDialog& confirmDialog,
     InputDialog& newItemDialog,
     MultiInputDialog& multiInputDialog
@@ -69,15 +68,6 @@ SessionOptions::SessionOptions(
           onChange,
           valueReset(isStartupSession, onChange, Persistence::SessionOptions{}.startupSession)
       }
-    , layout{
-          basicSettingsFactory_.identity(
-              {"sessionOptions", "layout"}, {.labelKey = SettingKeyPath{"layoutSetting", "layoutKeysLabel"}}
-          ),
-          onChange,
-          obtainCurrentLayout,
-          confirmDialog,
-          newItemDialog
-      }
     , terminalOptions{factory.within({"terminalOptionsGroupName"}), onChange}
     , termios{factory.within({"termiosGroupName"}), onChange}
     , queueOptions{factory.within({"queueOptionsGroupName"}), onChange}
@@ -104,7 +94,6 @@ void SessionOptions::applyToState(Persistence::SessionOptions& state) const
     assignIfValid(state.icon, icon);
     assignIfValid(state.orderBy, orderBy);
     assignIfValid(state.startupSession, isStartupSession);
-    state.layouts = layout.value();
     terminalOptions.applyToState(state.terminalOptions.value());
     termios.applyToState(state.termios.value());
     queueOptions.applyToState(state.queueOptions.value());
@@ -140,7 +129,6 @@ void SessionOptions::loadFromState(Persistence::SessionOptions const& state, boo
     icon.value(state.icon);
     orderBy.value(state.orderBy);
     isStartupSession.value(state.startupSession);
-    layout.value(state.layouts);
     terminalOptions.loadFromState(state.terminalOptions.value());
     termios.loadFromState(state.termios.value());
     queueOptions.loadFromState(state.queueOptions.value());

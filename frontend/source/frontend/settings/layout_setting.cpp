@@ -20,8 +20,20 @@ LayoutSetting::LayoutSetting(
     , confirmDialog_{&confirmDialog}
     , newItemDialog_{&newItemDialog}
     , selected_{}
+    , names_{}
     , obtainCurrentLayout_{std::move(obtainCurrentLayout)}
 {}
+
+void LayoutSetting::refreshNames()
+{
+    names_.value().clear();
+    for (auto const& [name, layout] : state_.value())
+        names_.value().push_back(name);
+    if (!state_.value().contains(selected_.value()))
+        selected_.value() = names_.value().empty() ? std::string{} : names_.value().front();
+    names_.modifyNow();
+    selected_.modifyNow();
+}
 
 Nui::ElementRenderer LayoutSetting::renderRow(LanguageObservedText labelText)
 {
@@ -38,12 +50,12 @@ Nui::ElementRenderer LayoutSetting::renderRow(LanguageObservedText labelText)
             style = "color: var(--color); margin-right: 10px"
         }(std::move(labelText)),
         div{class_ = "layout-setting-controls"}(
-            Snc::select(Snc::SelectOptions<decltype(selected_), decltype(state_)>{
+            Snc::select(Snc::SelectOptions<decltype(selected_), decltype(names_)>{
                 .activeOption = selected_,
-                .options = state_,
+                .options = names_,
                 .attributes {
-                    disabled = observe(state_).generate([](auto const& state) {
-                        return state.empty();
+                    disabled = observe(names_).generate([](auto const& names) {
+                        return names.empty();
                     }),
                 },
                 .onChange = [this](auto const&, auto const& /*event*/)
@@ -83,8 +95,9 @@ Nui::ElementRenderer LayoutSetting::renderRow(LanguageObservedText labelText)
                             if (auto currentLayout = obtainCurrentLayout_())
                             {
                                 currentKeys[*newKey] = *currentLayout;
-                                selected_ = *newKey;
+                                selected_.value() = *newKey;
                                 state_.modifyNow();
+                                refreshNames();
                                 onChange_();
                             }
                             else
@@ -134,6 +147,7 @@ Nui::ElementRenderer LayoutSetting::renderRow(LanguageObservedText labelText)
 
                             state_.value().erase(keyToRemove);
                             state_.modifyNow();
+                            refreshNames();
                             onChange_();
                         },
                     });

@@ -204,6 +204,11 @@ namespace Persistence
             Log::info("Applied the one-time move of the terminal renderer from DOM to WebGL.");
             mustSave = true;
         }
+        if (stateCache_.gatherSessionLayouts())
+        {
+            Log::info("Gathered the layouts of the servers into the layouts of their type.");
+            mustSave = true;
+        }
 
         bool hasMissingDefaults = false;
         auto termiosDefault = stateCache_.termios.find("default");

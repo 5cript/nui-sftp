@@ -12,6 +12,14 @@
     }
 }
 
+.toolbar-separator {
+    align-self: stretch;
+    width: 1px;
+    margin: 4px 3px;
+    flex-shrink: 0;
+    background-color: var(--border-color-fields);
+}
+
 /* Inline brand-mark shown at the left of the toolbar. Defaults to a flat
    theme-tinted plate; themes (e.g. Nebula) override the chrome for richer
    looks. */
