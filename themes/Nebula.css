@@ -197,7 +197,7 @@
         0 0 0 1px rgba(255, 255, 255, 0.12) inset !important;
 }
 
-:root[data-custom-theme="Nebula"] .script-nui-button:not([data-variant="primary"]):not([data-variant="danger"]) {
+:root[data-custom-theme="Nebula"] .script-nui-button:not([data-variant="primary"]):not([data-variant="danger"]):not([data-variant="transparent"]) {
     background: rgba(255, 255, 255, 0.04) !important;
     border: 1px solid rgba(255, 255, 255, 0.13) !important;
     color: var(--color) !important;
@@ -383,7 +383,7 @@
         0 0 0 1px rgba(255, 255, 255, 0.20) inset !important;
 }
 
-:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-button:not([data-variant="primary"]):not([data-variant="danger"]) {
+:root[data-custom-theme="Nebula"][data-theme="light"] .script-nui-button:not([data-variant="primary"]):not([data-variant="danger"]):not([data-variant="transparent"]) {
     background: rgba(255, 255, 255, 0.55) !important;
     border: 1px solid rgba(0, 0, 0, 0.13) !important;
     color: var(--color) !important;
