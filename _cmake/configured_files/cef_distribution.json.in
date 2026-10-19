@@ -1,0 +1,7 @@
+{
+    "version": "@NUI_CEF_SELECTED_VERSION@",
+    "platform": "@NUI_CEF_SELECTED_PLATFORM@",
+    "archive": "@NUI_CEF_SELECTED_ARCHIVE@",
+    "url": "@NUI_CEF_SELECTED_URL@",
+    "sha256": "@NUI_CEF_SELECTED_SHA256@"
+}
