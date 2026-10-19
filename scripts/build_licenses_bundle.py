@@ -49,6 +49,12 @@ DEFAULT_NPM_FILE = REPO / "licenses" / "npm-licenses.json"
 # in practice, but checked at generation time).
 HEADER_DELIM = "NUI_LIC_EMBED"
 
+# License texts for npm packages that ship none, by package name prefix. Every npm package needs a text: the build
+# fails for a new one without, add its license here.
+NPM_TEXT_FALLBACKS = {
+    "@lumino/": TEXTS_DIR / "lumino-LICENSE.txt",
+}
+
 
 def build_cpp_section() -> list[dict]:
     doc = json.loads(SPDX_FILE.read_text(encoding="utf-8"))
@@ -72,6 +78,7 @@ def build_cpp_section() -> list[dict]:
                 "downloadLocation": element.get("software_downloadLocation", ""),
                 "copyright": element.get("software_copyrightText", ""),
                 "role": element.get("extension_role", ""),
+                "browserEngines": element.get("extension_browserEngines", []),
                 "text": text,
             }
         )
@@ -122,6 +129,11 @@ def build_npm_section(npm_file: Path, host_root: Path | None) -> list[dict]:
                             break
                         except OSError:
                             continue
+        if not text:
+            for prefix, fallback in NPM_TEXT_FALLBACKS.items():
+                if name.startswith(prefix):
+                    text = fallback.read_text(encoding="utf-8", errors="replace")
+                    break
         out.append(
             {
                 "name": name,
@@ -131,6 +143,12 @@ def build_npm_section(npm_file: Path, host_root: Path | None) -> list[dict]:
                 "url": info.get("repository", "") or info.get("url", ""),
                 "text": text,
             }
+        )
+    without_text = sorted(f"{p['name']}@{p['version']}" for p in out if not p["text"].strip())
+    if without_text:
+        raise SystemExit(
+            "npm packages without a license text: " + ", ".join(without_text)
+            + ". Add their license to NPM_TEXT_FALLBACKS in scripts/build_licenses_bundle.py."
         )
     out.sort(key=lambda p: p["name"].lower())
     return out

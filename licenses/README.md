@@ -16,3 +16,11 @@ This directory is the **source of truth** for C++ third-party attribution.
 ## Drift detection
 
 `scripts/check_licenses.py` greps the CMake source for `find_package`, `FetchContent_Declare`, and vendored `add_subdirectory(dependencies/...)` calls and diffs the extracted set against the names in `third_party.spdx.json`. CI fails on mismatch.
+
+## Engine specific packages
+
+An entry with `extension_browserEngines` (a list of `cef`, `webkitgtk`, `webview2`, `wkwebview`) ships only with those browser engines, the licenses page of a build shows it only for its own engine. Entries without the field ship everywhere.
+
+## npm packages without a license file
+
+Some npm packages (the `@lumino` ones) publish no license file. `scripts/build_licenses_bundle.py` takes their text from `NPM_TEXT_FALLBACKS` and fails the build for any other npm package without a text.
