@@ -20,17 +20,19 @@
     background-color: var(--border-color-fields);
 }
 
-/* Inline brand-mark shown at the left of the toolbar. Defaults to a flat
-   theme-tinted plate; themes (e.g. Nebula) override the chrome for richer
+/* Inline brand-mark shown at the left of the toolbar. Defaults to the palette
+   of the primary button; themes (e.g. Nebula) override the chrome for richer
    looks. */
 .toolbar-brand-mark {
-    width: 36px;
-    height: 36px;
-    border-radius: 6px;
+    box-sizing: border-box;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--script-nui-components-button-border-color-primary);
+    border-radius: var(--script-nui-components-button-border-radius, 0.25rem);
     display: grid;
     place-items: center;
-    color: var(--theme-color);
-    background: color-mix(in srgb, var(--theme-color) 18%, var(--background-color));
+    color: var(--script-nui-components-button-color);
+    background: var(--script-nui-components-button-color-primary);
     overflow: hidden;
     flex-shrink: 0;
 }
