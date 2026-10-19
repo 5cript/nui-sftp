@@ -194,6 +194,8 @@
     --nui-file-grid-tile-hover-background: rgba(255, 255, 255, 0.16);
     --nui-file-grid-tile-hover-border: rgba(255, 255, 255, 0.35);
 
+    --nui-file-grid-origin-accent: var(--theme-color);
+
     /* Loading placeholder — flat grayscale plate with slight transparency (dark default). */
     --nui-file-grid-loading-placeholder-background: rgba(255, 255, 255, 0.08);
     --nui-file-grid-loading-placeholder-border: rgba(255, 255, 255, 0.18);
@@ -244,6 +246,8 @@
     --nui-file-grid-tile-border: rgba(0, 0, 0, 0.14);
     --nui-file-grid-tile-hover-background: rgba(255, 255, 255, 0.75);
     --nui-file-grid-tile-hover-border: rgba(0, 0, 0, 0.28);
+
+    --nui-file-grid-origin-accent: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
 
     /* Loading placeholder (light mode). */
     --nui-file-grid-loading-placeholder-background: rgba(0, 0, 0, 0.05);

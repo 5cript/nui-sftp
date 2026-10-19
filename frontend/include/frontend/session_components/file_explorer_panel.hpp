@@ -91,6 +91,12 @@ class FileExplorerPanel
     void setup();
 
     /**
+     * @brief Sets the user, host and port the remote side names as its origin. Syncing the change is left
+     * to the caller.
+     */
+    void setRemoteOrigin(std::string userAndHost);
+
+    /**
      * @brief Attaches the caller-provided synchronize callback to both sides
      *        of the grid.  Used by Session::setupFileGrid to wire in the
      *        sync-dialog + progress-dialog open flow, which themselves stay

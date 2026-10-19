@@ -287,6 +287,75 @@
     background: hsla(241, 82%, 49%, 0.45);
 }
 
+.nui-file-grid-origin-local,
+.nui-file-grid-origin-remote {
+    --nui-file-grid-origin-color: var(--nui-file-grid-origin-accent, var(--nui-file-grid-color));
+    color: var(--nui-file-grid-origin-color);
+    border: 1px solid color-mix(in srgb, var(--nui-file-grid-origin-color) 60%, transparent);
+    border-radius: 4px;
+    white-space: nowrap;
+
+    & svg {
+        width: 14px;
+        height: 14px;
+        flex: none;
+        fill: currentColor;
+    }
+}
+
+.nui-file-grid-origin-kind {
+    font-weight: 700;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.nui-file-grid-origin-chip {
+    --nui-file-grid-origin-chip-radius: var(--script-nui-components-field-border-radius, 0px);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 9px;
+    box-sizing: border-box;
+    flex: none;
+    margin-right: -5px;
+    border-color: var(--nui-file-grid-border-color);
+    border-right: none;
+    border-radius: var(--nui-file-grid-origin-chip-radius) 0 0 var(--nui-file-grid-origin-chip-radius);
+    background-color: var(--nui-file-grid-filter-background);
+
+    &+input {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+    }
+}
+
+.nui-file-grid-origin-card {
+    /* A long host wraps instead of widening Places, which would make the sides uneven */
+    contain: inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 2px 8px 6px;
+    padding: 7px 8px;
+}
+
+.nui-file-grid-origin-card-kind {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.nui-file-grid-origin-host {
+    font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    color: var(--nui-file-grid-color, var(--color));
+}
+
 .nui-file-grid-head {
     height: auto;
     display: flex;

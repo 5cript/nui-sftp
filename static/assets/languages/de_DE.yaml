@@ -77,6 +77,9 @@ fileExplorer:
     devices: "Geräte"
     drives: "Laufwerke"
     root: "Wurzelverzeichnis"
+  origin:
+    local: "Lokal"
+    remote: "Remote"
   errors:
     dropOnSameSide: "Das Verschieben von Elementen per Drag and Drop innerhalb derselben Seite wird nicht unterstützt."
     dropDataUnreadable: "Die Drag-and-Drop-Daten konnten nicht gelesen werden: {}"
