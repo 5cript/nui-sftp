@@ -314,6 +314,12 @@ class OperationQueue
      */
     void setCompletionObserver(std::function<void(OperationCompleted const&)> observer);
 
+    /**
+     * @brief Calls @p callback on the strand once the operation @p operationId completed, failed or was cancelled,
+     *        after the frontend was told. Must be called from the strand, before the operation can complete.
+     */
+    void whenCompleted(Ids::OperationId const& operationId, std::function<void(OperationCompleted const&)> callback);
+
     bool hasPriorityWork() const;
 
     /**
@@ -423,6 +429,8 @@ class OperationQueue
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
     std::function<void(OperationCompleted const&)> completionObserver_{};
+    std::unordered_map<Ids::OperationId, std::function<void(OperationCompleted const&)>, Ids::IdHash>
+        completionCallbacks_{};
     // Transfer slots handed out per queue tick.
     int parallelism_{1};
     // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.
