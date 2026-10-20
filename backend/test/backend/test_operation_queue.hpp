@@ -1016,6 +1016,42 @@ namespace Test
         EXPECT_EQ(remoteNames(*sftp, "/home/test/Documents"), (std::set<std::string>{"doc1.txt", "doc2.txt"}));
     }
 
+    TEST_F(OperationQueueTests, ACompletionCallbackRunsOnceForItsOperationOnly)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto moved = Ids::generateOperationId();
+        const auto blocked = Ids::generateOperationId();
+        std::vector<SharedData::OperationCompleted> called;
+        runOnStrand(
+            [&]()
+            {
+                ASSERT_TRUE(queue->addRenameOperation(
+                    *sftp, moved, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
+                ).has_value());
+                ASSERT_TRUE(queue->addRenameOperation(
+                    *sftp, blocked, remote("/home/test/Documents/doc2.txt"), remote("/home/test/Documents/doc1.txt")
+                ).has_value());
+                queue->whenCompleted(
+                    blocked,
+                    [&called](SharedData::OperationCompleted const& completed)
+                    {
+                        called.push_back(completed);
+                    }
+                );
+            }
+        );
+
+        workUntilCompletions(2);
+        runOnStrand([]() {});
+        ASSERT_EQ(called.size(), 1u);
+        EXPECT_EQ(called.front().operationId, blocked);
+        EXPECT_EQ(called.front().reason, SharedData::OperationCompletionReason::Failed);
+    }
+
     TEST_F(OperationQueueTests, AdoptedDirectoryDownloadKeepsItsCardId)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

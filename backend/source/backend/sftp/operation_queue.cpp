@@ -448,6 +448,8 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             if (self->completionObserver_)
                 self->completionObserver_(operationCompleted);
             RpcHelper::callRemoteSafely(*self->hub_, self->rpcName("onOperationCompleted"), operationCompleted);
+            if (auto callback = self->completionCallbacks_.extract(operationCompleted.operationId); !callback.empty())
+                callback.mapped()(operationCompleted);
         }
     );
 }
@@ -455,6 +457,14 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
 void OperationQueue::setCompletionObserver(std::function<void(OperationCompleted const&)> observer)
 {
     completionObserver_ = std::move(observer);
+}
+
+void OperationQueue::whenCompleted(
+    Ids::OperationId const& operationId,
+    std::function<void(OperationCompleted const&)> callback
+)
+{
+    completionCallbacks_.insert_or_assign(operationId, std::move(callback));
 }
 
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
