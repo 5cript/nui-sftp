@@ -438,7 +438,11 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
                 return;
 
             if (operationCompleted.error)
-                Log::error("Operation failed: {}", operationCompleted.error->toString());
+                Log::log(
+                    Operation::failureLevelOf(*operationCompleted.error),
+                    "Operation failed: {}",
+                    operationCompleted.error->toString()
+                );
 
             // Drop any resume backup tied to this operation, it has run to
             // completion (success, failure, or cancel) and no longer needs

@@ -320,7 +320,13 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             continue;
         }
 
-        Log::error("{}: Transfer failed for: {}: {}", logName(), slot.paths.remote.value(), error.toString());
+        Log::log(
+            failureLevelOf(error),
+            "{}: Transfer failed for: {}: {}",
+            logName(),
+            slot.paths.remote.value(),
+            error.toString()
+        );
         if (isSkippableError(error))
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.

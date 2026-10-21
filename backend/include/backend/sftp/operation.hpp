@@ -187,6 +187,15 @@ class Operation
         return Error{.type = ErrorType::RenameFailure};
     }
 
+    /**
+     * @brief The level a failure with @p error is logged at: a destination that changed since its compare is no error,
+     *        the compare kept it on purpose and the owner of the operation reports it.
+     */
+    static Log::Level failureLevelOf(Error const& error)
+    {
+        return error.type == ErrorType::ChangedSinceCompare ? Log::Level::Warning : Log::Level::Error;
+    }
+
   protected:
     void enterState(OperationState newState)
     {
