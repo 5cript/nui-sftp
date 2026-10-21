@@ -197,7 +197,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             const auto finalizeResult = finalizeInStrand(*sftp);
             if (!finalizeResult.has_value())
             {
-                Log::error("UploadOperation: Failed to finalize operation: {}", finalizeResult.error().toString());
+                Log::log(
+                    failureLevelOf(finalizeResult.error()),
+                    "UploadOperation: Failed to finalize operation: {}",
+                    finalizeResult.error().toString()
+                );
                 return enterErrorState<WorkStatus>(finalizeResult.error());
             }
             state_ = Completed;

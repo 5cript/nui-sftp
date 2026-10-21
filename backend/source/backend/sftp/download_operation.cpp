@@ -199,7 +199,11 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             const auto finalizeResult = finalizeInStrand();
             if (!finalizeResult.has_value())
             {
-                Log::error("DownloadOperation: Failed to finalize operation: {}", finalizeResult.error().toString());
+                Log::log(
+                    failureLevelOf(finalizeResult.error()),
+                    "DownloadOperation: Failed to finalize operation: {}",
+                    finalizeResult.error().toString()
+                );
                 return enterErrorState<WorkStatus>(finalizeResult.error());
             }
             state_ = Completed;
