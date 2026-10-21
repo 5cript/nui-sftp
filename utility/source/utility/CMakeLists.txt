@@ -24,6 +24,7 @@ else()
         error_message.cpp
         permissions.cpp
         rename.cpp
+        shared_input_file_stream.cpp
         link_safe_remove.cpp
         no_follow_tree_walk.cpp
         download_mark.cpp
