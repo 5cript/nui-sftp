@@ -9,9 +9,9 @@
 #include <paths/remote_path.hpp>
 #include <persistence/state/sftp_options.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
+#include <utility/shared_input_file_stream.hpp>
 
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 class UploadOperation : public Operation
@@ -169,7 +169,8 @@ class UploadOperation : public Operation
     std::filesystem::path localNativePath_{};
     /** @brief Where the upload is written before it replaces remotePath_. */
     Paths::RemotePath tempPath_{};
-    std::ifstream localFile_;
+    /** @brief Lets others rename or delete the file while it uploads, which a std::ifstream refuses on Windows. */
+    Utility::SharedInputFileStream localFile_;
     bool isSymlink_{false};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};

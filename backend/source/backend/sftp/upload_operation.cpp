@@ -607,7 +607,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
         return std::unexpected(Error{.type = ErrorType::NotAFile});
     }
 
-    localFile_.open(localNativePath_, std::ios::binary);
+    localFile_.open(localNativePath_);
     if (!localFile_.is_open())
     {
         Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.toUtf8());
