@@ -218,6 +218,30 @@ namespace Test
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt.filepart"), "<missing>") << "the temp file is removed";
     }
 
+    TEST_F(ComparedStateCheckTests, AnUploadThatMustFindItsDestinationDoesNotRecreateOneTheServerLost)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto localPath = localDirectory_.path() / "upload.txt";
+        writeLocalFile(localPath, "new content");
+        auto compared = remoteNow(*sftp, "/home/test/file1.txt");
+        compared.mustStillExist = true;
+
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/lost.txt"),
+                .localPath = toLocal(localPath),
+                .mayOverwrite = true,
+                .comparedDestination = compared,
+            }
+        };
+        const auto result = runToEnd(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, Operation::ErrorType::ChangedSinceCompare);
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/lost.txt"), "<missing>");
+    }
+
     TEST_F(ComparedStateCheckTests, AnUploadReplacesADestinationThatIsAsTheCompareSawIt)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
