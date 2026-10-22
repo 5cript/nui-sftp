@@ -6,6 +6,7 @@
 #include <backend/sftp/operation_queue.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/file_tracking/tracker.hpp>
 #include <backend/rpc_helper.hpp>
 #include <persistence/state_holder.hpp>
 
@@ -42,7 +43,8 @@ class Session
         Nui::RpcHub& hub,
         Persistence::SftpOptions const& sftpOptions,
         BulkResumeRegistry* bulkResumeRegistry,
-        std::shared_ptr<LocalOperationQueue> localOperationQueue
+        std::shared_ptr<LocalOperationQueue> localOperationQueue,
+        FileTracking::TrackerServices fileTracking = {}
     );
 
     Session(const Session&) = delete;
@@ -63,7 +65,38 @@ class Session
      */
     void adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds);
 
+    /**
+     * @brief Ends the watches of this session without telling the frontend, which is gone. Must be called from the
+     *        strand.
+     */
+    void stopFileTracking();
+
   private:
+    /**
+     * @brief The server side of the file tracker: this session's operation queue and SFTP channels.
+     */
+    class FileTrackingRemote;
+
+    /**
+     * @brief Creates the file tracker of this session, the strand runs it.
+     */
+    void startFileTracking();
+
+    /**
+     * @brief Handles the requests of the file tracking panel, "FileTracker::{id}::..." with the paths as UTF-8:
+     *        open (remote path, size, watch) answers once the copy is there with {instanceId, localPath}, an error to
+     *        show or neither, checkUploadAndWatch (local item, remote directory) with {item, destination},
+     *        uploadAndWatch (local item, remote destination), stop (watch id), setOption (watch id, option, value),
+     *        discard (instance id, local path) with {instanceDestroyed} and answer (question id, answer). See
+     *        FileTracking::Tracker.
+     */
+    void registerRpcFileTracker();
+
+    /**
+     * @brief An open SFTP channel of this session, nothing when there is none.
+     */
+    std::shared_ptr<SecureShell::SftpSession> anySftpChannel() const;
+
     /**
      * Handles calls from the frontend to create a new channel with the following payload:
      * {
@@ -370,4 +403,8 @@ class Session
     std::string remoteTempFileSuffix_;
     /** @brief Runs the local deletes of this session, which go on when it ends. */
     std::shared_ptr<LocalOperationQueue> localOperationQueue_;
+    FileTracking::TrackerServices fileTrackingServices_;
+    /** @brief Suffix of this session's downloads in progress, the file tracker ignores them. */
+    std::string downloadTempFileSuffix_;
+    std::unique_ptr<FileTracking::Tracker> tracker_{};
 };

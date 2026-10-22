@@ -3,6 +3,7 @@ add_library(
     STATIC
         session_manager.cpp
         session.cpp
+        session_file_tracking.cpp
         rpc_filesystem.cpp
         local_delete_guard.cpp
         local_removal.cpp
@@ -36,6 +37,7 @@ add_library(
         file_tracking/instance_watch.cpp
         file_tracking/temp_dir_instancing.cpp
         file_tracking/temp_dir_instance_manager.cpp
+        file_tracking/frontend_tracker_view.cpp
         file_tracking/tracker.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp

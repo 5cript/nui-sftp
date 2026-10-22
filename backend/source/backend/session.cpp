@@ -71,7 +71,8 @@ Session::Session(
     Nui::RpcHub& hub,
     Persistence::SftpOptions const& sftpOptions,
     BulkResumeRegistry* bulkResumeRegistry,
-    std::shared_ptr<LocalOperationQueue> localOperationQueue
+    std::shared_ptr<LocalOperationQueue> localOperationQueue,
+    FileTracking::TrackerServices fileTracking
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
@@ -90,6 +91,10 @@ Session::Session(
           sftpOptions.uploadOptions ? sftpOptions.uploadOptions->tempFileSuffix : std::nullopt
       )}
     , localOperationQueue_{std::move(localOperationQueue)}
+    , fileTrackingServices_{std::move(fileTracking)}
+    , downloadTempFileSuffix_{Persistence::effectiveTempFileSuffix(
+          sftpOptions.downloadOptions ? sftpOptions.downloadOptions->tempFileSuffix : std::nullopt
+      )}
 {}
 
 Session::~Session()
@@ -146,6 +151,8 @@ void Session::start()
             self->registerRpcSftpPreDeleteChecks();
             self->registerRpcQueuedRemoves();
             self->operationQueue_->registerRpc();
+            self->startFileTracking();
+            self->registerRpcFileTracker();
 
             Log::info("Session '{}' connected", self->id_.value());
 
@@ -178,6 +185,9 @@ void Session::stop()
             }
 
             Log::info("Stopping session '{}'", self->id_.value());
+
+            // Before the queue goes, whose cancellations would otherwise reach the tracker.
+            self->tracker_.reset();
 
             // Backup any in-flight or queued bulk operations before
             // teardown so a seamless reconnect can adopt them.  Always
@@ -244,15 +254,7 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
             // which expect a channel id.  We adopt against the most-recently
             // opened sftp channel by convention; if none exists, the resume
             // is dropped back into the registry for a later attempt.
-            std::shared_ptr<SecureShell::SftpSession> sftp;
-            for (auto const& [channelId, weakChannel] : self->sftpChannels_)
-            {
-                if (auto locked = weakChannel.lock(); locked)
-                {
-                    sftp = locked;
-                    break;
-                }
-            }
+            const auto sftp = self->anySftpChannel();
             if (!sftp)
             {
                 Log::warn(
@@ -275,6 +277,16 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
             }
         }
     );
+}
+
+std::shared_ptr<SecureShell::SftpSession> Session::anySftpChannel() const
+{
+    for (auto const& [channelId, weakChannel] : sftpChannels_)
+    {
+        if (auto locked = weakChannel.lock(); locked)
+            return locked;
+    }
+    return nullptr;
 }
 
 void Session::doOperationQueueWork()
