@@ -49,6 +49,11 @@ class UploadOperation : public Operation
          *        transferred as it is now. Unset outside of sync.
          */
         std::optional<SharedData::ComparedState> comparedDestination{std::nullopt};
+        /**
+         * @brief A source that is gone when the upload starts is nothing to upload, it completes without a transfer.
+         *        For uploads that mirror local files whose deletions are handled apart, see FileTracking::Tracker.
+         */
+        bool sourceMayVanish{false};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -121,6 +126,11 @@ class UploadOperation : public Operation
      *        regular file or a link, no other type, that exists.
      */
     std::expected<void, Error> openLocalSource();
+
+    /**
+     * @brief Whether the local source is not there at all, see UploadOperationOptions::sourceMayVanish.
+     */
+    bool sourceIsGone() const;
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
 

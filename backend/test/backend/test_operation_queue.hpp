@@ -377,6 +377,62 @@ namespace Test
         EXPECT_EQ(remoteNames(*sftp, "/home/test/uploaded"), (std::set<std::string>{"a.txt", "b.txt"}));
     }
 
+    TEST_F(OperationQueueTests, UploadsWhoseSourceMayVanishCompleteWithoutATransferOnceItIsGone)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto file = localDirectory_.path() / "vanishing.txt";
+        const auto directory = localDirectory_.path() / "vanishingDirectory";
+        const auto kept = localDirectory_.path() / "mustExist.txt";
+        std::ofstream{file} << "file";
+        std::filesystem::create_directories(directory);
+        std::ofstream{directory / "inside.txt"} << "inside";
+        std::ofstream{kept} << "kept";
+        const auto fileId = Ids::generateOperationId();
+        const auto directoryId = Ids::generateOperationId();
+        const auto keptId = Ids::generateOperationId();
+        const auto add = [&](Ids::OperationId const& operationId, std::filesystem::path const& path, bool mayVanish)
+        {
+            return runOnStrand(
+                [&]()
+                {
+                    return queue->addUploadOperation(
+                        *sftp,
+                        operationId,
+                        toLocal(path),
+                        remote("/home/test/" + path.filename().string()),
+                        true,
+                        false,
+                        false,
+                        false,
+                        SharedData::OperationMode::Queued,
+                        mayVanish
+                    );
+                }
+            );
+        };
+        ASSERT_TRUE(add(fileId, file, true).has_value());
+        ASSERT_TRUE(add(directoryId, directory, true).has_value());
+        ASSERT_TRUE(add(keptId, kept, false).has_value());
+        std::filesystem::remove(file);
+        std::filesystem::remove_all(directory);
+        std::filesystem::remove(kept);
+        setPaused(false);
+
+        workUntilCompletions(3);
+        std::map<std::string, SharedData::OperationCompletionReason> reasons;
+        for (auto const& completed : completions())
+            reasons.emplace(completed.operationId.value(), completed.reason);
+        EXPECT_EQ(reasons[fileId.value()], SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(reasons[directoryId.value()], SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(reasons[keptId.value()], SharedData::OperationCompletionReason::Failed);
+        const auto names = remoteNames(*sftp, "/home/test");
+        EXPECT_FALSE(names.contains("vanishing.txt"));
+        EXPECT_FALSE(names.contains("vanishingDirectory"));
+    }
+
 #ifndef _WIN32
     TEST_F(OperationQueueTests, DirectoryUploadReportsAnUnreadableSubdirectory)
     {

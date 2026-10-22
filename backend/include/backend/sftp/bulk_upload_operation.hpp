@@ -35,6 +35,12 @@ class BulkUploadOperation : public BulkTransferOperation
 
     SharedData::OperationType type() const override;
 
+    /**
+     * @brief Completes without a transfer when the scanned directory is gone before the scan and the individual
+     *        options let the source vanish, see UploadOperation::UploadOperationOptions::sourceMayVanish.
+     */
+    std::expected<WorkStatus, Error> work() override;
+
     /** @brief See BulkDownloadOperation::PrescannedFile. */
     struct PrescannedFile
     {

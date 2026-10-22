@@ -80,6 +80,13 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         }
         case (Preparing):
         {
+            if (options_.sourceMayVanish && sourceIsGone())
+            {
+                Log::info("UploadOperation: '{}' is gone, nothing to upload.", options_.localPath.toUtf8());
+                state_ = Completed;
+                options_.progressCallback(1, 1, 1, 0);
+                return WorkStatus::Complete;
+            }
             if (const auto opened = openLocalSource(); !opened)
                 return enterErrorState<WorkStatus>(opened.error());
             if (!isSymlink_)
@@ -557,6 +564,13 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& s
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = mkdirResult.error()});
     }
     return {};
+}
+
+bool UploadOperation::sourceIsGone() const
+{
+    std::error_code statusError{};
+    return std::filesystem::symlink_status(localNativePath_, statusError).type() ==
+        std::filesystem::file_type::not_found;
 }
 
 std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()

@@ -97,6 +97,11 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
 
+    /**
+     * @brief Queues the upload of the file, link or directory @p localPath to @p remotePath.
+     * @param sourceMayVanish A source that is gone by the time the upload starts completes it without a transfer, see
+     *        UploadOperation::UploadOperationOptions::sourceMayVanish.
+     */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
         Ids::OperationId operationId,
@@ -106,7 +111,8 @@ class OperationQueue
         bool isBigFile,
         bool insertRefresh,
         bool createMissingDirectories,
-        SharedData::OperationMode mode = SharedData::OperationMode::Queued
+        SharedData::OperationMode mode = SharedData::OperationMode::Queued,
+        bool sourceMayVanish = false
     );
 
     /**
