@@ -186,7 +186,9 @@ void Session::stop()
 
             Log::info("Stopping session '{}'", self->id_.value());
 
-            // Before the queue goes, whose cancellations would otherwise reach the tracker.
+            // Before the queue goes, whose cancellations would otherwise reach the tracker. The copies of the session
+            // count as orphaned from now on.
+            self->stopFileTracking();
             self->tracker_.reset();
 
             // Backup any in-flight or queued bulk operations before

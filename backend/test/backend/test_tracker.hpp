@@ -1199,6 +1199,48 @@ namespace Test
         EXPECT_TRUE(tracker_->checkUploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv")).has_value());
     }
 
+    TEST_F(TrackerTest, StoppingAllReleasesTheCopiesSoTheyCountAsOrphaned)
+    {
+        const auto watched = open("/srv/watched.txt", /*watch=*/true);
+        const auto opened = open("/srv/opened.txt", /*watch=*/false);
+        ASSERT_TRUE(watched.has_value());
+        ASSERT_TRUE(opened.has_value());
+        ASSERT_EQ(instances_->countOrphaned(), 0u);
+
+        tracker_->stopAll();
+
+        EXPECT_EQ(instances_->findInstance(watched->instanceId.value()), nullptr);
+        EXPECT_EQ(instances_->findInstance(opened->instanceId.value()), nullptr);
+        EXPECT_TRUE(std::filesystem::exists(watched->localPath.native()));
+        EXPECT_TRUE(std::filesystem::exists(opened->localPath.native()));
+        EXPECT_EQ(instances_->countOrphaned(), 2u);
+        EXPECT_EQ(instances_->removeOrphaned(), 2);
+    }
+
+    TEST_F(TrackerTest, StoppingAllDropsADownloadOnItsWayWithItsInstance)
+    {
+        std::optional<Opened> opened;
+        tracker_->open(
+            remote("/srv/notes.txt"),
+            0,
+            /*watch=*/true,
+            [&opened](Opened const& result)
+            {
+                opened = result;
+            }
+        );
+        ASSERT_EQ(remote_->of("download").size(), 1u);
+
+        tracker_->stopAll();
+        end(*remote_->of("download").front(), SharedData::OperationCompletionReason::Completed);
+
+        ASSERT_TRUE(opened.has_value());
+        EXPECT_FALSE(opened->has_value());
+        EXPECT_TRUE(view_->entries.empty());
+        EXPECT_TRUE(instances_->listInstanceIds().empty());
+        EXPECT_EQ(instances_->countOrphaned(), 0u);
+    }
+
     TEST_F(TrackerTest, AFileRecreatedBeforeItsDeletionIsHandledIsOnlyUploaded)
     {
         const auto file = root_ / "local" / "project" / "src" / "main.cpp";
