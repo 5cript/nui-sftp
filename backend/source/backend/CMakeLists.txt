@@ -21,6 +21,11 @@ add_library(
         process/process_store.cpp
         process/environment.cpp
         file_tracking/change_filter.cpp
+        file_tracking/change_reporter.cpp
+        file_tracking/directory_watch_service.cpp
+        file_tracking/directory_watcher.cpp
+        file_tracking/event_spelling.cpp
+        file_tracking/file_states.cpp
         file_tracking/settled_changes.cpp
         file_tracking/instance_bookkeeping.cpp
         file_tracking/instance_lock.cpp

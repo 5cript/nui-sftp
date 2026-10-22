@@ -329,16 +329,11 @@ void Main::registerRpc()
 
             opener_ = std::make_unique<Opener>(portalParentWindow(window_));
             rpcSystem_ = std::make_unique<RpcSystem>(window_.getExecutor(), window_, hub_);
-            tempDirInstanceManager_ = std::make_unique<FileTracking::TempDirInstanceManager>(
-                window_.getExecutor(),
-                window_,
-                hub_,
+            const auto temporaryDownloadsDirectory =
                 Nui::resolvePath(holder.stateCache().localFilesystemOptions.temporaryDownloadsDirectory.value_or(
                     Persistence::LocalFilesystemOptions{}.temporaryDownloadsDirectory.value()
-                ))
-            );
-            tempDirInstanceManager_->registerRpc();
-            tempDirInstanceManager_->scheduleStartupCleanup();
+                ));
+            sshSessionManager_->startFileTracking(temporaryDownloadsDirectory);
 
             if (error)
             {

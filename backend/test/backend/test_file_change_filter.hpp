@@ -45,6 +45,15 @@ namespace Test
             EXPECT_FALSE(isTransientFile(name, filepart)) << name;
     }
 
+    TEST(FileChangeFilterTests, OnlyChangesEndingAndStartingAtTemporariesAreTransient)
+    {
+        EXPECT_TRUE(FileTracking::isTransientChange("report.pdf.filepart", "", filepart));
+        EXPECT_TRUE(FileTracking::isTransientChange(".goutputstream-ABC123", ".DS_Store", filepart));
+        EXPECT_FALSE(FileTracking::isTransientChange("._project", "project", filepart));
+        EXPECT_FALSE(FileTracking::isTransientChange("report.pdf", "report.pdf.filepart", filepart));
+        EXPECT_FALSE(FileTracking::isTransientChange("notes.txt", "", filepart));
+    }
+
     TEST(FileChangeFilterTests, ChangesOfTransientFilesAreDropped)
     {
         EXPECT_FALSE(filterFileChange({FileAction::Modified, ".DS_Store"}, false, filepart).has_value());

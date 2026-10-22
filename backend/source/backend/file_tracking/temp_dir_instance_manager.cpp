@@ -1,9 +1,10 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/file_tracking/instance_bookkeeping.hpp>
+#include <backend/file_tracking/file_states.hpp>
+#include <backend/file_tracking/change_filter.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <paths/native.hpp>
-#include <paths/local_path.hpp>
 
 #include <boost/asio/post.hpp>
 #include <fmt/format.h>
@@ -174,43 +175,33 @@ namespace FileTracking
 
     namespace InstanceManagerDetail
     {
-        nlohmann::json fileStatesOf(std::filesystem::path const& instanceDirectory)
+        std::vector<FileState>
+        fileStatesOf(std::filesystem::path const& instanceDirectory, std::filesystem::path const& below)
         {
-            nlohmann::json files = nlohmann::json::array();
+            std::vector<FileState> files;
+            // Below a canonical path the walk spells everything canonically, like the change events.
+            std::error_code canonicalError{};
+            const auto root = std::filesystem::weakly_canonical(instanceDirectory, canonicalError);
+            if (!below.empty())
+            {
+                const auto canonicalBelow = std::filesystem::weakly_canonical(below, canonicalError);
+                if (!isAtOrBelow(root, canonicalBelow) || isBookkeepingPath(root, canonicalBelow))
+                    return files;
+                if (canonicalBelow.lexically_normal() != root.lexically_normal())
+                    return itemStatesOf(canonicalBelow);
+            }
             std::error_code walkError{};
-            for (std::filesystem::recursive_directory_iterator iter{instanceDirectory, walkError}, end;
+            for (std::filesystem::recursive_directory_iterator iter{root, walkError}, end;
                  !walkError && iter != end;
                  iter.increment(walkError))
             {
-                std::error_code entryError{};
-                if (iter->is_symlink(entryError))
-                    continue;
                 if (iter.depth() == 0 && iter->path().filename() == std::filesystem::path{bookkeepingDirectoryName})
                 {
                     iter.disable_recursion_pending();
                     continue;
                 }
-                // Canonical like the watched directory, so the paths match the change events.
-                const auto path = Paths::nativeToUtf8(std::filesystem::weakly_canonical(iter->path(), entryError));
-                if (iter->is_directory(entryError))
-                {
-                    files.push_back({{"path", path}, {"directory", true}});
-                    continue;
-                }
-                if (!iter->is_regular_file(entryError))
-                    continue;
-                const auto size = iter->file_size(entryError);
-                const auto modified = iter->last_write_time(entryError);
-                if (entryError)
-                    continue;
-                const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::file_clock::to_sys(modified).time_since_epoch()
-                );
-                files.push_back({
-                    {"path", path},
-                    {"size", size},
-                    {"mtime", seconds.count()},
-                });
+                if (auto state = fileStateOf(*iter))
+                    files.push_back(*std::move(state));
             }
             if (walkError)
                 Log::warn(
@@ -270,181 +261,20 @@ namespace FileTracking
     // TempDirInstanceManager
     // -------------------------------------------------------------------------
     TempDirInstanceManager::TempDirInstanceManager(
-        boost::asio::any_io_executor executor,
-        Nui::Window& wnd,
-        Nui::RpcHub& hub,
+        boost::asio::strand<boost::asio::any_io_executor> strand,
         std::filesystem::path tempRootDir,
         std::chrono::hours deadInstanceRetentionHours
     )
-        : StrandRpc{std::move(executor), wnd, hub}
+        : strand_{std::move(strand)}
         , tempRootDir_{std::move(tempRootDir)}
         , deadInstanceRetentionHours_{deadInstanceRetentionHours}
-        , wnd_{&wnd}
         , instances_{}
     {}
-
-    void TempDirInstanceManager::registerRpc()
-    {
-        registerOnStrand(
-            "FileTracking::createInstance",
-            [this](RpcHelper::RpcOnce&& reply)
-            {
-                auto* inst = createInstance();
-                if (!inst)
-                {
-                    reply.error("Failed to create instance");
-                    return;
-                }
-                // Canonical like the paths of the change events and of fileStates, which the frontend maps.
-                std::error_code canonicalError;
-                const auto canonical = std::filesystem::weakly_canonical(inst->instanceDir(), canonicalError);
-                reply({
-                    {"success", true},
-                    {"instanceId", inst->instanceId()},
-                    {"instanceDir", Paths::nativeToUtf8(canonicalError ? inst->instanceDir() : canonical)},
-                });
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::destroyInstance",
-            [this](RpcHelper::RpcOnce&& reply, std::string instanceId)
-            {
-                if (!findInstance(instanceId))
-                {
-                    reply.error(fmt::format("Instance not found: {}", instanceId));
-                    return;
-                }
-                destroyInstance(instanceId);
-                reply({{"success", true}});
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::addWatch",
-            [this](
-                RpcHelper::RpcOnce&& reply,
-                std::string instanceId,
-                std::string path,
-                bool recursive,
-                std::string downloadTempSuffix
-            )
-            {
-                auto* inst = findInstance(instanceId);
-                if (!inst)
-                {
-                    reply.error(fmt::format("Instance not found: {}", instanceId));
-                    return;
-                }
-                const auto watchedPath = Paths::LocalPath::fromUtf8(path);
-                if (!watchedPath)
-                {
-                    reply.error(fmt::format("Cannot watch '{}': {}", path, watchedPath.error().toString()));
-                    return;
-                }
-                auto watch = inst->addWatch(watchedPath->native(), recursive, std::move(downloadTempSuffix));
-                if (!watch)
-                {
-                    reply.error(fmt::format("Failed to add watch on path: {}", path));
-                    return;
-                }
-                watches_[instanceId].push_back(std::move(*watch));
-                reply({{"success", true}});
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::listInstances",
-            [this](RpcHelper::RpcOnce&& reply)
-            {
-                auto arr = nlohmann::json::array();
-                for (auto const& [instId, inst] : instances_)
-                {
-                    arr.push_back({
-                        {"instanceId", instId},
-                        {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
-                    });
-                }
-                reply({{"success", true}, {"instances", std::move(arr)}});
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::getInstanceInfo",
-            [this](RpcHelper::RpcOnce&& reply, std::string instanceId)
-            {
-                auto* inst = findInstance(instanceId);
-                if (!inst)
-                {
-                    reply.error(fmt::format("Instance not found: {}", instanceId));
-                    return;
-                }
-                reply({
-                    {"success", true},
-                    {"instanceId", instanceId},
-                    {"instanceDir", Paths::nativeToUtf8(inst->instanceDir())},
-                });
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::fileStates",
-            [this](RpcHelper::RpcOnce&& reply, std::string instanceId)
-            {
-                auto* inst = findInstance(instanceId);
-                if (!inst)
-                {
-                    reply.error(fmt::format("Instance not found: {}", instanceId));
-                    return;
-                }
-                reply({{"success", true}, {"files", InstanceManagerDetail::fileStatesOf(inst->instanceDir())}});
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::discardContent",
-            [this](RpcHelper::RpcOnce&& reply, std::string instanceId, std::string path)
-            {
-                const auto content = Paths::LocalPath::fromUtf8(path);
-                if (!content)
-                {
-                    reply.error(fmt::format("Cannot discard '{}': {}", path, content.error().toString()));
-                    return;
-                }
-                const auto outcome = discardContent(instanceId, content->native());
-                if (!outcome)
-                {
-                    Log::error("FileTracking::discardContent: {}", outcome.error());
-                    reply.error(outcome.error());
-                    return;
-                }
-                reply({{"success", true}, {"instanceDestroyed", *outcome == DiscardOutcome::InstanceDestroyed}});
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::countOrphaned",
-            [this](RpcHelper::RpcOnce&& reply)
-            {
-                const auto count = orphanedInstanceDirs(tempRootDir_, listInstanceIds()).size();
-                reply({{"success", true}, {"count", count}});
-            }
-        );
-
-        registerOnStrand(
-            "FileTracking::forceCleanup",
-            [this](RpcHelper::RpcOnce&& reply)
-            {
-                const int removed = forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
-                reply({{"success", true}, {"removed", removed}});
-            }
-        );
-    }
 
     void TempDirInstanceManager::scheduleStartupCleanup()
     {
         boost::asio::post(
-            *strand_,
+            strand_,
             [this]()
             {
                 manualCleanup();
@@ -457,10 +287,7 @@ namespace FileTracking
         try
         {
             auto inst = std::make_unique<TemporaryDirectoryInstance>(
-                TemporaryDirectoryInstance::Config{.tempRootDir = tempRootDir_},
-                *strand_,
-                *wnd_,
-                *hub_
+                TemporaryDirectoryInstance::Config{.tempRootDir = tempRootDir_}, strand_
             );
             auto* ptr = inst.get();
             instances_.emplace(inst->instanceId(), std::move(inst));
@@ -475,7 +302,6 @@ namespace FileTracking
 
     void TempDirInstanceManager::destroyInstance(std::string const& instanceId)
     {
-        watches_.erase(instanceId);
         instances_.erase(instanceId);
     }
 
@@ -489,7 +315,6 @@ namespace FileTracking
         if (!content)
             return std::unexpected{content.error()};
 
-        watches_.erase(instanceId);
         Log::info("Discarding '{}' of instance '{}'", Paths::nativeToUtf8(*content), instanceId);
         std::error_code removeError;
         Utility::removeAllNoFollow(*content, removeError);
@@ -503,6 +328,26 @@ namespace FileTracking
         instance->cleanupNow();
         destroyInstance(instanceId);
         return DiscardOutcome::InstanceDestroyed;
+    }
+
+    void TempDirInstanceManager::removeInstance(std::string const& instanceId)
+    {
+        auto* instance = findInstance(instanceId);
+        if (!instance)
+            return;
+        Log::info("Removing instance '{}' with its content", instanceId);
+        instance->cleanupNow();
+        destroyInstance(instanceId);
+    }
+
+    std::size_t TempDirInstanceManager::countOrphaned() const
+    {
+        return orphanedInstanceDirs(tempRootDir_, listInstanceIds()).size();
+    }
+
+    int TempDirInstanceManager::removeOrphaned()
+    {
+        return forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
     }
 
     TemporaryDirectoryInstance*

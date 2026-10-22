@@ -1,10 +1,10 @@
 #pragma once
 
+#include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/temp_dir_instancing.hpp>
-#include <backend/rpc_helper.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
-#include <nlohmann/json.hpp>
+#include <boost/asio/strand.hpp>
 
 #include <chrono>
 #include <expected>
@@ -13,12 +13,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-namespace Nui
-{
-    class Window;
-    class RpcHub;
-}
 
 namespace FileTracking
 {
@@ -34,11 +28,13 @@ namespace FileTracking
     namespace InstanceManagerDetail
     {
         /**
-         * @brief What the reply of FileTracking::fileStates lists: every regular file below @p instanceDirectory as
-         *        {path, size, mtime} (seconds) and every directory as {path, directory: true}, paths canonical and
-         *        UTF-8. Symbolic links and the bookkeeping directory are left out.
+         * @brief The states (see fileStateOf) of every regular file and directory below @p instanceDirectory, paths
+         *        canonical. Symbolic links and the bookkeeping directory are left out.
+         * @param below Lists only this path and what lies below it, nothing when it is outside the instance or in its
+         *        bookkeeping. Empty lists everything.
          */
-        nlohmann::json fileStatesOf(std::filesystem::path const& instanceDirectory);
+        std::vector<FileState>
+        fileStatesOf(std::filesystem::path const& instanceDirectory, std::filesystem::path const& below = {});
 
         /**
          * @brief @p path as content of @p instanceDirectory that may be removed: its parent directory resolved,
@@ -66,41 +62,19 @@ namespace FileTracking
     };
 
     /**
-     * @brief Owns and tracks all TemporaryDirectoryInstance objects for a session.
+     * @brief Owns and tracks the TemporaryDirectoryInstance objects of every session.
      *
-     * Inherits RpcHelper::StrandRpc so that all RPC handlers it registers run on
-     * the shared strand.  The manager also owns the dead-instance cleanup policy:
-     * the retention scan runs once at start (see scheduleStartupCleanup), the
-     * frontend's Clean Up removes every orphaned directory at once (forceCleanup).
-     *
-     * ### Registered RPC endpoints
-     * All names are prefixed with @c "FileTracking::".
-     *
-     * | Name                    | Parameters                          | Returns                        |
-     * |-------------------------|-------------------------------------|--------------------------------|
-     * | createInstance          | —                                   | {success, instanceId, instanceDir} |
-     * | destroyInstance         | instanceId: string                  | {success}                      |
-     * | listInstances           | —                                   | {success, instances: [...]}    |
-     * | getInstanceInfo         | instanceId: string                  | {success, instanceId, instanceDir} |
-     * | fileStates              | instanceId: string                  | {success, files: [...]}, see InstanceManagerDetail::fileStatesOf |
-     * | discardContent          | instanceId: string, path: string    | {success, instanceDestroyed: bool}, see discardContent |
-     * | countOrphaned           | —                                   | {success, count: int}          |
-     * | forceCleanup            | —                                   | {success, removed: int}        |
-     *
-     * ### Push events (instance → frontend)
-     * Each instance emits @c "FileTracking::\<instanceId\>::onFileChanged"
-     * (see TemporaryDirectoryInstance).
+     * The manager also owns the dead-instance cleanup policy: the retention scan runs once at start (see
+     * scheduleStartupCleanup), the user's Clean Up removes every orphaned directory at once (removeOrphaned).
+     * Lives on its strand: every member must be called from it.
      */
-    class TempDirInstanceManager : public RpcHelper::StrandRpc
+    class TempDirInstanceManager
     {
       public:
         /**
          * @brief Construct the manager.
          *
-         * @param executor               Executor for the shared strand.
-         * @param wnd                    Nui window forwarded to each instance.
-         * @param hub                    RPC hub forwarded to each instance and used
-         *                               for manager RPC registrations.
+         * @param strand                 Runs the instances' changes and the startup cleanup.
          * @param tempRootDir            Root directory under which instance
          *                               subdirectories are created.
          * @param deadInstanceRetentionHours
@@ -108,9 +82,7 @@ namespace FileTracking
          *                               before manualCleanup() deletes it.
          */
         TempDirInstanceManager(
-            boost::asio::any_io_executor executor,
-            Nui::Window& wnd,
-            Nui::RpcHub& hub,
+            boost::asio::strand<boost::asio::any_io_executor> strand,
             std::filesystem::path tempRootDir,
             std::chrono::hours deadInstanceRetentionHours = std::chrono::hours{24}
         );
@@ -123,17 +95,9 @@ namespace FileTracking
         TempDirInstanceManager& operator=(TempDirInstanceManager&&) = delete;
 
         /**
-         * @brief Register all RPC handlers listed in the class documentation.
-         *
-         * Must be called once after construction, from the strand or before the
-         * strand starts processing.
-         */
-        void registerRpc();
-
-        /**
          * @brief Runs manualCleanup() once on the strand, for the instance directories that earlier runs left.
          *
-         * Called once at start, after registerRpc(), so the scan runs before the frontend's first request.
+         * Called once at start, so the scan runs before the frontend's first request.
          */
         void scheduleStartupCleanup();
 
@@ -149,7 +113,7 @@ namespace FileTracking
         TemporaryDirectoryInstance* createInstance();
 
         /**
-         * @brief Remove the watches of the instance with the given ID, then destroy it.
+         * @brief Destroy the instance with the given ID.
          *
          * If the instance does not exist this is a no-op.
          *
@@ -158,9 +122,8 @@ namespace FileTracking
         void destroyInstance(std::string const& instanceId);
 
         /**
-         * @brief Removes @p path, content of the instance @p instanceId that the user decided not to keep, after
-         *        ending the instance's watches, so the removal is reported as no change. A link is removed itself,
-         *        never followed. When nothing else is left in the instance directory, the instance is destroyed
+         * @brief Removes @p path, content of the instance @p instanceId that the user decided not to keep. End its
+         *        watch first, or the removal is reported as a change. A link is removed itself, never followed. When nothing else is left in the instance directory, the instance is destroyed
          *        and, unlike destroyInstance(), its directory is removed as well (bookkeeping included, after its
          *        lock is released), so no orphan stays behind.
          *
@@ -169,6 +132,24 @@ namespace FileTracking
          */
         std::expected<DiscardOutcome, std::string>
         discardContent(std::string const& instanceId, std::filesystem::path const& path);
+
+        /**
+         * @brief Ends the instance @p instanceId and removes its directory with everything in it, for an instance
+         *        whose content is of no use, like the remains of a failed download. Nothing happens when there is none.
+         */
+        void removeInstance(std::string const& instanceId);
+
+        /**
+         * @brief How many instance directories below the root no live process holds.
+         */
+        std::size_t countOrphaned() const;
+
+        /**
+         * @brief Removes every instance directory below the root that no live process holds, regardless of the
+         *        retention period.
+         * @return How many were removed.
+         */
+        int removeOrphaned();
 
         /**
          * @brief Look up an instance by ID.
@@ -199,10 +180,9 @@ namespace FileTracking
         void manualCleanup();
 
       private:
+        boost::asio::strand<boost::asio::any_io_executor> strand_;
         std::filesystem::path tempRootDir_;
         std::chrono::hours deadInstanceRetentionHours_;
-        Nui::Window* wnd_;
         std::map<std::string, std::unique_ptr<TemporaryDirectoryInstance>> instances_;
-        std::map<std::string, std::vector<InstanceWatch>> watches_;
     };
 }

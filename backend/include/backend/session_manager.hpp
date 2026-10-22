@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/session.hpp>
+#include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/password/password_provider.hpp>
 #include <backend/password/password_request.hpp>
@@ -16,6 +17,7 @@
 #include <boost/asio/strand.hpp>
 
 #include <atomic>
+#include <filesystem>
 #include <memory>
 #include <map>
 #include <functional>
@@ -45,6 +47,12 @@ class SessionManager
      * @brief Whether the sessions refuse local deletes, as the local filesystem options say. Refused until set.
      */
     void preventLocalDeletion(bool prevent);
+
+    /**
+     * @brief Starts file tracking on the strand of the sessions: the instances of temporary downloads below
+     *        @p temporaryDownloadsDirectory. Call once, before the first session.
+     */
+    void startFileTracking(std::filesystem::path const& temporaryDownloadsDirectory);
 
     void addPasswordProvider(int priority, PasswordProvider* provider);
     void joinSessionAdder();
@@ -105,6 +113,12 @@ class SessionManager
     void registerRpcDiscardBulkResume();
 
     /**
+     * @brief Handles "FileTracking::countOrphaned" with {count} and "FileTracking::forceCleanup" with {removed}: the
+     *        instance directories no live process holds, which the latter removes.
+     */
+    void registerRpcOrphanedInstances();
+
+    /**
      * @brief Makes a new request the pending one, so that shutdown() can cancel it.
      *
      * @return The request, or nullptr once prompts are cancelled.
@@ -119,6 +133,7 @@ class SessionManager
   private:
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
+    std::unique_ptr<FileTracking::TempDirInstanceManager> temporaryInstances_{};
     std::unordered_map<Ids::SessionId, std::shared_ptr<Session>, Ids::IdHash> sessions_{};
     /** @brief Read by the local operation queue on each local delete the explorer asks for. */
     std::shared_ptr<std::atomic_bool> localDeletionPrevented_{std::make_shared<std::atomic_bool>(true)};

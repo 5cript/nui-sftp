@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 
 extern std::filesystem::path temporaryRoot;
@@ -173,24 +174,41 @@ namespace Test
         writeText(instanceDirectory_ / "tree" / "inner.txt", "12345");
 
         const auto states = FileTracking::InstanceManagerDetail::fileStatesOf(instanceDirectory_);
-        ASSERT_TRUE(states.is_array());
-        const auto find = [&states](std::filesystem::path const& path) -> nlohmann::json
+        const auto find = [&states](std::filesystem::path const& path) -> std::optional<FileTracking::FileState>
         {
-            const auto wanted = Paths::nativeToUtf8(std::filesystem::weakly_canonical(path));
-            const auto found = std::ranges::find_if(
-                states,
-                [&wanted](nlohmann::json const& state)
-                {
-                    return state["path"] == wanted;
-                }
-            );
-            return found == states.end() ? nlohmann::json{} : *found;
+            const auto found =
+                std::ranges::find(states, std::filesystem::weakly_canonical(path), &FileTracking::FileState::path);
+            return found == states.end() ? std::nullopt : std::optional{*found};
         };
         EXPECT_EQ(states.size(), 3u);
-        EXPECT_EQ(find(instanceDirectory_ / "metadata.json")["size"], 7);
-        EXPECT_EQ(find(instanceDirectory_ / "tree" / "inner.txt")["size"], 5);
-        EXPECT_TRUE(find(instanceDirectory_ / "tree" / "inner.txt").contains("mtime"));
-        EXPECT_EQ(find(instanceDirectory_ / "tree")["directory"], true);
-        EXPECT_TRUE(find(FileTracking::bookkeepingPaths(instanceDirectory_).metadata).is_null());
+        EXPECT_EQ(find(instanceDirectory_ / "metadata.json").value_or(FileTracking::FileState{}).size, 7u);
+        const auto inner = find(instanceDirectory_ / "tree" / "inner.txt");
+        ASSERT_TRUE(inner.has_value());
+        EXPECT_EQ(inner->size, 5u);
+        EXPECT_GT(inner->mtime, 0u);
+        EXPECT_TRUE(find(instanceDirectory_ / "tree").value_or(FileTracking::FileState{}).isDirectory);
+        EXPECT_FALSE(find(FileTracking::bookkeepingPaths(instanceDirectory_).metadata).has_value());
+    }
+
+    TEST_F(InstanceBookkeepingTest, FileStatesBelowAPathListOnlyThatPathAndItsContent)
+    {
+        ASSERT_TRUE(FileTracking::createBookkeepingDirectory(instanceDirectory_).has_value());
+        writeText(instanceDirectory_ / "metadata.json", "tracked");
+        writeText(instanceDirectory_ / "tree" / "inner.txt", "12345");
+        const auto canonical = [](std::filesystem::path const& path)
+        {
+            return std::filesystem::weakly_canonical(path);
+        };
+
+        const auto tree =
+            FileTracking::InstanceManagerDetail::fileStatesOf(instanceDirectory_, instanceDirectory_ / "tree");
+
+        ASSERT_EQ(tree.size(), 2u);
+        EXPECT_EQ(tree[0].path, canonical(instanceDirectory_ / "tree"));
+        EXPECT_EQ(tree[1].path, canonical(instanceDirectory_ / "tree" / "inner.txt"));
+        const auto bookkeeping = FileTracking::bookkeepingPaths(instanceDirectory_).metadata;
+        EXPECT_TRUE(FileTracking::InstanceManagerDetail::fileStatesOf(instanceDirectory_, bookkeeping).empty());
+        const auto outside = instanceDirectory_.parent_path();
+        EXPECT_TRUE(FileTracking::InstanceManagerDetail::fileStatesOf(instanceDirectory_, outside).empty());
     }
 }

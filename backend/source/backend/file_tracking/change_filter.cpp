@@ -47,6 +47,17 @@ namespace FileTracking
         return isSafeSaveTemporary(name);
     }
 
+    bool isTransientChange(
+        std::string const& filename,
+        std::string const& oldFilename,
+        std::string const& downloadTempSuffix
+    )
+    {
+        // A real file renamed onto a temporary name is how an editor moves the original aside.
+        return isTransientFile(filename, downloadTempSuffix) &&
+            (oldFilename.empty() || isTransientFile(oldFilename, downloadTempSuffix));
+    }
+
     std::optional<FileChange>
     filterFileChange(FileChange change, bool isDirectory, std::string const& downloadTempSuffix)
     {

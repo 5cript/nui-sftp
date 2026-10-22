@@ -3,6 +3,7 @@
 #include <backend/file_tracking/file_action.hpp>
 #include <backend/file_tracking/instance_lock.hpp>
 #include <backend/file_tracking/instance_watch.hpp>
+#include <backend/file_tracking/reported_change.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <boost/asio/strand.hpp>
@@ -12,12 +13,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-
-namespace Nui
-{
-    class Window;
-    class RpcHub;
-}
 
 namespace FileTracking
 {
@@ -34,21 +29,10 @@ namespace FileTracking
      * by TempDirInstanceManager) can reclaim the space after the configured
      * retention period.
      *
-     * File-change events inside the instance directory are forwarded to the frontend
-     * via @c Nui::RpcHub under the event name
-     * @c "FileTracking::<instanceId>::onFileChanged" with a JSON payload:
-     * @code
-     * {
-     *   "action":      "Added" | "Modified" | "Deleted" | "Moved",
-     *   "directory":   "/abs/path/to/dir/",
-     *   "filename":    "changed-file.txt",
-     *   "oldFilename": "previous-name.txt",  // only populated for Moved
-     *   "isDirectory": false                 // the changed path is a directory now
-     * }
-     * @endcode
+     * File-change events inside the instance directory go to the sink of its first watch, see addWatch().
      *
      * The class is non-copyable and non-movable because it owns OS-level resources
-     * (lock file descriptor, efsw watcher thread).
+     * (lock file descriptor, its directory watches).
      */
     class TemporaryDirectoryInstance
     {
@@ -67,23 +51,16 @@ namespace FileTracking
          *        and write the initial metadata.
          *
          * @param config   Directory root configuration.
-         * @param strand   Strand used to serialise RPC event dispatch from the efsw
-         *                 callback thread.
-         * @param wnd      Nui window (reserved for future use).
-         * @param hub      RPC hub used to push file-change events to the frontend.
+         * @param strand   Strand the changes of the watched directories are handled
+         *                 and reported on.
          *
          * @throws std::runtime_error if the instance directory cannot be created or
          *         the lock file cannot be acquired.
          */
-        TemporaryDirectoryInstance(
-            Config config,
-            boost::asio::strand<boost::asio::any_io_executor> strand,
-            Nui::Window& wnd,
-            Nui::RpcHub& hub
-        );
+        TemporaryDirectoryInstance(Config config, boost::asio::strand<boost::asio::any_io_executor> strand);
 
         /**
-         * @brief Stops the efsw watcher and writes the death timestamp to the
+         * @brief Stops reporting changes and writes the death timestamp to the
          *        metadata file, but does **not** delete the instance directory.
          */
         ~TemporaryDirectoryInstance();
@@ -104,24 +81,26 @@ namespace FileTracking
         std::filesystem::path instanceDir() const;
 
         /**
-         * @brief Register an efsw watch and return a move-only RAII handle.
+         * @brief Watch a directory and return a move-only RAII handle.
          *
          * The watch is removed automatically when the returned InstanceWatch is
-         * destroyed or release() is called on it.  The efsw watcher is (re)started
-         * after a successful watch is added.
+         * destroyed or release() is called on it.
          *
          * @param path      Absolute path or path relative to instanceDir().  Must
          *                  resolve to a location inside instanceDir().
          * @param recursive Whether to recurse into subdirectories.
          * @param downloadTempSuffix The suffix downloads into the instance write under until complete, those
          *                  files and their final rename are not mirrored to the remote side.
+         * @param sink      Receives the changes. The first watch decides the suffix and the sink, later ones share
+         *                  its event stream.
          * @return A valid InstanceWatch on success, or std::nullopt if the path is
          *         outside instanceDir(), does not exist, or efsw rejected the watch.
          */
         std::optional<InstanceWatch> addWatch(
             std::filesystem::path const& path,
             bool recursive = true,
-            std::string downloadTempSuffix = std::string{Persistence::defaultTempFileSuffix}
+            std::string downloadTempSuffix = std::string{Persistence::defaultTempFileSuffix},
+            ChangeSink sink = [](ReportedChange const&) {}
         );
 
         /**
