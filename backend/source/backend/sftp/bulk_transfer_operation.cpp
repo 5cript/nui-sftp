@@ -298,8 +298,15 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         auto result = slot.child->workInStrand();
         if (result.has_value())
         {
-            if (result.value() == WorkStatus::Complete)
-                finishSlot(slot, true);
+            if (result.value() != WorkStatus::Complete)
+                continue;
+            // A source that may vanish and was gone ends cancelled: no error, but its owner hears it did not go.
+            const bool transferred = slot.child->state() != OperationState::Canceled;
+            if (!transferred)
+                indexedFailures_.push_back(
+                    {.index = static_cast<std::uint32_t>(slot.entryIndex), .type = ErrorType::FileNotFound}
+                );
+            finishSlot(slot, transferred);
             continue;
         }
 

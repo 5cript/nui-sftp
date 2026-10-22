@@ -49,7 +49,8 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
             status && !status->has_value())
         {
             Log::info("BulkUploadOperation: '{}' is gone, nothing to upload.", common().localPath.toUtf8());
-            enterState(OperationState::Completed);
+            // Ends without a transfer, so its owner does not take the destination for uploaded.
+            enterState(OperationState::Canceled);
             return WorkStatus::Complete;
         }
     }

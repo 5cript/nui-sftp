@@ -137,6 +137,11 @@ namespace FileTracking
             bool refreshListing{false};
             /** @brief Its place in the server order once it started, see ServerOperationOrder. */
             std::optional<ServerOperationOrder::Ticket> ticket{};
+            /**
+             * @brief The destination of a stopped upload of the same file under its old name, whose partial file this
+             *        one continues, see UploadRequest::continuesPartialOf.
+             */
+            std::optional<Paths::RemotePath> continuesPartialOf{};
         };
 
         /**
@@ -1122,7 +1127,12 @@ namespace FileTracking
                 return;
             }
             if (entry.pendingUploads.removeRemoteWhenDone(path))
+            {
+                // A deletion reported after the path came back (Windows holds deletions back) stops nothing.
+                if (isGoneLocally(path))
+                    stopUpload(entry, path, PartialFile::Discarded);
                 return;
+            }
             if (!entry.serverContent.has(path))
             {
                 // The upload of a directory above may have sent it before it went, it is looked at once that ended.
@@ -1247,7 +1257,10 @@ namespace FileTracking
                 newPath.toUtf8()
             );
             const auto oldPath = entry.localPath;
-            // An upload of the item that is on its way writes the old name, its server copy follows once it ended.
+            // An upload of the item that is on its way writes the old name: it stops and goes on under the new one,
+            // or its server copy follows once it ended.
+            if (mirrorsMoves)
+                stopUpload(entry, oldPath, PartialFile::Kept);
             const bool deferred = entry.pendingUploads.moveWhenDone(oldPath, newPath);
             // Without mirrored moves the server copy keeps its name, the new local name stands for it.
             if (!mirrorsMoves)
@@ -1274,10 +1287,11 @@ namespace FileTracking
                 return;
             }
 
-            const auto meaning = meaningOfMove(entry.serverContent.has(change.path), entry.serverContent.has(oldPath));
-            if (meaning == MoveMeaning::Rename)
+            if (meaningOfMoveIn(entry, oldPath, change.path) == MoveMeaning::Rename)
             {
-                // An upload of the source on its way writes the old name, its server copy follows once it ended.
+                // An upload of the source on its way writes the old name: a file stops and goes on under the new one,
+                // or the server copy follows once the upload ended.
+                stopUpload(entry, oldPath, PartialFile::Kept);
                 if (entry.pendingUploads.moveWhenDone(oldPath, change.path))
                     return;
                 const bool renamed = renameRemote(entry, oldPath, change.path, *oldRemotePath, *newRemotePath);
@@ -1286,10 +1300,51 @@ namespace FileTracking
             }
 
             Log::info("FileTracking: '{}' replaced '{}', uploading it.", oldPath.toUtf8(), change.path.toUtf8());
-            if (entry.options.moveRemoteOnLocalMove && !entry.pendingUploads.removeRemoteWhenDone(oldPath) &&
-                entry.serverContent.has(oldPath) && !entry.serverContent.hasBelow(oldPath))
-                removeRemote(entry, oldPath, *oldRemotePath);
+            if (entry.options.moveRemoteOnLocalMove)
+            {
+                if (entry.pendingUploads.removeRemoteWhenDone(oldPath))
+                    stopUpload(entry, oldPath, PartialFile::Discarded);
+                else if (entry.serverContent.has(oldPath) && !entry.serverContent.hasBelow(oldPath))
+                    removeRemote(entry, oldPath, *oldRemotePath);
+            }
             onContentChanged(entry, change);
+        }
+
+        /**
+         * @brief What the move of @p oldPath to @p newPath in @p entry does on the server. With mirrored moves an
+         *        upload on its way counts as the server copy it brings, and a move into a directory whose upload is on
+         *        its way replaces what that upload brings there.
+         */
+        static MoveMeaning
+        meaningOfMoveIn(Entry const& entry, Paths::LocalPath const& oldPath, Paths::LocalPath const& newPath)
+        {
+            auto const& known = entry.serverContent;
+            auto const& pending = entry.pendingUploads;
+            if (!entry.options.moveRemoteOnLocalMove)
+                return meaningOfMove(known.has(newPath), known.has(oldPath));
+            return meaningOfMove(
+                known.has(newPath) || pending.covers(newPath), known.has(oldPath) || pending.isPending(oldPath)
+            );
+        }
+
+        /**
+         * @brief Stops the upload of the file at @p path that is on its way, once the remote got it: its partial file
+         *        stays for the upload under the new name, see finishMovedUpload(), or goes, see @p partial. Its end
+         *        follows as usual.
+         */
+        void stopUpload(Entry& entry, Paths::LocalPath const& path, PartialFile partial)
+        {
+            const auto destination = entry.pendingUploads.sentFileTo(path);
+            if (!destination)
+                return;
+            Log::info(
+                "FileTracking: stopping the upload of '{}', it was {}.",
+                path.toUtf8(),
+                partial == PartialFile::Kept ? "renamed" : "deleted"
+            );
+            if (partial == PartialFile::Kept)
+                entry.pendingUploads.keepsPartial(path);
+            remote->cancelUpload(*destination, partial);
         }
 
         /**
@@ -1309,7 +1364,7 @@ namespace FileTracking
                 return false;
             inOrder(
                 {oldRemotePath, newRemotePath},
-                [this, watchId = entry.watchId, oldRemotePath, newRemotePath, ended = remoteChangeOf(entry)](
+                [this, watchId = entry.watchId, oldRemotePath, newRemotePath, ended = renameEndOf(entry, newPath)](
                     ServerOperationOrder::Ticket ticket
                 )
                 {
@@ -1328,6 +1383,38 @@ namespace FileTracking
             );
             entry.serverContent.move(oldPath, newPath);
             return true;
+        }
+
+        /**
+         * @brief Hears when the rename of a server copy for @p newPath ended, see remoteChangeOf(). One that failed
+         *        left the copy where it was: what is at @p newPath now goes there, compared with the server first.
+         */
+        TrackerRemote::OnEnded renameEndOf(Entry& entry, Paths::LocalPath newPath)
+        {
+            return [weak = weak_from_this(),
+                       watchId = entry.watchId,
+                       newPath = std::move(newPath),
+                       ended = remoteChangeOf(entry)](SharedData::OperationCompletionReason reason)
+            {
+                ended(reason);
+                if (reason == SharedData::OperationCompletionReason::Completed)
+                    return;
+                if (const auto self = weak.lock())
+                    self->onRenameFailed(watchId, newPath);
+            };
+        }
+
+        void onRenameFailed(Ids::WatchId const& watchId, Paths::LocalPath const& newPath)
+        {
+            auto* entry = find(watchId);
+            if (!entry)
+                return;
+            Log::warn("FileTracking: the server's copy was not renamed to '{}', uploading it there", newPath.toUtf8());
+            entry->serverContent.forget(newPath);
+            const auto status = localStatusOf(newPath);
+            if (!status || !*status)
+                return;
+            onContentChanged(*entry, {.path = newPath, .isDirectory = std::filesystem::is_directory(**status)});
         }
 
         /**
@@ -1469,7 +1556,7 @@ namespace FileTracking
                 Log::debug(
                     "FileTracking: the server has '{}' as it is, not uploading it.", upload.change.path.toUtf8()
                 );
-                return;
+                return discardPartial(upload.continuesPartialOf);
             }
             if (upload.change.isDirectory && !entry->pendingUploads.covers(upload.change.path) &&
                 entry->serverContent.hasDirectory(upload.change.path))
@@ -1477,12 +1564,15 @@ namespace FileTracking
             const bool starts = entry->pendingUploads.start(upload.change);
             progressChanged();
             if (!starts)
-                return;
+                return discardPartial(upload.continuesPartialOf);
             showUploading(*entry);
             upload.ticket.reset();
-            auto destination = upload.destination;
+            // A continued upload takes the partial file of the old name, after the stopped upload ended.
+            std::vector<Paths::RemotePath> paths{upload.destination};
+            if (upload.continuesPartialOf)
+                paths.push_back(*upload.continuesPartialOf);
             inOrder(
-                {std::move(destination)},
+                std::move(paths),
                 [this, upload = std::move(upload)](ServerOperationOrder::Ticket ticket) mutable
                 {
                     upload.ticket = ticket;
@@ -1712,6 +1802,7 @@ namespace FileTracking
             entry->pendingUploads.changesHandled(upload.change.path);
             if (upload.change.isDirectory)
                 entry->pendingUploads.carries(upload.change.path, entryCountOf(upload.change.path.native()));
+            entry->pendingUploads.sent(upload.change.path, upload.destination, upload.change.isDirectory);
             const auto queued = remote->upload(
                 UploadRequest{
                     .source = upload.change.path,
@@ -1720,6 +1811,7 @@ namespace FileTracking
                     // Below the item a directory renamed without mirroring has no server counterpart yet.
                     .createMissingDirectories = upload.change.path != entry->localPath,
                     .expectedDestination = std::move(expected),
+                    .continuesPartialOf = upload.continuesPartialOf,
                 },
                 [weak = weak_from_this(), upload](UploadEnd const& ended)
                 {
@@ -1750,7 +1842,12 @@ namespace FileTracking
                 return enqueueUpload(upload);
             }
             if (ended.reason != SharedData::OperationCompletionReason::Completed || !entry)
+            {
+                // Nobody continues the partial file of a watch that ended meanwhile.
+                if (!entry && !upload.change.isDirectory)
+                    discardPartial(upload.destination);
                 return finishUpload(upload, UploadOutcome::NotUploaded);
+            }
             // Uploads carry the local modification time, so the local states are what the server has now. A link
             // to a directory reports itself as one, the walk of its states would follow it.
             std::optional<std::size_t> carried{};
@@ -1838,12 +1935,16 @@ namespace FileTracking
             const auto serverDestination = finished.serverCopyAt
                 ? remotePathOf(entry, serverPath).value_or(upload.destination)
                 : upload.destination;
+            const auto keptPartial = keptPartialOf(upload, outcome, finished);
             if (finished.removeRemote)
             {
                 // Deleted while it was on its way but there again by now, the way git flips a path: it goes once
-                // more instead and the server copy stays.
-                if (!isThereAgain(entry, serverPath))
+                // more instead and the server copy stays. So does one whose stopped upload left nothing.
+                const bool backUnsent = outcome != UploadOutcome::Uploaded &&
+                    !isGoneLocally(finished.movedTo.value_or(upload.change.path));
+                if (!isThereAgain(entry, serverPath) && !backUnsent)
                 {
+                    discardPartial(keptPartial);
                     // Everything below a directory went along.
                     if (entry.serverContent.has(serverPath))
                         removeKnownTree(entry, serverPath);
@@ -1854,7 +1955,7 @@ namespace FileTracking
                 finished.changedAgain = true;
             }
             if (finished.movedTo)
-                return finishMovedUpload(entry, upload, outcome, finished, serverPath, serverDestination);
+                return finishMovedUpload(entry, upload, outcome, finished, serverPath, serverDestination, keptPartial);
             if (finished.changedAgain)
             {
                 // Back as the other kind, a directory where a file was or the other way round: the server's copy is
@@ -1863,10 +1964,52 @@ namespace FileTracking
                     removeKnownTree(entry, serverPath);
                 auto again = upload;
                 again.change.isDirectory = finished.isDirectory;
+                again.continuesPartialOf.reset();
                 queueUpload(std::move(again));
             }
+            discardPartial(keptPartial);
             for (auto const& change : finished.changedBelow)
                 onContentChanged(entry, change, /*checkServer=*/false);
+        }
+
+        /**
+         * @brief The partial file on the server that the path of @p upload left and no upload continues yet: the one
+         *        a stopped upload kept, or the one @p upload was to continue but never got to. Nothing once it was
+         *        uploaded.
+         */
+        static std::optional<Paths::RemotePath>
+        keptPartialOf(Upload const& upload, UploadOutcome outcome, PendingUploads::Finished const& finished)
+        {
+            if (outcome == UploadOutcome::Uploaded || upload.change.isDirectory)
+                return std::nullopt;
+            if (finished.sentTo)
+                return finished.partialKept ? finished.sentTo : std::nullopt;
+            return upload.continuesPartialOf;
+        }
+
+        /**
+         * @brief The partial file a stopped upload to @p destination kept goes, no upload continues it. It goes in the
+         *        server order, so it never meets the partial file of a later upload of that path.
+         */
+        void discardPartial(std::optional<Paths::RemotePath> const& destination)
+        {
+            if (!destination)
+                return;
+            inOrder(
+                {*destination},
+                [this, destination = *destination](ServerOperationOrder::Ticket ticket)
+                {
+                    const auto queued = remote->discardPartialUpload(destination, leavesOrderWhenEnded(ticket));
+                    if (queued)
+                        return;
+                    Log::warn(
+                        "FileTracking: cannot remove the partial upload of '{}': {}",
+                        destination.value(),
+                        queued.error()
+                    );
+                    leaveOrder(ticket);
+                }
+            );
         }
 
         /**
@@ -1880,7 +2023,8 @@ namespace FileTracking
             UploadOutcome outcome,
             PendingUploads::Finished const& finished,
             Paths::LocalPath const& serverPath,
-            Paths::RemotePath const& serverDestination
+            Paths::RemotePath const& serverDestination,
+            std::optional<Paths::RemotePath> const& keptPartial
         )
         {
             auto const& movedTo = *finished.movedTo;
@@ -1893,7 +2037,7 @@ namespace FileTracking
                     entry.watchId.value(),
                     destination.error().toString()
                 );
-                return;
+                return discardPartial(keptPartial);
             }
             // The server copy moved along with a directory above, or the server renames it now.
             const bool inPlace = serverPath == movedTo;
@@ -1901,14 +2045,21 @@ namespace FileTracking
                 ((outcome == UploadOutcome::Uploaded || entry.serverContent.has(serverPath)) &&
                  renameRemote(entry, serverPath, movedTo, serverDestination, *destination));
             const LocalChange moved{.path = movedTo, .isDirectory = upload.change.isDirectory};
-            // The upload read the old path, which may have been gone by then. A declined one waits for the next change.
-            if (outcome == UploadOutcome::NotUploaded || finished.changedAgain)
+            // The upload read the old path, which may have been gone by then, or it was stopped and goes on under the
+            // new name. A declined one waits for the next change.
+            const bool goesAgain = outcome == UploadOutcome::NotUploaded || finished.changedAgain;
+            // A file changed since it was stopped goes anew: the resume compares only the end of the part sent.
+            const auto continued = goesAgain && !finished.changedAgain ? keptPartial : std::nullopt;
+            if (!continued)
+                discardPartial(keptPartial);
+            if (goesAgain)
                 return queueUpload(Upload{
                     .watchId = entry.watchId,
                     .change = moved,
                     .destination = *destination,
                     .checkServer =
                         outcome == UploadOutcome::Declined || (!renamed && outcome != UploadOutcome::Uploaded),
+                    .continuesPartialOf = continued,
                 });
             // The states taken after the upload are those of the old path, the local ones are the server's now.
             if (renamed && outcome == UploadOutcome::Uploaded && (moved.isDirectory || inPlace))

@@ -39,6 +39,16 @@ class UploadOperation : public Operation
      */
     using OnSent = std::function<void(Paths::LocalPath const& source, std::optional<SentSource> const& unchanged)>;
 
+    /**
+     * @brief What a cancelled upload does with the temporary file it wrote to.
+     */
+    enum class PartialFile
+    {
+        /** @brief It stays, a later upload of the same source continues it. */
+        Kept,
+        Discarded,
+    };
+
     struct UploadOperationOptions
     {
         std::function<void(
@@ -80,6 +90,11 @@ class UploadOperation : public Operation
          * @brief Hears of a regular file the upload wrote to the server, see OnSent. A link is not told.
          */
         OnSent onSent{};
+        /**
+         * @brief The destination of a cancelled upload of the same source under its old name: its temporary file
+         *        becomes this upload's before it is continued, see tryContinue. Unless this upload has one already.
+         */
+        std::optional<Paths::RemotePath> adoptPartialOf{};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -132,6 +147,12 @@ class UploadOperation : public Operation
 
     std::expected<void, UploadOperation::Error> cancel(bool adoptCancelState) override;
 
+    /**
+     * @brief What a later cancel(true) does with the temporary file this upload wrote to, kept unless told otherwise.
+     *        A temporary file it did not open itself always stays.
+     */
+    void partialFileOnCancel(PartialFile partial);
+
     void pause(bool doPause) override;
 
     std::expected<void, Error> prepare();
@@ -160,6 +181,12 @@ class UploadOperation : public Operation
     bool sourceIsGone() const;
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
+
+    /**
+     * @brief Moves the temporary file of UploadOperationOptions::adoptPartialOf to tempPath_ when this upload has none
+     *        there. A failure leaves the upload to start anew.
+     */
+    void takeOverPartialFileInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
     std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
@@ -202,6 +229,12 @@ class UploadOperation : public Operation
 
     void cleanup();
 
+    /**
+     * @brief Removes the temporary file this upload wrote to, on the strand of the transfer. A failure is only
+     *        logged.
+     */
+    void removeTemporaryFile();
+
   private:
     std::weak_ptr<SecureShell::SftpSession> sftp_;
     std::weak_ptr<SecureShell::IFileStream> fileStream_;
@@ -219,6 +252,9 @@ class UploadOperation : public Operation
     std::optional<SentSource> sourceBeforeOpening_{};
     /** @brief The upload continued a temp file an earlier one left, whose content is not known to be the source's. */
     bool continued_{false};
+    /** @brief The upload opened tempPath_ to write to it, created anew or continued. */
+    bool openedTemporaryFile_{false};
+    PartialFile partialFileOnCancel_{PartialFile::Kept};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
     SecureShell::BufferLease buffer_;

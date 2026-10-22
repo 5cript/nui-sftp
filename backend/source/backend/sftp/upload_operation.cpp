@@ -12,9 +12,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <system_error>
 #include <tuple>
+#include <utility>
 
 namespace
 {
@@ -103,7 +105,8 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             if (options_.sourceMayVanish && sourceIsGone())
             {
                 Log::info("UploadOperation: '{}' is gone, nothing to upload.", options_.localPath.toUtf8());
-                state_ = Completed;
+                // Ends without a transfer, so its owner does not take the destination for uploaded.
+                state_ = Canceled;
                 options_.progressCallback(1, 1, 1, 0);
                 return WorkStatus::Complete;
             }
@@ -114,7 +117,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 const auto prepareResult = prepareInStrand(*sftp);
                 if (!prepareResult.has_value())
                 {
-                    Log::error("UploadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
+                    Log::log(
+                        failureLevelOf(prepareResult.error()),
+                        "UploadOperation: Failed to prepare operation: {}",
+                        prepareResult.error().toString()
+                    );
                     return enterErrorState<WorkStatus>(prepareResult.error());
                 }
             }
@@ -448,6 +455,13 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         }
     }
 
+    // Checked before anything is sent too, not only before the destination is replaced.
+    if (const auto unchanged =
+            ComparedStateCheck::requireUnchangedRemoteInStrand(sftp, remotePath_, options_.comparedDestination);
+        !unchanged)
+        return std::unexpected(unchanged.error());
+    if (options_.adoptPartialOf)
+        takeOverPartialFileInStrand(sftp);
     const auto tempResult = sftp.lstatInStrand(tempPath_);
 
     // Permissions of what is uploaded: the target of a followed symlink, not the link.
@@ -480,6 +494,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
             }
             fileStream_ = openResult.value();
+            openedTemporaryFile_ = true;
 
             auto stream = fileStream_.lock();
             if (!stream)
@@ -524,8 +539,23 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     }
 
     fileStream_ = openResult.value();
+    openedTemporaryFile_ = true;
 
     return {};
+}
+
+void UploadOperation::takeOverPartialFileInStrand(SecureShell::SftpSession& sftp)
+{
+    const auto partial = options_.adoptPartialOf->withFilenameSuffix(options_.tempFileSuffix);
+    if (!partial || *partial == tempPath_ || sftp.lstatInStrand(tempPath_).has_value())
+        return;
+    if (options_.createMissingDirectories)
+    {
+        if (const auto created = ensureRemoteDirectoryExistsInStrand(sftp, *tempPath_.parent()); !created)
+            return;
+    }
+    if (const auto renamed = sftp.renameNoReplaceInStrand(*partial, tempPath_); renamed.has_value())
+        Log::info("UploadOperation: continuing '{}' as '{}'.", partial->value(), tempPath_.value());
 }
 
 bool UploadOperation::tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize)
@@ -755,7 +785,34 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
     }
 
     cleanup();
+    const bool openedTemporaryFile = std::exchange(openedTemporaryFile_, false);
+    if (adoptCancelState && partialFileOnCancel_ == PartialFile::Discarded && openedTemporaryFile)
+        removeTemporaryFile();
     return {};
+}
+
+void UploadOperation::partialFileOnCancel(PartialFile partial)
+{
+    partialFileOnCancel_ = partial;
+}
+
+void UploadOperation::removeTemporaryFile()
+{
+    const auto remove = [weak = sftp_, temporary = tempPath_]()
+    {
+        const auto sftp = openSession(weak);
+        if (!sftp)
+            return;
+        if (const auto removed = sftp->removeFileInStrand(temporary); !removed.has_value())
+            Log::warn("UploadOperation: Cannot remove '{}': {}", temporary.value(), removed.error().message);
+    };
+    auto* transferStrand = strand();
+    if (!transferStrand)
+        return;
+    if (transferStrand->withinProcessingThread())
+        return remove();
+    if (transferStrand->pushPromiseTask(remove).wait_for(options_.futureTimeout) != std::future_status::ready)
+        Log::warn("UploadOperation: Removing '{}' timed out.", tempPath_.value());
 }
 
 void UploadOperation::cleanup()
@@ -873,8 +930,10 @@ void UploadOperation::reportSent() const
 
 void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sftp)
 {
+    // As it was when the source was opened: renamed or deleted since, its path has none.
     std::error_code timeError{};
-    const auto localTime = std::filesystem::last_write_time(localNativePath_, timeError);
+    const auto localTime = sourceBeforeOpening_ ? sourceBeforeOpening_->modified
+                                                : std::filesystem::last_write_time(localNativePath_, timeError);
     if (timeError)
     {
         Log::warn(

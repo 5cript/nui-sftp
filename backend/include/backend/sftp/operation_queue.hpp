@@ -59,8 +59,37 @@ class OperationQueue
         int parallelism = 1
     );
 
+    /**
+     * @brief Cancels every queued operation, each completes as cancelled.
+     */
     void cancelAll();
+
+    /**
+     * @brief Drops every queued operation without completing any, for a session that goes: a reconnect may adopt
+     *        their backups, see dumpBulkResumes(), and the frontend keeps their cards until then.
+     */
+    void dropAll();
+
+    /**
+     * @brief Cancels the operation @p id, it completes as cancelled.
+     */
     void cancel(Ids::OperationId id);
+
+    /**
+     * @brief Cancels the upload @p id like cancel(), the temporary file it wrote to stays for a later upload or goes,
+     *        see @p partial.
+     */
+    void cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial);
+
+    /**
+     * @brief Removes the temporary file an upload to @p remotePath left on @p sftp, a cancelled one that kept it, and
+     *        calls @p onDone on the strand then. Nothing is removed when there is none.
+     */
+    void discardPartialUpload(
+        SecureShell::SftpSession& sftp,
+        Paths::RemotePath const& remotePath,
+        std::function<void()> onDone
+    );
 
     /**
      * @brief Move @p operationId within the regular `operations_` queue to
@@ -109,6 +138,9 @@ class OperationQueue
      *        UploadOperation::UploadOperationOptions::comparedDestination. A directory ignores it.
      * @param onSent Hears of each regular file sent unchanged, the files below a directory too, see
      *        UploadOperation::UploadOperationOptions::onSent.
+     * @param adoptPartialOf The destination of a cancelled upload of the file under its old name, whose temporary
+     *        file this one continues, see UploadOperation::UploadOperationOptions::adoptPartialOf. A directory
+     *        ignores it.
      */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -122,7 +154,8 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued,
         bool sourceMayVanish = false,
         std::optional<SharedData::ComparedState> comparedDestination = std::nullopt,
-        UploadOperation::OnSent onSent = {}
+        UploadOperation::OnSent onSent = {},
+        std::optional<Paths::RemotePath> adoptPartialOf = std::nullopt
     );
 
     /**
@@ -437,6 +470,16 @@ class OperationQueue
      * @brief Drops the scan @p id of a sync whose other scan failed, without telling its session again.
      */
     void cancelSiblingScan(Ids::OperationId const& id);
+
+    /**
+     * @brief Takes the operation @p id out of the queue it waits in, nothing when no queue has it.
+     */
+    std::unique_ptr<Operation> takeOperation(Ids::OperationId const& id);
+
+    /**
+     * @brief Cancels @p operation, already taken out of its queue, and completes it as cancelled.
+     */
+    void completeCancelled(Ids::OperationId const& id, Operation& operation);
 
     /**
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.

@@ -347,12 +347,34 @@ void OperationQueue::cancelAll()
             if (!self)
                 return;
 
+            // Taken out first: an owner hearing of its cancel may queue anew.
+            auto cancelled = std::exchange(self->priorityOperations_, {});
+            std::ranges::move(std::exchange(self->operations_, {}), std::back_inserter(cancelled));
+            auto waiting = std::exchange(self->syncScanCallbacks_, {});
+            for (auto& [id, callback] : waiting)
+                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
+            for (auto& [id, operation] : cancelled)
+                self->completeCancelled(id, *operation);
+            Log::info("All operations in the queue have been canceled.");
+        }
+    );
+}
+
+void OperationQueue::dropAll()
+{
+    within_strand_do(
+        [weak = weak_from_this()]()
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+
             self->operations_.clear();
             self->priorityOperations_.clear();
             auto waiting = std::exchange(self->syncScanCallbacks_, {});
             for (auto& [id, callback] : waiting)
                 callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
-            Log::info("All operations in the queue have been canceled.");
+            Log::info("All operations in the queue have been dropped.");
         }
     );
 }
@@ -366,20 +388,85 @@ void OperationQueue::cancel(Ids::OperationId id)
             if (!self)
                 return;
 
-            auto cancelPredicate = [id](auto& op)
-            {
-                bool isMatch = op.first == id;
-                if (isMatch)
-                    std::ignore = op.second->cancel(true);
-                return isMatch;
-            };
-
-            const auto erasedFromRegular = std::erase_if(self->operations_, cancelPredicate);
-            if (erasedFromRegular == 0)
-                std::erase_if(self->priorityOperations_, cancelPredicate);
+            const auto cancelled = self->takeOperation(id);
             self->failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
+            if (cancelled)
+                self->completeCancelled(id, *cancelled);
         }
     );
+}
+
+void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
+{
+    within_strand_do(
+        [weak = weak_from_this(), id = std::move(id), partial]()
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+
+            const auto cancelled = self->takeOperation(id);
+            if (!cancelled)
+                return;
+            if (cancelled->type() == SharedData::OperationType::Upload)
+                static_cast<UploadOperation&>(*cancelled).partialFileOnCancel(partial);
+            self->completeCancelled(id, *cancelled);
+        }
+    );
+}
+
+void OperationQueue::discardPartialUpload(
+    SecureShell::SftpSession& sftp,
+    Paths::RemotePath const& remotePath,
+    std::function<void()> onDone
+)
+{
+    const auto suffix = Persistence::effectiveTempFileSuffix(
+        sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
+    );
+    const auto partial = remotePath.withFilenameSuffix(suffix);
+    if (!partial)
+    {
+        boost::asio::post(*strand_, std::move(onDone));
+        return;
+    }
+    sftp.perform(
+        [weak = sftp.weak_from_this(), partial = *partial, strand = strand_, onDone = std::move(onDone)]()
+        {
+            if (const auto session = weak.lock())
+            {
+                if (const auto removed = session->removeFileInStrand(partial); removed.has_value())
+                    Log::info("OperationQueue: removed the partial upload '{}'.", partial.value());
+            }
+            boost::asio::post(*strand, onDone);
+        }
+    );
+}
+
+std::unique_ptr<Operation> OperationQueue::takeOperation(Ids::OperationId const& id)
+{
+    for (auto* queue : {&operations_, &priorityOperations_})
+    {
+        const auto found = std::ranges::find_if(
+            *queue,
+            [&id](auto const& queued)
+            {
+                return queued.first == id;
+            }
+        );
+        if (found == queue->end())
+            continue;
+        auto operation = std::move(found->second);
+        queue->erase(found);
+        return operation;
+    }
+    return nullptr;
+}
+
+void OperationQueue::completeCancelled(Ids::OperationId const& id, Operation& operation)
+{
+    std::ignore = operation.cancel(true);
+    completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Canceled, id, operation));
 }
 
 void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
@@ -740,13 +827,20 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         results = runBatch(std::nullopt);
     }
 
+    // Out of the queue before its owner hears of it, who may cancel or queue operations then.
+    const auto takeFinished = [&queue](std::size_t index)
+    {
+        auto finished = std::move(queue[index]);
+        queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(index));
+        return finished;
+    };
+
     bool moreWork = false;
     for (auto& item : results)
     {
-        auto& [id, operation] = queue[item.queueIndex];
-
         if (!item.result.has_value())
         {
+            const auto [id, operation] = takeFinished(item.queueIndex);
             failSyncScan(
                 id,
                 Utility::localizedMessage(
@@ -758,16 +852,19 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
             completeOperation(
                 makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, item.result.error())
             );
-            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
         }
 
         const auto workStatus = item.result.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
+            const auto [id, operation] = takeFinished(item.queueIndex);
             deliverSyncScan(id, *operation);
-            completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
-            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
+            // An upload whose source may vanish and was gone ends cancelled, nothing went.
+            const auto reason = operation->state() == SharedData::OperationState::Canceled
+                ? OperationQueue::CompletionReason::Canceled
+                : OperationQueue::CompletionReason::Completed;
+            completeOperation(makeCompletedOperation(reason, id, *operation));
             return true;
         }
         else if (workStatus == Operation::WorkStatus::MoreWork)
@@ -1485,7 +1582,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     SharedData::OperationMode mode,
     bool sourceMayVanish,
     std::optional<SharedData::ComparedState> comparedDestination,
-    UploadOperation::OnSent onSent
+    UploadOperation::OnSent onSent,
+    std::optional<Paths::RemotePath> adoptPartialOf
 )
 {
     // Assumed in strand
@@ -1528,6 +1626,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
         opts.onSent = std::move(onSent);
+        opts.adoptPartialOf = std::move(adoptPartialOf);
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
