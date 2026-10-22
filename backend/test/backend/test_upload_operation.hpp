@@ -5,6 +5,14 @@
 
 #include <nui/utility/scope_exit.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+#ifndef _WIN32
+#    include <unistd.h>
+#endif
+
 extern std::filesystem::path temporaryRoot;
 
 namespace Test
@@ -635,6 +643,70 @@ namespace Test
         auto workResult = operation.work();
         ASSERT_FALSE(workResult.has_value());
         EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::FileNotFound);
+    }
+
+    TEST_F(UploadOperationTests, AVanishedSourceThatMayVanishCompletesWithoutATransfer)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/vanished.txt"),
+                .localPath = toLocal(temporaryRoot / "vanished.txt"),
+                .sourceMayVanish = true,
+            }
+        };
+
+        const auto workResult = operation.work();
+        ASSERT_TRUE(workResult.has_value()) << workResult.error().toString();
+        EXPECT_EQ(*workResult, UploadOperation::WorkStatus::Complete);
+    }
+
+    TEST_F(UploadOperationTests, ASourceThatCannotBeCheckedFailsInsteadOfVanishing)
+    {
+#ifdef _WIN32
+        // Past MAX_PATH std::filesystem does not find a path that exists.
+        const std::wstring segment(60, L's');
+        const auto directory = temporaryRoot / "unreachable" / segment / segment / segment / segment;
+        const auto extended = [](std::filesystem::path const& path)
+        {
+            return std::filesystem::path{LR"(\\?\)" + path.lexically_normal().make_preferred().native()};
+        };
+        std::filesystem::create_directories(extended(directory));
+        std::ofstream{extended(directory / "source.txt")} << "content";
+        auto restore = Nui::ScopeExit{[&]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::remove_all(extended(temporaryRoot / "unreachable"), errorCode);
+        }};
+#else
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can look into any directory";
+        const auto directory = temporaryRoot / "unreachable";
+        std::filesystem::create_directories(directory);
+        std::ofstream{directory / "source.txt"} << "content";
+        std::filesystem::permissions(directory, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&directory]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(directory, std::filesystem::perms::owner_all, errorCode);
+            std::filesystem::remove_all(directory, errorCode);
+        }};
+#endif
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/source.txt"),
+                .localPath = toLocal(directory / "source.txt"),
+                .sourceMayVanish = true,
+            }
+        };
+
+        const auto workResult = operation.work();
+        EXPECT_FALSE(workResult.has_value()) << "a source that may still exist must never complete as gone";
     }
 
     TEST_F(UploadOperationTests, UploadLocalDirectoryFails)

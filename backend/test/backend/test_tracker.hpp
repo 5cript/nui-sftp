@@ -9,6 +9,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
+#include <nui/utility/scope_exit.hpp>
 
 #include <gtest/gtest.h>
 
@@ -23,7 +24,12 @@
 #include <ranges>
 #include <set>
 #include <string>
+#include <system_error>
 #include <vector>
+
+#ifndef _WIN32
+#    include <unistd.h>
+#endif
 
 extern std::filesystem::path temporaryRoot;
 
@@ -423,14 +429,18 @@ namespace Test
          */
         void serve(std::filesystem::path const& source, std::string const& destination)
         {
-            if (std::filesystem::is_symlink(source))
+            // An upload skips what it cannot read (past MAX_PATH or being deleted on Windows).
+            std::error_code statusError;
+            const auto status = std::filesystem::symlink_status(source, statusError);
+            if (std::filesystem::is_symlink(status))
                 remote_->server[destination] = FileTracking::ServerState{};
-            else if (std::filesystem::is_regular_file(source))
+            else if (std::filesystem::is_regular_file(status))
                 remote_->server[destination] = stateOf(source);
-            else if (std::filesystem::is_directory(source))
+            else if (std::filesystem::is_directory(status))
             {
                 remote_->server[destination] = FileTracking::ServerState{};
-                for (auto const& entry : std::filesystem::directory_iterator{source})
+                std::error_code listError;
+                for (auto const& entry : std::filesystem::directory_iterator{source, listError})
                     serve(entry.path(), destination + "/" + entry.path().filename().generic_string());
             }
         }
@@ -1899,4 +1909,88 @@ namespace Test
         EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
         EXPECT_FALSE(onlyEntry().uploading);
     }
+
+#ifdef _WIN32
+    TEST_F(TrackerTest, EntriesPastMaxPathAreNeitherUploadedNorDeletedOnTheServer)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+
+        // Without long path support std::filesystem does not find these, although they exist.
+        const std::wstring segment(48, L's');
+        auto deep = project;
+        for (int level = 0; level < 6; ++level)
+            deep /= segment;
+        const auto extended = [](std::filesystem::path const& path)
+        {
+            return std::filesystem::path{LR"(\\?\)" + path.lexically_normal().make_preferred().native()};
+        };
+        auto removeTree = Nui::ScopeExit{[&]() noexcept {
+            std::error_code removeError;
+            std::filesystem::remove_all(extended(project / segment), removeError);
+        }};
+        std::filesystem::create_directories(extended(deep));
+        std::ofstream{extended(deep / "long-file.txt")} << "long";
+        ASSERT_GE((deep / "long-file.txt").native().size(), std::size_t{MAX_PATH});
+        for (int round = 0; round < 10; ++round)
+        {
+            completeUploads();
+            runFor(std::chrono::milliseconds{200});
+        }
+
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_EQ(
+            std::ranges::count_if(
+                remote_->server,
+                [](auto const& entry)
+                {
+                    return entry.first.ends_with("/long-file.txt");
+                }
+            ),
+            0
+        );
+    }
+#else
+    TEST_F(TrackerTest, ADeletionThatCannotBeCheckedKeepsTheServerCopy)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can look into any directory";
+        const auto source = root_ / "local" / "project" / "src";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+
+        // Deleted, but its directory no longer lets anyone look: for the tracker it may as well still be there.
+        std::filesystem::remove(source / "main.cpp");
+        std::filesystem::permissions(source, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&source]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(source, std::filesystem::perms::owner_all, errorCode);
+        }};
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+    }
+
+    TEST_F(TrackerTest, AChangeThatCannotBeCheckedIsNotUploaded)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can look into any directory";
+        const auto source = root_ / "local" / "project" / "src";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+
+        write(source / "new.cpp", "new");
+        std::filesystem::permissions(source, std::filesystem::perms::none);
+        auto restore = Nui::ScopeExit{[&source]() noexcept {
+            std::error_code errorCode{};
+            std::filesystem::permissions(source, std::filesystem::perms::owner_all, errorCode);
+        }};
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_EQ(uploadsTo("/srv/project/src/new.cpp"), 0u);
+        EXPECT_TRUE(remote_->of("remove").empty());
+    }
+#endif
 }

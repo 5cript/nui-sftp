@@ -2,7 +2,9 @@
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/tracking_state.hpp>
+#include <utility/checked_symlink_status.hpp>
 #include <utility/enum_string_convert.hpp>
+#include <utility/error_message.hpp>
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
@@ -13,7 +15,10 @@
 #include <algorithm>
 #include <chrono>
 #include <deque>
+#include <expected>
+#include <filesystem>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <system_error>
@@ -145,26 +150,26 @@ namespace FileTracking
             Declined,
         };
 
-        std::optional<std::filesystem::file_status> localStatusOf(Paths::LocalPath const& path)
+        /**
+         * @brief What is at @p path itself: its status, nothing when it is gone, an error when that cannot be told.
+         *        Only a path that is gone counts as deleted, see Utility::checkedSymlinkStatus.
+         */
+        std::expected<std::optional<std::filesystem::file_status>, std::error_code>
+        localStatusOf(Paths::LocalPath const& path)
         {
-            std::error_code statusError;
-            const auto status = std::filesystem::symlink_status(path.native(), statusError);
-            if (statusError || !std::filesystem::exists(status))
-                return std::nullopt;
-            return status;
+            return Utility::checkedSymlinkStatus(path.native());
         }
 
         bool isGoneLocally(Paths::LocalPath const& path)
         {
-            std::error_code statusError;
-            return std::filesystem::symlink_status(path.native(), statusError).type() ==
-                std::filesystem::file_type::not_found;
+            const auto status = localStatusOf(path);
+            return status && !status->has_value();
         }
 
         bool isSymlink(Paths::LocalPath const& path)
         {
             const auto status = localStatusOf(path);
-            return status && std::filesystem::is_symlink(*status);
+            return status && *status && std::filesystem::is_symlink(**status);
         }
 
         /**
@@ -173,7 +178,7 @@ namespace FileTracking
         bool isDirectoryLocally(Paths::LocalPath const& path)
         {
             const auto status = localStatusOf(path);
-            return status && std::filesystem::is_directory(*status);
+            return status && *status && std::filesystem::is_directory(**status);
         }
 
         /**
@@ -1132,15 +1137,16 @@ namespace FileTracking
 
         /**
          * @brief Whether @p path, known on the server, is there again locally as the same kind, a directory or not.
+         *        A path that cannot be checked is not, removeRemote() keeps its server copy.
          */
         bool isThereAgain(Entry const& entry, Paths::LocalPath const& path) const
         {
             const auto status = localStatusOf(path);
-            if (!status)
+            if (!status || !*status)
                 return false;
             if (entry.serverContent.hasDirectory(path))
-                return std::filesystem::is_directory(*status);
-            return entry.serverContent.fileState(path) && !std::filesystem::is_directory(*status);
+                return std::filesystem::is_directory(**status);
+            return entry.serverContent.fileState(path) && !std::filesystem::is_directory(**status);
         }
 
         /**
@@ -1302,8 +1308,22 @@ namespace FileTracking
             return true;
         }
 
+        /**
+         * @brief Deletes the server copy of @p local, unless @p local cannot be checked: it may still exist.
+         */
         void removeRemote(Entry& entry, Paths::LocalPath const& local, Paths::RemotePath const& remotePath)
         {
+            if (const auto status = localStatusOf(local); !status)
+            {
+                Log::error(
+                    "FileTracking: not deleting '{}' for watch {}, '{}' cannot be checked: {}",
+                    remotePath.value(),
+                    entry.watchId.value(),
+                    local.toUtf8(),
+                    Utility::errorMessage(status.error())
+                );
+                return;
+            }
             Log::info(
                 "FileTracking: deleting '{}' for watch {}, it was deleted locally",
                 remotePath.value(),
@@ -1501,11 +1521,14 @@ namespace FileTracking
             // A path that moved away goes again at the new one, see enqueueUpload.
             if (entry && !entry->pendingUploads.movedAway(upload.change.path))
             {
-                if (isGoneLocally(upload.change.path))
+                const auto status = localStatusOf(upload.change.path);
+                if (!status)
+                    return onUncheckable(upload, status.error());
+                if (!*status)
                     return onGoneLocally(*entry, upload);
                 // Turned into the other kind while the change waited, or the server has the other kind there: it goes
                 // again as what it is now, after the server copy in the way (see followUpUpload).
-                const bool isDirectory = isDirectoryLocally(upload.change.path);
+                const bool isDirectory = std::filesystem::is_directory(**status);
                 if (isDirectory != upload.change.isDirectory ||
                     hasOtherKindInTheWay(*entry, upload.change.path, isDirectory))
                 {
@@ -1559,6 +1582,20 @@ namespace FileTracking
             finishUpload(upload, UploadOutcome::NotUploaded);
             if (auto* stillWatched = find(watchId))
                 onDeleted(*stillWatched, upload.change.path);
+        }
+
+        /**
+         * @brief The path of @p upload cannot be checked (@p error), it may still exist: it is neither uploaded nor
+         *        deleted on the server.
+         */
+        void onUncheckable(Upload const& upload, std::error_code const& error)
+        {
+            Log::error(
+                "FileTracking: not uploading '{}', it cannot be checked: {}",
+                upload.change.path.toUtf8(),
+                Utility::errorMessage(error)
+            );
+            finishUpload(upload, UploadOutcome::NotUploaded);
         }
 
         void askServerChanged(Upload upload)

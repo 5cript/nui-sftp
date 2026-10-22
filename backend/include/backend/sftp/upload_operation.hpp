@@ -154,7 +154,8 @@ class UploadOperation : public Operation
     std::expected<void, Error> openLocalSource();
 
     /**
-     * @brief Whether the local source is not there at all, see UploadOperationOptions::sourceMayVanish.
+     * @brief Whether the local source is not there at all, see UploadOperationOptions::sourceMayVanish. A source that
+     *        cannot be checked is not gone, opening it fails the upload.
      */
     bool sourceIsGone() const;
 
