@@ -173,9 +173,11 @@ namespace NuiFileExplorer
          * expose exactly the actions that make sense for its context.
          *
          * @param selectedItems The items currently selected (may be empty).
+         * @param otherSideSelectedItems The items selected on the other side (may be empty).
          * @return std::vector<ContextMenuItem>
          */
-        virtual std::vector<ContextMenuItem> contextMenuItems(std::vector<Item> const& selectedItems) = 0;
+        virtual std::vector<ContextMenuItem>
+        contextMenuItems(std::vector<Item> const& selectedItems, std::vector<Item> const& otherSideSelectedItems) = 0;
 
         /**
          * @brief Optional interface: provides default system places (XDG / Windows known folders).

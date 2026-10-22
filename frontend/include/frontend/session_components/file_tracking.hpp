@@ -46,6 +46,28 @@ class FileTrackingPanel
     );
 
     /**
+     * @brief Asks the tracker whether @p item could be uploaded into @p directory and watched now, before the user is
+     *        asked anything about the upload. @p onWatchable gets the item canonical, as the watch will report it;
+     *        @p onRefused gets the translated reason.
+     */
+    void checkUploadAndWatch(
+        Paths::LocalPath const& item,
+        Paths::RemotePath const& directory,
+        std::function<void(Paths::LocalPath const& canonicalItem)> onWatchable,
+        std::function<void(std::string const& reason)> onRefused
+    );
+
+    /**
+     * @brief Asks the tracker to watch @p item, upload it to @p remotePath and mirror its changes from then on.
+     *        @p onRefused gets the translated reason when it does not.
+     */
+    void uploadAndWatch(
+        Paths::LocalPath const& item,
+        Paths::RemotePath const& remotePath,
+        std::function<void(std::string const& reason)> onRefused
+    );
+
+    /**
      * @brief Asks the tracker to remove @p localPath, a download of the instance @p instanceId the user decided not to
      *        open, with its watch.
      */

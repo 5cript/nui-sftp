@@ -24,6 +24,7 @@
 #include <vector>
 
 class RemoteSideModel;
+class FileTrackingPanel;
 
 class LocalSideModel
     : public SideModel
@@ -62,8 +63,18 @@ class LocalSideModel
      *        tar archive in the listed remote directory.
      */
     void onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items);
+
+    /**
+     * @brief Uploads @p item into the listed remote directory, or its subdirectory @p subDir, and watches it, so its
+     *        changes go to the server too. A watch never overlaps another one, locally or on the server, such an item
+     *        is refused before anything is uploaded.
+     */
+    void onUploadAndWatch(NuiFileExplorer::Item const& item, std::optional<std::string> const& subDir);
     std::vector<NuiFileExplorer::ContextMenuItem>
-    contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
+    contextMenuItems(
+        std::vector<NuiFileExplorer::Item> const& selectedItems,
+        std::vector<NuiFileExplorer::Item> const& otherSideSelectedItems
+    ) override;
     void onDropExternal(
         std::vector<NuiFileExplorer::Item> const& items,
         std::optional<std::string> const& subDir,
@@ -89,6 +100,7 @@ class LocalSideModel
         return openerCaps_;
     }
     void setRemoteModel(RemoteSideModel* model);
+    void setFileTracking(FileTrackingPanel* fileTracking);
 
     /**
      * @brief The directory the shown items were listed from, an error before the first listing.
@@ -112,6 +124,18 @@ class LocalSideModel
     std::expected<Paths::LocalPath, Paths::PathError> localPathOf(NuiFileExplorer::Item const& item) const;
 
     std::expected<std::string, Paths::PathError> itemPathText(NuiFileExplorer::Item const& item) const override;
+
+    /**
+     * @brief Asks the user to upload @p items into the listed remote directory, or its subdirectory @p subDir, and to
+     *        replace what exists there. @p onAccepted gets the uploads the user agreed to.
+     * @param sourceOf The local path that is uploaded for an item, the upload carries its name.
+     */
+    void confirmUploads(
+        std::vector<NuiFileExplorer::Item> const& items,
+        std::optional<std::string> const& subDir,
+        std::function<std::expected<Paths::LocalPath, Paths::PathError>(NuiFileExplorer::Item const&)> const& sourceOf,
+        std::function<void(std::vector<SharedData::BulkUploadEntry>)> onAccepted
+    );
 
     /**
      * @brief Queues the uploads the user accepted, a single file as a transfer of its own.
@@ -146,6 +170,7 @@ class LocalSideModel
     void probeOpenerCapabilities();
 
     RemoteSideModel* remoteModel_{nullptr};
+    FileTrackingPanel* fileTracking_{nullptr};
     NuiFileExplorer::PathSuggestionCache pathSuggestionCache_;
     SharedData::OpenerCapabilities openerCaps_{};
 };

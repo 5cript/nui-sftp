@@ -615,6 +615,51 @@ void FileTrackingPanel::open(
     );
 }
 
+void FileTrackingPanel::checkUploadAndWatch(
+    Paths::LocalPath const& item,
+    Paths::RemotePath const& directory,
+    std::function<void(Paths::LocalPath const& canonicalItem)> onWatchable,
+    std::function<void(std::string const& reason)> onRefused
+)
+{
+    Nui::RpcClient::callWithBackChannel(
+        impl_->rpcName("checkUploadAndWatch"),
+        impl_->lifetime.guarded(
+            [onWatchable = std::move(onWatchable), onRefused = std::move(onRefused)](Nui::val response)
+            {
+                if (!Implementation::succeeded(response))
+                    return onRefused(Implementation::errorOf(response).value_or(""));
+                const auto canonicalItem = Paths::LocalPath::fromUtf8(response["item"].as<std::string>());
+                if (!canonicalItem)
+                    return onRefused(canonicalItem.error().toString());
+                onWatchable(*canonicalItem);
+            }
+        ),
+        item.toUtf8(),
+        directory.value()
+    );
+}
+
+void FileTrackingPanel::uploadAndWatch(
+    Paths::LocalPath const& item,
+    Paths::RemotePath const& remotePath,
+    std::function<void(std::string const& reason)> onRefused
+)
+{
+    Nui::RpcClient::callWithBackChannel(
+        impl_->rpcName("uploadAndWatch"),
+        impl_->lifetime.guarded(
+            [onRefused = std::move(onRefused)](Nui::val response)
+            {
+                if (!Implementation::succeeded(response))
+                    onRefused(Implementation::errorOf(response).value_or(""));
+            }
+        ),
+        item.toUtf8(),
+        remotePath.value()
+    );
+}
+
 void FileTrackingPanel::discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
 {
     impl_->forward("discard", instanceId.value(), localPath.toUtf8());

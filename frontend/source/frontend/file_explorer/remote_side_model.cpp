@@ -89,7 +89,10 @@ RemoteSideModel::RemoteSideModel(
 }
 
 std::vector<NuiFileExplorer::ContextMenuItem>
-RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
+RemoteSideModel::contextMenuItems(
+    std::vector<NuiFileExplorer::Item> const& selectedItems,
+    std::vector<NuiFileExplorer::Item> const& /*otherSideSelectedItems*/
+)
 {
     namespace Snc = ScriptNuiComponents;
     const bool hasItems = !selectedItems.empty();

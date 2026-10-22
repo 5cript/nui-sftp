@@ -3,6 +3,7 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
+#include <frontend/session_components/file_tracking.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
 #include <log/log.hpp>
@@ -486,7 +487,95 @@ void LocalSideModel::onTransfer(
 
     if (items.empty())
         return;
+    Log::info("Upload items requested: {}", items.size());
+    confirmUploads(
+        items,
+        subDir,
+        [this](NuiFileExplorer::Item const& item)
+        {
+            return localPathOf(item);
+        },
+        lifetime_.guarded(
+            [this](std::vector<SharedData::BulkUploadEntry> accepted)
+            {
+                enqueueUploads(std::move(accepted));
+            }
+        )
+    );
+}
 
+void LocalSideModel::onUploadAndWatch(NuiFileExplorer::Item const& item, std::optional<std::string> const& subDir)
+{
+    CHECK_COMPLETE();
+
+    if (fileTracking_ == nullptr || !remoteModel_)
+    {
+        Log::error("File tracking or the remote side is not available, cannot upload and watch.");
+        return;
+    }
+    const auto refusedTitle = language->get("localSideModel", "uploadAndWatchFailedTitle");
+    const auto path = localPathOf(item);
+    if (!path)
+        return showPathRefused(refusedTitle, path.error());
+    const auto targetDirectory = remoteModel_->currentRemotePath().and_then(
+        [&subDir](Paths::RemotePath const& directory)
+        {
+            return FileExplorer::targetDirectoryOf(directory, subDir);
+        }
+    );
+    if (!targetDirectory)
+        return showPathRefused(refusedTitle, targetDirectory.error());
+    Log::info("Upload and watch requested: {} into {}", path->toUtf8(), targetDirectory->value());
+
+    auto showRefused = lifetime_.guarded(
+        [this, refusedTitle](std::string const& reason)
+        {
+            confirmDialog_->open({
+                .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                .headerText = refusedTitle,
+                .text = reason,
+                .buttons = ConfirmDialog::Button::Ok,
+            });
+        }
+    );
+    // The watch reports the item canonical, so it uploads under that name: a symbolic link under its target's.
+    fileTracking_->checkUploadAndWatch(
+        *path,
+        *targetDirectory,
+        lifetime_.guarded(
+            [this, item, subDir, showRefused](Paths::LocalPath const& canonicalItem)
+            {
+                confirmUploads(
+                    {item},
+                    subDir,
+                    [canonicalItem](NuiFileExplorer::Item const&) -> std::expected<Paths::LocalPath, Paths::PathError>
+                    {
+                        return canonicalItem;
+                    },
+                    lifetime_.guarded(
+                        [this, showRefused](std::vector<SharedData::BulkUploadEntry> accepted)
+                        {
+                            if (accepted.empty() || fileTracking_ == nullptr)
+                                return;
+                            fileTracking_->uploadAndWatch(
+                                accepted.front().source, accepted.front().destination, showRefused
+                            );
+                        }
+                    )
+                );
+            }
+        ),
+        showRefused
+    );
+}
+
+void LocalSideModel::confirmUploads(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir,
+    std::function<std::expected<Paths::LocalPath, Paths::PathError>(NuiFileExplorer::Item const&)> const& sourceOf,
+    std::function<void(std::vector<SharedData::BulkUploadEntry>)> onAccepted
+)
+{
     if (!remoteModel_)
     {
         Log::error("Cannot transfer items: remote model is not set");
@@ -498,8 +587,6 @@ void LocalSideModel::onTransfer(
         });
         return;
     }
-
-    Log::info("Upload items requested: {}", items.size());
 
     const auto refuse = [this](Paths::PathError const& error)
     {
@@ -513,14 +600,7 @@ void LocalSideModel::onTransfer(
     );
     if (!destinationDirectory)
         return refuse(destinationDirectory.error());
-    auto candidates = transferCandidates<SharedData::BulkUploadEntry>(
-        items,
-        [this](NuiFileExplorer::Item const& item)
-        {
-            return localPathOf(item);
-        },
-        *destinationDirectory
-    );
+    auto candidates = transferCandidates<SharedData::BulkUploadEntry>(items, sourceOf, *destinationDirectory);
     if (!candidates)
         return refuse(candidates.error());
 
@@ -534,12 +614,7 @@ void LocalSideModel::onTransfer(
             .overwriteHeaderText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
             .overwriteText = language->get("localSideModel", "fileAlreadyExistsOverwrite"),
         },
-        lifetime_.guarded(
-            [this](std::vector<SharedData::BulkUploadEntry> accepted)
-            {
-                enqueueUploads(std::move(accepted));
-            }
-        )
+        std::move(onAccepted)
     );
 }
 
@@ -802,11 +877,19 @@ void LocalSideModel::enqueueSingleUpload(
 }
 
 std::vector<NuiFileExplorer::ContextMenuItem>
-LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems)
+LocalSideModel::contextMenuItems(
+    std::vector<NuiFileExplorer::Item> const& selectedItems,
+    std::vector<NuiFileExplorer::Item> const& otherSideSelectedItems
+)
 {
     namespace Snc = ScriptNuiComponents;
     const bool hasItems = !selectedItems.empty();
     const bool singleItem = selectedItems.size() == 1;
+    // A single directory selected on the remote side receives a watched upload, any other selection is ignored.
+    const auto watchTarget = otherSideSelectedItems.size() == 1 && otherSideSelectedItems.front().isDirectoryLike() &&
+            !otherSideSelectedItems.front().isParentLink && otherSideSelectedItems.front().nameIsValidUtf8
+        ? std::optional{otherSideSelectedItems.front().name}
+        : std::nullopt;
 
     std::vector<NuiFileExplorer::ContextMenuItem> items;
 
@@ -832,6 +915,37 @@ LocalSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& selec
                     onTransferAsArchive(selectedItems);
                 },
                 !hasItems || archiveTransferDialog_ == nullptr
+            )
+        );
+        items.push_back(
+            Snc::PopupMenu::item(
+                language->get("fileExplorer", "contextMenu", "uploadAndWatch"),
+                Ui5Icons::show(),
+                [this, selectedItems, watchTarget]()
+                {
+                    onUploadAndWatch(selectedItems.front(), watchTarget);
+                },
+                !singleItem || fileTracking_ == nullptr,
+                /*shortcut=*/{},
+                fmt::format(
+                    fmt::runtime(language->get(
+                        "fileExplorer", "contextMenu", watchTarget ? "uploadAndWatchIntoSelectionHint" : "uploadAndWatchHint"
+                    )),
+                    remoteModel_->currentRemotePath()
+                        .and_then(
+                            [&watchTarget](Paths::RemotePath const& directory)
+                            {
+                                return FileExplorer::targetDirectoryOf(directory, watchTarget);
+                            }
+                        )
+                        .transform(
+                            [](Paths::RemotePath const& directory)
+                            {
+                                return directory.value();
+                            }
+                        )
+                        .value_or(std::string{})
+                )
             )
         );
         items.push_back(Snc::PopupMenu::separator());
@@ -958,6 +1072,11 @@ void LocalSideModel::onOpenInFileManager(NuiFileExplorer::Item const& item)
 void LocalSideModel::setRemoteModel(RemoteSideModel* model)
 {
     remoteModel_ = model;
+}
+
+void LocalSideModel::setFileTracking(FileTrackingPanel* fileTracking)
+{
+    fileTracking_ = fileTracking;
 }
 
 std::expected<Paths::LocalPath, Paths::PathError> LocalSideModel::currentLocalPath() const

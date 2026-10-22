@@ -66,7 +66,10 @@ class RemoteSideModel
      */
     void onTransferAsArchive(std::vector<NuiFileExplorer::Item> const& items);
     std::vector<NuiFileExplorer::ContextMenuItem>
-    contextMenuItems(std::vector<NuiFileExplorer::Item> const& selectedItems) override;
+    contextMenuItems(
+        std::vector<NuiFileExplorer::Item> const& selectedItems,
+        std::vector<NuiFileExplorer::Item> const& otherSideSelectedItems
+    ) override;
     void onDropExternal(
         std::vector<NuiFileExplorer::Item> const& items,
         std::optional<std::string> const& subDir,
