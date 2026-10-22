@@ -876,7 +876,7 @@ namespace FileTracking
             );
             if (watched != entries.end())
                 forget(watched->first);
-            auto discarded = instances->discardContent(instanceId.value(), path.native());
+            const auto discarded = instances->discardContent(instanceId.value(), path.native());
             if (discarded == DiscardOutcome::InstanceDestroyed)
                 openedCopies.erase(instanceId);
             return discarded;
@@ -1132,8 +1132,9 @@ namespace FileTracking
                 entry->localPath.toUtf8(),
                 watchId.value()
             );
-            const auto ended =
-                SharedData::EndedWatches{.reason = SharedData::WatchEndReason::CopyGone, .entries = {shownEntryOf(*entry)}};
+            const auto ended = SharedData::EndedWatches{
+                .reason = SharedData::WatchEndReason::CopyGone, .entries = {shownEntryOf(*entry)}
+            };
             stop(watchId);
             view->showEnded(ended);
         }
