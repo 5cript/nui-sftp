@@ -216,12 +216,14 @@ class OperationQueue
 
     /**
      * @brief Upload analogue of @ref addBulkDownloadOperation.
+     * @param sourceMayVanish Each entry may be gone by the time it is uploaded, see addUploadOperation.
      */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
         SharedData::BulkUploadRequest request,
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
-        Ids::OperationId const& bulkCardId
+        Ids::OperationId const& bulkCardId,
+        bool sourceMayVanish = false
     );
 
     /**

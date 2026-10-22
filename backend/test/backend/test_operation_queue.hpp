@@ -527,6 +527,56 @@ namespace Test
         EXPECT_EQ(errors.mentioning("lost.txt"), 1u);
     }
 
+    TEST_F(OperationQueueTests, ABulkUploadWhoseSourcesMayVanishSkipsAGoneFileWithoutAnError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto localPath = localDirectory_.path() / "gathered";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "kept.txt"} << "kept";
+        std::ofstream{localPath / "vanished.txt"} << "vanished";
+        const SharedData::BulkUploadRequest request{
+            .entries =
+                {
+                    {.source = toLocal(localPath / "kept.txt"),
+                        .destination = remote("/home/test/gathered/kept.txt"),
+                        .sizeBytes = 4},
+                    {.source = toLocal(localPath / "vanished.txt"),
+                        .destination = remote("/home/test/gathered/vanished.txt"),
+                        .sizeBytes = 8},
+                },
+            .allowOverwrite = true,
+        };
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    Ids::generateOperationId(),
+                    /*sourceMayVanish=*/true
+                );
+            }
+        );
+        std::filesystem::remove(localPath / "vanished.txt");
+        setPaused(false);
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(finished.front().failedEntries.empty());
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/gathered"), std::set<std::string>{"kept.txt"});
+        EXPECT_EQ(errors.mentioning("vanished.txt"), 0u);
+    }
+
 #ifndef _WIN32
     TEST_F(OperationQueueTests, DirectoryUploadReportsAnUnreadableSubdirectory)
     {

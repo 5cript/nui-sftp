@@ -1637,7 +1637,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
     SecureShell::SftpSession& sftp,
     SharedData::BulkUploadRequest request,
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
-    Ids::OperationId const& bulkCardId
+    Ids::OperationId const& bulkCardId,
+    bool sourceMayVanish
 )
 {
     // Assumed in strand.
@@ -1661,7 +1662,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 /*isBigFile*/ false,
                 unit.insertRefresh,
                 /*createMissingDirectories*/ true,
-                unit.mode
+                unit.mode,
+                sourceMayVanish
             );
             if (!result)
             {
@@ -1700,6 +1702,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
 
             auto uploadOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
             uploadOptions.createMissingDirectories = true;
+            uploadOptions.sourceMayVanish = sourceMayVanish;
             auto bulk = std::make_unique<BulkUploadOperation>(
                 sftp.weak_from_this(),
                 BulkUploadOperation::BulkUploadOperationOptions{
