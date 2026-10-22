@@ -727,6 +727,7 @@ void Session::openSftp(std::string const& username, bool forceOpen)
                 impl_->operationQueue.activate(remoteSideModel()->engine(), sshTerminalEngine->sshSessionId());
             impl_->fileTrackingPanel.activate(sshTerminalEngine->sshSessionId());
             localSideModel().operationQueue(&impl_->operationQueue);
+            localSideModel().setFileTracking(&impl_->fileTrackingPanel);
             if (remoteSideModel())
             {
                 remoteSideModel()->operationQueue(&impl_->operationQueue);

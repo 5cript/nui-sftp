@@ -45,6 +45,9 @@ fileExplorer:
     downloadAsArchive: "Download as Archive"
     removeFromFavorites: "Remove from Favorites"
     uploadAsArchive: "Upload as Archive"
+    uploadAndWatch: "Upload and Watch"
+    uploadAndWatchHint: "Uploads it to {} and keeps watching it here. Every change you save is uploaded again, until you stop the watch in File Tracking. Select one directory on the remote side to upload into it instead."
+    uploadAndWatchIntoSelectionHint: "Uploads it into the directory selected on the remote side, {}, and keeps watching it here. Every change you save is uploaded again, until you stop the watch in File Tracking."
     synchronize: "Synchronize..."
     synchronizeHint: "Select exactly one directory on each side to synchronize."
   archiveDefaultName: "archive"
@@ -263,6 +266,7 @@ localSideModel:
   deleteDirectoriesWithContent: "This also deletes everything inside the selected directories. It cannot be undone."
   remoteSideUnavailable: "Remote side is not available"
   transferFailedTitle: "File Transfer Failed"
+  uploadAndWatchFailedTitle: "Cannot Upload and Watch"
 sessionFrontend:
   sessionCreationFailedHeader: "Session Creation Failed"
   sessionCreationFailedText: "Failed to create session instance:\n{}"

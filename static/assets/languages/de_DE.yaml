@@ -45,6 +45,9 @@ fileExplorer:
     downloadAsArchive: "Als Archiv herunterladen"
     removeFromFavorites: "Aus Favoriten entfernen"
     uploadAsArchive: "Als Archiv hochladen"
+    uploadAndWatch: "Hochladen und Beobachten"
+    uploadAndWatchHint: "Lädt es nach {} hoch und beobachtet es hier weiter. Jede Änderung, die Sie speichern, wird erneut hochgeladen, bis Sie die Beobachtung unter Dateiüberwachung beenden. Wählen Sie auf der Serverseite ein Verzeichnis aus, um stattdessen dorthin hochzuladen."
+    uploadAndWatchIntoSelectionHint: "Lädt es in das auf der Serverseite ausgewählte Verzeichnis {} hoch und beobachtet es hier weiter. Jede Änderung, die Sie speichern, wird erneut hochgeladen, bis Sie die Beobachtung unter Dateiüberwachung beenden."
     synchronize: "Synchronisieren..."
     synchronizeHint: "Wählen Sie auf jeder Seite genau ein Verzeichnis zum Synchronisieren aus."
   archiveDefaultName: "archiv"
@@ -165,6 +168,7 @@ localSideModel:
   deleteDirectoriesWithContent: "Dabei wird auch der gesamte Inhalt der ausgewählten Verzeichnisse gelöscht. Das lässt sich nicht rückgängig machen."
   remoteSideUnavailable: "Die Remote-Seite ist nicht verfügbar"
   transferFailedTitle: "Dateiübertragung fehlgeschlagen"
+  uploadAndWatchFailedTitle: "Hochladen und Beobachten nicht möglich"
 operationQueue:
   pause: "Pausieren"
   continue: "Fortsetzen"

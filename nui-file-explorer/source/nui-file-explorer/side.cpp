@@ -646,7 +646,8 @@ namespace NuiFileExplorer
         if (impl_->otherSide)
             impl_->otherSide->closeMenus();
 
-        auto menuItems = impl_->model->contextMenuItems(clickItems);
+        const auto otherSelected = impl_->otherSide ? impl_->otherSide->selectedItems() : std::vector<Item>{};
+        auto menuItems = impl_->model->contextMenuItems(clickItems, otherSelected);
 
         if (impl_->onSynchronize && impl_->otherSide)
         {
@@ -658,7 +659,6 @@ namespace NuiFileExplorer
                 return items.size() == 1 && items[0].isDirectoryLike() && items[0].nameIsValidUtf8;
             };
             const bool thisSideOk = isSyncRoot(clickItems);
-            const auto otherSelected = impl_->otherSide->selectedItems();
             const bool otherSideOk = isSyncRoot(otherSelected);
 
             menuItems.push_back(Snc::PopupMenu::separator());
