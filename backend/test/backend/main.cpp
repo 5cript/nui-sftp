@@ -32,6 +32,7 @@
 #include "test_settled_changes.hpp"
 #include "test_tracking_state.hpp"
 #include "test_tracker.hpp"
+#include "test_batching_remote.hpp"
 #include "test_password_request.hpp"
 #include "test_sync_session.hpp"
 #include "test_dropped_entry.hpp"

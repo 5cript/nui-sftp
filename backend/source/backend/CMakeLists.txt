@@ -20,6 +20,7 @@ add_library(
         process/process.cpp
         process/process_store.cpp
         process/environment.cpp
+        file_tracking/batching_remote.cpp
         file_tracking/change_filter.cpp
         file_tracking/change_reporter.cpp
         file_tracking/directory_watch_service.cpp
