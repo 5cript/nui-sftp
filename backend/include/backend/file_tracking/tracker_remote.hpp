@@ -38,6 +38,21 @@ namespace FileTracking
          *        UploadEnd::changedOnServer. Unset, whatever it has is replaced.
          */
         std::optional<ExpectedDestination> expectedDestination{};
+        /**
+         * @brief The destination of a stopped upload of the same file, renamed since: this upload continues the
+         *        partial file it kept, see TrackerRemote::cancelUpload().
+         */
+        std::optional<Paths::RemotePath> continuesPartialOf{};
+    };
+
+    /**
+     * @brief What becomes of the partial file of an upload that is stopped, see TrackerRemote::cancelUpload().
+     */
+    enum class PartialFile
+    {
+        /** @brief It stays for an upload that continues it, see UploadRequest::continuesPartialOf. */
+        Kept,
+        Discarded,
     };
 
     /**
@@ -115,10 +130,25 @@ namespace FileTracking
         ) = 0;
 
         /**
-         * @brief Queues the upload, a source that is gone by the time it runs completes it without a transfer: its
+         * @brief Queues the upload, a source that is gone by the time it runs ends it without a transfer: its
          *        deletion is mirrored apart.
          */
         virtual std::expected<void, std::string> upload(UploadRequest const& request, OnUploadEnded onEnded) = 0;
+
+        /**
+         * @brief Stops the upload to @p destination that is on its way. It still ends once, never before this call
+         *        returned: as cancelled unless it ended first. The partial file it wrote stays for an upload that
+         *        continues it or goes, see @p partial. Nothing happens to an upload that is not on its way or cannot
+         *        be stopped.
+         */
+        virtual void cancelUpload(Paths::RemotePath const& destination, PartialFile partial) = 0;
+
+        /**
+         * @brief Removes the partial file a stopped upload to @p destination kept, see cancelUpload(), @p onEnded
+         *        hears when that is done. Nothing is removed when there is none.
+         */
+        virtual std::expected<void, std::string>
+        discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded) = 0;
 
         /**
          * @brief Queues the rename of @p source to @p destination, which never replaces anything.

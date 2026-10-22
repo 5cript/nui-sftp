@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -55,7 +56,7 @@ namespace FileTracking
     class BatchingRemote : public TrackerRemote
     {
       public:
-        struct Timing
+        struct Limits
         {
             /** @brief A batch goes once nothing was added to it for this long. */
             std::chrono::milliseconds quiet{100};
@@ -63,12 +64,14 @@ namespace FileTracking
             std::chrono::milliseconds longest{1000};
             /** @brief A batch goes at once when it holds this many entries. */
             std::size_t maxEntries{500};
+            /** @brief A file this large goes on its own, an upload that can be stopped, see cancelUpload(). */
+            std::uint64_t aloneFromBytes{8u * 1024u * 1024u};
         };
 
         BatchingRemote(
             boost::asio::strand<boost::asio::any_io_executor> strand,
             std::unique_ptr<BulkTrackerRemote> inner,
-            Timing timing
+            Limits limits
         );
         BatchingRemote(
             boost::asio::strand<boost::asio::any_io_executor> strand,
@@ -91,9 +94,19 @@ namespace FileTracking
 
         /**
          * @brief Gathers @p request into the next batch. It goes on its own when it creates no missing directories,
-         *        refreshes the listing, is no regular file or is alone in its batch.
+         *        refreshes the listing, is no regular file, is a large one, continues a partial file or is alone in
+         *        its batch.
          */
         std::expected<void, std::string> upload(UploadRequest const& request, OnUploadEnded onEnded) override;
+
+        /**
+         * @brief An upload still gathered ends as cancelled without being sent, one on its way is stopped by the inner
+         *        remote. One in a bulk goes on.
+         */
+        void cancelUpload(Paths::RemotePath const& destination, PartialFile partial) override;
+
+        std::expected<void, std::string>
+        discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded) override;
 
         std::expected<void, std::string>
         rename(Paths::RemotePath const& source, Paths::RemotePath const& destination, OnEnded onEnded) override;

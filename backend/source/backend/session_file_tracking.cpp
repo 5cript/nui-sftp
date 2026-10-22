@@ -21,8 +21,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <set>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -224,9 +226,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     {
         const bool isDirectory = isDirectoryLocally(request.source);
         const auto sent = std::make_shared<SentFiles>();
-        return queue(
-            [&request,
-                &sent](OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId)
+        std::optional<Ids::OperationId> queuedAs{};
+        auto queued = queue(
+            [&request, &sent, &queuedAs](
+                OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId
+            )
             {
                 auto added = queue.addUploadOperation(
                     channel,
@@ -240,14 +244,65 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     SharedData::OperationMode::PriorityQueued,
                     /*sourceMayVanish=*/true,
                     comparedStateOf(request.expectedDestination),
-                    sent->recorder()
+                    sent->recorder(),
+                    request.continuesPartialOf
                 );
                 // The tracker asks the user about a server copy that changed meanwhile.
                 if (added)
+                {
                     queue.leaveChangedDestinationsToOwner(operationId);
+                    queuedAs = operationId;
+                }
                 return added;
             },
-            endOfUpload(session_, request.destination, isDirectory, sent, std::move(onEnded))
+            forgettingSentUpload(
+                request.destination, endOfUpload(session_, request.destination, isDirectory, sent, std::move(onEnded))
+            )
+        );
+        if (queued && queuedAs)
+            sentUploads_->insert_or_assign(request.destination.value(), *queuedAs);
+        return queued;
+    }
+
+    void cancelUpload(Paths::RemotePath const& destination, FileTracking::PartialFile partial) override
+    {
+        const auto found = sentUploads_->find(destination.value());
+        const auto session = session_.lock();
+        if (found == sentUploads_->end() || !session)
+            return;
+        Log::info("FileTracking: stopping the upload to '{}'", destination.value());
+        // The stopped upload ends after the tracker's call, which may still decide what follows it.
+        boost::asio::post(
+            *session->strand_,
+            [weak = session_,
+                operationId = found->second,
+                partialFile = partial == FileTracking::PartialFile::Kept ? UploadOperation::PartialFile::Kept
+                                                                          : UploadOperation::PartialFile::Discarded]()
+            {
+                if (const auto locked = weak.lock(); locked && locked->operationQueue_)
+                    locked->operationQueue_->cancelUpload(operationId, partialFile);
+            }
+        );
+    }
+
+    std::expected<void, std::string>
+    discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded) override
+    {
+        return withChannel(
+            [&destination,
+                &onEnded](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
+            {
+                session.operationQueue_->discardPartialUpload(
+                    channel,
+                    destination,
+                    [onEnded = std::move(onEnded)]()
+                    {
+                        if (onEnded)
+                            onEnded(SharedData::OperationCompletionReason::Completed);
+                    }
+                );
+                return {};
+            }
         );
     }
 
@@ -603,8 +658,33 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         );
     }
 
+    /**
+     * @brief Hands the end of the single upload to @p destination to @p ended, once it can no longer be stopped.
+     */
+    std::function<void(SharedData::OperationCompleted const&)> forgettingSentUpload(
+        Paths::RemotePath const& destination,
+        std::function<void(SharedData::OperationCompleted const&)> ended
+    ) const
+    {
+        return [sentUploads = std::weak_ptr{sentUploads_}, destination = destination.value(), ended = std::move(ended)](
+                   SharedData::OperationCompleted const& completed
+               )
+        {
+            if (const auto uploads = sentUploads.lock())
+                if (const auto found = uploads->find(destination);
+                    found != uploads->end() && found->second == completed.operationId)
+                    uploads->erase(found);
+            if (ended)
+                ended(completed);
+        };
+    }
+
   private:
     std::weak_ptr<Session> session_;
+    /** @brief The single uploads on their way by destination, the tracker may stop them, see cancelUpload(). */
+    std::shared_ptr<std::map<std::string, Ids::OperationId>> sentUploads_{
+        std::make_shared<std::map<std::string, Ids::OperationId>>()
+    };
 };
 
 void Session::startFileTracking()
