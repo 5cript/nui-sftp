@@ -1470,16 +1470,23 @@ namespace Test
         ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
 
         std::filesystem::remove_all(project);
-        runFor(std::chrono::milliseconds{1500});
-        completeEverything();
 
 #ifdef __APPLE__
+        runFor(std::chrono::milliseconds{1500});
+        completeEverything();
         // The accepted limitation, see Tracker: FSEvents reports only the removal of project, like a move to the trash.
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
 #else
+        // Windows also reports src modified, its delete waits until that change settled.
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                completeRemovesAndRenames();
+                return !remote_->server.contains("/srv/project/src");
+            }
+        ));
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
-        EXPECT_FALSE(remote_->server.contains("/srv/project/src"));
 #endif
     }
 
