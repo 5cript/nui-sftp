@@ -237,7 +237,7 @@ void SessionManager::addSession(
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    self->removeSession(sessionId);
+                    self->removeSession(sessionId, /*connectionLost=*/true);
 
                     // Notify frontend of session loss:
                     self->wnd_->runInJavascriptThread(
@@ -306,14 +306,16 @@ void SessionManager::addSession(
     );
 }
 
-void SessionManager::removeSession(Ids::SessionId sessionId)
+void SessionManager::removeSession(Ids::SessionId sessionId, bool connectionLost)
 {
     within_strand_do(
-        [this, sessionId]()
+        [this, sessionId, connectionLost]()
         {
             if (auto iter = sessions_.find(sessionId); iter != sessions_.end())
             {
                 Log::info("Removing session with id: {}", sessionId.value());
+                if (connectionLost)
+                    iter->second->onConnectionLost();
                 iter->second->stop();
                 sessions_.erase(iter);
             }

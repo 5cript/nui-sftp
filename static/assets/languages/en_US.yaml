@@ -522,6 +522,8 @@ fileTracking:
   headerCleanupRunning: "Cleaning…"
   progressSyncing: "Syncing {} of {}"
   progressWaitingForAnswer: "{} waiting for your answer"
+  watchEndedCopyGone: "The watch of {} ended, its temporary copy was deleted or renamed. The file on the server is unchanged, use Open and Watch to edit it again."
+  watchesEndedConnectionLost: "The connection was lost, the watches of {} ended. Watch them again once the session is connected."
 settings:
   version: "Version"
   settingsRestartRequiredHeader: "Restart Required"

@@ -66,10 +66,16 @@ class Session
     void adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds);
 
     /**
-     * @brief Ends the watches of this session without telling the frontend, which is gone. Must be called from the
-     *        strand.
+     * @brief Ends the watches of this session without telling the frontend, which is gone, and releases the instances
+     *        of its copies, see FileTracking::Tracker::stopAll(). Must be called from the strand.
      */
     void stopFileTracking();
+
+    /**
+     * @brief The connection of this session was lost: its watches end and the frontend shows why, see
+     *        FileTracking::Tracker::connectionLost(). Must be called from the strand, before stop().
+     */
+    void onConnectionLost();
 
   private:
     /**
