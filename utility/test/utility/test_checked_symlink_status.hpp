@@ -159,6 +159,66 @@ namespace Utility::Test
         EXPECT_FALSE(below->has_value());
     }
 
+    TEST_F(CheckedSymlinkStatusTests, AFileWrittenAnewRightAfterALookMissedItIsThere)
+    {
+        const auto file = directory_.path() / "file.txt";
+        std::ofstream{file} << "content";
+        int looks = 0;
+
+        // git deletes the file and writes it anew, the first look comes in between.
+        const auto status = Detail::checkedSymlinkStatus(
+            file,
+            [&looks](std::filesystem::path const& path, std::error_code& error)
+            {
+                if (looks++ == 0)
+                    return std::filesystem::file_status{std::filesystem::file_type::not_found};
+                return std::filesystem::symlink_status(path, error);
+            }
+        );
+
+        ASSERT_TRUE(status.has_value()) << status.error().message();
+        ASSERT_TRUE(status->has_value());
+        EXPECT_EQ((*status)->type(), std::filesystem::file_type::regular);
+    }
+
+    TEST_F(CheckedSymlinkStatusTests, AFileGoneAgainOnTheSecondLookIsGone)
+    {
+        const auto file = directory_.path() / "file.txt";
+        std::ofstream{file} << "content";
+        int looks = 0;
+
+        const auto status = Detail::checkedSymlinkStatus(
+            file,
+            [&looks, &file](std::filesystem::path const&, std::error_code&)
+            {
+                if (looks++ == 1)
+                    std::filesystem::remove(file);
+                return std::filesystem::file_status{std::filesystem::file_type::not_found};
+            }
+        );
+
+        ASSERT_TRUE(status.has_value()) << status.error().message();
+        EXPECT_FALSE(status->has_value());
+    }
+
+    TEST_F(CheckedSymlinkStatusTests, ANameOnlyItsExtendedLengthPathReachesIsAnErrorNotGone)
+    {
+        // Win32 drops a trailing dot, so the plain path names another file.
+        const auto file = directory_.path() / "trailing.";
+        const auto extended = std::filesystem::path{LR"(\\?\)" + file.lexically_normal().make_preferred().native()};
+        std::ofstream{extended} << "content";
+        auto removeFile = Nui::ScopeExit{[&extended]() noexcept {
+            std::error_code removeError;
+            std::filesystem::remove(extended, removeError);
+        }};
+        ASSERT_TRUE(std::filesystem::exists(extended));
+
+        const auto status = checkedSymlinkStatus(file);
+
+        ASSERT_FALSE(status.has_value());
+        EXPECT_EQ(status.error().value(), ERROR_INVALID_NAME);
+    }
+
     TEST_F(CheckedSymlinkStatusLongPathTests, AnExtendedLengthPathHasItsStatus)
     {
         const auto status = checkedSymlinkStatus(extended(longDirectory_));
