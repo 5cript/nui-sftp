@@ -1,0 +1,33 @@
+#pragma once
+
+#include <ids/ids.hpp>
+#include <shared_data/shared_data.hpp>
+#include <shared_data/file_tracking/watch_options.hpp>
+#include <utility/describe.hpp>
+#include <paths/paths.hpp>
+
+#include <string>
+
+namespace SharedData
+{
+    /**
+     * @brief What the file tracking panel shows of one watch of the session's tracker.
+     */
+    struct TrackedEntry
+    {
+        Ids::WatchId watchId;
+        /** @brief The name of the watched local file or directory. */
+        std::string name;
+        /** @brief Where the watched item goes on the server. */
+        Paths::RemotePath remotePath;
+        WatchOptions options;
+        /** @brief Uploads of the item are on their way. */
+        bool uploading{false};
+        /**
+         * @brief The item is a temporary copy of the server's file (Open and Watch): its moves and its removal never
+         *        reach the server, the options for those stay off.
+         */
+        bool downloadedCopy{false};
+    };
+    BOOST_DESCRIBE_STRUCT(TrackedEntry, (), (watchId, name, remotePath, options, uploading, downloadedCopy))
+}

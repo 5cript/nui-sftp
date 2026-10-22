@@ -1208,6 +1208,9 @@ backend:
     watchFailed: "'{}' kann nicht beobachtet werden, das Dateisystem lässt es nicht zu."
     watchOverlaps: "'{}' kann nicht beobachtet werden, es überschneidet sich mit '{}', das bereits beobachtet wird. Beobachtungen können nicht verschachtelt werden."
     watchOverlapsDownloads: "'{}' kann nicht beobachtet werden, es überschneidet sich mit dem Verzeichnis der temporären Downloads '{}', das von Öffnen und Beobachten beobachtet wird."
+    remoteOverlaps: "'{}' kann nicht beobachtet werden, es überschneidet sich mit '{}' auf dem Server, wohin bereits eine andere Beobachtung hochlädt. Beobachtungen können nicht verschachtelt werden."
+    instanceCreationFailed: "Für den Download konnte kein Verzeichnis angelegt werden. Details finden Sie in den Logs."
+    watchCopyFailed: "Der Download '{}' kann nicht beobachtet werden, das Dateisystem lässt es nicht zu."
   deleteGuard:
     noPath: "Es wurde nichts gelöscht. Ein Pfad fehlt."
     root: "Es wurde nichts gelöscht. '{}' ist das Wurzelverzeichnis."

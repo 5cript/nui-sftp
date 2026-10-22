@@ -1210,6 +1210,9 @@ backend:
     watchFailed: "'{}' cannot be watched, the file system refused to watch it."
     watchOverlaps: "'{}' cannot be watched, it overlaps '{}', which is watched already. Watches cannot be nested."
     watchOverlapsDownloads: "'{}' cannot be watched, it overlaps the directory of temporary downloads '{}', which Open and Watch watches."
+    remoteOverlaps: "'{}' cannot be watched, it overlaps '{}' on the server, which another watch uploads to already. Watches cannot be nested."
+    instanceCreationFailed: "No directory for the download could be created. Check the logs for details."
+    watchCopyFailed: "The download '{}' cannot be watched, the file system refused to watch it."
   deleteGuard:
     noPath: "Nothing was deleted. A path is missing."
     root: "Nothing was deleted. '{}' is the root directory."
