@@ -15,7 +15,7 @@ namespace ComparedStateCheck
     {
         Operation::Error changedError(std::string const& path)
         {
-            Log::warn("'{}' changed after the sync compared it, it is neither replaced nor deleted.", path);
+            Log::warn("'{}' changed since it was compared, it is neither replaced nor deleted.", path);
             return Operation::Error{
                 .type = Operation::ErrorType::ChangedSinceCompare,
                 .extraInfo = fmt::format("'{}' changed after the compare", path),

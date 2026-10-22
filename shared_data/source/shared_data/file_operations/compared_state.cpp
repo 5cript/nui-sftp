@@ -18,7 +18,7 @@ namespace SharedData
         if (!compared.exists)
             return !current.exists;
         if (!current.exists)
-            return true;
+            return !compared.mustStillExist;
         if (compared.type != current.type)
             return false;
         switch (compared.type)

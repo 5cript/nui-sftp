@@ -46,6 +46,16 @@ namespace SharedData::Test
         EXPECT_TRUE(unchangedSinceCompare(file(3, 100), ComparedState{}));
     }
 
+    TEST(ComparedStateTests, SomethingThatMustStillExistChangedWhenItIsGone)
+    {
+        using namespace ComparedStateTestDetail;
+        auto compared = file(3, 100);
+        compared.mustStillExist = true;
+        EXPECT_FALSE(unchangedSinceCompare(compared, ComparedState{}));
+        EXPECT_TRUE(unchangedSinceCompare(compared, file(3, 100)));
+        EXPECT_FALSE(unchangedSinceCompare(compared, file(4, 100)));
+    }
+
     TEST(ComparedStateTests, AnotherTypeChanged)
     {
         using namespace ComparedStateTestDetail;
