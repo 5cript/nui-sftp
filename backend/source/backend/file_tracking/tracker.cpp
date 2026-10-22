@@ -1124,6 +1124,12 @@ namespace FileTracking
                 return;
             if (!entry.serverContent.has(path))
             {
+                // The upload of a directory above may have sent it before it went, it is looked at once that ended.
+                if (entry.pendingUploads.covers(path))
+                {
+                    entry.pendingUploads.start({.path = path});
+                    return progressChanged();
+                }
                 Log::debug("FileTracking: '{}' is not on the server, nothing to delete there.", path.toUtf8());
                 return;
             }

@@ -1762,6 +1762,39 @@ namespace Test
         EXPECT_TRUE(view_->questions.empty());
     }
 
+    TEST_F(TrackerTest, AFileDeletedWhileItsDirectoryUploadsIsDeletedOnTheServerIfTheUploadSentIt)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto staging = root_ / "staging";
+        const auto directory = project / "moved-in";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        std::filesystem::create_directory(staging);
+        write(staging / "keep.txt", "keep");
+        write(staging / "gone.txt", "gone");
+
+        // Moved in, its files are reported with it only.
+        std::filesystem::rename(staging, directory);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/moved-in") == 1u;
+            }
+        ));
+        auto* upload = remote_->of("upload").back();
+        const auto sent = sentFilesOf(directory);
+        serve(directory, "/srv/project/moved-in");
+        // An editor's temporary file, its removal is reported while the upload still runs.
+        std::filesystem::remove(directory / "gone.txt");
+        runFor(std::chrono::milliseconds{1000});
+        endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed, .sentFiles = sent});
+        completeEverything();
+
+        EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/moved-in/gone.txt"});
+        EXPECT_TRUE(remote_->server.contains("/srv/project/moved-in/keep.txt"));
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
     TEST_F(TrackerTest, ALinkUploadedWithItsDirectoryIsDeletedOnTheServerToo)
     {
         const auto project = root_ / "local" / "project";
