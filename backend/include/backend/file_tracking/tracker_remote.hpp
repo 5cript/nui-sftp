@@ -46,7 +46,7 @@ namespace FileTracking
     struct SentFile
     {
         Paths::LocalPath path;
-        /** @brief The state it had from before it was read until the upload ended, nothing when it changed meanwhile. */
+        /** @brief Its state from before it was read until the upload ended, nothing when it changed meanwhile. */
         std::optional<SourceState> state{};
     };
 
