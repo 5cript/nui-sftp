@@ -960,12 +960,15 @@ namespace FileTracking
             for (auto const& entry : std::views::values(entries))
                 ended.entries.push_back(shownEntryOf(entry));
             Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
+            // stopAll() forgets the progress shown, this view still shows it.
+            const bool progressShown = shownProgress != SharedData::TrackerProgress{};
             stopAll();
             for (auto const& shown : ended.entries)
                 view->removeEntry(shown.watchId);
             if (!ended.entries.empty())
                 view->showEnded(ended);
-            showProgress();
+            if (progressShown)
+                view->showProgress(shownProgress);
             view->showOrphanedCount(instances->countOrphaned());
         }
 
