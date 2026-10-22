@@ -1445,4 +1445,148 @@ namespace Test
 
         EXPECT_TRUE(remoteSizeOf(*sftp, remote("/home/test/testfile.txt.filepart")).has_value());
     }
+
+    namespace
+    {
+        /**
+         * @brief What the server has in the file @p path, nothing when it cannot be read.
+         */
+        std::optional<std::string> remoteContentOf(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
+        {
+            auto opening = sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::none);
+            if (opening.wait_for(5s) != std::future_status::ready)
+                return std::nullopt;
+            auto opened = opening.get();
+            if (!opened)
+                return std::nullopt;
+            const auto file = opened->lock();
+            if (!file)
+                return std::nullopt;
+            std::string content;
+            std::string chunk(64u * 1024u, '\0');
+            while (true)
+            {
+                auto reading = file->readSome(chunk.data(), chunk.size());
+                if (reading.wait_for(5s) != std::future_status::ready)
+                    return std::nullopt;
+                const auto read = reading.get();
+                if (!read)
+                    return std::nullopt;
+                if (*read == 0)
+                    break;
+                content.append(chunk.data(), static_cast<std::size_t>(*read));
+            }
+            file->close();
+            return content;
+        }
+
+        /**
+         * @brief @p size bytes that differ along the way, so a part continued at the wrong place shows.
+         */
+        std::string patternedContent(std::size_t size)
+        {
+            std::string content(size, '\0');
+            for (std::size_t index = 0; index < size; ++index)
+                content[index] = static_cast<char>('a' + index % 23u);
+            return content;
+        }
+    }
+
+    TEST_F(UploadOperationTests, AnUploadContinuesThePartialFileOfItsOldName)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto source = temporaryRoot / "old.bin";
+        const auto content = patternedContent(1024u * 1024u);
+        writeContent(source, content);
+        {
+            std::uint64_t sent = 0;
+            UploadOperation stopped{
+                sftp,
+                {
+                    .progressCallback =
+                        [&sent](auto, auto, auto current, auto)
+                    {
+                        sent = static_cast<std::uint64_t>(current);
+                    },
+                    .remotePath = remote("/home/test/old.bin"),
+                    .localPath = toLocal(source),
+                }
+            };
+            ASSERT_TRUE(workUntilPartlySent(stopped, sent));
+            ASSERT_TRUE(stopped.cancel(true).has_value());
+        }
+        const auto kept = remoteSizeOf(*sftp, remote("/home/test/old.bin.filepart"));
+        ASSERT_TRUE(kept.has_value());
+        const auto renamed = temporaryRoot / "new.bin";
+        std::filesystem::rename(source, renamed);
+
+        std::optional<std::uint64_t> firstProgress;
+        UploadOperation continued{
+            sftp,
+            {
+                .progressCallback =
+                    [&firstProgress](auto, auto, auto current, auto)
+                {
+                    if (!firstProgress)
+                        firstProgress = static_cast<std::uint64_t>(current);
+                },
+                .remotePath = remote("/home/test/new.bin"),
+                .localPath = toLocal(renamed),
+                .adoptPartialOf = remote("/home/test/old.bin"),
+            }
+        };
+        ASSERT_EQ(runToCompletion(continued), UploadOperation::WorkStatus::Complete);
+
+        ASSERT_TRUE(firstProgress.has_value());
+        EXPECT_GE(*firstProgress, *kept);
+        EXPECT_FALSE(remoteSizeOf(*sftp, remote("/home/test/old.bin.filepart")).has_value());
+        EXPECT_FALSE(remoteSizeOf(*sftp, remote("/home/test/old.bin")).has_value());
+        EXPECT_EQ(remoteContentOf(*sftp, remote("/home/test/new.bin")), content);
+    }
+
+    TEST_F(UploadOperationTests, AnAdoptedPartialFileOfAnotherSourceStartsOver)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        ASSERT_TRUE(serverStartResult->command(
+            "createFile", {{"path", "/home/test/old.bin.filepart"}, {"content", "something else entirely"}}
+        ));
+        const auto source = temporaryRoot / "new.bin";
+        const auto content = patternedContent(100000u);
+        writeContent(source, content);
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/new.bin"),
+                .localPath = toLocal(source),
+                .adoptPartialOf = remote("/home/test/old.bin"),
+            }
+        };
+
+        ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
+
+        EXPECT_EQ(remoteContentOf(*sftp, remote("/home/test/new.bin")), content);
+    }
+
+    TEST_F(UploadOperationTests, AnUploadWithoutTheOldPartialFileStartsFresh)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto source = temporaryRoot / "new.bin";
+        const auto content = patternedContent(100000u);
+        writeContent(source, content);
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/new.bin"),
+                .localPath = toLocal(source),
+                .adoptPartialOf = remote("/home/test/old.bin"),
+            }
+        };
+
+        ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
+
+        EXPECT_EQ(remoteContentOf(*sftp, remote("/home/test/new.bin")), content);
+    }
 }

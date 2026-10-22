@@ -90,6 +90,11 @@ class UploadOperation : public Operation
          *        file that changed meanwhile are not told.
          */
         OnSent onSent{};
+        /**
+         * @brief The destination of a cancelled upload of the same source under its old name: its temporary file
+         *        becomes this upload's before it is continued, see tryContinue. Unless this upload has one already.
+         */
+        std::optional<Paths::RemotePath> adoptPartialOf{};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -176,6 +181,12 @@ class UploadOperation : public Operation
     bool sourceIsGone() const;
 
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
+
+    /**
+     * @brief Moves the temporary file of UploadOperationOptions::adoptPartialOf to tempPath_ when this upload has none
+     *        there. A failure leaves the upload to start anew.
+     */
+    void takeOverPartialFileInStrand(SecureShell::SftpSession& sftp);
 
     /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
     std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);

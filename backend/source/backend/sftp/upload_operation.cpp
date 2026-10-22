@@ -450,6 +450,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         }
     }
 
+    if (options_.adoptPartialOf)
+        takeOverPartialFileInStrand(sftp);
     const auto tempResult = sftp.lstatInStrand(tempPath_);
 
     // Permissions of what is uploaded: the target of a followed symlink, not the link.
@@ -530,6 +532,20 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     openedTemporaryFile_ = true;
 
     return {};
+}
+
+void UploadOperation::takeOverPartialFileInStrand(SecureShell::SftpSession& sftp)
+{
+    const auto partial = options_.adoptPartialOf->withFilenameSuffix(options_.tempFileSuffix);
+    if (!partial || *partial == tempPath_ || sftp.lstatInStrand(tempPath_).has_value())
+        return;
+    if (options_.createMissingDirectories)
+    {
+        if (const auto created = ensureRemoteDirectoryExistsInStrand(sftp, *tempPath_.parent()); !created)
+            return;
+    }
+    if (const auto renamed = sftp.renameNoReplaceInStrand(*partial, tempPath_); renamed.has_value())
+        Log::info("UploadOperation: continuing '{}' as '{}'.", partial->value(), tempPath_.value());
 }
 
 bool UploadOperation::tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize)

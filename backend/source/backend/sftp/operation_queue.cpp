@@ -1578,7 +1578,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     SharedData::OperationMode mode,
     bool sourceMayVanish,
     std::optional<SharedData::ComparedState> comparedDestination,
-    UploadOperation::OnSent onSent
+    UploadOperation::OnSent onSent,
+    std::optional<Paths::RemotePath> adoptPartialOf
 )
 {
     // Assumed in strand
@@ -1621,6 +1622,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
         opts.onSent = std::move(onSent);
+        opts.adoptPartialOf = std::move(adoptPartialOf);
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )

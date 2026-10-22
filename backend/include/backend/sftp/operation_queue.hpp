@@ -138,6 +138,9 @@ class OperationQueue
      *        UploadOperation::UploadOperationOptions::comparedDestination. A directory ignores it.
      * @param onSent Hears of each regular file sent unchanged, the files below a directory too, see
      *        UploadOperation::UploadOperationOptions::onSent.
+     * @param adoptPartialOf The destination of a cancelled upload of the file under its old name, whose temporary
+     *        file this one continues, see UploadOperation::UploadOperationOptions::adoptPartialOf. A directory
+     *        ignores it.
      */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -151,7 +154,8 @@ class OperationQueue
         SharedData::OperationMode mode = SharedData::OperationMode::Queued,
         bool sourceMayVanish = false,
         std::optional<SharedData::ComparedState> comparedDestination = std::nullopt,
-        UploadOperation::OnSent onSent = {}
+        UploadOperation::OnSent onSent = {},
+        std::optional<Paths::RemotePath> adoptPartialOf = std::nullopt
     );
 
     /**
