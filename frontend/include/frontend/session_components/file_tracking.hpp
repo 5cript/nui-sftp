@@ -1,57 +1,53 @@
 #pragma once
 
-#include <persistence/state_holder.hpp>
-#include <persistence/state/sftp_options.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
-#include <frontend/events/frontend_events.hpp>
 #include <ids/ids.hpp>
 #include <paths/paths.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
-#include <filesystem>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
 
-class OperationQueue;
-
+/**
+ * @brief Shows the file tracker of a session, which lives in the backend as "FileTracker::<sessionId>": its watches,
+ *        its questions and the orphaned download directories. Forwards what the user asks for and decides nothing.
+ */
 class FileTrackingPanel
 {
   public:
-    FileTrackingPanel(Persistence::StateHolder* stateHolder, FrontendEvents* events, ConfirmDialog* confirmDialog);
+    explicit FileTrackingPanel(ConfirmDialog* confirmDialog);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FileTrackingPanel);
 
     /**
-     * @brief Connect to a live session's operation queue.
-     * @param downloadTempSuffix The suffix the session's downloads write under until complete, see
-     *        Persistence::effectiveTempFileSuffix. The watches ignore those files.
+     * @brief Shows the tracker of the session @p sessionId from now on.
      */
-    void activate(OperationQueue* operationQueue, Ids::SessionId sessionId, std::string downloadTempSuffix);
+    void activate(Ids::SessionId sessionId);
 
-    /** @brief The suffix of the session's downloads in progress, given to activate(). */
-    std::string const& downloadTempSuffix() const;
-
-    /** @brief Disconnect from the session; clears all watches and entries. */
+    /**
+     * @brief Shows nothing any more, the session has ended.
+     */
     void deactivate();
 
     /**
-     * @brief Register a new watched entry after a priority download has been initiated.
-     *
-     * @param instanceId  The FileTracking instance ID returned by createInstance.
-     * @param instanceDirectory The local temporary directory for this instance.
-     * @param remotePath  Absolute remote path that was downloaded.
-     * @param localPath   Local path inside instanceDirectory where the file/dir lives.
+     * @brief Asks the tracker to download @p remotePath into a directory of its own, and to watch it there when
+     *        @p watch is set. @p onOpened gets the copy, @p onRefused the translated reason when there is none.
+     *        Neither is called when the download did not end well, its card in the queue tells why.
      */
-    void startWatching(
-        Ids::InstanceId const& instanceId,
-        Paths::LocalPath const& instanceDirectory,
+    void open(
         Paths::RemotePath const& remotePath,
-        Paths::LocalPath const& localPath
+        std::uint64_t sizeBytes,
+        bool watch,
+        std::function<void(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)> onOpened,
+        std::function<void(std::string const& reason)> onRefused
     );
 
     /**
-     * @brief Removes @p localPath, a download of the instance @p instanceId the user decided not to open, and ends
-     *        its watch like Stop does when it has one. Once nothing else is left in the instance, it ends and its
-     *        directory is removed, so it leaves no orphan.
+     * @brief Asks the tracker to remove @p localPath, a download of the instance @p instanceId the user decided not to
+     *        open, with its watch.
      */
     void discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath);
 

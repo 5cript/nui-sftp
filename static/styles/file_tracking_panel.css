@@ -58,6 +58,63 @@ header.file-tracking-header {
     color: var(--warning-color, #f5a623);
 }
 
+.file-tracking-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 0.82em;
+}
+
+.file-tracking-progress-idle {
+    display: none;
+}
+
+.file-tracking-progress-track {
+    position: relative;
+    width: 140px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 3px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--theme-color, #4caf50) 20%, transparent);
+}
+
+.file-tracking-progress-fill {
+    height: 100%;
+    background: var(--theme-color, #4caf50);
+    transition: width 0.2s ease-out;
+}
+
+.file-tracking-progress-track::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 30%;
+    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.35), transparent);
+    animation: file-tracking-progress-sweep 1.2s linear infinite;
+}
+
+@keyframes file-tracking-progress-sweep {
+    from {
+        transform: translateX(-100%);
+    }
+
+    to {
+        transform: translateX(340%);
+    }
+}
+
+.file-tracking-progress-text {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.file-tracking-progress-waiting {
+    white-space: nowrap;
+    color: var(--warning-color, #f5a623);
+}
+
 .file-tracking-header-actions {
     display: flex;
     gap: 6px;

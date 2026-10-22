@@ -124,33 +124,10 @@ class RemoteSideModel
     enqueueDeletes(std::vector<Paths::RemotePath> nonEmpties, std::vector<Paths::RemotePath> filesAndEmptyDirs);
 
     /**
-     * @brief Downloads @p item into a file tracking instance and opens it, with @p watch also uploads it again when
-     *        it changes.
+     * @brief Has the file tracker download @p item into a directory of its own and opens it, with @p watch the
+     *        tracker also uploads it again when it changes.
      */
     void onDownloadAndOpen(NuiFileExplorer::Item const& item, bool openWith, bool watch);
-    void onFileTrackingInstanceCreated(
-        NuiFileExplorer::Item const& item,
-        bool openWith,
-        bool synchronize,
-        Ids::InstanceId const& instanceId,
-        std::string const& instanceDirStr
-    );
-    void onFileDownloadComplete(
-        Ids::InstanceId const& instanceId,
-        Paths::LocalPath const& instanceDirectory,
-        Paths::RemotePath const& remotePath,
-        Paths::LocalPath const& localPath,
-        bool openWith,
-        bool synchronize,
-        bool success
-    );
-    void onFileWatchAdded(
-        Ids::InstanceId const& instanceId,
-        Paths::LocalPath const& instanceDirectory,
-        Paths::RemotePath const& remotePath,
-        Paths::LocalPath const& localPath,
-        bool openWith
-    );
     /**
      * @brief What happens when the user decides not to open the download @p localPath of the instance
      *        @p instanceId: the download is removed and its watch ends, see FileTrackingPanel::discard.

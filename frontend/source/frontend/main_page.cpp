@@ -124,6 +124,15 @@ MainPage::MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events
 void MainPage::onSetupComplete()
 {
     Log::info("Setup is complete.");
+    // The watches of a frontend that loaded before this one (a reload) are not shown anywhere any more.
+    Nui::RpcClient::callWithBackChannel(
+        "FileTracker::stopAll",
+        [](Nui::val response)
+        {
+            if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
+                Log::error("FileTracker::stopAll failed");
+        }
+    );
     applyPanelTitles();
     impl_->panelTitlesListener = language->listenToLanguageChange(
         [](std::string const&)
