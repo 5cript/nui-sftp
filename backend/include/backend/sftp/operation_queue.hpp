@@ -103,9 +103,12 @@ class OperationQueue
     /**
      * @brief Queues the upload of the file, link or directory @p localPath to @p remotePath.
      * @param sourceMayVanish A source that is gone by the time the upload starts completes it without a transfer, see
-     *        UploadOperation::UploadOperationOptions::sourceMayVanish.
+     *        UploadOperation::UploadOperationOptions::sourceMayVanish. One that is gone already is refused as
+     *        FileNotFound, which is no error worth logging.
      * @param comparedDestination What a file or link must find at @p remotePath to replace it, see
      *        UploadOperation::UploadOperationOptions::comparedDestination. A directory ignores it.
+     * @param onSent Hears of each regular file sent unchanged, the files below a directory too, see
+     *        UploadOperation::UploadOperationOptions::onSent.
      */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -118,7 +121,8 @@ class OperationQueue
         bool createMissingDirectories,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued,
         bool sourceMayVanish = false,
-        std::optional<SharedData::ComparedState> comparedDestination = std::nullopt
+        std::optional<SharedData::ComparedState> comparedDestination = std::nullopt,
+        UploadOperation::OnSent onSent = {}
     );
 
     /**
@@ -215,12 +219,16 @@ class OperationQueue
 
     /**
      * @brief Upload analogue of @ref addBulkDownloadOperation.
+     * @param sourceMayVanish Each entry may be gone by the time it is uploaded, see addUploadOperation.
+     * @param onSent Hears of each regular file sent unchanged, see addUploadOperation.
      */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
         SharedData::BulkUploadRequest request,
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
-        Ids::OperationId const& bulkCardId
+        Ids::OperationId const& bulkCardId,
+        bool sourceMayVanish = false,
+        UploadOperation::OnSent const& onSent = {}
     );
 
     /**

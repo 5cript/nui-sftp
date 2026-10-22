@@ -212,6 +212,26 @@ namespace
             .symlinkHandling = opts.symlinkHandling.value_or(def.symlinkHandling),
         };
     }
+
+    /**
+     * @brief Why the upload of @p localPath is refused, its status (@p status, @p statusError) unreadable. A source
+     *        that may vanish and is gone is nothing that failed.
+     */
+    Operation::Error refusedSource(
+        Paths::LocalPath const& localPath,
+        std::filesystem::file_status status,
+        std::error_code const& statusError,
+        bool sourceMayVanish
+    )
+    {
+        if (sourceMayVanish && status.type() == std::filesystem::file_type::not_found)
+        {
+            Log::debug("Not uploading '{}', it is gone.", localPath.toUtf8());
+            return Operation::Error{.type = Operation::ErrorType::FileNotFound};
+        }
+        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(statusError));
+        return Operation::Error{.type = Operation::ErrorType::FileStatFailed};
+    }
 }
 
 OperationQueue::OperationQueue(
@@ -1464,7 +1484,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool createMissingDirectories,
     SharedData::OperationMode mode,
     bool sourceMayVanish,
-    std::optional<SharedData::ComparedState> comparedDestination
+    std::optional<SharedData::ComparedState> comparedDestination,
+    UploadOperation::OnSent onSent
 )
 {
     // Assumed in strand
@@ -1477,10 +1498,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     const auto symStat = std::filesystem::symlink_status(localNativePath, ec);
 
     if (ec)
-    {
-        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(ec));
-        return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
-    }
+        return std::unexpected(refusedSource(localPath, symStat, ec, sourceMayVanish));
 
     const bool isSymlink = std::filesystem::is_symlink(symStat);
     std::filesystem::file_status stat = symStat;
@@ -1488,10 +1506,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     {
         stat = std::filesystem::status(localNativePath, ec);
         if (ec)
-        {
-            Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(ec));
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::FileStatFailed});
-        }
+            return std::unexpected(refusedSource(localPath, stat, ec, sourceMayVanish));
     }
 
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
@@ -1512,6 +1527,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.createMissingDirectories = createMissingDirectories;
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
+        opts.onSent = std::move(onSent);
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -1565,6 +1581,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     {
         auto individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
         individualOptions.sourceMayVanish = sourceMayVanish;
+        individualOptions.onSent = std::move(onSent);
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp.weak_from_this(),
             BulkUploadOperation::BulkUploadOperationOptions{
@@ -1623,7 +1640,9 @@ std::size_t OperationQueue::addBulkUploadOperation(
     SecureShell::SftpSession& sftp,
     SharedData::BulkUploadRequest request,
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
-    Ids::OperationId const& bulkCardId
+    Ids::OperationId const& bulkCardId,
+    bool sourceMayVanish,
+    UploadOperation::OnSent const& onSent
 )
 {
     // Assumed in strand.
@@ -1647,7 +1666,10 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 /*isBigFile*/ false,
                 unit.insertRefresh,
                 /*createMissingDirectories*/ true,
-                unit.mode
+                unit.mode,
+                sourceMayVanish,
+                std::nullopt,
+                onSent
             );
             if (!result)
             {
@@ -1686,6 +1708,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
 
             auto uploadOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
             uploadOptions.createMissingDirectories = true;
+            uploadOptions.sourceMayVanish = sourceMayVanish;
+            uploadOptions.onSent = onSent;
             auto bulk = std::make_unique<BulkUploadOperation>(
                 sftp.weak_from_this(),
                 BulkUploadOperation::BulkUploadOperationOptions{

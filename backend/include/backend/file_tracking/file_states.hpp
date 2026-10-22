@@ -1,5 +1,8 @@
 #pragma once
 
+#include <backend/file_tracking/tracking_state.hpp>
+
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -37,4 +40,16 @@ namespace FileTracking
      *        canonical. Symbolic links below it are not followed.
      */
     std::vector<FileState> itemStatesOf(std::filesystem::path const& item);
+
+    /**
+     * @brief How many entries @p item is with everything below it when it is a directory, symbolic links not
+     *        followed. Their states are not read.
+     */
+    std::size_t entryCountOf(std::filesystem::path const& item);
+
+    /**
+     * @brief The state of the regular file at @p path, nothing for anything else, a symbolic link too, and when it
+     *        cannot be read.
+     */
+    std::optional<SourceState> sourceStateOf(std::filesystem::path const& path);
 }

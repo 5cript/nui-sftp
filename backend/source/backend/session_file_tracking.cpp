@@ -20,6 +20,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <set>
 #include <string_view>
@@ -147,6 +148,32 @@ namespace
         std::error_code statusError;
         return std::filesystem::is_directory(std::filesystem::symlink_status(path.native(), statusError));
     }
+
+    /**
+     * @brief Gathers the files an upload sent unchanged, told on the strands of its transfers, until it ended.
+     */
+    class SentFiles : public std::enable_shared_from_this<SentFiles>
+    {
+      public:
+        UploadOperation::OnSent recorder()
+        {
+            return [self = shared_from_this()](Paths::LocalPath const& source, UploadOperation::SentSource const& sent)
+            {
+                std::scoped_lock lock{self->mutex_};
+                self->files_.push_back({.path = source, .state = {.size = sent.size, .modified = sent.modified}});
+            };
+        }
+
+        std::vector<FileTracking::SentFile> take()
+        {
+            std::scoped_lock lock{mutex_};
+            return std::exchange(files_, {});
+        }
+
+      private:
+        std::mutex mutex_{};
+        std::vector<FileTracking::SentFile> files_{};
+    };
 }
 
 class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
@@ -196,8 +223,10 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     std::expected<void, std::string> upload(FileTracking::UploadRequest const& request, OnUploadEnded onEnded) override
     {
         const bool isDirectory = isDirectoryLocally(request.source);
+        const auto sent = std::make_shared<SentFiles>();
         return queue(
-            [&request](OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId)
+            [&request,
+                &sent](OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId)
             {
                 auto added = queue.addUploadOperation(
                     channel,
@@ -210,14 +239,15 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     request.createMissingDirectories,
                     SharedData::OperationMode::PriorityQueued,
                     /*sourceMayVanish=*/true,
-                    comparedStateOf(request.expectedDestination)
+                    comparedStateOf(request.expectedDestination),
+                    sent->recorder()
                 );
                 // The tracker asks the user about a server copy that changed meanwhile.
                 if (added)
                     queue.leaveChangedDestinationsToOwner(operationId);
                 return added;
             },
-            endOfUpload(session_, request.destination, isDirectory, std::move(onEnded))
+            endOfUpload(session_, request.destination, isDirectory, sent, std::move(onEnded))
         );
     }
 
@@ -260,6 +290,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
             [&requests,
                 &onEnded](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
             {
+                const auto sent = std::make_shared<SentFiles>();
                 SharedData::BulkUploadRequest bulk{
                     .allowOverwrite = true,
                     .mode = SharedData::OperationMode::PriorityQueued,
@@ -286,7 +317,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     {
                         return Ids::generateOperationId();
                     },
-                    cardId
+                    cardId,
+                    /*sourceMayVanish=*/true,
+                    sent->recorder()
                 );
                 // The tracker decides anew what goes once the session is back.
                 queue.discardResumeBackup(cardId);
@@ -295,10 +328,13 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     cardId,
                     [session = session.weak_from_this(),
                         onEnded = std::move(onEnded),
+                        sent,
+                        sources = requests | std::views::transform(&FileTracking::UploadRequest::source) |
+                            std::ranges::to<std::vector>(),
                         destinations = requests | std::views::transform(&FileTracking::UploadRequest::destination) |
                             std::ranges::to<std::vector>()](SharedData::OperationCompleted const& completed)
                     {
-                        endUploads(session, completed, destinations, onEnded);
+                        endUploads(session, completed, sources, destinations, sent->take(), onEnded);
                     }
                 );
                 session.resetQueueThrottle();
@@ -351,32 +387,41 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
   private:
     /**
      * @brief Hands the end of an upload to @p onEnded, a completed one of anything but a directory once the server
-     *        told what it has at @p destination. Nothing for an empty @p onEnded.
+     *        told what it has at @p destination, with the files @p sent tells of. Nothing for an empty @p onEnded.
      */
-    static std::function<void(SharedData::OperationCompleted const&)>
-    endOfUpload(std::weak_ptr<Session> session, Paths::RemotePath destination, bool isDirectory, OnUploadEnded onEnded)
+    static std::function<void(SharedData::OperationCompleted const&)> endOfUpload(
+        std::weak_ptr<Session> session,
+        Paths::RemotePath destination,
+        bool isDirectory,
+        std::shared_ptr<SentFiles> sent,
+        OnUploadEnded onEnded
+    )
     {
         if (!onEnded)
             return {};
         return [session = std::move(session),
                    destination = std::move(destination),
                    isDirectory,
+                   sent = std::move(sent),
                    onEnded = std::move(onEnded)](SharedData::OperationCompleted const& completed)
         {
-            if (completed.reason != SharedData::OperationCompletionReason::Completed || isDirectory)
+            const bool uploaded = completed.reason == SharedData::OperationCompletionReason::Completed;
+            if (!uploaded || isDirectory)
                 return onEnded({
                     .reason = completed.reason,
                     .changedOnServer =
                         completed.error && completed.error->type == SharedData::OperationErrorType::ChangedSinceCompare,
+                    .sentFiles = uploaded ? sent->take() : std::vector<FileTracking::SentFile>{},
                 });
             askStatesThen(
                 session,
                 {destination},
-                [onEnded](DestinationStates::States const& states)
+                [onEnded, sentFiles = sent->take()](DestinationStates::States const& states)
                 {
                     onEnded({
                         .reason = SharedData::OperationCompletionReason::Completed,
                         .destinationState = states.front(),
+                        .sentFiles = sentFiles,
                     });
                 }
             );
@@ -385,12 +430,14 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
 
     /**
      * @brief Hands each upload of a bulk that ended as @p completed its end: a completed one once the server told
-     *        what it has at its destination, of @p destinations by index.
+     *        what it has at its destination, of @p destinations by index, with its source when it is among @p sent.
      */
     static void endUploads(
         std::weak_ptr<Session> const& session,
         SharedData::OperationCompleted const& completed,
+        std::vector<Paths::LocalPath> const& sources,
         std::vector<Paths::RemotePath> const& destinations,
+        std::vector<FileTracking::SentFile> const& sent,
         OnUploadEntryEnded const& onEnded
     )
     {
@@ -428,10 +475,28 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         }
         if (uploaded.empty())
             return;
+        const auto sentBySource = sent |
+            std::views::transform(
+                [](FileTracking::SentFile const& file)
+                {
+                    return std::pair{file.path.toUtf8(), file};
+                }
+            ) |
+            std::ranges::to<std::map>();
+        const auto sentFilesOf = [&sentBySource, &sources](std::size_t index)
+        {
+            const auto found = sentBySource.find(sources[index].toUtf8());
+            if (found == sentBySource.end())
+                return std::vector<FileTracking::SentFile>{};
+            return std::vector{found->second};
+        };
+        auto uploadedSent = uploaded | std::views::transform(sentFilesOf) | std::ranges::to<std::vector>();
         askStatesThen(
             session,
             std::move(uploadedDestinations),
-            [onEnded, uploaded = std::move(uploaded)](DestinationStates::States const& states)
+            [onEnded,
+                uploaded = std::move(uploaded),
+                uploadedSent = std::move(uploadedSent)](DestinationStates::States const& states)
             {
                 for (std::size_t position = 0; position < uploaded.size(); ++position)
                     onEnded(
@@ -439,6 +504,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         {
                             .reason = SharedData::OperationCompletionReason::Completed,
                             .destinationState = states[position],
+                            .sentFiles = uploadedSent[position],
                         }
                     );
             }

@@ -1142,4 +1142,123 @@ namespace Test
             ASSERT_TRUE(closeResult.has_value());
         }
     }
+
+    namespace
+    {
+        /**
+         * @brief Records what an upload tells of the files it sent.
+         */
+        struct SentRecorder
+        {
+            std::vector<std::pair<std::string, UploadOperation::SentSource>> sent{};
+
+            UploadOperation::OnSent onSent()
+            {
+                return [this](Paths::LocalPath const& source, UploadOperation::SentSource const& state)
+                {
+                    sent.emplace_back(source.toUtf8(), state);
+                };
+            }
+        };
+
+        void writeContent(std::filesystem::path const& path, std::string const& content)
+        {
+            std::ofstream{path, std::ios_base::binary | std::ios_base::trunc} << content;
+        }
+    }
+
+    TEST_F(UploadOperationTests, AnUploadTellsTheStateOfTheFileItSent)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto source = temporaryRoot / "sent.txt";
+        writeContent(source, std::string(30000, 's'));
+        SentRecorder recorder;
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/sent.txt"),
+                .localPath = toLocal(source),
+                .onSent = recorder.onSent(),
+            }
+        };
+
+        ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
+
+        ASSERT_EQ(recorder.sent.size(), 1u);
+        EXPECT_EQ(recorder.sent.front().first, toLocal(source).toUtf8());
+        EXPECT_EQ(
+            recorder.sent.front().second,
+            (UploadOperation::SentSource{.size = 30000u, .modified = std::filesystem::last_write_time(source)})
+        );
+    }
+
+    TEST_F(UploadOperationTests, AFileChangedWhileItUploadsIsNotToldAsSent)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto source = temporaryRoot / "growing.txt";
+        // Larger than the transfer buffer, so the progress of the first part comes before the rest is read.
+        writeContent(source, std::string(30000, 'g'));
+        SentRecorder recorder;
+        bool appended = false;
+        UploadOperation operation{
+            sftp,
+            {
+                .progressCallback =
+                    [&](auto, auto, auto current, auto)
+                {
+                    if (appended || current == 0)
+                        return;
+                    appended = true;
+                    std::ofstream{source, std::ios_base::binary | std::ios_base::app} << "more";
+                },
+                .remotePath = remote("/home/test/growing.txt"),
+                .localPath = toLocal(source),
+                .onSent = recorder.onSent(),
+            }
+        };
+
+        ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(appended);
+        EXPECT_TRUE(recorder.sent.empty());
+    }
+
+    TEST_F(UploadOperationTests, AContinuedUploadIsNotToldAsSent)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        {
+            auto openFut = sftp->openFile(
+                remote("/home/test/testfile.txt.filepart"),
+                SecureShell::SftpSession::OpenType::Write | SecureShell::SftpSession::OpenType::Create,
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+            );
+            ASSERT_EQ(openFut.wait_for(5s), std::future_status::ready);
+            auto opened = openFut.get();
+            ASSERT_TRUE(opened.has_value());
+            auto file = opened->lock();
+            ASSERT_TRUE(file);
+            const auto partialContent = testFileContent.substr(0, testFileContent.size() / 2);
+            auto writeFut = file->write(partialContent);
+            ASSERT_EQ(writeFut.wait_for(5s), std::future_status::ready);
+            (void)writeFut.get();
+            file->close();
+        }
+        SentRecorder recorder;
+        UploadOperation operation{
+            sftp,
+            {
+                .remotePath = remote("/home/test/testfile.txt"),
+                .localPath = toLocal(temporaryRoot / "testfile.txt"),
+                .tryContinue = true,
+                .onSent = recorder.onSent(),
+            }
+        };
+
+        ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
+
+        EXPECT_TRUE(recorder.sent.empty());
+    }
 }

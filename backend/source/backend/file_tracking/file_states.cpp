@@ -60,4 +60,30 @@ namespace FileTracking
             );
         return files;
     }
+
+    std::size_t entryCountOf(std::filesystem::path const& item)
+    {
+        std::size_t count = 1;
+        std::error_code walkError{};
+        for (
+            std::filesystem::recursive_directory_iterator iter{item, walkError}, end; !walkError && iter != end;
+            iter.increment(walkError)
+        )
+            ++count;
+        return count;
+    }
+
+    std::optional<SourceState> sourceStateOf(std::filesystem::path const& path)
+    {
+        std::error_code statusError{};
+        if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(path, statusError)))
+            return std::nullopt;
+        std::error_code sizeError{};
+        const auto size = std::filesystem::file_size(path, sizeError);
+        std::error_code timeError{};
+        const auto modified = std::filesystem::last_write_time(path, timeError);
+        if (sizeError || timeError)
+            return std::nullopt;
+        return SourceState{.size = static_cast<std::uint64_t>(size), .modified = modified};
+    }
 }
