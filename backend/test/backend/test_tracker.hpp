@@ -1602,8 +1602,8 @@ namespace Test
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/x"));
         EXPECT_TRUE(remote_->server.contains("/srv/project/docs/x/y/deep.txt"));
         EXPECT_TRUE(view_->questions.empty());
-#ifndef __APPLE__
-        // The watch reports the move between directories as one, the server renames the directory.
+#ifdef __linux__
+        // inotify reports the move between directories as one, the server renames the directory.
         ASSERT_EQ(remote_->of("rename").size(), 1u);
         EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/x");
         EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/docs/x");
@@ -1632,7 +1632,7 @@ namespace Test
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
         EXPECT_TRUE(remote_->server.contains("/srv/project/lib/main.cpp"));
         EXPECT_TRUE(view_->questions.empty());
-#ifndef __APPLE__
+#ifdef __linux__
         ASSERT_EQ(remote_->of("rename").size(), 1u);
         EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/main.cpp");
         EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/lib/main.cpp");
