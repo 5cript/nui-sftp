@@ -1429,7 +1429,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool insertRefresh,
     bool createMissingDirectories,
     SharedData::OperationMode mode,
-    bool sourceMayVanish
+    bool sourceMayVanish,
+    std::optional<SharedData::ComparedState> comparedDestination
 )
 {
     // Assumed in strand
@@ -1476,6 +1477,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.bigFileOptimized = isBigFile || (!isSymlink && localFileSize(localNativePath) >= Constants::bigFileCutOff);
         opts.createMissingDirectories = createMissingDirectories;
         opts.sourceMayVanish = sourceMayVanish;
+        opts.comparedDestination = std::move(comparedDestination);
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
