@@ -482,8 +482,9 @@ namespace Test
                     operation.kind != "discard" && found != remote_->server.end())
                 {
                     if (operation.kind == "rename")
-                        remote_->server[operation.destination] = found->second;
-                    remote_->server.erase(operation.source);
+                        renameOnServer(operation.source, operation.destination);
+                    else
+                        remote_->server.erase(operation.source);
                 }
                 end(remote_->queued[index], SharedData::OperationCompletionReason::Completed);
             }
@@ -513,6 +514,26 @@ namespace Test
                     return;
             }
             ADD_FAILURE() << "operations kept coming";
+        }
+
+        /**
+         * @brief The server renames @p source to @p destination, a directory with its content.
+         */
+        void renameOnServer(std::string const& source, std::string const& destination)
+        {
+            std::vector<std::pair<std::string, FileTracking::ServerState>> moved;
+            for (auto entry = remote_->server.begin(); entry != remote_->server.end();)
+            {
+                if (entry->first != source && !entry->first.starts_with(source + "/"))
+                {
+                    ++entry;
+                    continue;
+                }
+                moved.emplace_back(destination + entry->first.substr(source.size()), entry->second);
+                entry = remote_->server.erase(entry);
+            }
+            for (auto& [path, state] : moved)
+                remote_->server.insert_or_assign(std::move(path), state);
         }
 
         /**
@@ -1571,26 +1592,53 @@ namespace Test
         ASSERT_TRUE(runUntil(
             [this]()
             {
-                return uploadsTo("/srv/project/docs/x") == 1u;
+                return !remote_->of("rename").empty() || uploadsTo("/srv/project/docs/x") == 1u;
             }
         ));
         runFor(std::chrono::milliseconds{500});
         completeEverything();
 
-        auto removed = remote_->sourcesOf("remove");
-        std::ranges::sort(removed);
-        EXPECT_EQ(
-            removed,
-            (std::vector<std::string>{
-                "/srv/project/src/x",
-                "/srv/project/src/x/main.c",
-                "/srv/project/src/x/y",
-                "/srv/project/src/x/y/deep.txt",
-            })
-        );
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/x/main.c"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/x"));
         EXPECT_TRUE(remote_->server.contains("/srv/project/docs/x/y/deep.txt"));
         EXPECT_TRUE(view_->questions.empty());
+#ifndef __APPLE__
+        // The watch reports the move between directories as one, the server renames the directory.
+        ASSERT_EQ(remote_->of("rename").size(), 1u);
+        EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/x");
+        EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/docs/x");
+        EXPECT_EQ(uploadsTo("/srv/project/docs/x"), 0u);
+        EXPECT_TRUE(remote_->of("remove").empty());
+#endif
+    }
+
+    TEST_F(TrackerTest, AFileMovedToAnotherDirectoryOfTheItemIsRenamedOnTheServer)
+    {
+        const auto project = root_ / "local" / "project";
+        std::filesystem::create_directories(project / "lib");
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+
+        std::filesystem::rename(project / "src" / "main.cpp", project / "lib" / "main.cpp");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("rename").empty() || !remote_->of("remove").empty();
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        completeEverything();
+
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
+        EXPECT_TRUE(remote_->server.contains("/srv/project/lib/main.cpp"));
+        EXPECT_TRUE(view_->questions.empty());
+#ifndef __APPLE__
+        ASSERT_EQ(remote_->of("rename").size(), 1u);
+        EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/main.cpp");
+        EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/lib/main.cpp");
+        EXPECT_EQ(uploadsTo("/srv/project/lib/main.cpp"), 0u);
+        EXPECT_TRUE(remote_->of("remove").empty());
+#endif
     }
 
     TEST_F(TrackerTest, ADirectoryMovedOutAndInAgainLeavesNoServerCopyAtItsOldPlace)
