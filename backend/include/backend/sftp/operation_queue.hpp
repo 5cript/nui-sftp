@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <atomic>
 
@@ -337,6 +338,14 @@ class OperationQueue
      */
     void discardResumeBackup(Ids::OperationId const& operationId);
 
+    /**
+     * @brief The owner of the operation @p operationId asks the user about destinations that changed since their
+     *        compare, so such an end is no failure of the queue's: the operation completes as canceled with the error
+     *        that tells the owner why, and a bulk leaves those entries out of its failed ones while its indexed
+     *        failures keep them. Must be called from the strand.
+     */
+    void leaveChangedDestinationsToOwner(Ids::OperationId const& operationId);
+
     bool hasPriorityWork() const;
 
     /**
@@ -448,6 +457,8 @@ class OperationQueue
     std::function<void(OperationCompleted const&)> completionObserver_{};
     std::unordered_map<Ids::OperationId, std::function<void(OperationCompleted const&)>, Ids::IdHash>
         completionCallbacks_{};
+    /** @brief See leaveChangedDestinationsToOwner(). */
+    std::unordered_set<Ids::OperationId, Ids::IdHash> changedDestinationsLeftToOwner_{};
     // Transfer slots handed out per queue tick.
     int parallelism_{1};
     // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.

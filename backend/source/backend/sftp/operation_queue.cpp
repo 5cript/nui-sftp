@@ -68,6 +68,29 @@ namespace
         return parent ? *std::move(parent) : PathT{};
     }
 
+    bool changedSinceCompare(SharedData::OperationError const& error)
+    {
+        return error.type == SharedData::OperationErrorType::ChangedSinceCompare;
+    }
+
+    /**
+     * @brief @p completed as it ends an operation whose owner asks about changed destinations itself, see
+     *        OperationQueue::leaveChangedDestinationsToOwner.
+     */
+    void leaveChangesToOwner(OperationQueue::OperationCompleted& completed)
+    {
+        if (completed.reason == SharedData::OperationCompletionReason::Failed && completed.error &&
+            changedSinceCompare(*completed.error))
+            completed.reason = SharedData::OperationCompletionReason::Canceled;
+        std::erase_if(
+            completed.failedEntries,
+            [](auto const& failed)
+            {
+                return changedSinceCompare(failed.second);
+            }
+        );
+    }
+
     OperationQueue::OperationCompleted makeCompletedOperation(
         OperationQueue::CompletionReason reason,
         Ids::OperationId operationId,
@@ -437,6 +460,8 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             if (!self)
                 return;
 
+            if (self->changedDestinationsLeftToOwner_.erase(operationCompleted.operationId) > 0)
+                leaveChangesToOwner(operationCompleted);
             if (operationCompleted.error)
                 Log::log(
                     Operation::failureLevelOf(*operationCompleted.error),
@@ -474,6 +499,11 @@ void OperationQueue::whenCompleted(
 void OperationQueue::discardResumeBackup(Ids::OperationId const& operationId)
 {
     bulkResumeStash_.erase(operationId);
+}
+
+void OperationQueue::leaveChangedDestinationsToOwner(Ids::OperationId const& operationId)
+{
+    changedDestinationsLeftToOwner_.insert(operationId);
 }
 
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)

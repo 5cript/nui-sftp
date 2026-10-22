@@ -1325,6 +1325,99 @@ namespace Test
         EXPECT_EQ(finished.front().error->type, SharedData::OperationErrorType::FileExists);
     }
 
+    TEST_F(OperationQueueTests, AChangedDestinationLeftToItsOwnerIsNoFailure)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localFile = localDirectory_.path() / "changed.txt";
+        std::ofstream{localFile} << "changed";
+        // Each expects nothing at file1.txt, which the server has.
+        const auto add = [&](Ids::OperationId const& operationId, bool leftToOwner)
+        {
+            return runOnStrand(
+                [&]()
+                {
+                    auto added = queue->addUploadOperation(
+                        *sftp,
+                        operationId,
+                        toLocal(localFile),
+                        remote("/home/test/file1.txt"),
+                        true,
+                        false,
+                        false,
+                        false,
+                        SharedData::OperationMode::PriorityQueued,
+                        false,
+                        SharedData::ComparedState{}
+                    );
+                    if (added && leftToOwner)
+                        queue->leaveChangedDestinationsToOwner(operationId);
+                    return added;
+                }
+            );
+        };
+        const auto owned = Ids::generateOperationId();
+        const auto unowned = Ids::generateOperationId();
+        ASSERT_TRUE(add(owned, true).has_value());
+        ASSERT_TRUE(add(unowned, false).has_value());
+        const SharedData::BulkUploadRequest request{
+            .entries =
+                {
+                    {.source = toLocal(localFile),
+                        .destination = remote("/home/test/file2.txt"),
+                        .sizeBytes = 7,
+                        .mayOverwrite = true,
+                        .comparedDestination = SharedData::ComparedState{}},
+                    {.source = toLocal(localFile),
+                        .destination = remote("/home/test/fresh.txt"),
+                        .sizeBytes = 7,
+                        .mayOverwrite = true,
+                        .comparedDestination = SharedData::ComparedState{}},
+                },
+            .mode = SharedData::OperationMode::PriorityQueued,
+        };
+        const auto card = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    card
+                );
+                queue->leaveChangedDestinationsToOwner(card);
+            }
+        );
+
+        workUntilCompletions(3);
+        std::map<std::string, SharedData::OperationCompleted> finished;
+        for (auto const& completed : completions())
+            finished.emplace(completed.operationId.value(), completed);
+        ASSERT_EQ(finished.size(), 3u);
+        auto const& ownedEnd = finished.at(owned.value());
+        EXPECT_EQ(ownedEnd.reason, SharedData::OperationCompletionReason::Canceled);
+        ASSERT_TRUE(ownedEnd.error.has_value()) << "the owner has to learn why";
+        EXPECT_EQ(ownedEnd.error->type, SharedData::OperationErrorType::ChangedSinceCompare);
+        auto const& unownedEnd = finished.at(unowned.value());
+        EXPECT_EQ(unownedEnd.reason, SharedData::OperationCompletionReason::Failed);
+        ASSERT_TRUE(unownedEnd.error.has_value());
+        EXPECT_EQ(unownedEnd.error->type, SharedData::OperationErrorType::ChangedSinceCompare);
+        auto const& bulkEnd = finished.at(card.value());
+        EXPECT_EQ(bulkEnd.reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(bulkEnd.failedEntries.empty());
+        ASSERT_EQ(bulkEnd.indexedFailures.size(), 1u);
+        EXPECT_EQ(bulkEnd.indexedFailures.front().index, 0u);
+        EXPECT_EQ(bulkEnd.indexedFailures.front().type, SharedData::OperationErrorType::ChangedSinceCompare);
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("fresh.txt"));
+    }
+
     TEST_F(OperationQueueTests, QueuedOperationsOfAClosedChannelFailWithChannelClosed)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
