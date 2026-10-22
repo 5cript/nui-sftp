@@ -12,7 +12,8 @@ namespace Utility
      *
      * Only "no such file or directory" (ENOENT, ENOTDIR, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND) means the path
      * does not exist. On Windows std::filesystem also reports a path past MAX_PATH and an unreachable network path as
-     * not found, so that answer is checked again through the extended-length form (\\?\) of the path.
+     * not found, so that answer is checked again through the extended-length form (\\?\) of the path. A path that is
+     * being deleted (STATUS_DELETE_PENDING, until the last handle to it closes) or lies below one counts as gone.
      *
      * @return The status, nothing when the path does not exist, an error when that cannot be told: the path exists
      *         but cannot be reached as given (ERROR_FILENAME_EXCED_RANGE past MAX_PATH), or the check failed.

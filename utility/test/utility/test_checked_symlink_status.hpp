@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #ifdef _WIN32
@@ -121,6 +122,41 @@ namespace Utility::Test
 
         ASSERT_TRUE(status.has_value()) << status.error().message();
         EXPECT_FALSE(status->has_value());
+    }
+
+    TEST_F(CheckedSymlinkStatusTests, APathBeingDeletedAndWhatIsBelowItAreGone)
+    {
+        const auto doomed = directory_.path() / "doomed";
+        std::filesystem::create_directory(doomed);
+        std::ofstream{doomed / "file.txt"} << "content";
+        // An open handle, like a watch's, keeps what libc++ removes without POSIX semantics pending deletion.
+        const auto handle = std::unique_ptr<void, decltype(&::CloseHandle)>{
+            ::CreateFileW(
+                doomed.c_str(),
+                FILE_LIST_DIRECTORY,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr,
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                nullptr
+            ),
+            &::CloseHandle
+        };
+        ASSERT_NE(handle.get(), INVALID_HANDLE_VALUE);
+        std::filesystem::remove(doomed / "file.txt");
+        std::filesystem::remove(doomed);
+        std::error_code statusError;
+        std::filesystem::symlink_status(doomed, statusError);
+        if (statusError != std::errc::permission_denied)
+            GTEST_SKIP() << "the removal did not leave the directory pending deletion: " << statusError.message();
+
+        const auto status = checkedSymlinkStatus(doomed);
+        const auto below = checkedSymlinkStatus(doomed / "file.txt");
+
+        ASSERT_TRUE(status.has_value()) << status.error().message();
+        EXPECT_FALSE(status->has_value());
+        ASSERT_TRUE(below.has_value()) << below.error().message();
+        EXPECT_FALSE(below->has_value());
     }
 
     TEST_F(CheckedSymlinkStatusLongPathTests, AnExtendedLengthPathHasItsStatus)
