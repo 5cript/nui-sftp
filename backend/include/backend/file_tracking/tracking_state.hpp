@@ -755,14 +755,14 @@ namespace FileTracking
 
         /**
          * @brief The changes on their way: each pending upload with the entries it carries or the changes waiting
-         *        below its directory, whichever are more since those mostly are the same, and the one more it takes
-         *        when its path changed again.
+         *        below its directory, whichever are more since those mostly are the same, and the one more a file
+         *        takes when it changed again. What a directory that changed again lacks counts once it goes.
          */
         std::size_t changeCount() const
         {
             std::size_t count = 0;
             for (auto const& pending : std::views::values(pending_))
-                count += countedOf(pending) + (pending.changedAgain ? 1 : 0);
+                count += countedOf(pending) + (pending.changedAgain && !pending.isDirectory ? 1 : 0);
             return count;
         }
 
