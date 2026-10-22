@@ -117,7 +117,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 const auto prepareResult = prepareInStrand(*sftp);
                 if (!prepareResult.has_value())
                 {
-                    Log::error("UploadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
+                    Log::log(
+                        failureLevelOf(prepareResult.error()),
+                        "UploadOperation: Failed to prepare operation: {}",
+                        prepareResult.error().toString()
+                    );
                     return enterErrorState<WorkStatus>(prepareResult.error());
                 }
             }
@@ -451,6 +455,11 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         }
     }
 
+    // Checked before anything is sent too, not only before the destination is replaced.
+    if (const auto unchanged =
+            ComparedStateCheck::requireUnchangedRemoteInStrand(sftp, remotePath_, options_.comparedDestination);
+        !unchanged)
+        return std::unexpected(unchanged.error());
     if (options_.adoptPartialOf)
         takeOverPartialFileInStrand(sftp);
     const auto tempResult = sftp.lstatInStrand(tempPath_);
