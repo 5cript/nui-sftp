@@ -51,12 +51,35 @@ namespace Utility
         }
 
         /**
-         * @brief What Windows itself says about @p path, which std::filesystem did not find (@p failure unset) or
-         *        could not check (@p failure). It tells apart what std::filesystem reports alike: a path past MAX_PATH
-         *        from a missing one, and a file being deleted from one that denies access.
+         * @brief What Windows itself says about @p path, which @p readStatus did not find (@p failure unset) or could
+         *        not check (@p failure). It tells apart what std::filesystem reports alike: a path past MAX_PATH from a
+         *        missing one, and a file being deleted from one that denies access. A shorter path Windows finds was
+         *        written anew meanwhile (git deletes and writes files) and gets one more look when @p lookAgain.
          */
+        std::expected<std::optional<std::filesystem::file_status>, std::error_code> askWindows(
+            std::filesystem::path const& path,
+            std::error_code failure,
+            Detail::SymlinkStatusReader const& readStatus,
+            bool lookAgain
+        );
+
         std::expected<std::optional<std::filesystem::file_status>, std::error_code>
-        askWindows(std::filesystem::path const& path, std::error_code failure)
+        statusOf(std::filesystem::path const& path, Detail::SymlinkStatusReader const& readStatus, bool lookAgain)
+        {
+            std::error_code statusError{};
+            const auto status = readStatus(path, statusError);
+            const bool notFound = status.type() == std::filesystem::file_type::not_found;
+            if (!notFound && !statusError)
+                return status;
+            return askWindows(path, notFound ? std::error_code{} : statusError, readStatus, lookAgain);
+        }
+
+        std::expected<std::optional<std::filesystem::file_status>, std::error_code> askWindows(
+            std::filesystem::path const& path,
+            std::error_code failure,
+            Detail::SymlinkStatusReader const& readStatus,
+            bool lookAgain
+        )
         {
             const auto readNtStatus = ntStatusReader();
             const auto extended = extendedLengthPathOf(path);
@@ -65,9 +88,11 @@ namespace Utility
             {
                 if (failure)
                     return std::unexpected(failure);
-                return std::unexpected(
-                    systemError(path.native().size() >= MAX_PATH ? ERROR_FILENAME_EXCED_RANGE : ERROR_INVALID_NAME)
-                );
+                if (path.native().size() >= MAX_PATH)
+                    return std::unexpected(systemError(ERROR_FILENAME_EXCED_RANGE));
+                if (lookAgain)
+                    return statusOf(path, readStatus, /*lookAgain=*/false);
+                return std::unexpected(systemError(ERROR_INVALID_NAME));
             }
             const auto lastError = ::GetLastError();
             if (lastError == ERROR_FILE_NOT_FOUND || lastError == ERROR_PATH_NOT_FOUND)
@@ -82,20 +107,35 @@ namespace Utility
 #endif
     }
 
+    namespace Detail
+    {
+        std::expected<std::optional<std::filesystem::file_status>, std::error_code>
+        checkedSymlinkStatus(std::filesystem::path const& path, SymlinkStatusReader const& readStatus)
+        {
+#ifdef _WIN32
+            return statusOf(path, readStatus, /*lookAgain=*/true);
+#else
+            std::error_code statusError{};
+            const auto status = readStatus(path, statusError);
+            const bool notFound = status.type() == std::filesystem::file_type::not_found;
+            if (!notFound && !statusError)
+                return status;
+            if (notFound)
+                return std::nullopt;
+            return std::unexpected(statusError);
+#endif
+        }
+    }
+
     std::expected<std::optional<std::filesystem::file_status>, std::error_code>
     checkedSymlinkStatus(std::filesystem::path const& path)
     {
-        std::error_code statusError{};
-        const auto status = std::filesystem::symlink_status(path, statusError);
-        const bool notFound = status.type() == std::filesystem::file_type::not_found;
-        if (!notFound && !statusError)
-            return status;
-#ifdef _WIN32
-        return askWindows(path, notFound ? std::error_code{} : statusError);
-#else
-        if (notFound)
-            return std::nullopt;
-        return std::unexpected(statusError);
-#endif
+        return Detail::checkedSymlinkStatus(
+            path,
+            [](std::filesystem::path const& looked, std::error_code& error)
+            {
+                return std::filesystem::symlink_status(looked, error);
+            }
+        );
     }
 }

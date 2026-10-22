@@ -182,6 +182,18 @@ namespace FileTracking
         }
 
         /**
+         * @brief What the server has of a file an upload sent in @p sent: uploads carry the modification time along,
+         *        in seconds.
+         */
+        ServerState serverStateOf(SourceState const& sent)
+        {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::file_clock::to_sys(sent.modified).time_since_epoch()
+            );
+            return ServerState{.mtime = static_cast<std::uint64_t>(seconds.count()), .size = sent.size};
+        }
+
+        /**
          * @brief Whether @p option may be on for a downloaded copy: removing or renaming a temporary copy never touches
          *        the server's file.
          */
@@ -694,7 +706,8 @@ namespace FileTracking
             );
             if (queued)
                 return;
-            Log::error("FileTracking: not downloading '{}': {}", remotePath.value(), queued.error());
+            // The caller shows why, an error would show it a second time.
+            Log::warn("FileTracking: not downloading '{}': {}", remotePath.value(), queued.error());
             downloading.erase(instanceId);
             instances->removeInstance(instanceId.value());
             onOpened(std::unexpected{OpenFailure{queued.error()}});
@@ -1112,6 +1125,12 @@ namespace FileTracking
                 return;
             if (!entry.serverContent.has(path))
             {
+                // The upload of a directory above may have sent it before it went, it is looked at once that ended.
+                if (entry.pendingUploads.covers(path))
+                {
+                    entry.pendingUploads.start({.path = path});
+                    return progressChanged();
+                }
                 Log::debug("FileTracking: '{}' is not on the server, nothing to delete there.", path.toUtf8());
                 return;
             }
@@ -1576,13 +1595,13 @@ namespace FileTracking
         /**
          * @brief The path of @p upload is gone by the time it would go: there is nothing to ask about or to upload,
          *        and the deletion is mirrored, which the watch may not report (macOS can report a removed directory
-         *        as modified only).
+         *        as modified only). The change counts as nothing done, the deletion counts on its own.
          */
         void onGoneLocally(Entry const& entry, Upload const& upload)
         {
             Log::debug("FileTracking: '{}' is gone, not uploading it.", upload.change.path.toUtf8());
             const auto watchId = entry.watchId;
-            finishUpload(upload, UploadOutcome::NotUploaded);
+            finishUpload(upload, UploadOutcome::NotUploaded, /*carried=*/0u);
             if (auto* stillWatched = find(watchId))
                 onDeleted(*stillWatched, upload.change.path);
         }
@@ -1734,26 +1753,70 @@ namespace FileTracking
                 return finishUpload(upload, UploadOutcome::NotUploaded);
             // Uploads carry the local modification time, so the local states are what the server has now. A link
             // to a directory reports itself as one, the walk of its states would follow it.
-            std::size_t carried = 0;
+            std::optional<std::size_t> carried{};
             if (upload.change.isDirectory && !isSymlink(upload.change.path))
             {
                 carried = rememberStates(*entry, upload.change.path);
+                rememberSentButGone(*entry, upload, ended.sentFiles);
                 removeMovedAway(*entry, upload.change.path);
             }
             else if (ended.destinationState)
                 entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
             for (auto const& sent : ended.sentFiles)
-                if (sent.path.isWithin(upload.change.path))
-                    entry->serverContent.rememberSent(sent.path, sent.state);
+                if (sent.state && sent.path.isWithin(upload.change.path))
+                    entry->serverContent.rememberSent(sent.path, *sent.state);
             finishUpload(upload, UploadOutcome::Uploaded, carried);
+        }
+
+        /**
+         * @brief What the directory upload @p upload wrote that is gone locally by now, which rememberStates() cannot
+         *        see: the files of @p sent with the directories above them, and the directory itself when the server
+         *        has it. Their deletions follow as reported, see onDeleted.
+         */
+        void rememberSentButGone(Entry& entry, Upload const& upload, std::vector<SentFile> const& sent)
+        {
+            auto const& directory = upload.change.path;
+            for (auto const& file : sent)
+            {
+                if (!file.path.isWithin(directory) || entry.serverContent.fileState(file.path) ||
+                    !isGoneLocally(file.path))
+                    continue;
+                const auto state = serverStateOfSent(entry, file);
+                if (!state)
+                    continue;
+                entry.serverContent.rememberFile(file.path, *state);
+                for (auto parent = file.path.parent(); parent && parent->isWithin(directory); parent = parent->parent())
+                    entry.serverContent.rememberDirectory(*parent);
+            }
+            if (entry.serverContent.has(directory) || !isGoneLocally(directory))
+                return;
+            if (const auto state = remote->linkStat(upload.destination); state && *state)
+                entry.serverContent.rememberDirectory(directory);
+        }
+
+        /**
+         * @brief What the server has of @p file, which an upload wrote: the state it was sent in, or else what the
+         *        server tells. Nothing when it has no file there or cannot be asked.
+         */
+        std::optional<ServerState> serverStateOfSent(Entry const& entry, SentFile const& file)
+        {
+            if (file.state)
+                return serverStateOf(*file.state);
+            const auto remotePath = remotePathOf(entry, file.path);
+            if (!remotePath)
+                return std::nullopt;
+            return remote->linkStat(*remotePath).value_or(std::nullopt);
         }
 
         /**
          * @brief The upload of @p upload is no longer on its way, see followUpUpload. The operations waiting for it
          *        in the server order start then.
-         * @param carried The entries a completed directory upload left on the server, it counts as done that many.
+         * @param carried The entries it left on the server, it counts as done that many: what a completed directory
+         *        upload recorded, the changes below it that arrived meanwhile count when they go. Unset, it counts as
+         *        the changes it stood for.
          */
-        void finishUpload(Upload const& upload, UploadOutcome outcome, std::size_t carried = 0)
+        void
+        finishUpload(Upload const& upload, UploadOutcome outcome, std::optional<std::size_t> carried = std::nullopt)
         {
             if (auto* entry = find(upload.watchId))
                 followUpUpload(*entry, upload, outcome, carried);
@@ -1764,11 +1827,12 @@ namespace FileTracking
          * @brief What changed while @p upload was on its way goes now: the path itself once more, the changes below an
          *        uploaded directory, or the removal of a path that went away.
          */
-        void followUpUpload(Entry& entry, Upload const& upload, UploadOutcome outcome, std::size_t carried)
+        void
+        followUpUpload(Entry& entry, Upload const& upload, UploadOutcome outcome, std::optional<std::size_t> carried)
         {
             auto finished = entry.pendingUploads.finish(upload.change.path);
             showUploading(entry);
-            changeEnded(std::max(finished.counted, carried));
+            changeEnded(carried.value_or(finished.counted));
             // A directory above that moved took the server copy along.
             const auto serverPath = finished.serverCopyAt.value_or(upload.change.path);
             const auto serverDestination = finished.serverCopyAt

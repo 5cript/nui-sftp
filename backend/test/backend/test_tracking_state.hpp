@@ -571,9 +571,23 @@ namespace Test::TrackingState
         EXPECT_FALSE(pending.start({.path = local("/i/new/b.txt")}));
         EXPECT_EQ(pending.changeCount(), 4u);
         EXPECT_FALSE(pending.start({.path = local("/i/new"), .isDirectory = true}));
-        EXPECT_EQ(pending.changeCount(), 5u);
+        EXPECT_EQ(pending.changeCount(), 4u);
 
         EXPECT_EQ(pending.finish(local("/i/new")).counted, 4u);
         EXPECT_EQ(pending.changeCount(), 0u);
+    }
+
+    TEST(TrackingStateTests, AFileThatChangedAgainCountsOnceMoreADirectoryDoesNot)
+    {
+        PendingUploads pending;
+        ASSERT_TRUE(pending.start({.path = local("/i/a.txt")}));
+        ASSERT_TRUE(pending.start({.path = local("/i/new"), .isDirectory = true}));
+        pending.carries(local("/i/new"), 3u);
+        ASSERT_EQ(pending.changeCount(), 4u);
+
+        EXPECT_FALSE(pending.start({.path = local("/i/a.txt")}));
+        EXPECT_FALSE(pending.start({.path = local("/i/new"), .isDirectory = true}));
+
+        EXPECT_EQ(pending.changeCount(), 5u);
     }
 }
