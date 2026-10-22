@@ -1423,7 +1423,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool isBigFile,
     bool insertRefresh,
     bool createMissingDirectories,
-    SharedData::OperationMode mode
+    SharedData::OperationMode mode,
+    bool sourceMayVanish
 )
 {
     // Assumed in strand
@@ -1469,6 +1470,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         // A dropped or tracked file comes without a size, the slow path reports no speed.
         opts.bigFileOptimized = isBigFile || (!isSymlink && localFileSize(localNativePath) >= Constants::bigFileCutOff);
         opts.createMissingDirectories = createMissingDirectories;
+        opts.sourceMayVanish = sourceMayVanish;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -1520,13 +1522,15 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     }
     else if (stat.type() == std::filesystem::file_type::directory)
     {
+        auto individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
+        individualOptions.sourceMayVanish = sourceMayVanish;
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp.weak_from_this(),
             BulkUploadOperation::BulkUploadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", operationId),
                 .remotePath = remotePath,
                 .localPath = localPath,
-                .individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout),
+                .individualOptions = std::move(individualOptions),
                 .failFast = transferOptions.failFast.value_or(false),
                 .concurrency = bulkConcurrency_,
             }

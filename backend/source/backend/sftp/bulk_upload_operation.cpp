@@ -3,7 +3,9 @@
 #include <log/log.hpp>
 #include <utility/permissions.hpp>
 
+#include <filesystem>
 #include <ranges>
+#include <system_error>
 #include <vector>
 
 namespace
@@ -35,6 +37,22 @@ BulkUploadOperation::~BulkUploadOperation() = default;
 SharedData::OperationType BulkUploadOperation::type() const
 {
     return SharedData::OperationType::BulkUpload;
+}
+
+std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkUploadOperation::work()
+{
+    if (individualOptions_.sourceMayVanish && scanning())
+    {
+        std::error_code statusError{};
+        const auto root = common().localPath.native();
+        if (std::filesystem::symlink_status(root, statusError).type() == std::filesystem::file_type::not_found)
+        {
+            Log::info("BulkUploadOperation: '{}' is gone, nothing to upload.", common().localPath.toUtf8());
+            enterState(OperationState::Completed);
+            return WorkStatus::Complete;
+        }
+    }
+    return BulkTransferOperation::work();
 }
 
 std::expected<void, BulkUploadOperation::Error>
