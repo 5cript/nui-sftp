@@ -157,10 +157,18 @@ namespace
       public:
         UploadOperation::OnSent recorder()
         {
-            return [self = shared_from_this()](Paths::LocalPath const& source, UploadOperation::SentSource const& sent)
+            return [self = shared_from_this()](
+                       Paths::LocalPath const& source, std::optional<UploadOperation::SentSource> const& unchanged
+                   )
             {
+                const auto state = unchanged.transform(
+                    [](UploadOperation::SentSource const& sent)
+                    {
+                        return FileTracking::SourceState{.size = sent.size, .modified = sent.modified};
+                    }
+                );
                 std::scoped_lock lock{self->mutex_};
-                self->files_.push_back({.path = source, .state = {.size = sent.size, .modified = sent.modified}});
+                self->files_.push_back({.path = source, .state = state});
             };
         }
 

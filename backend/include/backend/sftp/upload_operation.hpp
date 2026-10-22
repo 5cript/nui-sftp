@@ -33,10 +33,11 @@ class UploadOperation : public Operation
     };
 
     /**
-     * @brief Hears of the regular file @p source an upload sent unchanged, see SentSource. Called on the strand of
-     *        the transfer.
+     * @brief Hears of the regular file @p source once it replaced the destination, with the state it was sent in
+     *        when it stayed unchanged (see SentSource). A continued upload and a file that changed meanwhile come
+     *        without one. Called on the strand of the transfer.
      */
-    using OnSent = std::function<void(Paths::LocalPath const& source, SentSource const& sent)>;
+    using OnSent = std::function<void(Paths::LocalPath const& source, std::optional<SentSource> const& unchanged)>;
 
     struct UploadOperationOptions
     {
@@ -76,8 +77,7 @@ class UploadOperation : public Operation
          */
         bool sourceMayVanish{false};
         /**
-         * @brief Hears of a regular file sent unchanged and in one go, see SentSource. A link, a continued upload and a
-         *        file that changed meanwhile are not told.
+         * @brief Hears of a regular file the upload wrote to the server, see OnSent. A link is not told.
          */
         OnSent onSent{};
     };
@@ -195,8 +195,8 @@ class UploadOperation : public Operation
     void applyModificationTimeInStrand(SecureShell::SftpSession& sftp);
 
     /**
-     * @brief Tells UploadOperationOptions::onSent of the source once it replaced the destination, unless it changed
-     *        since it was opened.
+     * @brief Tells UploadOperationOptions::onSent of the source once it replaced the destination, with its state
+     *        unless it changed since it was opened.
      */
     void reportSent() const;
 

@@ -1222,11 +1222,11 @@ namespace Test
          */
         struct SentRecorder
         {
-            std::vector<std::pair<std::string, UploadOperation::SentSource>> sent{};
+            std::vector<std::pair<std::string, std::optional<UploadOperation::SentSource>>> sent{};
 
             UploadOperation::OnSent onSent()
             {
-                return [this](Paths::LocalPath const& source, UploadOperation::SentSource const& state)
+                return [this](Paths::LocalPath const& source, std::optional<UploadOperation::SentSource> const& state)
                 {
                     sent.emplace_back(source.toUtf8(), state);
                 };
@@ -1265,7 +1265,7 @@ namespace Test
         );
     }
 
-    TEST_F(UploadOperationTests, AFileChangedWhileItUploadsIsNotToldAsSent)
+    TEST_F(UploadOperationTests, AFileChangedWhileItUploadsIsToldWithoutAState)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -1294,10 +1294,12 @@ namespace Test
         ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
 
         EXPECT_TRUE(appended);
-        EXPECT_TRUE(recorder.sent.empty());
+        ASSERT_EQ(recorder.sent.size(), 1u);
+        EXPECT_EQ(recorder.sent.front().first, toLocal(source).toUtf8());
+        EXPECT_FALSE(recorder.sent.front().second.has_value());
     }
 
-    TEST_F(UploadOperationTests, AContinuedUploadIsNotToldAsSent)
+    TEST_F(UploadOperationTests, AContinuedUploadIsToldWithoutAState)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -1331,6 +1333,7 @@ namespace Test
 
         ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
 
-        EXPECT_TRUE(recorder.sent.empty());
+        ASSERT_EQ(recorder.sent.size(), 1u);
+        EXPECT_FALSE(recorder.sent.front().second.has_value());
     }
 }

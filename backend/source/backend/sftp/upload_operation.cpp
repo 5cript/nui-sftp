@@ -857,12 +857,18 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Se
 
 void UploadOperation::reportSent() const
 {
-    if (!options_.onSent || isSymlink_ || continued_ || !sourceBeforeOpening_)
+    if (!options_.onSent || isSymlink_)
         return;
-    const auto now = sourceStateOf(localNativePath_);
-    if (now != sourceBeforeOpening_ || now->size != totalSize_)
-        return;
-    options_.onSent(options_.localPath, *now);
+    const auto unchanged = [this]() -> std::optional<SentSource>
+    {
+        if (continued_ || !sourceBeforeOpening_)
+            return std::nullopt;
+        const auto now = sourceStateOf(localNativePath_);
+        if (now != sourceBeforeOpening_ || now->size != totalSize_)
+            return std::nullopt;
+        return now;
+    }();
+    options_.onSent(options_.localPath, unchanged);
 }
 
 void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sftp)

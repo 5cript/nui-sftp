@@ -41,12 +41,13 @@ namespace FileTracking
     };
 
     /**
-     * @brief A local file an upload sent, in the state it had from before it was read until the upload ended.
+     * @brief A local file an upload wrote to the server.
      */
     struct SentFile
     {
         Paths::LocalPath path;
-        SourceState state;
+        /** @brief The state it had from before it was read until the upload ended, nothing when it changed meanwhile. */
+        std::optional<SourceState> state{};
     };
 
     /**
@@ -63,8 +64,7 @@ namespace FileTracking
          */
         std::optional<ServerState> destinationState{};
         /**
-         * @brief The regular files a completed upload sent unchanged, those below a directory too. One missing here
-         *        may still have gone to the server.
+         * @brief The regular files a completed upload wrote to the server, those below a directory too.
          */
         std::vector<SentFile> sentFiles{};
     };

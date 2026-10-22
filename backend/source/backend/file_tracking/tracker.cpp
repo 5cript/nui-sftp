@@ -1743,8 +1743,8 @@ namespace FileTracking
             else if (ended.destinationState)
                 entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
             for (auto const& sent : ended.sentFiles)
-                if (sent.path.isWithin(upload.change.path))
-                    entry->serverContent.rememberSent(sent.path, sent.state);
+                if (sent.state && sent.path.isWithin(upload.change.path))
+                    entry->serverContent.rememberSent(sent.path, *sent.state);
             finishUpload(upload, UploadOutcome::Uploaded, carried);
         }
 
