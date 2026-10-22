@@ -182,6 +182,18 @@ namespace FileTracking
         }
 
         /**
+         * @brief What the server has of a file an upload sent in @p sent: uploads carry the modification time along,
+         *        in seconds.
+         */
+        ServerState serverStateOf(SourceState const& sent)
+        {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::file_clock::to_sys(sent.modified).time_since_epoch()
+            );
+            return ServerState{.mtime = static_cast<std::uint64_t>(seconds.count()), .size = sent.size};
+        }
+
+        /**
          * @brief Whether @p option may be on for a downloaded copy: removing or renaming a temporary copy never touches
          *        the server's file.
          */
@@ -1738,6 +1750,7 @@ namespace FileTracking
             if (upload.change.isDirectory && !isSymlink(upload.change.path))
             {
                 carried = rememberStates(*entry, upload.change.path);
+                rememberSentButGone(*entry, upload, ended.sentFiles);
                 removeMovedAway(*entry, upload.change.path);
             }
             else if (ended.destinationState)
@@ -1746,6 +1759,46 @@ namespace FileTracking
                 if (sent.state && sent.path.isWithin(upload.change.path))
                     entry->serverContent.rememberSent(sent.path, *sent.state);
             finishUpload(upload, UploadOutcome::Uploaded, carried);
+        }
+
+        /**
+         * @brief What the directory upload @p upload wrote that is gone locally by now, which rememberStates() cannot
+         *        see: the files of @p sent with the directories above them, and the directory itself when the server
+         *        has it. Their deletions follow as reported, see onDeleted.
+         */
+        void rememberSentButGone(Entry& entry, Upload const& upload, std::vector<SentFile> const& sent)
+        {
+            auto const& directory = upload.change.path;
+            for (auto const& file : sent)
+            {
+                if (!file.path.isWithin(directory) || entry.serverContent.fileState(file.path) ||
+                    !isGoneLocally(file.path))
+                    continue;
+                const auto state = serverStateOfSent(entry, file);
+                if (!state)
+                    continue;
+                entry.serverContent.rememberFile(file.path, *state);
+                for (auto parent = file.path.parent(); parent && parent->isWithin(directory); parent = parent->parent())
+                    entry.serverContent.rememberDirectory(*parent);
+            }
+            if (entry.serverContent.has(directory) || !isGoneLocally(directory))
+                return;
+            if (const auto state = remote->linkStat(upload.destination); state && *state)
+                entry.serverContent.rememberDirectory(directory);
+        }
+
+        /**
+         * @brief What the server has of @p file, which an upload wrote: the state it was sent in, or else what the
+         *        server tells. Nothing when it has no file there or cannot be asked.
+         */
+        std::optional<ServerState> serverStateOfSent(Entry const& entry, SentFile const& file)
+        {
+            if (file.state)
+                return serverStateOf(*file.state);
+            const auto remotePath = remotePathOf(entry, file.path);
+            if (!remotePath)
+                return std::nullopt;
+            return remote->linkStat(*remotePath).value_or(std::nullopt);
         }
 
         /**

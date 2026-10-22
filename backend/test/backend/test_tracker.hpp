@@ -375,6 +375,17 @@ namespace Test
             );
         }
 
+        /**
+         * @brief Ends @p upload as @p ended tells, whatever the server has.
+         */
+        static void endAs(FakeRemote::Queued& upload, FileTracking::UploadEnd const& ended)
+        {
+            upload.ended = true;
+            // The tracker queues what follows while it handles the end, which may move the queued operations.
+            const auto onUploadEnded = std::move(upload.onUploadEnded);
+            onUploadEnded(ended);
+        }
+
         std::optional<FileTracking::ServerState> serverStateAt(std::string const& path) const
         {
             const auto found = remote_->server.find(path);
@@ -1649,6 +1660,105 @@ namespace Test
         EXPECT_EQ(uploadsTo("/srv/project/dir"), 1u);
         EXPECT_EQ(uploadsTo("/srv/project/dir/a.txt"), 1u);
         EXPECT_TRUE(remote_->server.contains("/srv/project/dir/a.txt"));
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
+    TEST_F(TrackerTest, ADirectoryRemovedJustAfterItsUploadSentItLeavesNothingOnTheServer)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto directory = project / "moved-dir";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+
+        // git checks out a branch with the directory, the next checkout removes it again while it uploads.
+        std::filesystem::create_directory(directory);
+        write(directory / "m0.txt", "m0");
+        write(directory / "m1.txt", "m1");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/moved-dir") == 1u;
+            }
+        ));
+        auto* upload = remote_->of("upload").back();
+        const auto sent = sentFilesOf(directory);
+        serve(directory, "/srv/project/moved-dir");
+        // Gone before the upload ended, the removals are reported afterwards.
+        std::filesystem::remove_all(directory);
+        endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed, .sentFiles = sent});
+        runFor(std::chrono::milliseconds{1000});
+        completeEverything();
+
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir/m0.txt"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir/m1.txt"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir"));
+        const auto removed = remote_->sourcesOf("remove");
+        ASSERT_FALSE(removed.empty());
+        EXPECT_EQ(removed.back(), "/srv/project/moved-dir");
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
+    TEST_F(TrackerTest, ADirectoryRemovedWhileItUploadsLeavesNothingOfWhatTheUploadSent)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto directory = project / "moved-dir";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+
+        std::filesystem::create_directory(directory);
+        write(directory / "m0.txt", "m0");
+        write(directory / "m1.txt", "m1");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/moved-dir") == 1u;
+            }
+        ));
+        auto* upload = remote_->of("upload").back();
+        auto sent = sentFilesOf(directory);
+        // m0.txt went while it was read, the upload tells it without a state.
+        for (auto& file : sent)
+            if (file.path.filename()->view() == "m0.txt")
+                file.state.reset();
+        serve(directory, "/srv/project/moved-dir");
+        std::filesystem::remove_all(directory);
+        runFor(std::chrono::milliseconds{1000});
+        endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed, .sentFiles = sent});
+        completeEverything();
+
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir/m0.txt"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir/m1.txt"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir"));
+        const auto removed = remote_->sourcesOf("remove");
+        ASSERT_FALSE(removed.empty());
+        EXPECT_EQ(removed.back(), "/srv/project/moved-dir");
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
+    TEST_F(TrackerTest, AnEmptyDirectoryAnUploadLeftAfterItsFilesWentIsDeletedOnTheServer)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto directory = project / "moved-dir";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+
+        std::filesystem::create_directory(directory);
+        write(directory / "m0.txt", "m0");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/moved-dir") == 1u;
+            }
+        ));
+        auto* upload = remote_->of("upload").back();
+        // The upload created the directory, its files were gone by the time it got to them.
+        remote_->server["/srv/project/moved-dir"] = FileTracking::ServerState{};
+        std::filesystem::remove_all(directory);
+        endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed});
+        runFor(std::chrono::milliseconds{1000});
+        completeEverything();
+
+        EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir"));
         EXPECT_TRUE(view_->questions.empty());
     }
 
