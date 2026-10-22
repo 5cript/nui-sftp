@@ -35,7 +35,9 @@ fileExplorer:
     openWith: "Öffnen mit"
     openInFileManager: "Im Dateimanager öffnen"
     openAndWatch: "Öffnen und Beobachten"
+    openAndWatchHint: "Lädt eine temporäre Kopie herunter und öffnet sie. Jede Änderung, die Sie an der Kopie speichern, wird wieder auf den Server hochgeladen, bis Sie die Beobachtung unter Dateiüberwachung beenden."
     openWithAndWatch: "Öffnen mit und Beobachten"
+    openWithAndWatchHint: "Lädt eine temporäre Kopie herunter und fragt, mit welcher Anwendung sie geöffnet wird. Jede Änderung, die Sie an der Kopie speichern, wird wieder auf den Server hochgeladen, bis Sie die Beobachtung unter Dateiüberwachung beenden."
     delete: "Löschen"
     rename: "Umbenennen"
     properties: "Eigenschaften"
@@ -95,6 +97,7 @@ sideModel:
   failedToListDirectoryText: "Beim Auflisten des Inhalts des Verzeichnisses '{}' ist ein Fehler aufgetreten."
   failedToListDirectoryReasonText: "Beim Auflisten des Inhalts des Verzeichnisses '{}' ist ein Fehler aufgetreten: {}"
 remoteSideModel:
+  openAndWatchFailedTitle: "Öffnen und Beobachten nicht möglich"
   newDirectory: "Neues Verzeichnis"
   enterNewDirectoryName: "Geben Sie den Namen des neuen Verzeichnisses ein"
   createNewDirectory: "Neues Verzeichnis erstellen"
@@ -290,9 +293,6 @@ sessionFrontend:
   getHomeDirectoryFailed: "Home-Verzeichnis konnte nicht ermittelt werden"
   remoteSideModelUnavailable: "Das Modell der Remote-Seite ist nicht verfügbar, SFTP kann nicht geöffnet werden. Das ist ein Fehler und sollte nicht passieren."
   sftpInitializationFailed: "SFTP-Initialisierung fehlgeschlagen"
-fileTrackingPanel:
-  instanceCreationFailed: "Datei-Tracking Instanzerstellung fehlgeschlagen"
-  instanceCreationFailedDesc: "Eine Datei-Tracking Instanz konnte im Backend nicht erstellt werden. Details finden Sie in den Logs."
 commandPanels:
   disconnectedTooltip: "Nicht verfügbar, solange die Verbindung getrennt ist"
   justNow: "gerade eben"
@@ -505,6 +505,7 @@ fileTracking:
   columnMoveRemote: "Remote verschieben"
   columnDeleteRemote: "Remote löschen"
   columnCheckRemote: "Remote prüfen"
+  downloadedCopyOptionHint: "Eine temporäre Kopie verschiebt oder löscht die Datei auf dem Server nie."
   serverChangedHeader: "Datei auf dem Server geändert"
   serverChangedText: "Die Datei '{}' wurde auf dem Server geändert, nachdem Sie sie geöffnet oder zuletzt hochgeladen haben. Die Version auf dem Server durch die lokale ersetzen?\n\n'Nein' behält die Version auf dem Server. Beim nächsten Speichern werden Sie erneut gefragt."
   columnStatus: "Status"
@@ -515,6 +516,8 @@ fileTracking:
   headerOrphaned: "Verwaist"
   headerCleanupButton: "Verwaiste bereinigen"
   headerCleanupRunning: "Bereinige…"
+  progressSyncing: "Synchronisiere {} von {}"
+  progressWaitingForAnswer: "{} warten auf Ihre Antwort"
 settings:
   version: "Version"
   settingsRestartRequiredHeader: "Neustart erforderlich"

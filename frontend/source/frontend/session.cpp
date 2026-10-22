@@ -162,7 +162,7 @@ struct Session::Implementation
         , operationQueue{this->stateHolder, this->events, this->persistenceName, this->engineOptions.queueOptions.value(), this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
         , frontendSessionManager{}
         , sessionOptions{params.stateHolder, params.events, this->persistenceName, this->sessionLayoutId, params.confirmDialog}
-        , fileTrackingPanel{params.stateHolder, params.events, params.confirmDialog}
+        , fileTrackingPanel{params.confirmDialog}
         , commandHistoryPanel{
               params.commandStoreClient,
               params.events,
@@ -725,13 +725,7 @@ void Session::openSftp(std::string const& username, bool forceOpen)
             localSideModel().engine(std::move(fileEngine));
             if (remoteSideModel())
                 impl_->operationQueue.activate(remoteSideModel()->engine(), sshTerminalEngine->sshSessionId());
-            impl_->fileTrackingPanel.activate(
-                &impl_->operationQueue,
-                sshTerminalEngine->sshSessionId(),
-                Persistence::effectiveTempFileSuffix(
-                    opts.sftpOptions->downloadOptions ? opts.sftpOptions->downloadOptions->tempFileSuffix : std::nullopt
-                )
-            );
+            impl_->fileTrackingPanel.activate(sshTerminalEngine->sshSessionId());
             localSideModel().operationQueue(&impl_->operationQueue);
             if (remoteSideModel())
             {

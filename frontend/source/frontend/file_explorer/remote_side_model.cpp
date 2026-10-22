@@ -149,7 +149,9 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {
                 onDownloadAndOpen(selectedItems.front(), false, true);
             },
-            !singleItem || fileTracking_ == nullptr || !canOpen
+            !singleItem || fileTracking_ == nullptr || !canOpen,
+            /*shortcut=*/{},
+            language->get("fileExplorer", "contextMenu", "openAndWatchHint")
         ),
         Snc::PopupMenu::item(
             language->get("fileExplorer", "contextMenu", "openWithAndWatch"),
@@ -158,7 +160,9 @@ RemoteSideModel::contextMenuItems(std::vector<NuiFileExplorer::Item> const& sele
             {
                 onDownloadAndOpen(selectedItems.front(), true, true);
             },
-            !singleItem || fileTracking_ == nullptr || !canOpen
+            !singleItem || fileTracking_ == nullptr || !canOpen,
+            /*shortcut=*/{},
+            language->get("fileExplorer", "contextMenu", "openWithAndWatchHint")
         ),
         Snc::PopupMenu::separator(),
         Snc::PopupMenu::item(
@@ -853,171 +857,34 @@ void RemoteSideModel::onDownloadAndOpen(NuiFileExplorer::Item const& item, bool 
         Log::error("File tracking panel is not available, cannot download/open file.");
         return;
     }
-
-    // The download goes into an instance directory of its own, which the watch observes.
-    Nui::RpcClient::callWithBackChannel(
-        "FileTracking::createInstance",
+    const auto failedTitle = language->get("remoteSideModel", watch ? "openAndWatchFailedTitle" : "downloadFailed");
+    const auto remotePath = remotePathOf(item);
+    if (!remotePath)
+        return showPathRefused(failedTitle, remotePath.error());
+    fileTracking_->open(
+        *remotePath,
+        item.size,
+        watch,
         lifetime_.guarded(
-            [this, item, openWith, watch](Nui::val response)
+            [this, openWith](Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
             {
-                if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
-                {
-                    Log::error("FileTracking: createInstance failed");
-                    confirmDialog_->open({
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                        .headerText = language->get("fileTrackingPanel", "instanceCreationFailed"),
-                        .text = language->get("fileTrackingPanel", "instanceCreationFailedDesc"),
-                        .buttons = ConfirmDialog::Button::Ok,
-                    });
-                    return;
-                }
-                onFileTrackingInstanceCreated(
-                    item,
-                    openWith,
-                    watch,
-                    Ids::makeInstanceId(response["instanceId"].as<std::string>()),
-                    response["instanceDir"].as<std::string>()
+                Log::info("FileTracking: opening {} (openWith={})", localPath.toUtf8(), openWith);
+                FileExplorer::openLocalFile(
+                    lifetime_, *confirmDialog_, localPath, openWith, discardWhenDeclined(instanceId, localPath)
                 );
+            }
+        ),
+        lifetime_.guarded(
+            [this, failedTitle](std::string const& reason)
+            {
+                confirmDialog_->open({
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+                    .headerText = failedTitle,
+                    .text = reason,
+                    .buttons = ConfirmDialog::Button::Ok,
+                });
             }
         )
-    );
-}
-
-void RemoteSideModel::onFileTrackingInstanceCreated(
-    NuiFileExplorer::Item const& item,
-    bool openWith,
-    bool synchronize,
-    Ids::InstanceId const& instanceId,
-    std::string const& instanceDirStr
-)
-{
-    Log::info("FileTracking: createInstance succeeded, id={}, dir={}", instanceId.value(), instanceDirStr);
-
-    const auto instanceDirectory = Paths::LocalPath::fromUtf8(instanceDirStr);
-    const auto remotePath = remotePathOf(item);
-    const auto localPath = remotePath.and_then(
-        [&instanceDirectory](Paths::RemotePath const& path)
-        {
-            return Paths::LocalPathSegment::make(*path.filename())
-                .and_then(
-                    [&instanceDirectory](Paths::LocalPathSegment const& segment)
-                    {
-                        return instanceDirectory.transform(
-                            [&segment](Paths::LocalPath const& directory)
-                            {
-                                return directory / segment;
-                            }
-                        );
-                    }
-                );
-        }
-    );
-    if (!localPath)
-        return showPathRefused(language->get("remoteSideModel", "downloadFailed"), localPath.error());
-
-    operationQueue_->enqueueDownload(
-        *remotePath,
-        *localPath,
-        item.size,
-        lifetime_.guarded(
-            [this,
-                instanceId,
-                instanceDirectory = *instanceDirectory,
-                remotePath = *remotePath,
-                localPath = *localPath,
-                openWith,
-                synchronize](std::optional<Ids::OperationId> const& opId, std::string const& info)
-            {
-                if (!opId)
-                {
-                    Log::error(
-                        "FileTracking: failed to enqueue download for instance {}: {}", instanceId.value(), info
-                    );
-                    return;
-                }
-                operationQueue_->addCompletionCallback(
-                    *opId,
-                    lifetime_.guarded(
-                        [this, instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize](
-                            bool success
-                        )
-                        {
-                            onFileDownloadComplete(
-                                instanceId, instanceDirectory, remotePath, localPath, openWith, synchronize, success
-                            );
-                        }
-                    )
-                );
-            }
-        ),
-        false, // allowOverwrite
-        false, // insertRefresh
-        false, // createMissingDirectories
-        SharedData::OperationMode::PriorityQueued
-    );
-}
-
-void RemoteSideModel::onFileDownloadComplete(
-    Ids::InstanceId const& instanceId,
-    Paths::LocalPath const& instanceDirectory,
-    Paths::RemotePath const& remotePath,
-    Paths::LocalPath const& localPath,
-    bool openWith,
-    bool synchronize,
-    bool success
-)
-{
-    if (!success)
-    {
-        Log::error("FileTracking: download failed for {}", localPath.toUtf8());
-        return;
-    }
-    Log::info("FileTracking: download completed for {}", localPath.toUtf8());
-
-    if (!synchronize)
-    {
-        Log::info("FileTracking: opening {} (openWith={}, no sync)", localPath.toUtf8(), openWith);
-        FileExplorer::openLocalFile(
-            lifetime_, *confirmDialog_, localPath, openWith, discardWhenDeclined(instanceId, localPath)
-        );
-        return;
-    }
-
-    Nui::RpcClient::callWithBackChannel(
-        "FileTracking::addWatch",
-        lifetime_.guarded(
-            [this, instanceId, instanceDirectory, remotePath, localPath, openWith](Nui::val watchResponse)
-            {
-                if (!watchResponse.hasOwnProperty("success") || !watchResponse["success"].as<bool>())
-                {
-                    Log::error("FileTracking: addWatch failed for instance {}", instanceId.value());
-                    return;
-                }
-                Log::info("FileTracking: addWatch succeeded for instance {}", instanceId.value());
-                onFileWatchAdded(instanceId, instanceDirectory, remotePath, localPath, openWith);
-            }
-        ),
-        instanceId.value(),
-        instanceDirectory.toUtf8(),
-        true,
-        fileTracking_ ? fileTracking_->downloadTempSuffix() : std::string{Persistence::defaultTempFileSuffix}
-    );
-}
-
-void RemoteSideModel::onFileWatchAdded(
-    Ids::InstanceId const& instanceId,
-    Paths::LocalPath const& instanceDirectory,
-    Paths::RemotePath const& remotePath,
-    Paths::LocalPath const& localPath,
-    bool openWith
-)
-{
-    fileTracking_->startWatching(instanceId, instanceDirectory, remotePath, localPath);
-
-    Log::info("FileTracking: opening {} (openWith={})", localPath.toUtf8(), openWith);
-
-    FileExplorer::openLocalFile(
-        lifetime_, *confirmDialog_, localPath, openWith, discardWhenDeclined(instanceId, localPath)
     );
 }
 

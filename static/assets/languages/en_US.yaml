@@ -35,7 +35,9 @@ fileExplorer:
     openWith: "Open With"
     openInFileManager: "Open in File Manager"
     openAndWatch: "Open and Watch"
+    openAndWatchHint: "Downloads a temporary copy and opens it. Every change you save to the copy is uploaded back to the server, until you stop the watch in File Tracking."
     openWithAndWatch: "Open With and Watch"
+    openWithAndWatchHint: "Downloads a temporary copy and asks which application opens it. Every change you save to the copy is uploaded back to the server, until you stop the watch in File Tracking."
     delete: "Delete"
     rename: "Rename"
     properties: "Properties"
@@ -193,6 +195,7 @@ sideModel:
   failedToListDirectoryText: "An error occurred while trying to list the contents of the directory '{}'."
   failedToListDirectoryReasonText: "An error occurred while trying to list the contents of the directory '{}': {}"
 remoteSideModel:
+  openAndWatchFailedTitle: "Cannot Open and Watch"
   newDirectory: "New Directory"
   enterNewDirectoryName: "Enter the name of the new directory"
   createNewDirectory: "Create New Directory"
@@ -290,9 +293,6 @@ sessionFrontend:
   getHomeDirectoryFailed: "Get Home Directory Failed"
   remoteSideModelUnavailable: "Remote side model is not available, cannot open SFTP. This is a bug and should not happen by design."
   sftpInitializationFailed: "SFTP Initialization Failed"
-fileTrackingPanel:
-  instanceCreationFailed: "File Tracking Instance Creation Failed"
-  instanceCreationFailedDesc: "Failed to create a file tracking instance on the backend. Check the logs for details."
 commandPanels:
   disconnectedTooltip: "Not available while the connection is lost"
   justNow: "just now"
@@ -505,6 +505,7 @@ fileTracking:
   columnMoveRemote: "Move Remote"
   columnDeleteRemote: "Delete Remote"
   columnCheckRemote: "Check Remote"
+  downloadedCopyOptionHint: "A temporary copy never moves or deletes the file on the server."
   serverChangedHeader: "File Changed on the Server"
   serverChangedText: "'{}' changed on the server after you opened or last uploaded it. Replace the server's version with your local one?\n\n'No' keeps the server's version. You will be asked again on the next save."
   columnStatus: "Status"
@@ -515,6 +516,8 @@ fileTracking:
   headerOrphaned: "Orphaned"
   headerCleanupButton: "Clean Up Orphaned"
   headerCleanupRunning: "Cleaning…"
+  progressSyncing: "Syncing {} of {}"
+  progressWaitingForAnswer: "{} waiting for your answer"
 settings:
   version: "Version"
   settingsRestartRequiredHeader: "Restart Required"
