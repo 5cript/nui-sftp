@@ -39,6 +39,13 @@ namespace FileTracking
      *        Its view shows the outcome, the frontend only forwards the user's input. No two watches upload to the
      *        same remote path or one below the other. Lives on the strand of the session: every member must be called
      *        from it.
+     *
+     * @par Accepted limitation on macOS
+     *      A directory that leaves with its content keeps its server copy, a move to the trash looks the same. A
+     *      directory deleted entry by entry reports its content first and its server copy goes. FSEvents reports
+     *      nothing below the watched directory itself when it is removed with its content (`rm -rf`), so its whole
+     *      server tree stays and a directory created anew in its place is uploaded into that tree. See
+     *      TrackerTest.TheWatchedDirectoryRemovedWithItsContentKeepsItsServerTreeOnlyOnMacOs.
      */
     class Tracker
     {

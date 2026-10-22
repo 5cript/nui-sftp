@@ -1263,6 +1263,27 @@ namespace Test
         );
     }
 
+    TEST_F(TrackerTest, TheWatchedDirectoryRemovedWithItsContentKeepsItsServerTreeOnlyOnMacOs)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+
+        std::filesystem::remove_all(project);
+        runFor(std::chrono::milliseconds{1500});
+        completeEverything();
+
+#ifdef __APPLE__
+        // The accepted limitation, see Tracker: FSEvents reports only the removal of project, like a move to the trash.
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+#else
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src"));
+#endif
+    }
+
     TEST_F(TrackerTest, ADirectoryMovedWithinTheItemLeavesNoServerCopyAtItsOldPlace)
     {
         const auto project = root_ / "local" / "project";
