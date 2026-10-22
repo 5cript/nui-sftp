@@ -77,6 +77,8 @@ namespace FileTracking
             /** @brief Canonical, like the paths of the changes. */
             std::filesystem::path instanceDirectory;
             InstanceWatch watch;
+            /** @brief Runs while the copy was reported deleted or renamed away, see awaitCopyReturn(). */
+            std::unique_ptr<boost::asio::steady_timer> returnWait{};
         };
 
         /**
@@ -106,6 +108,11 @@ namespace FileTracking
             bool shownUploading{false};
 
             DownloadedCopy const* downloadedCopy() const
+            {
+                return std::get_if<DownloadedCopy>(&source);
+            }
+
+            DownloadedCopy* downloadedCopy()
             {
                 return std::get_if<DownloadedCopy>(&source);
             }
@@ -983,10 +990,15 @@ namespace FileTracking
                 Utility::enumToString(reported.action),
                 path.toUtf8()
             );
-            // The local watch follows an original renamed beside itself once it is clear the rename stays.
-            if (!entry->downloadedCopy() && reported.action == FileAction::Moved && oldPath &&
-                *oldPath == entry->localPath)
-                return onItemMoved(*entry, path);
+            if (reported.action == FileAction::Moved && oldPath == entry->localPath)
+            {
+                // The local watch follows an original renamed beside itself once it is clear the rename stays.
+                if (!entry->downloadedCopy())
+                    return onItemMoved(*entry, path);
+                // A copy renamed away is not what goes to the server any more.
+                if (path != entry->localPath)
+                    return awaitCopyReturn(*entry);
+            }
             // Only the tracked file or directory maps to the remote side, anything else in its directory (Finder's
             // .DS_Store for one) would land next to it on the server.
             if (!path.isWithin(entry->localPath))
@@ -1031,6 +1043,8 @@ namespace FileTracking
 
         void onDeleted(Entry& entry, Paths::LocalPath const& path)
         {
+            if (entry.downloadedCopy() && path == entry.localPath)
+                return awaitCopyReturn(entry);
             if (!entry.options.deleteRemoteOnLocalDelete)
                 return;
             // Deleted and created anew before the deletion is handled, the way git rewrites files: the upload of the
@@ -1081,6 +1095,47 @@ namespace FileTracking
             if (entry.serverContent.hasDirectory(path))
                 return std::filesystem::is_directory(*status);
             return entry.serverContent.fileState(path) && !std::filesystem::is_directory(*status);
+        }
+
+        /**
+         * @brief The downloaded copy of @p entry was reported deleted or renamed away: its watch ends unless the copy
+         *        is back within copyReturnTime.
+         */
+        void awaitCopyReturn(Entry& entry)
+        {
+            auto* copy = entry.downloadedCopy();
+            if (!copy || copy->returnWait)
+                return;
+            Log::debug("FileTracking: the copy of watch {} went away, waiting for it", entry.watchId.value());
+            copy->returnWait = std::make_unique<boost::asio::steady_timer>(strand, copyReturnTime);
+            copy->returnWait->async_wait(
+                [weak = weak_from_this(), watchId = entry.watchId](boost::system::error_code const& error)
+                {
+                    if (error)
+                        return;
+                    if (const auto self = weak.lock())
+                        self->endUnlessCopyReturned(watchId);
+                }
+            );
+        }
+
+        void endUnlessCopyReturned(Ids::WatchId const& watchId)
+        {
+            auto* entry = find(watchId);
+            if (!entry || !entry->downloadedCopy())
+                return;
+            entry->downloadedCopy()->returnWait.reset();
+            if (!isGoneLocally(entry->localPath))
+                return;
+            Log::info(
+                "FileTracking: the copy {} of watch {} was deleted or renamed, its watch ends",
+                entry->localPath.toUtf8(),
+                watchId.value()
+            );
+            const auto ended =
+                SharedData::EndedWatches{.reason = SharedData::WatchEndReason::CopyGone, .entries = {shownEntryOf(*entry)}};
+            stop(watchId);
+            view->showEnded(ended);
         }
 
         /**

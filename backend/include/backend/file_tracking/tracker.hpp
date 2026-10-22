@@ -11,6 +11,7 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/strand.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -21,6 +22,12 @@
 namespace FileTracking
 {
     class LocalWatchManager;
+
+    /**
+     * @brief How long a downloaded copy that was deleted or renamed away has to come back before its watch ends:
+     *        editors that delete the file or move it aside before they write the new one.
+     */
+    inline constexpr std::chrono::milliseconds copyReturnTime{5000};
 
     /**
      * @brief What the trackers of the sessions work with, both managers on the strand of the sessions.
@@ -102,7 +109,8 @@ namespace FileTracking
          * @brief Downloads @p remotePath into an instance directory of its own, and watches it there when @p watch
          *        is set: its changes go back to @p remotePath from then on. @p onOpened gets the copy once the watch
          *        started, or why there is none. A watch that would overlap another one on the server is refused
-         *        before anything is downloaded.
+         *        before anything is downloaded. The copy never moves or deletes the server's file: a copy deleted or
+         *        renamed away ends its watch unless it is back within copyReturnTime, the view shows why.
          */
         void open(
             Paths::RemotePath const& remotePath,
