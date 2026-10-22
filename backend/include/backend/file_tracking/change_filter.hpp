@@ -24,6 +24,18 @@ namespace FileTracking
     bool isTransientFile(std::string const& filename, std::string const& downloadTempSuffix);
 
     /**
+     * @brief Whether a change of @p filename, moved from @p oldFilename when that is not empty, is noise nobody
+     *        follows: it ends at a temporary and does not come from a real file. Cheap enough for the watcher's
+     *        thread, which drops it before anything else looks at it.
+     * @param downloadTempSuffix The suffix of downloads in progress, see Persistence::effectiveTempFileSuffix.
+     */
+    bool isTransientChange(
+        std::string const& filename,
+        std::string const& oldFilename,
+        std::string const& downloadTempSuffix
+    );
+
+    /**
      * @brief Turns a raw watcher event into the change to mirror to the remote side.
      * @param change The event as the watcher reports it.
      * @param isDirectory Whether the changed path is a directory.

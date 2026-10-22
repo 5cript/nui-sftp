@@ -1,20 +1,20 @@
 #pragma once
 
-#include <efsw/efsw.hpp>
-
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
 namespace FileTracking
 {
+    class DirectoryWatchService;
+
     /**
-     * @brief Move-only RAII handle representing one efsw directory watch.
+     * @brief Move-only RAII handle representing one subscription of a DirectoryWatchService.
      *
-     * Destroying an InstanceWatch or assigning another one to it removes the
-     * underlying efsw watch via efsw::FileWatcher::removeWatch(). It does not keep
-     * the watcher alive: once its instance destroyed the watcher there is nothing
-     * left to remove. Instances of this type are produced by
-     * TemporaryDirectoryInstance::addWatch().
+     * Destroying an InstanceWatch or assigning another one to it ends the
+     * subscription. It does not keep the service alive: once the service is gone
+     * there is nothing left to end. Instances of this type are produced by
+     * DirectoryWatchService::subscribe().
      */
     class InstanceWatch
     {
@@ -27,15 +27,11 @@ namespace FileTracking
         /**
          * @brief Construct a valid watch handle.
          *
-         * @param watcher  The efsw::FileWatcher that registered this watch.
-         * @param watchId  The watch ID returned by efsw::FileWatcher::addWatch().
+         * @param service  The service that holds the subscription.
+         * @param watchId  The subscription.
          * @param path     The directory path being watched.
          */
-        InstanceWatch(
-            std::weak_ptr<efsw::FileWatcher> watcher,
-            efsw::WatchID watchId,
-            std::filesystem::path path
-        );
+        InstanceWatch(std::weak_ptr<DirectoryWatchService> service, std::int64_t watchId, std::filesystem::path path);
 
         ~InstanceWatch();
 
@@ -46,14 +42,14 @@ namespace FileTracking
         InstanceWatch& operator=(InstanceWatch&&) noexcept;
 
         /**
-         * @brief The path that was passed to addWatch().
+         * @brief The path that was passed to subscribe().
          */
         std::filesystem::path const& path() const;
 
         /**
-         * @brief The raw efsw watch identifier.
+         * @brief The subscription, negative for an invalid handle.
          */
-        efsw::WatchID watchId() const;
+        std::int64_t watchId() const;
 
         /**
          * @brief Returns true when this handle references a live watch.
@@ -61,7 +57,7 @@ namespace FileTracking
         bool isValid() const;
 
         /**
-         * @brief Explicitly remove the watch and invalidate this handle.
+         * @brief Explicitly end the subscription and invalidate this handle.
          *
          * Called automatically by the destructor.  Safe to call more than once.
          */

@@ -1,17 +1,15 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
 #include <backend/file_tracking/instance_bookkeeping.hpp>
+#include <backend/file_tracking/directory_watcher.hpp>
+#include <backend/file_tracking/change_reporter.hpp>
+#include <backend/file_tracking/change_filter.hpp>
 #include <utility/error_message.hpp>
-#include <backend/rpc_helper.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <paths/native.hpp>
-#include <backend/file_tracking/change_filter.hpp>
+#include <persistence/state/sftp_options.hpp>
 
-#include <efsw/efsw.hpp>
-#include <boost/asio/post.hpp>
 #include <nlohmann/json.hpp>
-#include <nui/rpc.hpp>
 #include <ids/id.hpp>
-#include <utility/enum_string_convert.hpp>
 #include <log/log.hpp>
 
 #include <chrono>
@@ -36,93 +34,7 @@ namespace FileTracking
                 throw std::runtime_error{fmt::format("Failed to create instance directory: {}", created.error())};
             return dir;
         }
-
-        FileAction toFileAction(efsw::Action action)
-        {
-            switch (action)
-            {
-                case efsw::Actions::Add:
-                    return FileAction::Added;
-                case efsw::Actions::Modified:
-                    return FileAction::Modified;
-                case efsw::Actions::Delete:
-                    return FileAction::Deleted;
-                case efsw::Actions::Moved:
-                    return FileAction::Moved;
-                default:
-                    return FileAction::Modified;
-            }
-        }
     } // namespace
-
-    /**
-     * @brief Receives the efsw events of one instance on efsw's thread and forwards them to the frontend.
-     */
-    class FileChangeListener : public efsw::FileWatchListener
-    {
-      public:
-        /**
-         * @param watchedInstanceDirectory The instance directory spelled like the watch reports it (canonical).
-         */
-        FileChangeListener(
-            std::string const& instanceId,
-            std::filesystem::path watchedInstanceDirectory,
-            boost::asio::strand<boost::asio::any_io_executor> strand,
-            Nui::RpcHub* hub,
-            std::string downloadTempSuffix
-        )
-            : watchedInstanceDirectory_{std::move(watchedInstanceDirectory)}
-            , strand_{std::move(strand)}
-            , hub_{hub}
-            , eventName_{fmt::format("FileTracking::{}::onFileChanged", instanceId)}
-            , downloadTempSuffix_{Persistence::effectiveTempFileSuffix(downloadTempSuffix)}
-        {}
-
-        void handleFileAction(
-            efsw::WatchID /*watchId*/,
-            const std::string& dir,
-            const std::string& filename,
-            efsw::Action action,
-            std::string const& oldFilename
-        ) override
-        {
-            // efsw reports UTF-8 on every platform.
-            const auto changedPath = Paths::nativeFromUtf8(dir) / Paths::nativeFromUtf8(filename);
-            if (isBookkeepingPath(watchedInstanceDirectory_, changedPath))
-                return;
-
-            std::error_code statusError;
-            const bool isDirectory = std::filesystem::is_directory(changedPath, statusError);
-            const auto change = filterFileChange(
-                {toFileAction(action), filename, oldFilename}, isDirectory, downloadTempSuffix_
-            );
-            if (!change)
-                return;
-
-            nlohmann::json payload = {
-                {"action", Utility::enumToString(change->action)},
-                {"directory", Paths::nativeToUtf8(Paths::nativeFromUtf8(dir))},
-                {"filename", Paths::nativeToUtf8(Paths::nativeFromUtf8(change->filename))},
-                {"oldFilename", Paths::nativeToUtf8(Paths::nativeFromUtf8(change->oldFilename))},
-                {"isDirectory", isDirectory},
-            };
-
-            boost::asio::post(
-                strand_,
-                [hub = hub_, name = eventName_, pld = std::move(payload)]() mutable
-                {
-                    RpcHelper::callRemoteSafely(*hub, name, pld);
-                }
-            );
-        }
-
-      private:
-        std::filesystem::path watchedInstanceDirectory_;
-        boost::asio::strand<boost::asio::any_io_executor> strand_;
-        Nui::RpcHub* hub_;
-        std::string eventName_;
-        std::string downloadTempSuffix_;
-    };
 
     // -------------------------------------------------------------------------
     // Implementation
@@ -134,9 +46,7 @@ namespace FileTracking
         std::filesystem::path instanceDir;
         std::optional<InstanceLock> lock;
         boost::asio::strand<boost::asio::any_io_executor> strand;
-        Nui::RpcHub* hub;
-        std::shared_ptr<efsw::FileWatcher> watcher;
-        std::unique_ptr<FileChangeListener> listener;
+        std::optional<DirectoryWatcher> watcher;
         bool valid{false};
 
         /**
@@ -145,20 +55,13 @@ namespace FileTracking
          * The directory must exist before the lock file inside it can be created,
          * which is why prepareInstanceDir() is called in the instanceDir initialiser.
          */
-        Implementation(
-            Config cfg,
-            boost::asio::strand<boost::asio::any_io_executor> strd,
-            Nui::RpcHub* hubPtr,
-            std::string instId
-        )
+        Implementation(Config cfg, boost::asio::strand<boost::asio::any_io_executor> strd, std::string instId)
             : config{std::move(cfg)}
             , instanceId{std::move(instId)}
             , instanceDir{prepareInstanceDir(config.tempRootDir / instanceId)}
             , lock{std::in_place, bookkeepingPaths(instanceDir).lock}
             , strand{std::move(strd)}
-            , hub{hubPtr}
-            , watcher{std::make_shared<efsw::FileWatcher>()}
-            , listener{nullptr}
+            , watcher{}
             , valid{false}
         {}
     };
@@ -168,11 +71,9 @@ namespace FileTracking
     // -------------------------------------------------------------------------
     TemporaryDirectoryInstance::TemporaryDirectoryInstance(
         Config config,
-        boost::asio::strand<boost::asio::any_io_executor> strand,
-        Nui::Window& /*wnd*/,
-        Nui::RpcHub& hub
+        boost::asio::strand<boost::asio::any_io_executor> strand
     )
-        : impl_{std::make_unique<Implementation>(std::move(config), std::move(strand), &hub, Ids::generateId().value())}
+        : impl_{std::make_unique<Implementation>(std::move(config), std::move(strand), Ids::generateId().value())}
     {
         writeMetadata();
         impl_->valid = true;
@@ -183,9 +84,8 @@ namespace FileTracking
         if (!impl_)
             return;
 
-        // Stop the efsw thread before anything else so no more callbacks fire.
+        // Stop the change handler before anything else so no more changes are reported.
         impl_->watcher.reset();
-        impl_->listener.reset();
 
         if (impl_->valid)
             writeDeadTimestamp();
@@ -204,7 +104,8 @@ namespace FileTracking
     std::optional<InstanceWatch> TemporaryDirectoryInstance::addWatch(
         std::filesystem::path const& path,
         bool recursive,
-        std::string downloadTempSuffix
+        std::string downloadTempSuffix,
+        ChangeSink sink
     )
     {
         namespace fs = std::filesystem;
@@ -229,30 +130,26 @@ namespace FileTracking
             return std::nullopt;
         }
 
-        if (impl_->listener)
-        {
-            Log::error("Watch already exists for instance '{}'", impl_->instanceId);
-            return std::nullopt;
-        }
-
-        impl_->listener = std::make_unique<FileChangeListener>(
-            impl_->instanceId,
-            fs::weakly_canonical(impl_->instanceDir),
-            impl_->strand,
-            impl_->hub,
-            std::move(downloadTempSuffix)
+        // The first watch decides the suffix and the sink, later ones share its event stream.
+        if (!impl_->watcher)
+            impl_->watcher.emplace(
+                impl_->strand,
+                [reporter = ChangeReporter{impl_->strand, std::move(sink), downloadTempSuffix},
+                 watchedInstanceDirectory = fs::weakly_canonical(impl_->instanceDir)](DirectoryChange const& change)
+                {
+                    if (!isBookkeepingPath(watchedInstanceDirectory, change.path()))
+                        reporter.report(change);
+                }
+            );
+        // A download writes its temporary many times over, those events go no further than efsw's thread.
+        return impl_->watcher->add(
+            absPath,
+            recursive,
+            [suffix = Persistence::effectiveTempFileSuffix(downloadTempSuffix)](DirectoryEvent const& event)
+            {
+                return !isTransientChange(event.filename, event.oldFilename, suffix);
+            }
         );
-
-        // efsw takes UTF-8, a narrow string is the ANSI code page on Windows.
-        auto watchId = impl_->watcher->addWatch(Paths::nativeToUtf8(absPath), impl_->listener.get(), recursive);
-        if (watchId < 0)
-        {
-            Log::warn("addWatch: efsw rejected watch for '{}'", Paths::nativeToUtf8(absPath));
-            return std::nullopt;
-        }
-
-        impl_->watcher->watch();
-        return InstanceWatch{impl_->watcher, watchId, std::move(absPath)};
     }
 
     void TemporaryDirectoryInstance::cleanupNow()
@@ -261,7 +158,6 @@ namespace FileTracking
             return;
 
         impl_->watcher.reset();
-        impl_->listener.reset();
         impl_->lock.reset();
 
         std::error_code err;

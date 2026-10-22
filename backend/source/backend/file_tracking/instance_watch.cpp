@@ -1,4 +1,5 @@
 #include <backend/file_tracking/instance_watch.hpp>
+#include <backend/file_tracking/directory_watch_service.hpp>
 
 #include <utility>
 
@@ -6,20 +7,20 @@ namespace FileTracking
 {
     struct InstanceWatch::Implementation
     {
-        std::weak_ptr<efsw::FileWatcher> watcher;
-        efsw::WatchID watchId;
+        std::weak_ptr<DirectoryWatchService> service;
+        std::int64_t watchId;
         std::filesystem::path path;
     };
 
     InstanceWatch::InstanceWatch() = default;
 
     InstanceWatch::InstanceWatch(
-        std::weak_ptr<efsw::FileWatcher> watcher,
-        efsw::WatchID watchId,
+        std::weak_ptr<DirectoryWatchService> service,
+        std::int64_t watchId,
         std::filesystem::path path
     )
         : impl_{std::make_unique<Implementation>(Implementation{
-              .watcher = std::move(watcher),
+              .service = std::move(service),
               .watchId = watchId,
               .path = std::move(path),
           })}
@@ -49,7 +50,7 @@ namespace FileTracking
         return impl_->path;
     }
 
-    efsw::WatchID InstanceWatch::watchId() const
+    std::int64_t InstanceWatch::watchId() const
     {
         if (!impl_)
             return -1;
@@ -65,8 +66,8 @@ namespace FileTracking
     {
         if (!impl_)
             return;
-        if (const auto watcher = impl_->watcher.lock(); watcher && impl_->watchId >= 0)
-            watcher->removeWatch(impl_->watchId);
+        if (const auto service = impl_->service.lock(); service && impl_->watchId >= 0)
+            service->unsubscribe(impl_->watchId);
         impl_.reset();
     }
 }

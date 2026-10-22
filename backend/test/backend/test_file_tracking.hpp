@@ -267,7 +267,7 @@ namespace Test
     }
 
     // =========================================================================
-    // TemporaryDirectoryInstanceTest — requires a display
+    // TemporaryDirectoryInstanceTest
     // =========================================================================
 
     class TemporaryDirectoryInstanceTest : public ::testing::Test
@@ -278,8 +278,6 @@ namespace Test
 
         void SetUp() override
         {
-            if (!NuiEnv::instance().available())
-                GTEST_SKIP() << "No display available; skipping TemporaryDirectoryInstance tests";
             root_ = makeTestTempRoot("tdi");
         }
 
@@ -296,9 +294,8 @@ namespace Test
 
         std::unique_ptr<TemporaryDirectoryInstance> makeInstance()
         {
-            auto& env = NuiEnv::instance();
             return std::make_unique<TemporaryDirectoryInstance>(
-                TemporaryDirectoryInstance::Config{.tempRootDir = root_}, makeStrand(), *env.window, *env.hub
+                TemporaryDirectoryInstance::Config{.tempRootDir = root_}, makeStrand()
             );
         }
     };
@@ -566,7 +563,7 @@ namespace Test
     }
 
     // =========================================================================
-    // TempDirInstanceManagerTest — requires a display
+    // TempDirInstanceManagerTest
     // =========================================================================
 
     class TempDirInstanceManagerTest : public ::testing::Test
@@ -577,8 +574,6 @@ namespace Test
 
         void SetUp() override
         {
-            if (!NuiEnv::instance().available())
-                GTEST_SKIP() << "No display available; skipping TempDirInstanceManager tests";
             root_ = makeTestTempRoot("mgr");
         }
 
@@ -590,9 +585,8 @@ namespace Test
 
         std::unique_ptr<TempDirInstanceManager> makeManager(std::chrono::hours retention = 24h)
         {
-            auto& env = NuiEnv::instance();
             return std::make_unique<TempDirInstanceManager>(
-                ioc_.get_executor(), *env.window, *env.hub, root_, retention
+                boost::asio::make_strand(ioc_.get_executor()), root_, retention
             );
         }
     };

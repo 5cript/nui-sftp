@@ -113,6 +113,32 @@ void SessionManager::preventLocalDeletion(bool prevent)
     localDeletionPrevented_->store(prevent);
 }
 
+void SessionManager::startFileTracking(std::filesystem::path const& temporaryDownloadsDirectory)
+{
+    temporaryInstances_ =
+        std::make_unique<FileTracking::TempDirInstanceManager>(*strand_, temporaryDownloadsDirectory);
+    temporaryInstances_->scheduleStartupCleanup();
+    registerRpcOrphanedInstances();
+}
+
+void SessionManager::registerRpcOrphanedInstances()
+{
+    on("FileTracking::countOrphaned")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                reply({{"success", true}, {"count", temporaryInstances_->countOrphaned()}});
+            }
+        );
+    on("FileTracking::forceCleanup")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                reply({{"success", true}, {"removed", temporaryInstances_->removeOrphaned()}});
+            }
+        );
+}
+
 SessionManager::~SessionManager()
 {
     for (auto& [id, session] : sessions_)

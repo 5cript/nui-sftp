@@ -2,7 +2,6 @@
 
 #include <backend/process/process_store.hpp>
 #include <backend/session_manager.hpp>
-#include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_filesystem.hpp>
 #include <backend/rpc_system.hpp>
@@ -74,7 +73,6 @@ class Main
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
-    std::unique_ptr<FileTracking::TempDirInstanceManager> tempDirInstanceManager_;
     std::optional<CommandStore::Store> commandStore_;
     /** @brief StoreRpc, or UnavailableStoreRpc when the store could not be opened. */
     std::unique_ptr<RpcHelper::StrandRpc> commandStoreRpc_;
