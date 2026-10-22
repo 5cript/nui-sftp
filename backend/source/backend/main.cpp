@@ -324,6 +324,7 @@ void Main::registerRpc()
                 [this, riskyFilePolicyOf](Persistence::State const& state)
                 {
                     riskyFilePolicy_.store(riskyFilePolicyOf(state));
+                    sshSessionManager_->fileTrackingDefaults(state.fileTrackingOptions);
                 }
             );
 
@@ -334,6 +335,7 @@ void Main::registerRpc()
                     Persistence::LocalFilesystemOptions{}.temporaryDownloadsDirectory.value()
                 ));
             sshSessionManager_->startFileTracking(temporaryDownloadsDirectory);
+            sshSessionManager_->fileTrackingDefaults(holder.stateCache().fileTrackingOptions);
 
             if (error)
             {

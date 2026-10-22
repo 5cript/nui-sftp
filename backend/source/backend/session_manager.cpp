@@ -17,6 +17,7 @@
 #include <future>
 #include <mutex>
 #include <cstring>
+#include <ranges>
 
 using namespace Detail;
 
@@ -118,6 +119,7 @@ void SessionManager::startFileTracking(std::filesystem::path const& temporaryDow
     temporaryInstances_ =
         std::make_unique<FileTracking::TempDirInstanceManager>(*strand_, temporaryDownloadsDirectory);
     temporaryInstances_->scheduleStartupCleanup();
+    localWatches_ = std::make_unique<FileTracking::LocalWatchManager>(*strand_, temporaryDownloadsDirectory);
     registerRpcOrphanedInstances();
 }
 
@@ -137,6 +139,22 @@ void SessionManager::registerRpcOrphanedInstances()
                 reply({{"success", true}, {"removed", temporaryInstances_->removeOrphaned()}});
             }
         );
+}
+
+void SessionManager::fileTrackingDefaults(Persistence::FileTrackingOptions const& options)
+{
+    within_strand_do(
+        [this,
+         defaults = SharedData::WatchOptions{
+             .autoReupload = options.autoReupload,
+             .moveRemoteOnLocalMove = options.moveRemoteOnLocalMove,
+             .deleteRemoteOnLocalDelete = options.deleteRemoteOnLocalDelete,
+             .checkRemoteChanges = options.checkRemoteChanges.value_or(true),
+         }]()
+        {
+            fileTrackingDefaults_ = defaults;
+        }
+    );
 }
 
 SessionManager::~SessionManager()
@@ -257,7 +275,16 @@ void SessionManager::addSession(
                     *hub_,
                     sessionOptions.sftpOptions.value(),
                     &bulkResumeRegistry_,
-                    localOperationQueue_
+                    localOperationQueue_,
+                    FileTracking::TrackerServices{
+                        .instances = temporaryInstances_.get(),
+                        .localWatches = localWatches_.get(),
+                        .defaultOptions =
+                            [this]()
+                        {
+                            return fileTrackingDefaults_;
+                        },
+                    }
                 );
                 const auto emplaced = sessions_.emplace(sessionId, session);
                 if (!emplaced.second)
@@ -304,7 +331,21 @@ void SessionManager::registerRpc()
     registerRpcSessionDisconnect();
     registerRpcAdoptBulkResume();
     registerRpcDiscardBulkResume();
+    registerRpcStopFileTracking();
     localOperationQueue_->registerRpc();
+}
+
+void SessionManager::registerRpcStopFileTracking()
+{
+    on("FileTracker::stopAll")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply)
+            {
+                for (auto const& session : std::views::values(sessions_))
+                    session->stopFileTracking();
+                reply({{"success", true}});
+            }
+        );
 }
 
 void SessionManager::registerRpcSessionConnect()

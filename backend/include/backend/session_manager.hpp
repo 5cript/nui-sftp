@@ -1,13 +1,16 @@
 #pragma once
 
 #include <backend/session.hpp>
+#include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/password/password_provider.hpp>
 #include <backend/password/password_request.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <persistence/state/file_tracking_options.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state_holder.hpp>
+#include <shared_data/file_tracking/watch_options.hpp>
 #include <backend/rpc_helper.hpp>
 
 #include <nui/rpc.hpp>
@@ -50,9 +53,14 @@ class SessionManager
 
     /**
      * @brief Starts file tracking on the strand of the sessions: the instances of temporary downloads below
-     *        @p temporaryDownloadsDirectory. Call once, before the first session.
+     *        @p temporaryDownloadsDirectory and the watches of local items. Call once, before the first session.
      */
     void startFileTracking(std::filesystem::path const& temporaryDownloadsDirectory);
+
+    /**
+     * @brief The options a new watch starts with from now on. Safe to call from any thread.
+     */
+    void fileTrackingDefaults(Persistence::FileTrackingOptions const& options);
 
     void addPasswordProvider(int priority, PasswordProvider* provider);
     void joinSessionAdder();
@@ -119,6 +127,12 @@ class SessionManager
     void registerRpcOrphanedInstances();
 
     /**
+     * @brief Handles "FileTracker::stopAll": a frontend that loads ends the watches of the one before it (a reload),
+     *        nobody is left to see them.
+     */
+    void registerRpcStopFileTracking();
+
+    /**
      * @brief Makes a new request the pending one, so that shutdown() can cancel it.
      *
      * @return The request, or nullptr once prompts are cancelled.
@@ -133,7 +147,11 @@ class SessionManager
   private:
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
+    /** @brief Outlive the sessions, which watch through them. */
     std::unique_ptr<FileTracking::TempDirInstanceManager> temporaryInstances_{};
+    std::unique_ptr<FileTracking::LocalWatchManager> localWatches_{};
+    /** @brief Read and written on the strand. */
+    SharedData::WatchOptions fileTrackingDefaults_{};
     std::unordered_map<Ids::SessionId, std::shared_ptr<Session>, Ids::IdHash> sessions_{};
     /** @brief Read by the local operation queue on each local delete the explorer asks for. */
     std::shared_ptr<std::atomic_bool> localDeletionPrevented_{std::make_shared<std::atomic_bool>(true)};
