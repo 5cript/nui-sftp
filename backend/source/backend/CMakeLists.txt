@@ -35,6 +35,7 @@ add_library(
         file_tracking/instance_watch.cpp
         file_tracking/temp_dir_instancing.cpp
         file_tracking/temp_dir_instance_manager.cpp
+        file_tracking/tracker.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp

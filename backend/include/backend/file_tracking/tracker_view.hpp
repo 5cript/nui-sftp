@@ -1,0 +1,48 @@
+#pragma once
+
+#include <ids/ids.hpp>
+#include <shared_data/file_tracking/server_changed_question.hpp>
+#include <shared_data/file_tracking/tracked_entry.hpp>
+#include <shared_data/file_tracking/tracker_progress.hpp>
+
+#include <cstddef>
+
+namespace FileTracking
+{
+    /**
+     * @brief What the user sees of a Tracker: its entries, its questions, its progress and the orphaned instances. Called on the
+     *        strand of the tracker.
+     */
+    class TrackerView
+    {
+      public:
+        TrackerView() = default;
+        virtual ~TrackerView() = default;
+        TrackerView(TrackerView const&) = delete;
+        TrackerView& operator=(TrackerView const&) = delete;
+        TrackerView(TrackerView&&) = delete;
+        TrackerView& operator=(TrackerView&&) = delete;
+
+        /**
+         * @brief Shows @p entry, new or changed.
+         */
+        virtual void showEntry(SharedData::TrackedEntry const& entry) = 0;
+
+        virtual void removeEntry(Ids::WatchId const& watchId) = 0;
+
+        /**
+         * @brief Asks @p question, the tracker waits for the answer before it asks the next one.
+         */
+        virtual void ask(SharedData::ServerChangedQuestion const& question) = 0;
+
+        /**
+         * @brief Shows how many instance directories no live process holds any more.
+         */
+        virtual void showOrphanedCount(std::size_t count) = 0;
+
+        /**
+         * @brief Shows how far the tracker is with the changes on their way, at most a few times a second.
+         */
+        virtual void showProgress(SharedData::TrackerProgress const& progress) = 0;
+    };
+}
