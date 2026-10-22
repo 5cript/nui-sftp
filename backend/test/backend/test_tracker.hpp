@@ -2292,7 +2292,8 @@ namespace Test
         std::filesystem::remove_all(directory);
         runFor(std::chrono::milliseconds{1000});
 
-        EXPECT_TRUE(remote_->cancels.empty());
+        for (auto const& destination : std::views::keys(remote_->cancels))
+            ADD_FAILURE() << "stopped the upload to " << destination;
     }
 
     TEST_F(TrackerTest, TheProgressCountsAStoppedUploadAsDone)

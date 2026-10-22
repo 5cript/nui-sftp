@@ -1783,7 +1783,7 @@ namespace FileTracking
             entry->pendingUploads.changesHandled(upload.change.path);
             if (upload.change.isDirectory)
                 entry->pendingUploads.carries(upload.change.path, entryCountOf(upload.change.path.native()));
-            entry->pendingUploads.sent(upload.change.path, upload.destination);
+            entry->pendingUploads.sent(upload.change.path, upload.destination, upload.change.isDirectory);
             const auto queued = remote->upload(
                 UploadRequest{
                     .source = upload.change.path,

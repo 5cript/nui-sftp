@@ -721,22 +721,27 @@ namespace FileTracking
         }
 
         /**
-         * @brief The upload that started at @p path was handed on to go to @p destination.
+         * @brief The upload that started at @p path was handed on to go to @p destination, as a directory when
+         *        @p isDirectory is set.
          */
-        void sent(Paths::LocalPath const& path, Paths::RemotePath destination)
+        void sent(Paths::LocalPath const& path, Paths::RemotePath destination, bool isDirectory)
         {
             if (const auto found = pending_.find(path); found != pending_.end())
+            {
                 found->second.sentTo = std::move(destination);
+                found->second.sentAsDirectory = isDirectory;
+            }
         }
 
         /**
-         * @brief Where the upload of the file whose path is @p path now was handed on to, nothing for a directory
-         *        and for an upload that was not handed on yet.
+         * @brief Where the upload of the file whose path is @p path now was handed on to, nothing for one handed on
+         *        as a directory and for an upload that was not handed on yet. A later change may tell another kind:
+         *        a directory removed meanwhile can no longer be told from a file.
          */
         std::optional<Paths::RemotePath> sentFileTo(Paths::LocalPath const& path) const
         {
             const auto found = std::ranges::find_if(pending_, IsAt{path});
-            if (found == pending_.end() || found->second.isDirectory)
+            if (found == pending_.end() || found->second.sentAsDirectory)
                 return std::nullopt;
             return found->second.sentTo;
         }
@@ -815,6 +820,7 @@ namespace FileTracking
             /** @brief The entries the upload carries, see carries(). */
             std::size_t carried{1};
             std::optional<Paths::RemotePath> sentTo{};
+            bool sentAsDirectory{false};
             bool partialKept{false};
         };
 
