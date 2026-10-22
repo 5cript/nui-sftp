@@ -1202,6 +1202,12 @@ terminalPanel:
   terminalNoFreeName: "Terminal {}: Alle Namen bis '{}' existieren bereits."
   terminalWriteFailed: "Terminal {}: Schreiben von '{}' fehlgeschlagen."
 backend:
+  fileTracking:
+    watchUnreadable: "'{}' kann nicht beobachtet werden: {}"
+    watchRoot: "'{}' kann nicht beobachtet werden, es ist die Wurzel eines Dateisystems."
+    watchFailed: "'{}' kann nicht beobachtet werden, das Dateisystem lässt es nicht zu."
+    watchOverlaps: "'{}' kann nicht beobachtet werden, es überschneidet sich mit '{}', das bereits beobachtet wird. Beobachtungen können nicht verschachtelt werden."
+    watchOverlapsDownloads: "'{}' kann nicht beobachtet werden, es überschneidet sich mit dem Verzeichnis der temporären Downloads '{}', das von Öffnen und Beobachten beobachtet wird."
   deleteGuard:
     noPath: "Es wurde nichts gelöscht. Ein Pfad fehlt."
     root: "Es wurde nichts gelöscht. '{}' ist das Wurzelverzeichnis."

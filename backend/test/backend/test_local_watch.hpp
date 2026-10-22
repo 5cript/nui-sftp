@@ -1,8 +1,14 @@
 #pragma once
 
+#include <backend/file_tracking/change_filter.hpp>
 #include <backend/file_tracking/directory_watch_service.hpp>
 #include <backend/file_tracking/directory_watcher.hpp>
 #include <backend/file_tracking/file_states.hpp>
+#include <backend/file_tracking/local_item_watch.hpp>
+#include <backend/file_tracking/local_watch_manager.hpp>
+#include <persistence/state/sftp_options.hpp>
+#include <paths/native.hpp>
+#include <utility/localized_message.hpp>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
@@ -28,6 +34,91 @@ extern std::filesystem::path temporaryRoot;
 namespace Test
 {
     namespace fs = std::filesystem;
+
+    TEST(LocalWatchScopeTests, AChangeOfTheItemOrBelowItConcernsIt)
+    {
+        const fs::path item{"/home/user/project"};
+        EXPECT_TRUE(FileTracking::isChangeOfItem(item, "/home/user/project", {}));
+        EXPECT_TRUE(FileTracking::isChangeOfItem(item, "/home/user/project/src/main.cpp", {}));
+        EXPECT_TRUE(FileTracking::isChangeOfItem(item, "/home/user/elsewhere", "/home/user/project"));
+        EXPECT_TRUE(FileTracking::isChangeOfItem(item, "/home/user/project", "/home/user/.project.swp"));
+    }
+
+    TEST(LocalWatchScopeTests, SiblingsAndPrefixesDoNotConcernTheItem)
+    {
+        const fs::path item{"/home/user/project"};
+        EXPECT_FALSE(FileTracking::isChangeOfItem(item, "/home/user/project2", {}));
+        EXPECT_FALSE(FileTracking::isChangeOfItem(item, "/home/user/other.txt", "/home/user/other.tmp"));
+        EXPECT_FALSE(FileTracking::isChangeOfItem(item, "/home/user", {}));
+    }
+
+    TEST(LocalWatchOverlapTests, NestedOrEqualItemsAreRefused)
+    {
+        const std::vector<FileTracking::LocalWatchManagerDetail::PlacedPath> watched{fs::path{"/home/user/project"}};
+        const fs::path downloads{"/var/tmp/nui-sftp"};
+        using FileTracking::LocalWatchManagerDetail::refuseOverlap;
+        EXPECT_FALSE(refuseOverlap(fs::path{"/home/user/project"}, watched, downloads).has_value());
+        EXPECT_FALSE(refuseOverlap(fs::path{"/home/user/project/src/main.cpp"}, watched, downloads).has_value());
+        EXPECT_FALSE(refuseOverlap(fs::path{"/home/user"}, watched, downloads).has_value());
+        EXPECT_FALSE(refuseOverlap(fs::path{"/var/tmp/nui-sftp/instance/file.txt"}, watched, downloads).has_value());
+        EXPECT_FALSE(refuseOverlap(fs::path{"/var"}, watched, downloads).has_value());
+    }
+
+    TEST(LocalWatchOverlapTests, TheRefusalNamesWhatItOverlaps)
+    {
+        using FileTracking::LocalWatchManagerDetail::refuseOverlap;
+        const auto nested = refuseOverlap(
+            fs::path{"/home/user/project/src"}, {fs::path{"/home/user/project"}}, fs::path{"/var/tmp/nui-sftp"}
+        );
+        const auto downloads = refuseOverlap(fs::path{"/var/tmp"}, {}, fs::path{"/var/tmp/nui-sftp"});
+
+        ASSERT_FALSE(nested.has_value());
+        EXPECT_EQ(
+            Utility::parseLocalizedMessage(nested.error()).key, "backend.fileTracking.watchOverlaps"
+        );
+        EXPECT_EQ(
+            Utility::parseLocalizedMessage(nested.error()).arguments,
+            (std::vector<std::string>{"/home/user/project/src", "/home/user/project"})
+        );
+        ASSERT_FALSE(downloads.has_value());
+        EXPECT_EQ(
+            Utility::parseLocalizedMessage(downloads.error()).key, "backend.fileTracking.watchOverlapsDownloads"
+        );
+    }
+
+    TEST(LocalWatchOverlapTests, SiblingsAndPrefixesAreAccepted)
+    {
+        const std::vector<FileTracking::LocalWatchManagerDetail::PlacedPath> watched{fs::path{"/home/user/project"}};
+        const fs::path downloads{"/var/tmp/nui-sftp"};
+        using FileTracking::LocalWatchManagerDetail::refuseOverlap;
+        EXPECT_TRUE(refuseOverlap(fs::path{"/home/user/project2"}, watched, downloads).has_value());
+        EXPECT_TRUE(refuseOverlap(fs::path{"/home/user/notes.txt"}, watched, downloads).has_value());
+        EXPECT_TRUE(refuseOverlap(fs::path{"/home/user/notes.txt"}, {}, downloads).has_value());
+        EXPECT_TRUE(refuseOverlap(fs::path{"/var/tmp/nui-sftp2"}, {}, downloads).has_value());
+    }
+
+#if defined(_WIN32) || defined(__APPLE__)
+    TEST(LocalWatchOverlapTests, CaseIsIgnoredWhereTheFileSystemFoldsIt)
+    {
+        EXPECT_TRUE(FileTracking::LocalWatchManagerDetail::overlaps(fs::path{"/Users/Me/Project"}, fs::path{"/users/me/project/src"}));
+    }
+#endif
+
+    TEST(LocalWatchOverlapTests, TheSameDirectoryUnderAnotherSpellingOverlaps)
+    {
+        const auto root = fs::canonical(temporaryRoot) /
+            ("overlap_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+        fs::create_directories(root / "project" / "src");
+        std::error_code linkError;
+        fs::create_directory_symlink(root / "project", root / "alias", linkError);
+        if (linkError)
+            GTEST_SKIP() << "Cannot create a symbolic link: " << linkError.message();
+
+        EXPECT_TRUE(FileTracking::LocalWatchManagerDetail::overlaps(root / "alias" / "src", root / "project"));
+        EXPECT_TRUE(FileTracking::LocalWatchManagerDetail::overlaps(root / "project", root / "alias" / "src"));
+        EXPECT_FALSE(FileTracking::LocalWatchManagerDetail::overlaps(root / "alias" / "missing", root / "other"));
+        fs::remove_all(root);
+    }
 
     class ItemStatesTest : public ::testing::Test
     {
@@ -87,6 +178,612 @@ namespace Test
     {
         EXPECT_TRUE(FileTracking::itemStatesOf(root_ / "missing").empty());
     }
+
+    class LocalWatchManagerTest : public ::testing::Test
+    {
+      protected:
+        boost::asio::io_context ioc_;
+        fs::path root_;
+        std::unique_ptr<FileTracking::LocalWatchManager> manager_;
+
+        void SetUp() override
+        {
+            root_ = fs::canonical(temporaryRoot) /
+                ("local_watch_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+            fs::create_directories(root_ / "project" / "src");
+            fs::create_directories(root_ / "downloads");
+            std::ofstream{root_ / "project" / "src" / "main.cpp"} << "int main() {}";
+            std::ofstream{root_ / "notes.txt"} << "notes";
+            manager_ = std::make_unique<FileTracking::LocalWatchManager>(
+                boost::asio::make_strand(ioc_.get_executor()), root_ / "downloads"
+            );
+        }
+
+        void TearDown() override
+        {
+            manager_.reset();
+            if (!root_.empty())
+                fs::remove_all(root_);
+        }
+
+        /** @brief What the watches of recordingSink() reported, in order. */
+        std::vector<FileTracking::ReportedChange> reported_{};
+
+        auto watch(fs::path const& item)
+        {
+            return manager_->watch(
+                Ids::generateWatchId(),
+                item,
+                std::string{Persistence::defaultTempFileSuffix},
+                [](FileTracking::ReportedChange const&) {}
+            );
+        }
+
+        FileTracking::ChangeSink recordingSink()
+        {
+            return [this](FileTracking::ReportedChange const& change)
+            {
+                reported_.push_back(change);
+            };
+        }
+
+        auto watchRecording(fs::path const& item)
+        {
+            return manager_->watch(
+                Ids::generateWatchId(), item, std::string{Persistence::defaultTempFileSuffix}, recordingSink()
+            );
+        }
+
+        /**
+         * @brief Lets the events from before the watch pass and forgets them, FSEvents delivers those too.
+         */
+        void settleEarlierEvents()
+        {
+            runFor(std::chrono::milliseconds{1000});
+            reported_.clear();
+        }
+
+        /**
+         * @brief Watches @p item without the manager, so the test can hand it changes, see LocalItemWatch::handleChange.
+         */
+        std::optional<FileTracking::LocalItemWatch> openRecording(fs::path const& item)
+        {
+            auto opened = FileTracking::LocalItemWatch::open(
+                Ids::generateWatchId(),
+                item,
+                boost::asio::make_strand(ioc_.get_executor()),
+                recordingSink(),
+                std::string{Persistence::defaultTempFileSuffix},
+                [](Ids::WatchId const&, fs::path const&)
+                {
+                    return true;
+                }
+            );
+            if (!opened)
+                return std::nullopt;
+            return std::move(*opened);
+        }
+
+        std::size_t reportedCount(FileTracking::FileAction action, fs::path const& path) const
+        {
+            return static_cast<std::size_t>(std::ranges::count_if(
+                reported_,
+                [&](FileTracking::ReportedChange const& change)
+                {
+                    return change.action == action && change.path.lexically_normal() == path.lexically_normal();
+                }
+            ));
+        }
+
+        /**
+         * @brief How many changes of the content of @p path were reported. FSEvents carries the creation of a file into
+         *        its later events, efsw reports an edit as an addition and a modification then, they settle into the
+         *        addition.
+         */
+        std::size_t reportedContentChanges(fs::path const& path) const
+        {
+            return reportedCount(FileTracking::FileAction::Added, path) +
+                reportedCount(FileTracking::FileAction::Modified, path);
+        }
+
+        bool reportedRemoval() const
+        {
+            return std::ranges::any_of(
+                reported_,
+                [](FileTracking::ReportedChange const& change)
+                {
+                    return change.action == FileTracking::FileAction::Deleted;
+                }
+            );
+        }
+
+        FileTracking::DirectoryChange changeOf(
+            FileTracking::FileAction action,
+            std::string const& filename,
+            std::string const& oldFilename = {}
+        ) const
+        {
+            return FileTracking::DirectoryChange{
+                .action = action,
+                .directory = root_,
+                .filename = filename,
+                .oldFilename = oldFilename,
+                .isDirectory = false,
+            };
+        }
+
+        /**
+         * @brief Runs the handlers until @p condition holds, at most for @p timeout.
+         */
+        bool runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{5})
+        {
+            const auto deadline = std::chrono::steady_clock::now() + timeout;
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                ioc_.restart();
+                ioc_.run_for(std::chrono::milliseconds{20});
+                if (condition())
+                    return true;
+            }
+            return false;
+        }
+
+        void runFor(std::chrono::milliseconds duration)
+        {
+            runUntil(
+                []()
+                {
+                    return false;
+                },
+                duration
+            );
+        }
+    };
+
+    TEST_F(LocalWatchManagerTest, WatchingAFileReportsItAndItsDirectory)
+    {
+        const auto watched = watch(root_ / "project" / "src" / ".." / "src" / "main.cpp");
+
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        EXPECT_EQ((*watched)->item(), root_ / "project" / "src" / "main.cpp");
+        EXPECT_EQ((*watched)->directory(), root_ / "project" / "src");
+        EXPECT_FALSE((*watched)->isDirectory());
+        EXPECT_TRUE((*watched)->watchId().isValid());
+        EXPECT_EQ(manager_->find((*watched)->watchId()), *watched);
+    }
+
+    TEST_F(LocalWatchManagerTest, WatchingADirectoryWorks)
+    {
+        const auto watched = watch(root_ / "project");
+
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        EXPECT_TRUE((*watched)->isDirectory());
+    }
+
+    TEST_F(LocalWatchManagerTest, OverlappingWatchesAreRefused)
+    {
+        ASSERT_TRUE(watch(root_ / "project").has_value());
+
+        EXPECT_FALSE(watch(root_ / "project").has_value());
+        EXPECT_FALSE(watch(root_ / "project" / "src" / "main.cpp").has_value());
+        EXPECT_FALSE(watch(root_).has_value());
+        EXPECT_TRUE(watch(root_ / "notes.txt").has_value());
+    }
+
+    TEST_F(LocalWatchManagerTest, CheckingTellsWhatAWatchWouldRefuseWithoutWatching)
+    {
+        const auto checked = manager_->checkWatchable(root_ / "project" / "." / "src");
+        ASSERT_TRUE(checked.has_value()) << checked.error();
+        EXPECT_EQ(*checked, root_ / "project" / "src");
+        ASSERT_TRUE(watch(root_ / "project").has_value());
+
+        EXPECT_FALSE(manager_->checkWatchable(root_ / "project" / "src").has_value());
+        EXPECT_FALSE(manager_->checkWatchable(root_ / "missing.txt").has_value());
+        EXPECT_TRUE(manager_->checkWatchable(root_ / "notes.txt").has_value());
+        EXPECT_TRUE(watch(root_ / "notes.txt").has_value());
+    }
+
+    TEST_F(LocalWatchManagerTest, TheTemporaryDownloadsDirectoryIsRefused)
+    {
+        std::ofstream{root_ / "downloads" / "copy.txt"} << "copy";
+
+        EXPECT_FALSE(watch(root_ / "downloads" / "copy.txt").has_value());
+        EXPECT_FALSE(watch(root_ / "downloads").has_value());
+    }
+
+    TEST_F(LocalWatchManagerTest, MissingItemsAndRootsAreRefused)
+    {
+        EXPECT_FALSE(watch(root_ / "missing.txt").has_value());
+        EXPECT_FALSE(watch(root_.root_path()).has_value());
+    }
+
+    TEST_F(LocalWatchManagerTest, ARenamedItemIsFollowed)
+    {
+        const auto watched = watch(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "notes.txt", root_ / "renamed.txt");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "renamed.txt";
+            }
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, ARenamedDirectoryIsFollowed)
+    {
+        const auto watched = watch(root_ / "project");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "project", root_ / "renamed");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "renamed";
+            }
+        ));
+        EXPECT_TRUE(manager_->find(watchId)->isDirectory());
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemRenamedTwiceIsFollowedToItsLastName)
+    {
+        const auto watched = watch(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "notes.txt", root_ / "first.txt");
+        fs::rename(root_ / "first.txt", root_ / "second.txt");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "second.txt";
+            }
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, ARenameOntoAnotherWatchIsNotFollowed)
+    {
+        std::ofstream{root_ / "other.txt"} << "other";
+        const auto watched = watch(root_ / "notes.txt");
+        const auto other = watch(root_ / "other.txt");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        ASSERT_TRUE(other.has_value()) << other.error();
+        const auto watchId = (*watched)->watchId();
+        const auto otherId = (*other)->watchId();
+
+        fs::rename(root_ / "notes.txt", root_ / "other.txt");
+        runUntil(
+            []()
+            {
+                return false;
+            },
+            std::chrono::seconds{1}
+        );
+
+        EXPECT_EQ(manager_->find(watchId)->item(), root_ / "notes.txt");
+        EXPECT_EQ(manager_->find(otherId)->item(), root_ / "other.txt");
+    }
+
+    TEST_F(LocalWatchManagerTest, ARenameOntoATemporaryNameIsNotFollowed)
+    {
+        const auto watched = watch(root_ / "project");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "project", root_ / "._project");
+
+        EXPECT_FALSE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() != root_ / "project";
+            },
+            std::chrono::milliseconds{1000}
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemMovedAsideAndWrittenAnewStaysWatched)
+    {
+        const auto watched = watch(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "notes.txt", root_ / "notes.txt~");
+        std::ofstream{root_ / "notes.txt"} << "written anew";
+
+        EXPECT_FALSE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() != root_ / "notes.txt";
+            },
+            std::chrono::milliseconds{1000}
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemMovedAsideAndWrittenAnewAfterTheSettleTimeTakesTheWatchBack)
+    {
+        const auto watched = manager_->watch(
+            Ids::generateWatchId(), root_ / "notes.txt", std::string{Persistence::defaultTempFileSuffix}, recordingSink()
+        );
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "notes.txt", root_ / "notes.txt~");
+        runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "notes.txt~";
+            }
+        );
+        runFor(std::chrono::milliseconds{300});
+        std::ofstream{root_ / "notes.txt"} << "written anew";
+        fs::remove(root_ / "notes.txt~");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "notes.txt" &&
+                    reportedCount(FileTracking::FileAction::Added, root_ / "notes.txt") > 0u;
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(manager_->find(watchId)->item(), root_ / "notes.txt");
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "notes.txt~"), 1u);
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "notes.txt"), 1u);
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, AFileAtTheOldNameLongAfterAFollowedRenameIsNotTheItem)
+    {
+        const auto watched = manager_->watch(
+            Ids::generateWatchId(), root_ / "notes.txt", std::string{Persistence::defaultTempFileSuffix}, recordingSink()
+        );
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+
+        fs::rename(root_ / "notes.txt", root_ / "renamed.txt");
+        ASSERT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "renamed.txt";
+            }
+        ));
+        runFor(FileTracking::renameReturnTime);
+        std::ofstream{root_ / "notes.txt"} << "another file";
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_EQ(manager_->find(watchId)->item(), root_ / "renamed.txt");
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Added, root_ / "notes.txt"), 0u);
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemRemovedAndWrittenAnewIsNotReportedRemoved)
+    {
+        const auto watched = manager_->watch(
+            Ids::generateWatchId(), root_ / "notes.txt", std::string{Persistence::defaultTempFileSuffix}, recordingSink()
+        );
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+
+        fs::remove(root_ / "notes.txt");
+        std::ofstream{root_ / "notes.txt"} << "written anew";
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedCount(FileTracking::FileAction::Added, root_ / "notes.txt") > 0u;
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemThatStaysAwayIsReportedRemoved)
+    {
+        const auto watched = manager_->watch(
+            Ids::generateWatchId(), root_ / "notes.txt", std::string{Persistence::defaultTempFileSuffix}, recordingSink()
+        );
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+
+        fs::remove(root_ / "notes.txt");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedCount(FileTracking::FileAction::Deleted, root_ / "notes.txt") == 1u;
+            }
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, ARemovalReportedBeforeARenameOfTheItemIsNotReported)
+    {
+        auto watched = openRecording(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value());
+
+        // Windows reports a case-only rename as the removal of the old name first.
+        fs::rename(root_ / "notes.txt", root_ / "NOTES.txt");
+        watched->handleChange(changeOf(FileTracking::FileAction::Deleted, "notes.txt"));
+        watched->handleChange(changeOf(FileTracking::FileAction::Moved, "NOTES.txt", "notes.txt"));
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return watched->item() == root_ / "NOTES.txt";
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "NOTES.txt"), 1u);
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, ARemovalReportedAfterARenameOfTheItemIsNotReported)
+    {
+        auto watched = openRecording(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value());
+
+        fs::rename(root_ / "notes.txt", root_ / "NOTES.txt");
+        watched->handleChange(changeOf(FileTracking::FileAction::Moved, "NOTES.txt", "notes.txt"));
+        watched->handleChange(changeOf(FileTracking::FileAction::Deleted, "notes.txt"));
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return watched->item() == root_ / "NOTES.txt";
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "NOTES.txt"), 1u);
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, UnwatchingFreesTheItem)
+    {
+        const auto watched = watch(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value());
+        const auto watchId = (*watched)->watchId();
+
+        manager_->unwatch(watchId);
+
+        EXPECT_EQ(manager_->find(watchId), nullptr);
+        EXPECT_TRUE(watch(root_ / "notes.txt").has_value());
+        EXPECT_NO_THROW(manager_->unwatch(Ids::makeWatchId("unknown")));
+    }
+
+#ifdef __APPLE__
+    TEST_F(LocalWatchManagerTest, ARemovedItemReportsNoChangeOfItsContentFirst)
+    {
+        const auto item = root_ / "notes.txt";
+        const auto watched = watchRecording(item);
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        settleEarlierEvents();
+
+        fs::remove(item);
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedCount(FileTracking::FileAction::Deleted, item) == 1u;
+            }
+        ));
+        EXPECT_EQ(reportedContentChanges(item), 0u);
+    }
+
+    // Finder names in NFD and APFS keeps that spelling, efsw reports every name precomposed (NFC).
+    TEST_F(LocalWatchManagerTest, AnItemInADecomposedDirectoryReportsItsEditsUnderItsSpelling)
+    {
+        const auto directory = root_ / Paths::nativeFromUtf8("Cafe\xCC\x81");
+        const auto item = directory / "notes.txt";
+        fs::create_directories(directory);
+        std::ofstream{item} << "notes";
+        const auto watched = watchRecording(item);
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        ASSERT_EQ((*watched)->item(), item);
+        settleEarlierEvents();
+
+        std::ofstream{item, std::ios::app} << " edited";
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedContentChanges(item) > 0u;
+            }
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemInADecomposedDirectoryIsFollowedWhenRenamed)
+    {
+        const auto directory = root_ / Paths::nativeFromUtf8("Cafe\xCC\x81");
+        fs::create_directories(directory);
+        std::ofstream{directory / "notes.txt"} << "notes";
+        const auto watched = watchRecording(directory / "notes.txt");
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        const auto watchId = (*watched)->watchId();
+        settleEarlierEvents();
+
+        fs::rename(directory / "notes.txt", directory / "renamed.txt");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == directory / "renamed.txt";
+            }
+        ));
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, directory / "renamed.txt"), 1u);
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemInADecomposedDirectoryThatStaysAwayIsReportedRemoved)
+    {
+        const auto directory = root_ / Paths::nativeFromUtf8("Cafe\xCC\x81");
+        const auto item = directory / "notes.txt";
+        fs::create_directories(directory);
+        std::ofstream{item} << "notes";
+        const auto watched = watchRecording(item);
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        settleEarlierEvents();
+
+        fs::remove(item);
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedCount(FileTracking::FileAction::Deleted, item) == 1u;
+            }
+        ));
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemNamedDecomposedReportsItsEditsAndIsFollowedWhenRenamed)
+    {
+        const auto item = root_ / Paths::nativeFromUtf8("cafe\xCC\x81.txt");
+        std::ofstream{item} << "notes";
+        const auto watched = watchRecording(item);
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        ASSERT_EQ((*watched)->item(), item);
+        const auto watchId = (*watched)->watchId();
+        settleEarlierEvents();
+
+        std::ofstream{item, std::ios::app} << " edited";
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedContentChanges(item) > 0u;
+            }
+        ));
+        fs::rename(item, root_ / "renamed.txt");
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return manager_->find(watchId)->item() == root_ / "renamed.txt";
+            }
+        ));
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "renamed.txt"), 1u);
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, ADecomposedDirectoryReportsChangesBelowItUnderItsSpelling)
+    {
+        const auto item = root_ / Paths::nativeFromUtf8("Cafe\xCC\x81");
+        fs::create_directories(item / "sub");
+        std::ofstream{item / "sub" / "notes.txt"} << "notes";
+        const auto watched = watchRecording(item);
+        ASSERT_TRUE(watched.has_value()) << watched.error();
+        ASSERT_TRUE((*watched)->isDirectory());
+        settleEarlierEvents();
+
+        std::ofstream{item / "sub" / "notes.txt", std::ios::app} << " edited";
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedContentChanges(item / "sub" / "notes.txt") > 0u;
+            }
+        ));
+    }
+#endif
 
     class DirectoryWatchServiceTest : public ::testing::Test
     {

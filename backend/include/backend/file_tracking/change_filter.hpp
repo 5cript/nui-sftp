@@ -46,6 +46,16 @@ namespace FileTracking
     filterFileChange(FileChange change, bool isDirectory, std::string const& downloadTempSuffix);
 
     /**
+     * @brief Whether a change of @p path, moved from @p oldPath when that is not empty, touches @p item or anything
+     *        below it. All paths are spelled alike (canonical).
+     */
+    bool isChangeOfItem(
+        std::filesystem::path const& item,
+        std::filesystem::path const& path,
+        std::filesystem::path const& oldPath
+    );
+
+    /**
      * @brief Whether @p path is @p base or lies below it, compared lexically. An empty @p path is neither.
      */
     bool isAtOrBelow(std::filesystem::path const& base, std::filesystem::path const& path);

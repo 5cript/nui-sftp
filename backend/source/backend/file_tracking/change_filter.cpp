@@ -83,6 +83,15 @@ namespace FileTracking
         return change;
     }
 
+    bool isChangeOfItem(
+        std::filesystem::path const& item,
+        std::filesystem::path const& path,
+        std::filesystem::path const& oldPath
+    )
+    {
+        return isAtOrBelow(item, path) || isAtOrBelow(item, oldPath);
+    }
+
     bool isAtOrBelow(std::filesystem::path const& base, std::filesystem::path const& path)
     {
         if (path.empty())
