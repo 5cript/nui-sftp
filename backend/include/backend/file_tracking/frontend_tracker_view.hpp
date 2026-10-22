@@ -16,8 +16,8 @@ namespace FileTracking
     /**
      * @brief Shows a Tracker in the file tracking panel of its session, which listens to
      *        @c "FileTracker::<sessionId>::<event>": onEntry (SharedData::TrackedEntry), onEntryRemoved (watch id),
-     *        onQuestion (SharedData::ServerChangedQuestion), onOrphanedCount (count) and onProgress
-     *        (SharedData::TrackerProgress).
+     *        onEntriesEnded (SharedData::EndedWatches), onQuestion (SharedData::ServerChangedQuestion),
+     *        onOrphanedCount (count) and onProgress (SharedData::TrackerProgress).
      */
     class FrontendTrackerView : public TrackerView
     {
@@ -26,6 +26,7 @@ namespace FileTracking
 
         void showEntry(SharedData::TrackedEntry const& entry) override;
         void removeEntry(Ids::WatchId const& watchId) override;
+        void showEnded(SharedData::EndedWatches const& ended) override;
         void ask(SharedData::ServerChangedQuestion const& question) override;
         void showOrphanedCount(std::size_t count) override;
         void showProgress(SharedData::TrackerProgress const& progress) override;

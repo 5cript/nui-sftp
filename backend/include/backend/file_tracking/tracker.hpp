@@ -155,6 +155,12 @@ namespace FileTracking
          */
         void stopAll();
 
+        /**
+         * @brief The session lost its connection: every watch ends like in stopAll(), either side may change until it
+         *        is back, and the view shows why. The user watches anew.
+         */
+        void connectionLost();
+
       private:
         struct Implementation;
         std::shared_ptr<Implementation> impl_;

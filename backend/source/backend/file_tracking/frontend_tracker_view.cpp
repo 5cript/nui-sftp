@@ -23,6 +23,11 @@ namespace FileTracking
         RpcHelper::callRemoteSafely(*hub_, eventName("onEntryRemoved"), watchId.value());
     }
 
+    void FrontendTrackerView::showEnded(SharedData::EndedWatches const& ended)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onEntriesEnded"), ended);
+    }
+
     void FrontendTrackerView::ask(SharedData::ServerChangedQuestion const& question)
     {
         RpcHelper::callRemoteSafely(*hub_, eventName("onQuestion"), question);

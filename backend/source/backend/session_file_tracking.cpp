@@ -564,6 +564,12 @@ void Session::stopFileTracking()
         tracker_->stopAll();
 }
 
+void Session::onConnectionLost()
+{
+    if (tracker_)
+        tracker_->connectionLost();
+}
+
 namespace
 {
     /**

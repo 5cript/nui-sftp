@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ids/ids.hpp>
+#include <shared_data/file_tracking/ended_watches.hpp>
 #include <shared_data/file_tracking/server_changed_question.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
 #include <shared_data/file_tracking/tracker_progress.hpp>
@@ -29,6 +30,12 @@ namespace FileTracking
         virtual void showEntry(SharedData::TrackedEntry const& entry) = 0;
 
         virtual void removeEntry(Ids::WatchId const& watchId) = 0;
+
+        /**
+         * @brief Tells the user why the watches of @p ended ended, they did not stop them. Their entries are removed
+         *        before, see removeEntry().
+         */
+        virtual void showEnded(SharedData::EndedWatches const& ended) = 0;
 
         /**
          * @brief Asks @p question, the tracker waits for the answer before it asks the next one.

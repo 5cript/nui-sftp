@@ -20,6 +20,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -157,6 +159,11 @@ namespace Test
                 removed.push_back(watchId.value());
             }
 
+            void showEnded(SharedData::EndedWatches const& shown) override
+            {
+                ended.push_back(shown);
+            }
+
             void ask(SharedData::ServerChangedQuestion const& question) override
             {
                 questions.push_back(question);
@@ -174,6 +181,7 @@ namespace Test
 
             std::map<std::string, SharedData::TrackedEntry> entries{};
             std::vector<std::string> removed{};
+            std::vector<SharedData::EndedWatches> ended{};
             std::vector<SharedData::ServerChangedQuestion> questions{};
             std::vector<std::size_t> orphanedCounts{};
             std::vector<SharedData::TrackerProgress> progress{};
@@ -1215,6 +1223,44 @@ namespace Test
         EXPECT_TRUE(std::filesystem::exists(opened->localPath.native()));
         EXPECT_EQ(instances_->countOrphaned(), 2u);
         EXPECT_EQ(instances_->removeOrphaned(), 2);
+    }
+
+    TEST_F(TrackerTest, ALostConnectionEndsEveryWatchAndShowsWhy)
+    {
+        const auto copy = open("/srv/copy.txt", /*watch=*/true);
+        ASSERT_TRUE(copy.has_value());
+        ASSERT_TRUE(
+            tracker_->uploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv/notes.txt")).has_value()
+        );
+        ASSERT_TRUE(runUntilProgress({.pending = 1}));
+
+        tracker_->connectionLost();
+        write(root_ / "local" / "notes.txt", "changed locally");
+        write(copy->localPath.native(), "changed copy");
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_TRUE(view_->entries.empty());
+        EXPECT_EQ(view_->removed.size(), 2u);
+        ASSERT_EQ(view_->ended.size(), 1u);
+        EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::ConnectionLost);
+        const auto names = view_->ended.front().entries | std::views::transform(&SharedData::TrackedEntry::name) |
+            std::ranges::to<std::set>();
+        EXPECT_EQ(names, (std::set<std::string>{"copy.txt", "notes.txt"}));
+        EXPECT_EQ(lastProgress(), SharedData::TrackerProgress{});
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
+        EXPECT_EQ(uploadsTo("/srv/copy.txt"), 0u);
+        EXPECT_EQ(instances_->findInstance(copy->instanceId.value()), nullptr);
+        ASSERT_FALSE(view_->orphanedCounts.empty());
+        EXPECT_EQ(view_->orphanedCounts.back(), 1u);
+        EXPECT_TRUE(tracker_->checkUploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv")).has_value());
+    }
+
+    TEST_F(TrackerTest, ALostConnectionWithoutWatchesShowsNoEnd)
+    {
+        tracker_->connectionLost();
+
+        EXPECT_TRUE(view_->ended.empty());
+        EXPECT_TRUE(view_->removed.empty());
     }
 
     TEST_F(TrackerTest, StoppingAllDropsADownloadOnItsWayWithItsInstance)
