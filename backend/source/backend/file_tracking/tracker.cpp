@@ -1245,15 +1245,38 @@ namespace FileTracking
         }
 
         /**
+         * @brief Whether the server's copy of the file of @p change holds what the file holds now: an upload sent it
+         *        in the state it has, the change was reported after that. Not while an upload that takes the file
+         *        along is on its way, the change goes after it.
+         */
+        static bool isSentAsItIs(Entry const& entry, LocalChange const& change)
+        {
+            if (change.isDirectory || entry.pendingUploads.covers(change.path))
+                return false;
+            const auto sent = entry.serverContent.sentFrom(change.path);
+            return sent && sent == sourceStateOf(change.path.native());
+        }
+
+        /**
          * @brief Uploads a change unless the same path, or a directory above it, is already on its way; the change
          *        then goes once that upload ended. It starts in the server order, after what was decided before on
-         *        its path.
+         *        its path. A file the server has as it is stays, a directory the server has goes by what it lacks.
          */
         void queueUpload(Upload upload)
         {
             auto* entry = find(upload.watchId);
             if (!entry)
                 return;
+            if (isSentAsItIs(*entry, upload.change))
+            {
+                Log::debug(
+                    "FileTracking: the server has '{}' as it is, not uploading it.", upload.change.path.toUtf8()
+                );
+                return;
+            }
+            if (upload.change.isDirectory && !entry->pendingUploads.covers(upload.change.path) &&
+                entry->serverContent.hasDirectory(upload.change.path))
+                return uploadWhatTheServerLacks(*entry, upload);
             const bool starts = entry->pendingUploads.start(upload.change);
             progressChanged();
             if (!starts)
@@ -1269,6 +1292,52 @@ namespace FileTracking
                     checkServerThenUpload(std::move(upload));
                 }
             );
+        }
+
+        /**
+         * @brief @p upload is of a directory the server has: what is below it goes on its own where the server lacks
+         *        it, a file no upload sent as it is and a directory with its content. A link the server has stays,
+         *        a change of its own retargets it. Nothing is compared with the server, the upload of the whole
+         *        directory would not either: the states recorded after the last one may be newer than what it sent.
+         */
+        void uploadWhatTheServerLacks(Entry& entry, Upload const& upload)
+        {
+            Log::debug(
+                "FileTracking: the server has the directory '{}', uploading what it lacks.", upload.change.path.toUtf8()
+            );
+            const auto watchId = entry.watchId;
+            std::vector<Paths::LocalPath> newDirectories;
+            for (auto const& state : itemStatesOf(upload.change.path.native()))
+            {
+                const auto path = Paths::LocalPath::make(state.path);
+                if (!path || *path == upload.change.path || !path->isWithin(upload.change.path))
+                    continue;
+                auto* stillWatched = find(watchId);
+                if (!stillWatched)
+                    return;
+                const auto inNewDirectory = std::ranges::any_of(
+                    newDirectories,
+                    [&path](Paths::LocalPath const& directory)
+                    {
+                        return path->isWithin(directory);
+                    }
+                );
+                const bool known = state.isDirectory ? stillWatched->serverContent.hasDirectory(*path)
+                                                     : state.isSymlink && stillWatched->serverContent.fileState(*path);
+                if (inNewDirectory || known)
+                    continue;
+                if (state.isDirectory)
+                    newDirectories.push_back(*path);
+                if (const auto destination = remotePathOf(*stillWatched, *path))
+                    queueUpload(
+                        Upload{
+                            .watchId = watchId,
+                            .change = {.path = *path, .isDirectory = state.isDirectory},
+                            .destination = *destination,
+                            .checkServer = false,
+                        }
+                    );
+            }
         }
 
         void checkServerThenUpload(Upload upload)
@@ -1475,6 +1544,9 @@ namespace FileTracking
             }
             else if (ended.destinationState)
                 entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
+            for (auto const& sent : ended.sentFiles)
+                if (sent.path.isWithin(upload.change.path))
+                    entry->serverContent.rememberSent(sent.path, sent.state);
             finishUpload(upload, UploadOutcome::Uploaded);
         }
 

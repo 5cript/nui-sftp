@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -508,5 +510,49 @@ namespace Test::TrackingState
         EXPECT_FALSE(secondStarts);
         EXPECT_TRUE(order.leave(second + 1u).empty());
         EXPECT_EQ(order.leave(first), std::vector{second});
+    }
+
+    TEST(TrackingStateTests, KnownContentRemembersTheStateAKnownFileWasSentIn)
+    {
+        KnownServerContent known;
+        const SourceState sent{.size = 4, .modified = std::filesystem::file_time_type{std::chrono::seconds{7}}};
+        known.rememberSent(local("/i/unknown.txt"), sent);
+        known.rememberFile(local("/i/a.txt"), ServerState{.mtime = 7, .size = 4});
+        known.rememberSent(local("/i/a.txt"), sent);
+
+        EXPECT_FALSE(known.sentFrom(local("/i/unknown.txt")).has_value());
+        EXPECT_EQ(known.sentFrom(local("/i/a.txt")), sent);
+        known.rememberFile(local("/i/a.txt"), ServerState{.mtime = 8, .size = 4});
+        EXPECT_FALSE(known.sentFrom(local("/i/a.txt")).has_value());
+    }
+
+    TEST(TrackingStateTests, KnownContentForgetsAndMovesWhatWasSentWithItsTree)
+    {
+        KnownServerContent known;
+        const SourceState sent{.size = 4, .modified = std::filesystem::file_time_type{std::chrono::seconds{7}}};
+        known.rememberFile(local("/i/dir/a.txt"), ServerState{});
+        known.rememberSent(local("/i/dir/a.txt"), sent);
+        known.rememberFile(local("/i/gone/b.txt"), ServerState{});
+        known.rememberSent(local("/i/gone/b.txt"), sent);
+
+        known.move(local("/i/dir"), local("/i/renamed"));
+        known.forget(local("/i/gone"));
+
+        EXPECT_FALSE(known.sentFrom(local("/i/dir/a.txt")).has_value());
+        EXPECT_EQ(known.sentFrom(local("/i/renamed/a.txt")), sent);
+        EXPECT_FALSE(known.sentFrom(local("/i/gone/b.txt")).has_value());
+    }
+
+    TEST(TrackingStateTests, AnUploadCoversItsPathAndAPendingDirectoryWhatLiesBelowIt)
+    {
+        PendingUploads pending;
+        ASSERT_TRUE(pending.start({.path = local("/i/new"), .isDirectory = true}));
+        ASSERT_TRUE(pending.start({.path = local("/i/file.txt")}));
+
+        EXPECT_TRUE(pending.covers(local("/i/new")));
+        EXPECT_TRUE(pending.covers(local("/i/new/sub/a.txt")));
+        EXPECT_TRUE(pending.covers(local("/i/file.txt")));
+        EXPECT_FALSE(pending.covers(local("/i/file.txt/below")));
+        EXPECT_FALSE(pending.covers(local("/i/newer.txt")));
     }
 }

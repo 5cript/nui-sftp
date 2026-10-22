@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace FileTracking
 {
@@ -40,6 +41,15 @@ namespace FileTracking
     };
 
     /**
+     * @brief A local file an upload sent, in the state it had from before it was read until the upload ended.
+     */
+    struct SentFile
+    {
+        Paths::LocalPath path;
+        SourceState state;
+    };
+
+    /**
      * @brief How a queued upload ended.
      */
     struct UploadEnd
@@ -52,6 +62,11 @@ namespace FileTracking
          *        when it has nothing there or could not be asked.
          */
         std::optional<ServerState> destinationState{};
+        /**
+         * @brief The regular files a completed upload sent unchanged, those below a directory too. One missing here
+         *        may still have gone to the server.
+         */
+        std::vector<SentFile> sentFiles{};
     };
 
     /**
