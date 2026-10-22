@@ -61,6 +61,18 @@ namespace FileTracking
         return files;
     }
 
+    std::size_t entryCountOf(std::filesystem::path const& item)
+    {
+        std::size_t count = 1;
+        std::error_code walkError{};
+        for (
+            std::filesystem::recursive_directory_iterator iter{item, walkError}, end; !walkError && iter != end;
+            iter.increment(walkError)
+        )
+            ++count;
+        return count;
+    }
+
     std::optional<SourceState> sourceStateOf(std::filesystem::path const& path)
     {
         std::error_code statusError{};

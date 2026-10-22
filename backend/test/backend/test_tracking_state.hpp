@@ -555,4 +555,25 @@ namespace Test::TrackingState
         EXPECT_FALSE(pending.covers(local("/i/file.txt/below")));
         EXPECT_FALSE(pending.covers(local("/i/newer.txt")));
     }
+
+    TEST(TrackingStateTests, AnUploadCountsTheEntriesItCarriesAndLateChangesBelowItOnlyBeyondThem)
+    {
+        PendingUploads pending;
+        ASSERT_TRUE(pending.start({.path = local("/i/new"), .isDirectory = true}));
+        EXPECT_FALSE(pending.start({.path = local("/i/new/a.txt")}));
+        EXPECT_EQ(pending.changeCount(), 2u);
+
+        pending.changesHandled(local("/i/new"));
+        EXPECT_EQ(pending.changeCount(), 2u);
+        pending.carries(local("/i/new"), 4u);
+        EXPECT_EQ(pending.changeCount(), 4u);
+        EXPECT_FALSE(pending.start({.path = local("/i/new/a.txt")}));
+        EXPECT_FALSE(pending.start({.path = local("/i/new/b.txt")}));
+        EXPECT_EQ(pending.changeCount(), 4u);
+        EXPECT_FALSE(pending.start({.path = local("/i/new"), .isDirectory = true}));
+        EXPECT_EQ(pending.changeCount(), 5u);
+
+        EXPECT_EQ(pending.finish(local("/i/new")).counted, 4u);
+        EXPECT_EQ(pending.changeCount(), 0u);
+    }
 }
