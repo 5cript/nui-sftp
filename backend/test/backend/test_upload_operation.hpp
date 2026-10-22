@@ -647,7 +647,7 @@ namespace Test
         EXPECT_EQ(workResult.error().type, UploadOperation::ErrorType::FileNotFound);
     }
 
-    TEST_F(UploadOperationTests, AVanishedSourceThatMayVanishCompletesWithoutATransfer)
+    TEST_F(UploadOperationTests, AVanishedSourceThatMayVanishEndsCanceledWithoutATransfer)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -664,6 +664,7 @@ namespace Test
         const auto workResult = operation.work();
         ASSERT_TRUE(workResult.has_value()) << workResult.error().toString();
         EXPECT_EQ(*workResult, UploadOperation::WorkStatus::Complete);
+        EXPECT_EQ(operation.state(), SharedData::OperationState::Canceled);
     }
 
     TEST_F(UploadOperationTests, ASourceThatCannotBeCheckedFailsInsteadOfVanishing)
@@ -1588,5 +1589,39 @@ namespace Test
         ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
 
         EXPECT_EQ(remoteContentOf(*sftp, remote("/home/test/new.bin")), content);
+    }
+
+    TEST_F(UploadOperationTests, AnUploadKeepsTheModificationTimeOfASourceRenamedMeanwhile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto source = temporaryRoot / "dated.bin";
+        writeContent(source, patternedContent(1024u * 1024u));
+        const auto modified =
+            std::chrono::file_clock::from_sys(std::chrono::sys_seconds{std::chrono::seconds{1600000000}});
+        std::filesystem::last_write_time(source, modified);
+        std::uint64_t sent = 0;
+        UploadOperation operation{
+            sftp,
+            {
+                .progressCallback =
+                    [&sent](auto, auto, auto current, auto)
+                {
+                    sent = static_cast<std::uint64_t>(current);
+                },
+                .remotePath = remote("/home/test/dated.bin"),
+                .localPath = toLocal(source),
+            }
+        };
+        ASSERT_TRUE(workUntilPartlySent(operation, sent));
+
+        std::filesystem::rename(source, temporaryRoot / "dated-renamed.bin");
+        ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete);
+
+        auto stat = sftp->stat(remote("/home/test/dated.bin"));
+        ASSERT_EQ(stat.wait_for(5s), std::future_status::ready);
+        const auto information = stat.get();
+        ASSERT_TRUE(information.has_value());
+        EXPECT_EQ(information->mtime, 1600000000u);
     }
 }
