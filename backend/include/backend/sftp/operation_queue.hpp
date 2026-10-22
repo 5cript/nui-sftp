@@ -76,6 +76,22 @@ class OperationQueue
     void cancel(Ids::OperationId id);
 
     /**
+     * @brief Cancels the upload @p id like cancel(), the temporary file it wrote to stays for a later upload or goes,
+     *        see @p partial.
+     */
+    void cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial);
+
+    /**
+     * @brief Removes the temporary file an upload to @p remotePath left on @p sftp, a cancelled one that kept it, and
+     *        calls @p onDone on the strand then. Nothing is removed when there is none.
+     */
+    void discardPartialUpload(
+        SecureShell::SftpSession& sftp,
+        Paths::RemotePath const& remotePath,
+        std::function<void()> onDone
+    );
+
+    /**
      * @brief Move @p operationId within the regular `operations_` queue to
      *        the absolute index @p newIndex.  Dispatched through the strand
      *        so it cannot interleave with `work()`; the running op (deque
