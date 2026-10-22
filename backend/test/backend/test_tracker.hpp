@@ -401,14 +401,16 @@ namespace Test
          */
         void serve(std::filesystem::path const& source, std::string const& destination)
         {
-            if (std::filesystem::is_symlink(source))
+            // An upload skips what it cannot read (past MAX_PATH or being deleted on Windows).
+            std::error_code statusError;
+            const auto status = std::filesystem::symlink_status(source, statusError);
+            if (std::filesystem::is_symlink(status))
                 remote_->server[destination] = FileTracking::ServerState{};
-            else if (std::filesystem::is_regular_file(source))
+            else if (std::filesystem::is_regular_file(status))
                 remote_->server[destination] = stateOf(source);
-            else if (std::filesystem::is_directory(source))
+            else if (std::filesystem::is_directory(status))
             {
                 remote_->server[destination] = FileTracking::ServerState{};
-                // An upload skips what it cannot list (past MAX_PATH on Windows).
                 std::error_code listError;
                 for (auto const& entry : std::filesystem::directory_iterator{source, listError})
                     serve(entry.path(), destination + "/" + entry.path().filename().generic_string());
