@@ -1,6 +1,7 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
 #include <constants/sftp.hpp>
 #include <log/log.hpp>
+#include <utility/checked_symlink_status.hpp>
 #include <utility/permissions.hpp>
 
 #include <filesystem>
@@ -43,9 +44,9 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
 {
     if (individualOptions_.sourceMayVanish && scanning())
     {
-        std::error_code statusError{};
-        const auto root = common().localPath.native();
-        if (std::filesystem::symlink_status(root, statusError).type() == std::filesystem::file_type::not_found)
+        // A root that cannot be checked is not gone, its scan fails.
+        if (const auto status = Utility::checkedSymlinkStatus(common().localPath.native());
+            status && !status->has_value())
         {
             Log::info("BulkUploadOperation: '{}' is gone, nothing to upload.", common().localPath.toUtf8());
             enterState(OperationState::Completed);
