@@ -326,6 +326,12 @@ class OperationQueue
      */
     void whenCompleted(Ids::OperationId const& operationId, std::function<void(OperationCompleted const&)> callback);
 
+    /**
+     * @brief Keeps no resume backup of the operation @p operationId, a reconnect does not queue it again. For an owner
+     *        that decides anew what goes to the server. Must be called from the strand.
+     */
+    void discardResumeBackup(Ids::OperationId const& operationId);
+
     bool hasPriorityWork() const;
 
     /**

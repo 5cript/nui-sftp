@@ -467,6 +467,11 @@ void OperationQueue::whenCompleted(
     completionCallbacks_.insert_or_assign(operationId, std::move(callback));
 }
 
+void OperationQueue::discardResumeBackup(Ids::OperationId const& operationId)
+{
+    bulkResumeStash_.erase(operationId);
+}
+
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
 {
     if (bulkResumeStash_.empty())
