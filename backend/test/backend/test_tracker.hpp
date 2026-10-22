@@ -2568,6 +2568,34 @@ namespace Test
         EXPECT_FALSE(lastUploadTo("/srv/project/b.bin")->upload.continuesPartialOf.has_value());
     }
 
+    TEST_F(TrackerTest, AFailedServerRenameUploadsTheNewName)
+    {
+        const auto file = root_ / "local" / "project" / "src" / "main.cpp";
+        const auto renamed = root_ / "local" / "project" / "src" / "start.cpp";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+
+        std::filesystem::rename(file, renamed);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("rename").empty();
+            }
+        ));
+        // Something unknown to the tracker is in the way on the server.
+        end(*remote_->of("rename").front(), SharedData::OperationCompletionReason::Failed);
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/start.cpp") == 1u;
+            }
+        ));
+        auto const* upload = lastUploadTo("/srv/project/src/start.cpp");
+        ASSERT_TRUE(upload->upload.expectedDestination.has_value());
+        EXPECT_FALSE(upload->upload.expectedDestination->file.has_value());
+    }
+
     TEST_F(TrackerTest, AFileRenamedAndEditedWhileItUploadsGoesAnewUnderTheNewName)
     {
         const auto file = root_ / "local" / "project" / "a.bin";

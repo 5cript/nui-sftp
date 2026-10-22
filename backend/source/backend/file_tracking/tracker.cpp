@@ -1345,7 +1345,7 @@ namespace FileTracking
                 return false;
             inOrder(
                 {oldRemotePath, newRemotePath},
-                [this, watchId = entry.watchId, oldRemotePath, newRemotePath, ended = remoteChangeOf(entry)](
+                [this, watchId = entry.watchId, oldRemotePath, newRemotePath, ended = renameEndOf(entry, newPath)](
                     ServerOperationOrder::Ticket ticket
                 )
                 {
@@ -1364,6 +1364,38 @@ namespace FileTracking
             );
             entry.serverContent.move(oldPath, newPath);
             return true;
+        }
+
+        /**
+         * @brief Hears when the rename of a server copy for @p newPath ended, see remoteChangeOf(). One that failed
+         *        left the copy where it was: what is at @p newPath now goes there, compared with the server first.
+         */
+        TrackerRemote::OnEnded renameEndOf(Entry& entry, Paths::LocalPath newPath)
+        {
+            return [weak = weak_from_this(),
+                       watchId = entry.watchId,
+                       newPath = std::move(newPath),
+                       ended = remoteChangeOf(entry)](SharedData::OperationCompletionReason reason)
+            {
+                ended(reason);
+                if (reason == SharedData::OperationCompletionReason::Completed)
+                    return;
+                if (const auto self = weak.lock())
+                    self->onRenameFailed(watchId, newPath);
+            };
+        }
+
+        void onRenameFailed(Ids::WatchId const& watchId, Paths::LocalPath const& newPath)
+        {
+            auto* entry = find(watchId);
+            if (!entry)
+                return;
+            Log::warn("FileTracking: the server's copy was not renamed to '{}', uploading it there", newPath.toUtf8());
+            entry->serverContent.forget(newPath);
+            const auto status = localStatusOf(newPath);
+            if (!status || !*status)
+                return;
+            onContentChanged(*entry, {.path = newPath, .isDirectory = std::filesystem::is_directory(**status)});
         }
 
         /**
