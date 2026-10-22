@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/file_tracking/settled_changes.hpp>
+#include <utility/temporary_directory.hpp>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -10,8 +11,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <vector>
+
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -158,5 +162,37 @@ namespace Test
         runFor(std::chrono::milliseconds{200});
 
         EXPECT_TRUE(sent_.empty());
+    }
+
+    TEST_F(SettledChangesTest, AFileWrittenOnWithoutEventsIsSentOnceItStaysTheSame)
+    {
+        const Utility::TemporaryDirectory directory{temporaryRoot, true};
+        const auto file = directory.path() / "big.bin";
+        changes_ = std::make_shared<FileTracking::SettledChanges>(
+            strand_,
+            [this](FileTracking::ReportedChange const& change)
+            {
+                sent_.push_back(change);
+            },
+            std::chrono::milliseconds{100}
+        );
+        std::ofstream writer{file, std::ios::binary};
+        writer << "chunk";
+        writer.flush();
+        add(FileAction::Added, file, true);
+
+        // Windows reports nothing while the writer keeps the file open.
+        for (int chunk = 0; chunk < 15; ++chunk)
+        {
+            runFor(std::chrono::milliseconds{20});
+            writer << "chunk";
+            writer.flush();
+        }
+        EXPECT_TRUE(sent_.empty());
+        writer.close();
+        runFor(std::chrono::milliseconds{400});
+
+        ASSERT_EQ(sent_.size(), 1u);
+        EXPECT_EQ(sent_[0].action, FileAction::Added);
     }
 }
