@@ -813,6 +813,48 @@ namespace Test
         EXPECT_TRUE(names.contains("adopted_b.txt"));
     }
 
+    TEST_F(OperationQueueTests, ADirectoryUploadWhoseBackupWasDiscardedIsNotResumed)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(true);
+
+        const auto localPath = localDirectory_.path() / "watched";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "a.txt"} << "a";
+        const auto kept = Ids::generateOperationId();
+        const auto discarded = Ids::generateOperationId();
+        runOnStrand(
+            [&]()
+            {
+                for (auto const& operationId : {kept, discarded})
+                {
+                    const auto added = queue->addUploadOperation(
+                        *sftp,
+                        operationId,
+                        toLocal(localPath),
+                        remote("/home/test/watched"),
+                        /*allowOverwrite=*/true,
+                        /*isBigFile=*/false,
+                        /*insertRefresh=*/true,
+                        /*createMissingDirectories=*/false,
+                        SharedData::OperationMode::PriorityQueued,
+                        /*sourceMayVanish=*/true
+                    );
+                    EXPECT_TRUE(added.has_value()) << added.error().toString();
+                }
+                queue->discardResumeBackup(discarded);
+            }
+        );
+
+        BulkResumeRegistry registry;
+        tearDownInto(registry);
+
+        EXPECT_TRUE(registry.take(kept).has_value());
+        EXPECT_FALSE(registry.take(discarded).has_value());
+    }
+
     TEST_F(OperationQueueTests, AResumedBulkUploadLeavesOutTheFilesItFinished)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

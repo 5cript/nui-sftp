@@ -512,7 +512,8 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     }
 
     /**
-     * @brief Queues an operation with @p add under a new id, @p onCompleted hears when it ended.
+     * @brief Queues an operation with @p add under a new id without a resume backup, @p onCompleted hears when it
+     *        ended.
      */
     template <typename AddT>
     std::expected<void, std::string>
@@ -526,6 +527,8 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 const auto added = add(*session.operationQueue_, channel, operationId);
                 if (!added)
                     return std::unexpected{added.error().toString()};
+                // Like the bulks: the watches end with the connection, a reconnect queues nothing of theirs again.
+                session.operationQueue_->discardResumeBackup(operationId);
                 if (onCompleted)
                     session.operationQueue_->whenCompleted(operationId, std::move(onCompleted));
                 session.resetQueueThrottle();
