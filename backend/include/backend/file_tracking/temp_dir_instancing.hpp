@@ -1,9 +1,9 @@
 #pragma once
 
+#include <backend/file_tracking/file_action.hpp>
 #include <backend/file_tracking/instance_lock.hpp>
 #include <backend/file_tracking/instance_watch.hpp>
 #include <persistence/state/sftp_options.hpp>
-#include <utility/describe.hpp>
 
 #include <boost/asio/strand.hpp>
 #include <boost/asio/any_io_executor.hpp>
@@ -21,21 +21,6 @@ namespace Nui
 
 namespace FileTracking
 {
-    /**
-     * @brief Mirrors the efsw action values; used to produce the "action" field
-     *        in onFileChanged RPC events.
-     */
-    enum class FileAction
-    {
-        Added,
-        Modified,
-        Deleted,
-        Moved,
-    };
-    BOOST_DESCRIBE_ENUM(FileAction, Added, Modified, Deleted, Moved)
-
-    // -------------------------------------------------------------------------
-
     /**
      * @brief Manages one temporary directory instance used for file-change tracking.
      *
