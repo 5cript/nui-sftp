@@ -15,6 +15,7 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/sync/diff.hpp>
@@ -28,6 +29,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -101,6 +103,8 @@ class OperationQueue
      * @brief Queues the upload of the file, link or directory @p localPath to @p remotePath.
      * @param sourceMayVanish A source that is gone by the time the upload starts completes it without a transfer, see
      *        UploadOperation::UploadOperationOptions::sourceMayVanish.
+     * @param comparedDestination What a file or link must find at @p remotePath to replace it, see
+     *        UploadOperation::UploadOperationOptions::comparedDestination. A directory ignores it.
      */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -112,7 +116,8 @@ class OperationQueue
         bool insertRefresh,
         bool createMissingDirectories,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued,
-        bool sourceMayVanish = false
+        bool sourceMayVanish = false,
+        std::optional<SharedData::ComparedState> comparedDestination = std::nullopt
     );
 
     /**
