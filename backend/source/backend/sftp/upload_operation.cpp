@@ -12,9 +12,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <system_error>
 #include <tuple>
+#include <utility>
 
 namespace
 {
@@ -480,6 +482,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
             }
             fileStream_ = openResult.value();
+            openedTemporaryFile_ = true;
 
             auto stream = fileStream_.lock();
             if (!stream)
@@ -524,6 +527,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     }
 
     fileStream_ = openResult.value();
+    openedTemporaryFile_ = true;
 
     return {};
 }
@@ -755,7 +759,34 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
     }
 
     cleanup();
+    const bool openedTemporaryFile = std::exchange(openedTemporaryFile_, false);
+    if (adoptCancelState && partialFileOnCancel_ == PartialFile::Discarded && openedTemporaryFile)
+        removeTemporaryFile();
     return {};
+}
+
+void UploadOperation::partialFileOnCancel(PartialFile partial)
+{
+    partialFileOnCancel_ = partial;
+}
+
+void UploadOperation::removeTemporaryFile()
+{
+    const auto remove = [weak = sftp_, temporary = tempPath_]()
+    {
+        const auto sftp = openSession(weak);
+        if (!sftp)
+            return;
+        if (const auto removed = sftp->removeFileInStrand(temporary); !removed.has_value())
+            Log::warn("UploadOperation: Cannot remove '{}': {}", temporary.value(), removed.error().message);
+    };
+    auto* transferStrand = strand();
+    if (!transferStrand)
+        return;
+    if (transferStrand->withinProcessingThread())
+        return remove();
+    if (transferStrand->pushPromiseTask(remove).wait_for(options_.futureTimeout) != std::future_status::ready)
+        Log::warn("UploadOperation: Removing '{}' timed out.", tempPath_.value());
 }
 
 void UploadOperation::cleanup()
