@@ -2,6 +2,7 @@
 
 #include <backend/file_tracking/file_action.hpp>
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -31,4 +32,9 @@ namespace FileTracking
      */
     std::optional<FileChange>
     filterFileChange(FileChange change, bool isDirectory, std::string const& downloadTempSuffix);
+
+    /**
+     * @brief Whether @p path is @p base or lies below it, compared lexically. An empty @p path is neither.
+     */
+    bool isAtOrBelow(std::filesystem::path const& base, std::filesystem::path const& path);
 }

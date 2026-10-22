@@ -71,4 +71,12 @@ namespace FileTracking
 
         return change;
     }
+
+    bool isAtOrBelow(std::filesystem::path const& base, std::filesystem::path const& path)
+    {
+        if (path.empty())
+            return false;
+        const auto relative = path.lexically_normal().lexically_relative(base.lexically_normal());
+        return !relative.empty() && *relative.begin() != "..";
+    }
 }
