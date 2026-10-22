@@ -30,7 +30,7 @@
 	url = https://github.com/gabime/spdlog.git
 [submodule "dependencies/efsw"]
 	path = dependencies/efsw
-	url = https://github.com/SpartanJ/efsw.git
+	url = https://github.com/5cript/efsw.git
 [submodule "dependencies/promise-cpp"]
 	path = dependencies/promise-cpp
 	url = https://github.com/5cript/promise-cpp.git

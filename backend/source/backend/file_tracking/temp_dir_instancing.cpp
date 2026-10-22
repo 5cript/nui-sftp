@@ -83,7 +83,7 @@ namespace FileTracking
             const std::string& dir,
             const std::string& filename,
             efsw::Action action,
-            std::string oldFilename
+            std::string const& oldFilename
         ) override
         {
             // efsw reports UTF-8 on every platform.
@@ -94,7 +94,7 @@ namespace FileTracking
             std::error_code statusError;
             const bool isDirectory = std::filesystem::is_directory(changedPath, statusError);
             const auto change = filterFileChange(
-                {toFileAction(action), filename, std::move(oldFilename)}, isDirectory, downloadTempSuffix_
+                {toFileAction(action), filename, oldFilename}, isDirectory, downloadTempSuffix_
             );
             if (!change)
                 return;
