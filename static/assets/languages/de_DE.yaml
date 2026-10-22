@@ -522,6 +522,8 @@ fileTracking:
   headerCleanupRunning: "Bereinige…"
   progressSyncing: "Synchronisiere {} von {}"
   progressWaitingForAnswer: "{} warten auf Ihre Antwort"
+  watchEndedCopyGone: "Die Beobachtung von {} wurde beendet, die temporäre Kopie wurde gelöscht oder umbenannt. Die Datei auf dem Server ist unverändert, mit 'Öffnen und Beobachten' können Sie sie erneut bearbeiten."
+  watchesEndedConnectionLost: "Die Verbindung wurde unterbrochen, die Beobachtung von {} wurde beendet. Beobachten Sie sie erneut, sobald die Sitzung wieder verbunden ist."
 settings:
   version: "Version"
   settingsRestartRequiredHeader: "Neustart erforderlich"
