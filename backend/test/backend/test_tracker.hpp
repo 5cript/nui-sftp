@@ -2045,6 +2045,38 @@ namespace Test
         EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
     }
 
+    TEST_F(TrackerTest, TheProgressCountsWhatADirectoryUploadLeftNotChangesThatCameToNothing)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto staging = root_ / "staging";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 3u, .waitingForAnswer = 0u}));
+        std::filesystem::create_directory(staging);
+        write(staging / "one.txt", "one");
+
+        std::filesystem::rename(staging, project / "moved-in");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/moved-in") == 1u;
+            }
+        ));
+        // An editor's temporary files come and go while the directory uploads.
+        for (auto const* name : {"a.tmp", "b.tmp", "c.tmp"})
+        {
+            write(project / "moved-in" / name, "temporary");
+            std::filesystem::remove(project / "moved-in" / name);
+        }
+        runFor(std::chrono::milliseconds{1000});
+        completeUploads();
+        runFor(std::chrono::milliseconds{500});
+        completeEverything();
+
+        EXPECT_TRUE(runUntilProgress({.pending = 0u, .done = 2u, .waitingForAnswer = 0u}));
+        EXPECT_TRUE(remote_->of("remove").empty());
+    }
+
     TEST_F(TrackerTest, TheProgressShowsAtOnceThatNothingIsOnItsWayAnyMore)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
