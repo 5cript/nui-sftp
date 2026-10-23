@@ -6,6 +6,7 @@
 #include <ssh/sftp_session.hpp>
 
 #include <log/log.hpp>
+#include <utility/checked_symlink_status.hpp>
 #include <utility/error_message.hpp>
 #include <utility/permissions.hpp>
 
@@ -572,9 +573,8 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& s
 
 bool UploadOperation::sourceIsGone() const
 {
-    std::error_code statusError{};
-    return std::filesystem::symlink_status(localNativePath_, statusError).type() ==
-        std::filesystem::file_type::not_found;
+    const auto status = Utility::checkedSymlinkStatus(localNativePath_);
+    return status && !status->has_value();
 }
 
 std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
