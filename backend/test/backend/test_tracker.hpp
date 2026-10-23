@@ -1148,6 +1148,87 @@ namespace Test
             }
         ));
         EXPECT_TRUE(remote_->of("remove").empty());
+        runFor(FileTracking::copyReturnTime);
+        EXPECT_TRUE(view_->ended.empty());
+        EXPECT_EQ(view_->entries.size(), 1u);
+    }
+
+    TEST_F(TrackerTest, ADownloadedCopyMovedAsideAndWrittenAnewKeepsItsWatch)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto aside = opened->localPath.native().parent_path() / "notes.backup";
+
+        std::filesystem::rename(opened->localPath.native(), aside);
+        runFor(std::chrono::milliseconds{500});
+        write(opened->localPath.native(), "saved anew");
+        std::filesystem::remove(aside);
+
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 1u;
+            }
+        ));
+        runFor(FileTracking::copyReturnTime);
+        EXPECT_TRUE(view_->ended.empty());
+        EXPECT_EQ(view_->entries.size(), 1u);
+        EXPECT_TRUE(remote_->of("rename").empty());
+    }
+
+    TEST_F(TrackerTest, ADownloadedCopyDeletedForGoodEndsItsWatchAndShowsWhy)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
+
+        std::filesystem::remove(opened->localPath.native());
+        runFor(std::chrono::milliseconds{1000});
+        EXPECT_EQ(view_->entries.size(), 1u);
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !view_->ended.empty();
+            },
+            FileTracking::copyReturnTime + std::chrono::seconds{2}
+        ));
+        EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::CopyGone);
+        ASSERT_EQ(view_->ended.front().entries.size(), 1u);
+        EXPECT_EQ(view_->ended.front().entries.front().watchId, watchId);
+        EXPECT_EQ(view_->ended.front().entries.front().name, "notes.txt");
+        EXPECT_TRUE(view_->entries.empty());
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_EQ(instances_->findInstance(opened->instanceId.value()), nullptr);
+        // Nothing was left in the instance, it went with its directory.
+        EXPECT_FALSE(std::filesystem::exists(opened->localPath.native().parent_path()));
+        EXPECT_EQ(instances_->countOrphaned(), 0u);
+        EXPECT_TRUE(open("/srv/notes.txt", /*watch=*/true).has_value());
+    }
+
+    TEST_F(TrackerTest, ADownloadedCopyRenamedAwayEndsItsWatchAndStaysForTheCleanup)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto renamed = opened->localPath.native().parent_path() / "renamed.txt";
+
+        std::filesystem::rename(opened->localPath.native(), renamed);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !view_->ended.empty();
+            },
+            FileTracking::copyReturnTime + std::chrono::seconds{2}
+        ));
+        write(renamed, "edited after the rename");
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::CopyGone);
+        EXPECT_TRUE(view_->entries.empty());
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 0u);
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_TRUE(std::filesystem::exists(renamed));
+        EXPECT_EQ(instances_->countOrphaned(), 1u);
     }
 
     TEST_F(TrackerTest, StoppingADownloadedCopyEndsItsInstance)
