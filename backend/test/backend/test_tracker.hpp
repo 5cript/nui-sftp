@@ -1967,6 +1967,103 @@ namespace Test
         EXPECT_TRUE(remote_->server.contains("/srv/project/new/sub"));
     }
 
+    TEST_F(TrackerTest, TheProgressCountsTheEntriesOfADirectoryMovedIn)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 3u, .waitingForAnswer = 0u}));
+        const auto staging = root_ / "staging";
+        std::filesystem::create_directories(staging / "sub");
+        write(staging / "one.txt", "one");
+        write(staging / "sub" / "two.txt", "two");
+
+        std::filesystem::rename(staging, project / "moved");
+
+        ASSERT_TRUE(runUntilProgress({.pending = 4u, .done = 0u, .waitingForAnswer = 0u}));
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
+    }
+
+    TEST_F(TrackerTest, TheProgressCountsANewDirectoryAndTheLateReportsOfItsContentOnce)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+
+        std::filesystem::create_directory(project / "new");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/new") == 1u;
+            }
+        ));
+        write(project / "new" / "one.txt", "one");
+        write(project / "new" / "two.txt", "two");
+        write(project / "new" / "three.txt", "three");
+        runFor(std::chrono::milliseconds{1000});
+        completeUploads();
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return lastProgress().pending == 0u;
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        completeEverything();
+
+        EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
+    }
+
+    TEST_F(TrackerTest, TheProgressCountsWhatADirectoryUploadLeftNotChangesThatCameToNothing)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto staging = root_ / "staging";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 3u, .waitingForAnswer = 0u}));
+        std::filesystem::create_directory(staging);
+        write(staging / "one.txt", "one");
+
+        std::filesystem::rename(staging, project / "moved-in");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/moved-in") == 1u;
+            }
+        ));
+        // An editor's temporary files come and go while the directory uploads.
+        for (auto const* name : {"a.tmp", "b.tmp", "c.tmp"})
+        {
+            write(project / "moved-in" / name, "temporary");
+            std::filesystem::remove(project / "moved-in" / name);
+        }
+        runFor(std::chrono::milliseconds{1000});
+        completeUploads();
+        runFor(std::chrono::milliseconds{500});
+        completeEverything();
+
+        EXPECT_TRUE(runUntilProgress({.pending = 0u, .done = 2u, .waitingForAnswer = 0u}));
+        EXPECT_TRUE(remote_->of("remove").empty());
+    }
+
+    TEST_F(TrackerTest, TheProgressShowsAtOnceThatNothingIsOnItsWayAnyMore)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        write(opened->localPath.native(), "changed locally");
+        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
+
+        completeUploads();
+        ioc_.restart();
+        ioc_.run_for(std::chrono::milliseconds{50});
+
+        EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
+        EXPECT_FALSE(onlyEntry().uploading);
+    }
+
 #ifdef _WIN32
     TEST_F(TrackerTest, EntriesPastMaxPathAreNeitherUploadedNorDeletedOnTheServer)
     {

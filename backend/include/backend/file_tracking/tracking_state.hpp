@@ -576,6 +576,8 @@ namespace FileTracking
              *        moveBelow), nothing when it is where the upload started.
              */
             std::optional<Paths::LocalPath> serverCopyAt{};
+            /** @brief The changes it counted as, see changeCount(), without the one more of changedAgain. */
+            std::size_t counted{1};
         };
 
         /**
@@ -617,9 +619,21 @@ namespace FileTracking
         {
             if (const auto found = pending_.find(path); found != pending_.end())
             {
+                // The changes below go along with it, they still count.
+                found->second.carried = countedOf(found->second);
                 found->second.changedAgain = false;
                 found->second.changedBelow.clear();
             }
+        }
+
+        /**
+         * @brief The upload of @p path carries @p entries entries, the path and what lies below it: it counts as at
+         *        least that many changes, see changeCount().
+         */
+        void carries(Paths::LocalPath const& path, std::size_t entries)
+        {
+            if (const auto found = pending_.find(path); found != pending_.end())
+                found->second.carried = std::max(found->second.carried, entries);
         }
 
         /**
@@ -720,6 +734,7 @@ namespace FileTracking
             const auto found = pending_.find(path);
             if (found == pending_.end())
                 return {};
+            const auto counted = countedOf(found->second);
             auto finished = Finished{
                 .changedAgain = found->second.changedAgain,
                 .removeRemote = found->second.removeRemote,
@@ -727,6 +742,7 @@ namespace FileTracking
                 .changedBelow = std::move(found->second.changedBelow),
                 .movedTo = std::move(found->second.movedTo),
                 .serverCopyAt = std::move(found->second.serverCopyAt),
+                .counted = counted,
             };
             pending_.erase(found);
             return finished;
@@ -738,14 +754,15 @@ namespace FileTracking
         }
 
         /**
-         * @brief The changes on their way: each pending upload, the one more it takes when its path changed again and
-         *        the changes waiting below a directory.
+         * @brief The changes on their way: each pending upload with the entries it carries or the changes waiting
+         *        below its directory, whichever are more since those mostly are the same, and the one more a file
+         *        takes when it changed again. What a directory that changed again lacks counts once it goes.
          */
         std::size_t changeCount() const
         {
             std::size_t count = 0;
             for (auto const& pending : std::views::values(pending_))
-                count += 1 + (pending.changedAgain ? 1 : 0) + pending.changedBelow.size();
+                count += countedOf(pending) + (pending.changedAgain && !pending.isDirectory ? 1 : 0);
             return count;
         }
 
@@ -758,7 +775,14 @@ namespace FileTracking
             std::vector<LocalChange> changedBelow{};
             std::optional<Paths::LocalPath> movedTo{};
             std::optional<Paths::LocalPath> serverCopyAt{};
+            /** @brief The entries the upload carries, see carries(). */
+            std::size_t carried{1};
         };
+
+        static std::size_t countedOf(Pending const& pending)
+        {
+            return std::max(pending.carried, 1 + pending.changedBelow.size());
+        }
 
         static Paths::LocalPath const& currentPathOf(Paths::LocalPath const& path, Pending const& pending)
         {

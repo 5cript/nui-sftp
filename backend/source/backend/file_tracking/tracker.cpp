@@ -382,6 +382,8 @@ namespace FileTracking
         SharedData::TrackerProgress shownProgress{};
         boost::asio::steady_timer progressTimer;
         bool progressScheduled{false};
+        /** @brief The view hears of the progress once the current handler ended, see progressChanged(). */
+        bool idleProgressPosted{false};
         ServerOperationOrder serverOrder{};
         /** @brief Start the operations that wait in serverOrder, by ticket. */
         std::map<ServerOperationOrder::Ticket, std::function<void(ServerOperationOrder::Ticket)>> waitingOperations{};
@@ -504,10 +506,45 @@ namespace FileTracking
         }
 
         /**
-         * @brief The view hears of the progress once the progress interval passed.
+         * @brief Whether no change is on its way any more, nor waits for an answer.
+         */
+        bool nothingOnItsWay() const
+        {
+            return !openQuestion && waitingQuestions.empty() &&
+                std::ranges::all_of(
+                    std::views::values(entries),
+                    [](Entry const& entry)
+                    {
+                        return entry.pendingUploads.empty() && entry.remoteChangesOnTheirWay == 0;
+                    }
+                );
+        }
+
+        /**
+         * @brief The view hears of the progress once the progress interval passed, or right after the change that
+         *        left nothing on its way, together with the rows that stopped uploading.
          */
         void progressChanged()
         {
+            if (nothingOnItsWay() && !idleProgressPosted)
+            {
+                idleProgressPosted = true;
+                // Posted, so the changes the end of an upload starts are on their way by then.
+                boost::asio::post(
+                    strand,
+                    [weak = weak_from_this()]()
+                    {
+                        const auto self = weak.lock();
+                        if (!self)
+                            return;
+                        self->idleProgressPosted = false;
+                        if (!self->nothingOnItsWay())
+                            return;
+                        self->progressTimer.cancel();
+                        self->showProgress();
+                    }
+                );
+            }
             if (std::exchange(progressScheduled, true))
                 return;
             progressTimer.expires_after(progressInterval);
@@ -534,9 +571,12 @@ namespace FileTracking
                 changesDone = 0;
         }
 
-        void changeEnded()
+        /**
+         * @param count The changes it counted as, see PendingUploads::changeCount().
+         */
+        void changeEnded(std::size_t count = 1)
         {
-            ++changesDone;
+            changesDone += count;
             progressChanged();
         }
 
@@ -922,6 +962,8 @@ namespace FileTracking
             progressTimer.cancel();
             progressScheduled = false;
             changesDone = 0;
+            // A frontend that comes next starts with nothing on its way, the idle progress has nothing to tell it.
+            shownProgress = {};
         }
 
         void connectionLost()
@@ -930,12 +972,15 @@ namespace FileTracking
             for (auto const& entry : std::views::values(entries))
                 ended.entries.push_back(shownEntryOf(entry));
             Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
+            // stopAll() forgets the progress shown, this view still shows it.
+            const bool progressShown = shownProgress != SharedData::TrackerProgress{};
             stopAll();
             for (auto const& shown : ended.entries)
                 view->removeEntry(shown.watchId);
             if (!ended.entries.empty())
                 view->showEnded(ended);
-            showProgress();
+            if (progressShown)
+                view->showProgress(shownProgress);
             view->showOrphanedCount(instances->countOrphaned());
         }
 
@@ -943,9 +988,11 @@ namespace FileTracking
          * @brief Records what the server has after a download or an upload: the local states below @p below, or of
          *        the whole item without it. Transfers carry the modification time along, a symbolic link is asked
          *        for on the server, which may have skipped it.
+         * @return How many entries it recorded.
          */
-        void rememberStates(Entry& entry, std::optional<Paths::LocalPath> const& below)
+        std::size_t rememberStates(Entry& entry, std::optional<Paths::LocalPath> const& below)
         {
+            std::size_t recorded = 0;
             const auto states = [&]()
             {
                 if (const auto* copy = entry.downloadedCopy())
@@ -965,7 +1012,9 @@ namespace FileTracking
                     rememberLink(entry, *path);
                 else
                     entry.serverContent.rememberFile(*path, ServerState{.mtime = state.mtime, .size = state.size});
+                ++recorded;
             }
+            return recorded;
         }
 
         void rememberLink(Entry& entry, Paths::LocalPath const& path)
@@ -1545,13 +1594,13 @@ namespace FileTracking
         /**
          * @brief The path of @p upload is gone by the time it would go: there is nothing to ask about or to upload,
          *        and the deletion is mirrored, which the watch may not report (macOS can report a removed directory
-         *        as modified only).
+         *        as modified only). The change counts as nothing done, the deletion counts on its own.
          */
         void onGoneLocally(Entry const& entry, Upload const& upload)
         {
             Log::debug("FileTracking: '{}' is gone, not uploading it.", upload.change.path.toUtf8());
             const auto watchId = entry.watchId;
-            finishUpload(upload, UploadOutcome::NotUploaded);
+            finishUpload(upload, UploadOutcome::NotUploaded, /*carried=*/0u);
             if (auto* stillWatched = find(watchId))
                 onDeleted(*stillWatched, upload.change.path);
         }
@@ -1660,6 +1709,8 @@ namespace FileTracking
                 return finishUpload(upload, UploadOutcome::NotUploaded);
             // The upload reads the file when it runs, the changes until now are in it.
             entry->pendingUploads.changesHandled(upload.change.path);
+            if (upload.change.isDirectory)
+                entry->pendingUploads.carries(upload.change.path, entryCountOf(upload.change.path.native()));
             const auto queued = remote->upload(
                 UploadRequest{
                     .source = upload.change.path,
@@ -1701,9 +1752,10 @@ namespace FileTracking
                 return finishUpload(upload, UploadOutcome::NotUploaded);
             // Uploads carry the local modification time, so the local states are what the server has now. A link
             // to a directory reports itself as one, the walk of its states would follow it.
+            std::optional<std::size_t> carried{};
             if (upload.change.isDirectory && !isSymlink(upload.change.path))
             {
-                rememberStates(*entry, upload.change.path);
+                carried = rememberStates(*entry, upload.change.path);
                 rememberSentButGone(*entry, upload, ended.sentFiles);
                 removeMovedAway(*entry, upload.change.path);
             }
@@ -1712,7 +1764,7 @@ namespace FileTracking
             for (auto const& sent : ended.sentFiles)
                 if (sent.state && sent.path.isWithin(upload.change.path))
                     entry->serverContent.rememberSent(sent.path, *sent.state);
-            finishUpload(upload, UploadOutcome::Uploaded);
+            finishUpload(upload, UploadOutcome::Uploaded, carried);
         }
 
         /**
@@ -1758,11 +1810,15 @@ namespace FileTracking
         /**
          * @brief The upload of @p upload is no longer on its way, see followUpUpload. The operations waiting for it
          *        in the server order start then.
+         * @param carried The entries it left on the server, it counts as done that many: what a completed directory
+         *        upload recorded, the changes below it that arrived meanwhile count when they go. Unset, it counts as
+         *        the changes it stood for.
          */
-        void finishUpload(Upload const& upload, UploadOutcome outcome)
+        void
+        finishUpload(Upload const& upload, UploadOutcome outcome, std::optional<std::size_t> carried = std::nullopt)
         {
             if (auto* entry = find(upload.watchId))
-                followUpUpload(*entry, upload, outcome);
+                followUpUpload(*entry, upload, outcome, carried);
             leaveOrder(upload);
         }
 
@@ -1770,11 +1826,12 @@ namespace FileTracking
          * @brief What changed while @p upload was on its way goes now: the path itself once more, the changes below an
          *        uploaded directory, or the removal of a path that went away.
          */
-        void followUpUpload(Entry& entry, Upload const& upload, UploadOutcome outcome)
+        void
+        followUpUpload(Entry& entry, Upload const& upload, UploadOutcome outcome, std::optional<std::size_t> carried)
         {
             auto finished = entry.pendingUploads.finish(upload.change.path);
             showUploading(entry);
-            changeEnded();
+            changeEnded(carried.value_or(finished.counted));
             // A directory above that moved took the server copy along.
             const auto serverPath = finished.serverCopyAt.value_or(upload.change.path);
             const auto serverDestination = finished.serverCopyAt
