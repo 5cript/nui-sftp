@@ -25,6 +25,13 @@ namespace FileTracking
     std::optional<DiskIdentity> diskIdentityOf(std::filesystem::path const& path);
 
     /**
+     * @brief Whether the file @p identity names was deleted rather than moved elsewhere on its volume, to the trash
+     *        for one. Nothing when that cannot be told: only macOS looks a file up by its identity, on APFS and HFS+.
+     * @param directory A directory on the same volume that is there, the one the file was in.
+     */
+    std::optional<bool> isDeletedFromItsVolume(DiskIdentity const& identity, std::filesystem::path const& directory);
+
+    /**
      * @brief Where a path lies on disk: the identities of the path and of the directories above it that exist. Taken
      *        once, so comparing places costs no further look at the disk.
      */
