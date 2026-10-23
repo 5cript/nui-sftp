@@ -590,4 +590,21 @@ namespace Test::TrackingState
 
         EXPECT_EQ(pending.changeCount(), 5u);
     }
+
+    TEST(TrackingStateTests, AnUploadIsStoppedAsTheKindItWasSentAs)
+    {
+        PendingUploads pending;
+        ASSERT_TRUE(pending.start({.path = local("/i/dir"), .isDirectory = true}));
+        EXPECT_FALSE(pending.sentFileTo(local("/i/dir")).has_value());
+        pending.sent(local("/i/dir"), remote("/r/dir"), /*isDirectory=*/true);
+        // A late report of the removed directory can no longer tell it was one.
+        EXPECT_FALSE(pending.start({.path = local("/i/dir"), .isDirectory = false}));
+        EXPECT_FALSE(pending.sentFileTo(local("/i/dir")).has_value());
+
+        ASSERT_TRUE(pending.start({.path = local("/i/file.txt")}));
+        EXPECT_FALSE(pending.sentFileTo(local("/i/file.txt")).has_value());
+        pending.sent(local("/i/file.txt"), remote("/r/file.txt"), /*isDirectory=*/false);
+        EXPECT_EQ(pending.sentFileTo(local("/i/file.txt")), remote("/r/file.txt"));
+        EXPECT_EQ(pending.finish(local("/i/file.txt")).sentTo, remote("/r/file.txt"));
+    }
 }
