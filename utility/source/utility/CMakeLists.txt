@@ -21,6 +21,7 @@ else()
         utility
         PRIVATE
         node/node.cpp
+        checked_symlink_status.cpp
         error_message.cpp
         permissions.cpp
         rename.cpp
