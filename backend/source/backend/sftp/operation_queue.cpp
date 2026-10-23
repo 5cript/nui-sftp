@@ -396,6 +396,53 @@ void OperationQueue::cancel(Ids::OperationId id)
     );
 }
 
+void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
+{
+    within_strand_do(
+        [weak = weak_from_this(), id = std::move(id), partial]()
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+
+            const auto cancelled = self->takeOperation(id);
+            if (!cancelled)
+                return;
+            if (cancelled->type() == SharedData::OperationType::Upload)
+                static_cast<UploadOperation&>(*cancelled).partialFileOnCancel(partial);
+            self->completeCancelled(id, *cancelled);
+        }
+    );
+}
+
+void OperationQueue::discardPartialUpload(
+    SecureShell::SftpSession& sftp,
+    Paths::RemotePath const& remotePath,
+    std::function<void()> onDone
+)
+{
+    const auto suffix = Persistence::effectiveTempFileSuffix(
+        sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
+    );
+    const auto partial = remotePath.withFilenameSuffix(suffix);
+    if (!partial)
+    {
+        boost::asio::post(*strand_, std::move(onDone));
+        return;
+    }
+    sftp.perform(
+        [weak = sftp.weak_from_this(), partial = *partial, strand = strand_, onDone = std::move(onDone)]()
+        {
+            if (const auto session = weak.lock())
+            {
+                if (const auto removed = session->removeFileInStrand(partial); removed.has_value())
+                    Log::info("OperationQueue: removed the partial upload '{}'.", partial.value());
+            }
+            boost::asio::post(*strand, onDone);
+        }
+    );
+}
+
 std::unique_ptr<Operation> OperationQueue::takeOperation(Ids::OperationId const& id)
 {
     for (auto* queue : {&operations_, &priorityOperations_})
@@ -1531,7 +1578,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     SharedData::OperationMode mode,
     bool sourceMayVanish,
     std::optional<SharedData::ComparedState> comparedDestination,
-    UploadOperation::OnSent onSent
+    UploadOperation::OnSent onSent,
+    std::optional<Paths::RemotePath> adoptPartialOf
 )
 {
     // Assumed in strand
@@ -1574,6 +1622,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
         opts.onSent = std::move(onSent);
+        opts.adoptPartialOf = std::move(adoptPartialOf);
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )

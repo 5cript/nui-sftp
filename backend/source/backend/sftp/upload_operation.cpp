@@ -12,9 +12,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <system_error>
 #include <tuple>
+#include <utility>
 
 namespace
 {
@@ -448,6 +450,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         }
     }
 
+    if (options_.adoptPartialOf)
+        takeOverPartialFileInStrand(sftp);
     const auto tempResult = sftp.lstatInStrand(tempPath_);
 
     // Permissions of what is uploaded: the target of a followed symlink, not the link.
@@ -480,6 +484,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
             }
             fileStream_ = openResult.value();
+            openedTemporaryFile_ = true;
 
             auto stream = fileStream_.lock();
             if (!stream)
@@ -524,8 +529,23 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     }
 
     fileStream_ = openResult.value();
+    openedTemporaryFile_ = true;
 
     return {};
+}
+
+void UploadOperation::takeOverPartialFileInStrand(SecureShell::SftpSession& sftp)
+{
+    const auto partial = options_.adoptPartialOf->withFilenameSuffix(options_.tempFileSuffix);
+    if (!partial || *partial == tempPath_ || sftp.lstatInStrand(tempPath_).has_value())
+        return;
+    if (options_.createMissingDirectories)
+    {
+        if (const auto created = ensureRemoteDirectoryExistsInStrand(sftp, *tempPath_.parent()); !created)
+            return;
+    }
+    if (const auto renamed = sftp.renameNoReplaceInStrand(*partial, tempPath_); renamed.has_value())
+        Log::info("UploadOperation: continuing '{}' as '{}'.", partial->value(), tempPath_.value());
 }
 
 bool UploadOperation::tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize)
@@ -748,14 +768,64 @@ std::expected<void, UploadOperation::Error> UploadOperation::cancel(bool adoptCa
     {
         Log::info(
             "UploadOperation: Upload of '{}' to '{}' canceled.",
-            options_.remotePath.value(),
-            options_.localPath.toUtf8()
+            options_.localPath.toUtf8(),
+            options_.remotePath.value()
         );
-        state_ = OperationState::Canceled;
     }
 
-    cleanup();
+    // A transfer reads the local file on the processing thread, closing it from elsewhere cuts a read short.
+    const auto sftp = openSession(sftp_);
+    if (sftp && !sftp->strand()->withinProcessingThread())
+    {
+        // Only wait, never get(): a finalized strand hands back an exceptional future.
+        auto cancelled = sftp->performPromise(
+            [this, adoptCancelState]()
+            {
+                cancelInStrand(adoptCancelState);
+                return true;
+            }
+        );
+        if (cancelled.wait_for(options_.futureTimeout) != std::future_status::ready)
+            Log::warn("UploadOperation: Cancelling the upload to '{}' timed out.", options_.remotePath.value());
+    }
+    else
+    {
+        cancelInStrand(adoptCancelState);
+    }
     return {};
+}
+
+void UploadOperation::cancelInStrand(bool adoptCancelState)
+{
+    if (adoptCancelState)
+        state_ = OperationState::Canceled;
+    cleanup();
+    const bool openedTemporaryFile = std::exchange(openedTemporaryFile_, false);
+    if (adoptCancelState && partialFileOnCancel_ == PartialFile::Discarded && openedTemporaryFile)
+        removeTemporaryFile();
+}
+
+void UploadOperation::partialFileOnCancel(PartialFile partial)
+{
+    partialFileOnCancel_ = partial;
+}
+
+void UploadOperation::removeTemporaryFile()
+{
+    const auto sftp = openSession(sftp_);
+    if (!sftp)
+        return;
+    // Queued behind the close of the file on the server, which cleanup() queued.
+    sftp->perform(
+        [weak = sftp_, temporary = tempPath_]()
+        {
+            const auto session = openSession(weak);
+            if (!session)
+                return;
+            if (const auto removed = session->removeFileInStrand(temporary); !removed.has_value())
+                Log::warn("UploadOperation: Cannot remove '{}': {}", temporary.value(), removed.error().message);
+        }
+    );
 }
 
 void UploadOperation::cleanup()
@@ -803,7 +873,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
         return result;
 
     Log::debug(
-        "UploadOperation: Finalized upload of '{}' to '{}'.", options_.remotePath.value(), options_.localPath.toUtf8()
+        "UploadOperation: Finalized upload of '{}' to '{}'.", options_.localPath.toUtf8(), options_.remotePath.value()
     );
     return {};
 }
