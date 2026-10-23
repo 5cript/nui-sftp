@@ -879,6 +879,9 @@ namespace Test
     TEST_F(TrackerTest, AFileThatAppearedOnTheServerBeforeItsFirstUploadIsAskedAbout)
     {
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        // FSEvents also delivers the creation of src from just before the watch. Coming after new.cpp, it would
+        // upload what the server lacks below src without asking.
+        runFor(std::chrono::milliseconds{1000});
         completeUploads();
         ASSERT_TRUE(runUntil(
             [this]()
