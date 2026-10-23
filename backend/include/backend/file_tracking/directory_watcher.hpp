@@ -26,13 +26,14 @@ namespace FileTracking
          *        watched directory it is spelled like that, see DirectoryWatcher::add.
          */
         std::filesystem::path directory;
-        /** @brief UTF-8, spelled like efsw reports it, see eventSpelling. */
+        /** @brief UTF-8, spelled like efsw reports it, see eventSpelling. Empty for Missed. */
         std::string filename;
         /** @brief The previous name of a move, UTF-8 and spelled like filename, empty otherwise. */
         std::string oldFilename;
         /** @brief Whether path() was a directory when the watch reported the change. */
         bool isDirectory;
 
+        /** @brief The changed path, the directory itself for Missed. */
         std::filesystem::path path() const;
 
         /** @brief Where a move came from, empty for anything else. */
@@ -50,7 +51,7 @@ namespace FileTracking
 
         /**
          * @brief Decides on efsw's thread whether an event reaches the strand. Called for every event of every
-         *        directory watched with it, it must be fast and thread safe.
+         *        directory watched with it, it must be fast and thread safe. Missed events pass untested.
          */
         using EventFilter = std::function<bool(DirectoryEvent const& event)>;
 
