@@ -141,6 +141,40 @@ namespace FileTracking
             return false;
 #endif
         }
+
+        /**
+         * @brief Hands @p event, in @p directory, to the handler on @p strand once it was looked at what the event
+         *        names.
+         */
+        void handOn(
+            boost::asio::strand<boost::asio::any_io_executor> const& strand,
+            std::weak_ptr<DirectoryWatcher::ChangeHandler> const& weakHandler,
+            DirectoryEvent const& event,
+            std::filesystem::path const& directory
+        )
+        {
+            if (weakHandler.expired())
+                return;
+            std::error_code statusError;
+            const auto status = std::filesystem::status(directory / Paths::nativeFromUtf8(event.filename), statusError);
+            if (modifiedWhatIsGone(event.action, status))
+                return;
+            boost::asio::post(
+                strand,
+                [weakHandler,
+                 change = DirectoryChange{
+                     .action = event.action,
+                     .directory = directory,
+                     .filename = event.filename,
+                     .oldFilename = event.oldFilename,
+                     .isDirectory = std::filesystem::is_directory(status),
+                 }]()
+                {
+                    if (const auto onChange = weakHandler.lock())
+                        (*onChange)(change);
+                }
+            );
+        }
     }
 
     std::filesystem::path DirectoryChange::path() const
@@ -158,6 +192,11 @@ namespace FileTracking
     struct DirectoryWatcher::Implementation
     {
         std::shared_ptr<DirectoryWatchService> service;
+        /**
+         * @brief Looks at what the events name, in their order. Not on efsw's thread, which Windows outpaces when a
+         *        watched directory is deleted, and not on the strand, which serves the RPCs too.
+         */
+        boost::asio::strand<boost::asio::any_io_executor> worker;
         boost::asio::strand<boost::asio::any_io_executor> strand;
         std::shared_ptr<ChangeHandler> onChange;
     };
@@ -165,6 +204,7 @@ namespace FileTracking
     DirectoryWatcher::DirectoryWatcher(boost::asio::strand<boost::asio::any_io_executor> strand, ChangeHandler onChange)
         : impl_{std::make_unique<Implementation>(Implementation{
               .service = DirectoryWatchService::shared(),
+              .worker = boost::asio::make_strand(strand.get_inner_executor()),
               .strand = std::move(strand),
               .onChange = std::make_shared<ChangeHandler>(std::move(onChange)),
           })}
@@ -180,7 +220,8 @@ namespace FileTracking
         return impl_->service->subscribe(
             directory,
             recursive,
-            [strand = impl_->strand,
+            [worker = impl_->worker,
+             strand = impl_->strand,
              weakHandler = std::weak_ptr<ChangeHandler>{impl_->onChange},
              replays = ReplayFilter{directory},
              filter = std::move(filter),
@@ -190,27 +231,11 @@ namespace FileTracking
                 // no entry to judge by.
                 if (event.action != FileAction::Missed && (replays.isReplay(event) || (filter && !filter(event))))
                     return;
-                // The stat runs on efsw's thread, the strand also serves the RPCs.
-                const auto changedDirectory = spelling.of(event.directory);
-                std::error_code statusError;
-                const auto status =
-                    std::filesystem::status(changedDirectory / Paths::nativeFromUtf8(event.filename), statusError);
-                if (modifiedWhatIsGone(event.action, status))
-                    return;
-                const bool isDirectory = std::filesystem::is_directory(status);
                 boost::asio::post(
-                    strand,
-                    [weakHandler,
-                     change = DirectoryChange{
-                         .action = event.action,
-                         .directory = changedDirectory,
-                         .filename = event.filename,
-                         .oldFilename = event.oldFilename,
-                         .isDirectory = isDirectory,
-                     }]()
+                    worker,
+                    [strand, weakHandler, event, changedDirectory = spelling.of(event.directory)]()
                     {
-                        if (const auto onChange = weakHandler.lock())
-                            (*onChange)(change);
+                        handOn(strand, weakHandler, event, changedDirectory);
                     }
                 );
             }
