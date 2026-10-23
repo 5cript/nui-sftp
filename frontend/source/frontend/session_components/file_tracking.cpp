@@ -1,6 +1,8 @@
 #include <frontend/session_components/file_tracking.hpp>
 #include <frontend/session_components/row_order.hpp>
+#include <frontend/notifications.hpp>
 
+#include <shared_data/file_tracking/ended_watches.hpp>
 #include <shared_data/file_tracking/server_changed_question.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
 #include <shared_data/file_tracking/tracker_progress.hpp>
@@ -21,11 +23,13 @@
 #include <nui/rpc.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -202,6 +206,15 @@ struct FileTrackingPanel::Implementation
             )
         ));
         listeners.push_back(Nui::RpcClient::autoRegisterFunction(
+            rpcName("onEntriesEnded"),
+            lifetime.guarded(
+                [](SharedData::EndedWatches const& ended)
+                {
+                    notifyEnded(ended);
+                }
+            )
+        ));
+        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
             rpcName("onQuestion"),
             lifetime.guarded(
                 [this](SharedData::ServerChangedQuestion const& question)
@@ -249,6 +262,32 @@ struct FileTrackingPanel::Implementation
         if (const auto row = rowOrder.remove(watchId))
             table->remove(*row);
         entryCount = rows.size();
+    }
+
+    /**
+     * @brief Tells the user why watches ended that they did not stop, their rows are gone already.
+     */
+    static void notifyEnded(SharedData::EndedWatches const& ended)
+    {
+        const auto text = [&ended]()
+        {
+            switch (ended.reason)
+            {
+                case SharedData::WatchEndReason::CopyGone:
+                    return language->get("fileTracking", "watchEndedCopyGone");
+                case SharedData::WatchEndReason::ConnectionLost:
+                    break;
+            }
+            return language->get("fileTracking", "watchesEndedConnectionLost");
+        }();
+        const auto names = ended.entries |
+            std::views::transform(
+                [](SharedData::TrackedEntry const& entry)
+                {
+                    return fmt::format("'{}'", entry.name);
+                }
+            );
+        Notifications::warning(fmt::format(fmt::runtime(text), fmt::join(names, ", ")));
     }
 
     void ask(SharedData::ServerChangedQuestion const& question)
