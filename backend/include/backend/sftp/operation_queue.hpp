@@ -103,7 +103,8 @@ class OperationQueue
     /**
      * @brief Queues the upload of the file, link or directory @p localPath to @p remotePath.
      * @param sourceMayVanish A source that is gone by the time the upload starts completes it without a transfer, see
-     *        UploadOperation::UploadOperationOptions::sourceMayVanish.
+     *        UploadOperation::UploadOperationOptions::sourceMayVanish. One that is gone already is refused as
+     *        FileNotFound, which is no error worth logging.
      * @param comparedDestination What a file or link must find at @p remotePath to replace it, see
      *        UploadOperation::UploadOperationOptions::comparedDestination. A directory ignores it.
      */
@@ -215,12 +216,14 @@ class OperationQueue
 
     /**
      * @brief Upload analogue of @ref addBulkDownloadOperation.
+     * @param sourceMayVanish Each entry may be gone by the time it is uploaded, see addUploadOperation.
      */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
         SharedData::BulkUploadRequest request,
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
-        Ids::OperationId const& bulkCardId
+        Ids::OperationId const& bulkCardId,
+        bool sourceMayVanish = false
     );
 
     /**

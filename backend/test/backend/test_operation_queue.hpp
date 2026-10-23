@@ -4,6 +4,7 @@
 #include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/operation_queue.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>
+#include "error_log_capture.hpp"
 #include "nui_env.hpp"
 #include "real_server_tests.hpp"
 
@@ -16,6 +17,7 @@
 #include <boost/asio/strand.hpp>
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <fstream>
 #include <future>
 #include <map>
@@ -431,6 +433,94 @@ namespace Test
         const auto names = remoteNames(*sftp, "/home/test");
         EXPECT_FALSE(names.contains("vanishing.txt"));
         EXPECT_FALSE(names.contains("vanishingDirectory"));
+    }
+
+    TEST_F(OperationQueueTests, AnUploadWhoseSourceMayVanishAndIsGoneAlreadyIsRefusedWithoutAnError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto add = [&](std::string const& name, bool mayVanish)
+        {
+            return runOnStrand(
+                [&]()
+                {
+                    return queue->addUploadOperation(
+                        *sftp,
+                        Ids::generateOperationId(),
+                        toLocal(localDirectory_.path() / name),
+                        remote("/home/test/" + name),
+                        true,
+                        false,
+                        false,
+                        false,
+                        SharedData::OperationMode::Queued,
+                        mayVanish
+                    );
+                }
+            );
+        };
+        const auto vanished = add("vanished.txt", true);
+        const auto lost = add("lost.txt", false);
+
+        ASSERT_FALSE(vanished.has_value());
+        EXPECT_EQ(vanished.error().type, Operation::ErrorType::FileNotFound);
+        ASSERT_FALSE(lost.has_value());
+        EXPECT_EQ(lost.error().type, Operation::ErrorType::FileStatFailed);
+        EXPECT_EQ(errors.mentioning("vanished.txt"), 0u);
+        EXPECT_EQ(errors.mentioning("lost.txt"), 1u);
+    }
+
+    TEST_F(OperationQueueTests, ABulkUploadWhoseSourcesMayVanishSkipsAGoneFileWithoutAnError)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto localPath = localDirectory_.path() / "gathered";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "kept.txt"} << "kept";
+        std::ofstream{localPath / "vanished.txt"} << "vanished";
+        const SharedData::BulkUploadRequest request{
+            .entries =
+                {
+                    {.source = toLocal(localPath / "kept.txt"),
+                        .destination = remote("/home/test/gathered/kept.txt"),
+                        .sizeBytes = 4},
+                    {.source = toLocal(localPath / "vanished.txt"),
+                        .destination = remote("/home/test/gathered/vanished.txt"),
+                        .sizeBytes = 8},
+                },
+            .allowOverwrite = true,
+        };
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    Ids::generateOperationId(),
+                    /*sourceMayVanish=*/true
+                );
+            }
+        );
+        std::filesystem::remove(localPath / "vanished.txt");
+        setPaused(false);
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(finished.front().failedEntries.empty());
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/gathered"), std::set<std::string>{"kept.txt"});
+        EXPECT_EQ(errors.mentioning("vanished.txt"), 0u);
     }
 
 #ifndef _WIN32
