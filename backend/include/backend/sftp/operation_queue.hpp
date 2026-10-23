@@ -59,7 +59,20 @@ class OperationQueue
         int parallelism = 1
     );
 
+    /**
+     * @brief Cancels every queued operation, each completes as cancelled.
+     */
     void cancelAll();
+
+    /**
+     * @brief Drops every queued operation without completing any, for a session that goes: a reconnect may adopt
+     *        their backups, see dumpBulkResumes(), and the frontend keeps their cards until then.
+     */
+    void dropAll();
+
+    /**
+     * @brief Cancels the operation @p id, it completes as cancelled.
+     */
     void cancel(Ids::OperationId id);
 
     /**
@@ -437,6 +450,16 @@ class OperationQueue
      * @brief Drops the scan @p id of a sync whose other scan failed, without telling its session again.
      */
     void cancelSiblingScan(Ids::OperationId const& id);
+
+    /**
+     * @brief Takes the operation @p id out of the queue it waits in, nothing when no queue has it.
+     */
+    std::unique_ptr<Operation> takeOperation(Ids::OperationId const& id);
+
+    /**
+     * @brief Cancels @p operation, already taken out of its queue, and completes it as cancelled.
+     */
+    void completeCancelled(Ids::OperationId const& id, Operation& operation);
 
     /**
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
