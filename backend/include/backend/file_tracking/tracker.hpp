@@ -46,9 +46,20 @@ namespace FileTracking
      *        Its view shows the outcome, the frontend only forwards the user's input. No two watches upload to the
      *        same remote path or one below the other. When a watch lost changes, what is there is compared with what
      *        the server is known to have: what is gone below a directory that is there is deleted like reported, and
-     *        what changed is uploaded. A watched directory gone meanwhile was deleted with its tree on Windows, where a
-     *        move keeps the watch; elsewhere it keeps its server copy like any directory that left with its content.
-     *        Lives on the strand of the session: every member must be called from it.
+     *        what changed is uploaded. Lives on the strand of the session: every member must be called from it.
+     *
+     * @par Deleted or moved away
+     *      A directory deleted locally is deleted on the server, one that left with its content (moved out of the
+     *      item, to the trash) keeps its server copy. A deletion reports the content first, so a directory still known
+     *      to have content when its removal is reported left as a whole. Where a watch loses those deletions, the
+     *      directory goes with its whole known tree: on Windows, which ends the read of a deleted watched directory
+     *      but follows a moved one, and on macOS for the watched directory itself, which FSEvents stops reporting
+     *      below once it is removed with its content (`rm -rf`). There it was deleted when its identity is found
+     *      nowhere on its volume, see isDeletedFromItsVolume.
+     *
+     * @par Accepted limitation on macOS
+     *      Only APFS and HFS+ volumes find a directory by its identity. On other volumes a watched directory removed
+     *      with its content keeps its server tree, but for the entries FSEvents reported deleted before.
      */
     class Tracker
     {
