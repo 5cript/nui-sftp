@@ -198,7 +198,7 @@ void Session::stop()
             if (self->bulkResumeRegistry_)
                 self->operationQueue_->dumpBulkResumes(*self->bulkResumeRegistry_);
             self->localOperationQueue_->release(self->id_);
-            self->operationQueue_->cancelAll();
+            self->operationQueue_->dropAll();
             self->operationQueue_.reset();
 
             // Close all channels

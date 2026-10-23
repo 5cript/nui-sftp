@@ -347,12 +347,34 @@ void OperationQueue::cancelAll()
             if (!self)
                 return;
 
+            // Taken out first: an owner hearing of its cancel may queue anew.
+            auto cancelled = std::exchange(self->priorityOperations_, {});
+            std::ranges::move(std::exchange(self->operations_, {}), std::back_inserter(cancelled));
+            auto waiting = std::exchange(self->syncScanCallbacks_, {});
+            for (auto& [id, callback] : waiting)
+                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
+            for (auto& [id, operation] : cancelled)
+                self->completeCancelled(id, *operation);
+            Log::info("All operations in the queue have been canceled.");
+        }
+    );
+}
+
+void OperationQueue::dropAll()
+{
+    within_strand_do(
+        [weak = weak_from_this()]()
+        {
+            auto self = weak.lock();
+            if (!self)
+                return;
+
             self->operations_.clear();
             self->priorityOperations_.clear();
             auto waiting = std::exchange(self->syncScanCallbacks_, {});
             for (auto& [id, callback] : waiting)
                 callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
-            Log::info("All operations in the queue have been canceled.");
+            Log::info("All operations in the queue have been dropped.");
         }
     );
 }
@@ -366,20 +388,38 @@ void OperationQueue::cancel(Ids::OperationId id)
             if (!self)
                 return;
 
-            auto cancelPredicate = [id](auto& op)
-            {
-                bool isMatch = op.first == id;
-                if (isMatch)
-                    std::ignore = op.second->cancel(true);
-                return isMatch;
-            };
-
-            const auto erasedFromRegular = std::erase_if(self->operations_, cancelPredicate);
-            if (erasedFromRegular == 0)
-                std::erase_if(self->priorityOperations_, cancelPredicate);
+            const auto cancelled = self->takeOperation(id);
             self->failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
+            if (cancelled)
+                self->completeCancelled(id, *cancelled);
         }
     );
+}
+
+std::unique_ptr<Operation> OperationQueue::takeOperation(Ids::OperationId const& id)
+{
+    for (auto* queue : {&operations_, &priorityOperations_})
+    {
+        const auto found = std::ranges::find_if(
+            *queue,
+            [&id](auto const& queued)
+            {
+                return queued.first == id;
+            }
+        );
+        if (found == queue->end())
+            continue;
+        auto operation = std::move(found->second);
+        queue->erase(found);
+        return operation;
+    }
+    return nullptr;
+}
+
+void OperationQueue::completeCancelled(Ids::OperationId const& id, Operation& operation)
+{
+    std::ignore = operation.cancel(true);
+    completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Canceled, id, operation));
 }
 
 void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
@@ -740,13 +780,20 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         results = runBatch(std::nullopt);
     }
 
+    // Out of the queue before its owner hears of it, who may cancel or queue operations then.
+    const auto takeFinished = [&queue](std::size_t index)
+    {
+        auto finished = std::move(queue[index]);
+        queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(index));
+        return finished;
+    };
+
     bool moreWork = false;
     for (auto& item : results)
     {
-        auto& [id, operation] = queue[item.queueIndex];
-
         if (!item.result.has_value())
         {
+            const auto [id, operation] = takeFinished(item.queueIndex);
             failSyncScan(
                 id,
                 Utility::localizedMessage(
@@ -758,16 +805,15 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
             completeOperation(
                 makeCompletedOperation(OperationQueue::CompletionReason::Failed, id, *operation, item.result.error())
             );
-            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
         }
 
         const auto workStatus = item.result.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
+            const auto [id, operation] = takeFinished(item.queueIndex);
             deliverSyncScan(id, *operation);
             completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
-            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(item.queueIndex));
             return true;
         }
         else if (workStatus == Operation::WorkStatus::MoreWork)

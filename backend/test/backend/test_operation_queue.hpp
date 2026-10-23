@@ -50,7 +50,7 @@ namespace Test
         {
             if (queue_)
                 runOnStrand([this]() {
-                    queue_->cancelAll();
+                    queue_->dropAll();
                 });
             queue_.reset();
             localQueue_.reset();
@@ -242,7 +242,7 @@ namespace Test
                 [this, &registry]()
                 {
                     queue_->dumpBulkResumes(registry);
-                    queue_->cancelAll();
+                    queue_->dropAll();
                 }
             );
             std::scoped_lock lock{completionsMutex_};
@@ -306,6 +306,34 @@ namespace Test
             for (auto const& entry : std::filesystem::directory_iterator{directory, errorCode})
                 names.insert(Paths::nativeToUtf8(entry.path().filename()));
             return names;
+        }
+
+        /**
+         * @brief Queues the delete of the file @p path as @p operationId, what its owner hears of its end goes to
+         *        @p heard on the strand.
+         */
+        std::expected<void, Operation::Error> addOwnedDelete(
+            SecureShell::SftpSession& sftp,
+            Ids::OperationId const& operationId,
+            std::string const& path,
+            std::shared_ptr<std::vector<SharedData::OperationCompleted>> const& heard
+        )
+        {
+            return runOnStrand(
+                [&]()
+                {
+                    const auto added = queue_->addDeleteOperation(sftp, operationId, remote(path), false, false);
+                    if (added)
+                        queue_->whenCompleted(
+                            operationId,
+                            [heard](SharedData::OperationCompleted const& completed)
+                            {
+                                heard->push_back(completed);
+                            }
+                        );
+                    return added;
+                }
+            );
         }
 
       protected:
@@ -873,7 +901,7 @@ namespace Test
             [&]()
             {
                 queue->dumpBulkResumes(registry);
-                queue->cancelAll();
+                queue->dropAll();
             }
         );
         auto backup = registry.take(card);
@@ -1341,11 +1369,13 @@ namespace Test
         });
         queue->cancel(directoryDelete);
 
-        workUntilCompletions(1);
+        workUntilCompletions(2);
         const auto finished = completions();
-        ASSERT_EQ(finished.size(), 1u);
-        EXPECT_EQ(finished.front().operationId, fileDelete);
-        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        ASSERT_EQ(finished.size(), 2u);
+        EXPECT_EQ(finished.front().operationId, directoryDelete);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_EQ(finished.back().operationId, fileDelete);
+        EXPECT_EQ(finished.back().reason, SharedData::OperationCompletionReason::Completed);
         EXPECT_EQ(remoteNames(*sftp, "/home/test/victim"), (std::set<std::string>{"keep.txt"}));
         EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("file2.txt"));
     }
@@ -2289,12 +2319,121 @@ namespace Test
         });
         queue->cancel(first);
 
-        workUntilCompletions(1);
+        workUntilCompletions(2);
         const auto finished = completions();
-        ASSERT_EQ(finished.size(), 1u);
-        EXPECT_EQ(finished.front().operationId, second);
+        ASSERT_EQ(finished.size(), 2u);
+        EXPECT_EQ(finished.front().operationId, first);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_EQ(finished.back().operationId, second);
         EXPECT_TRUE(localNames(firstLocal).empty());
         EXPECT_EQ(localNames(secondLocal), (std::set<std::string>{"image1.png", "image2.jpg"}));
+    }
+
+    TEST_F(OperationQueueTests, ACancelledOperationTellsItsOwnerItWasCanceled)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto deletion = Ids::generateOperationId();
+        const auto heard = std::make_shared<std::vector<SharedData::OperationCompleted>>();
+        ASSERT_TRUE(addOwnedDelete(*sftp, deletion, "/home/test/file1.txt", heard).has_value());
+        queue->cancel(deletion);
+        runOnStrand([]() {});
+
+        ASSERT_EQ(heard->size(), 1u);
+        EXPECT_EQ(heard->front().operationId, deletion);
+        EXPECT_EQ(heard->front().reason, SharedData::OperationCompletionReason::Canceled);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("file1.txt"));
+    }
+
+    TEST_F(OperationQueueTests, CancellingAllTellsEveryWaitingOwner)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto first = Ids::generateOperationId();
+        const auto second = Ids::generateOperationId();
+        const auto heard = std::make_shared<std::vector<SharedData::OperationCompleted>>();
+        ASSERT_TRUE(addOwnedDelete(*sftp, first, "/home/test/file1.txt", heard).has_value());
+        ASSERT_TRUE(addOwnedDelete(*sftp, second, "/home/test/Documents/doc1.txt", heard).has_value());
+        queue->cancelAll();
+        runOnStrand([]() {});
+
+        ASSERT_EQ(heard->size(), 2u);
+        for (auto const& completed : *heard)
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_EQ(completions().size(), 2u);
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("file1.txt"));
+    }
+
+    TEST_F(OperationQueueTests, DroppingAllAtTeardownTellsNobody)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        const auto heard = std::make_shared<std::vector<SharedData::OperationCompleted>>();
+        ASSERT_TRUE(addOwnedDelete(*sftp, Ids::generateOperationId(), "/home/test/file1.txt", heard).has_value());
+        queue->dropAll();
+        runOnStrand([]() {});
+        setPaused(false);
+        runOnStrand([&]() {
+            return queue->work();
+        });
+
+        EXPECT_TRUE(heard->empty());
+        EXPECT_TRUE(completions().empty());
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("file1.txt"));
+    }
+
+    TEST_F(OperationQueueTests, AnOwnerCancellingFromItsCompletionLeavesTheOtherOperationsAlone)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+
+        // Takes many steps, so the delete queued behind it completes first.
+        const auto big = localDirectory_.path() / "big.bin";
+        std::ofstream{big, std::ios::binary} << std::string(8u * 1024u * 1024u, 'x');
+        const auto upload = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addUploadOperation(
+                *sftp, upload, toLocal(big), remote("/home/test/big.bin"), true, false, false, false
+            );
+        }).has_value());
+        const auto deletion = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand([&]() {
+            const auto added = queue->addDeleteOperation(*sftp, deletion, remote("/home/test/file1.txt"), false, false);
+            queue->whenCompleted(
+                deletion,
+                [weak = std::weak_ptr{queue}, upload](SharedData::OperationCompleted const&)
+                {
+                    if (const auto owner = weak.lock())
+                        owner->cancel(upload);
+                }
+            );
+            return added;
+        }).has_value());
+        const auto later = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addDeleteOperation(*sftp, later, remote("/home/test/Documents/doc2.txt"), false, false);
+        }).has_value());
+        setPaused(false);
+
+        workUntilCompletions(3);
+        std::map<std::string, SharedData::OperationCompletionReason> reasons;
+        for (auto const& completed : completions())
+            reasons.emplace(completed.operationId.value(), completed.reason);
+        EXPECT_EQ(reasons.size(), 3u);
+        EXPECT_EQ(reasons[upload.value()], SharedData::OperationCompletionReason::Canceled);
+        EXPECT_EQ(reasons[deletion.value()], SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(reasons[later.value()], SharedData::OperationCompletionReason::Completed);
+        EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("big.bin"));
+        EXPECT_FALSE(remoteNames(*sftp, "/home/test/Documents").contains("doc2.txt"));
     }
 
     TEST_F(OperationQueueTests, ReorderedUnitsKeepTheirOwnScans)
