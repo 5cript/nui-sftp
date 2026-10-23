@@ -1,7 +1,11 @@
 #include <backend/file_tracking/disk_place.hpp>
+#include <utility/checked_symlink_status.hpp>
+
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <memory>
+#include <string_view>
 
 #ifdef _WIN32
 #    ifndef WIN32_LEAN_AND_MEAN
@@ -11,9 +15,32 @@
 #else
 #    include <sys/stat.h>
 #endif
+#ifdef __APPLE__
+#    include <sys/mount.h>
+#endif
 
 namespace FileTracking
 {
+#ifdef __APPLE__
+    namespace
+    {
+        /**
+         * @brief Whether @p directory lies on the volume @p device and that volume looks files up by their identity
+         *        under /.vol.
+         */
+        bool looksUpByIdentity(std::filesystem::path const& directory, std::uint64_t device)
+        {
+            struct stat status{};
+            struct statfs volume{};
+            if (::stat(directory.c_str(), &status) != 0 || static_cast<std::uint64_t>(status.st_dev) != device ||
+                ::statfs(directory.c_str(), &volume) != 0)
+                return false;
+            const std::string_view type{volume.f_fstypename};
+            return type == "apfs" || type == "hfs";
+        }
+    }
+#endif
+
     std::optional<DiskIdentity> diskIdentityOf(std::filesystem::path const& path)
     {
 #ifdef _WIN32
@@ -45,6 +72,24 @@ namespace FileTracking
             .device = static_cast<std::uint64_t>(status.st_dev),
             .file = static_cast<std::uint64_t>(status.st_ino),
         };
+#endif
+    }
+
+    std::optional<bool> isDeletedFromItsVolume(
+        [[maybe_unused]] DiskIdentity const& identity,
+        [[maybe_unused]] std::filesystem::path const& directory
+    )
+    {
+#ifdef __APPLE__
+        if (!looksUpByIdentity(directory, identity.device))
+            return std::nullopt;
+        // fsgetpath() still finds a deleted directory for a while after the last descriptor of it closed.
+        const auto status = Utility::checkedSymlinkStatus(fmt::format("/.vol/{}/{}", identity.device, identity.file));
+        if (!status)
+            return std::nullopt;
+        return !status->has_value();
+#else
+        return std::nullopt;
 #endif
     }
 

@@ -29,6 +29,7 @@
 #include "test_fork_pool.hpp"
 #include "test_file_change_filter.hpp"
 #include "test_local_watch.hpp"
+#include "test_disk_place.hpp"
 #include "test_settled_changes.hpp"
 #include "test_tracking_state.hpp"
 #include "test_tracker.hpp"
