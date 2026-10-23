@@ -1,5 +1,7 @@
 #pragma once
 
+#include <backend/file_tracking/tracking_state.hpp>
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -37,4 +39,10 @@ namespace FileTracking
      *        canonical. Symbolic links below it are not followed.
      */
     std::vector<FileState> itemStatesOf(std::filesystem::path const& item);
+
+    /**
+     * @brief The state of the regular file at @p path, nothing for anything else, a symbolic link too, and when it
+     *        cannot be read.
+     */
+    std::optional<SourceState> sourceStateOf(std::filesystem::path const& path);
 }
