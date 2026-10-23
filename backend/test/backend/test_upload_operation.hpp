@@ -1734,4 +1734,73 @@ namespace Test
         ASSERT_TRUE(information.has_value());
         EXPECT_EQ(information->mtime, 1600000000u);
     }
+
+    TEST_F(UploadOperationTests, AnUploadWhoseDestinationChangedSinceTheCompareFailsBeforeItWritesAnything)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/target.bin"}, {"content", "theirs"}})
+        );
+        const auto source = temporaryRoot / "target.bin";
+        writeContent(source, patternedContent(1024u * 1024u));
+        std::uint64_t sent = 0;
+        UploadOperation operation{
+            sftp,
+            {
+                .progressCallback =
+                    [&sent](auto, auto, auto current, auto)
+                {
+                    sent = static_cast<std::uint64_t>(current);
+                },
+                .remotePath = remote("/home/test/target.bin"),
+                .localPath = toLocal(source),
+                .mayOverwrite = true,
+                // The compare saw nothing there.
+                .comparedDestination = SharedData::ComparedState{},
+            }
+        };
+
+        const auto status = runToCompletion(operation);
+
+        ASSERT_FALSE(status.has_value());
+        EXPECT_EQ(status.error().type, SharedData::OperationErrorType::ChangedSinceCompare);
+        EXPECT_EQ(sent, 0u);
+        EXPECT_FALSE(remoteSizeOf(*sftp, remote("/home/test/target.bin.filepart")).has_value());
+        EXPECT_EQ(remoteContentOf(*sftp, remote("/home/test/target.bin")), std::string{"theirs"});
+    }
+
+    TEST_F(UploadOperationTests, AnUploadWhoseDestinationChangesDuringTheTransferStillFailsAtTheFinalize)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto source = temporaryRoot / "target.bin";
+        writeContent(source, patternedContent(1024u * 1024u));
+        std::uint64_t sent = 0;
+        UploadOperation operation{
+            sftp,
+            {
+                .progressCallback =
+                    [&sent](auto, auto, auto current, auto)
+                {
+                    sent = static_cast<std::uint64_t>(current);
+                },
+                .remotePath = remote("/home/test/target.bin"),
+                .localPath = toLocal(source),
+                .mayOverwrite = true,
+                .comparedDestination = SharedData::ComparedState{},
+            }
+        };
+        ASSERT_TRUE(workUntilPartlySent(operation, sent));
+
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/target.bin"}, {"content", "theirs"}})
+        );
+        const auto status = runToCompletion(operation);
+
+        ASSERT_FALSE(status.has_value());
+        EXPECT_EQ(status.error().type, SharedData::OperationErrorType::ChangedSinceCompare);
+        EXPECT_FALSE(remoteSizeOf(*sftp, remote("/home/test/target.bin.filepart")).has_value());
+        EXPECT_EQ(remoteContentOf(*sftp, remote("/home/test/target.bin")), std::string{"theirs"});
+    }
 }
