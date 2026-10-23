@@ -71,6 +71,12 @@ class Session
      */
     void stopFileTracking();
 
+    /**
+     * @brief The connection of this session was lost: its watches end and the frontend shows why, see
+     *        FileTracking::Tracker::connectionLost(). Must be called from the strand, before stop().
+     */
+    void onConnectionLost();
+
   private:
     /**
      * @brief The server side of the file tracker: this session's operation queue and SFTP channels.

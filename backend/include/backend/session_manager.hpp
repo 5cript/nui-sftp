@@ -101,8 +101,11 @@ class SessionManager
      */
     void registerRpcSessionDisconnect();
 
-    /// Removes a session and closes all its channels. Safe to call from any thread.
-    void removeSession(Ids::SessionId sessionId);
+    /**
+     * @brief Removes a session and closes all its channels. Safe to call from any thread.
+     * @param connectionLost The session lost its connection, its watches tell the frontend why they end.
+     */
+    void removeSession(Ids::SessionId sessionId, bool connectionLost = false);
 
     /**
      * @brief Handles "Session::sftp::adoptBulkResume" — pulls saved bulk
