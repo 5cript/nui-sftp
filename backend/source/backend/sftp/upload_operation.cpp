@@ -12,7 +12,26 @@
 
 #include <chrono>
 #include <filesystem>
+#include <optional>
+#include <system_error>
 #include <tuple>
+
+namespace
+{
+    /**
+     * @brief What the regular file at @p path is like now, nothing when that cannot be read.
+     */
+    std::optional<UploadOperation::SentSource> sourceStateOf(std::filesystem::path const& path)
+    {
+        std::error_code sizeError{};
+        const auto size = std::filesystem::file_size(path, sizeError);
+        std::error_code timeError{};
+        const auto modified = std::filesystem::last_write_time(path, timeError);
+        if (sizeError || timeError)
+            return std::nullopt;
+        return UploadOperation::SentSource{.size = static_cast<std::uint64_t>(size), .modified = modified};
+    }
+}
 
 UploadOperation::UploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, UploadOperationOptions options)
     : Operation{}
@@ -477,6 +496,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
             }
 
             // Success! Continue upload from position.
+            continued_ = true;
             leftToUpload_ -= static_cast<std::size_t>(tempResult->size);
             localFile_.seekg(static_cast<std::streamoff>(tempResult->size));
             return {};
@@ -625,6 +645,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
         return std::unexpected(Error{.type = ErrorType::NotAFile});
     }
 
+    // Taken before the file is opened, so a change while it is read differs from it.
+    sourceBeforeOpening_ = sourceStateOf(localNativePath_);
     localFile_.open(localNativePath_);
     if (!localFile_.is_open())
     {
@@ -829,7 +851,24 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Se
             Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
         return std::unexpected(std::move(moved).error());
     }
+    reportSent();
     return {};
+}
+
+void UploadOperation::reportSent() const
+{
+    if (!options_.onSent || isSymlink_)
+        return;
+    const auto unchanged = [this]() -> std::optional<SentSource>
+    {
+        if (continued_ || !sourceBeforeOpening_)
+            return std::nullopt;
+        const auto now = sourceStateOf(localNativePath_);
+        if (now != sourceBeforeOpening_ || now->size != totalSize_)
+            return std::nullopt;
+        return now;
+    }();
+    options_.onSent(options_.localPath, unchanged);
 }
 
 void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sftp)

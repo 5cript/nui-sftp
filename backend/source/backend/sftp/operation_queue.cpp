@@ -1484,7 +1484,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool createMissingDirectories,
     SharedData::OperationMode mode,
     bool sourceMayVanish,
-    std::optional<SharedData::ComparedState> comparedDestination
+    std::optional<SharedData::ComparedState> comparedDestination,
+    UploadOperation::OnSent onSent
 )
 {
     // Assumed in strand
@@ -1526,6 +1527,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.createMissingDirectories = createMissingDirectories;
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
+        opts.onSent = std::move(onSent);
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -1579,6 +1581,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     {
         auto individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
         individualOptions.sourceMayVanish = sourceMayVanish;
+        individualOptions.onSent = std::move(onSent);
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp.weak_from_this(),
             BulkUploadOperation::BulkUploadOperationOptions{
@@ -1638,7 +1641,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
     SharedData::BulkUploadRequest request,
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
     Ids::OperationId const& bulkCardId,
-    bool sourceMayVanish
+    bool sourceMayVanish,
+    UploadOperation::OnSent const& onSent
 )
 {
     // Assumed in strand.
@@ -1663,7 +1667,9 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 unit.insertRefresh,
                 /*createMissingDirectories*/ true,
                 unit.mode,
-                sourceMayVanish
+                sourceMayVanish,
+                std::nullopt,
+                onSent
             );
             if (!result)
             {
@@ -1703,6 +1709,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             auto uploadOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
             uploadOptions.createMissingDirectories = true;
             uploadOptions.sourceMayVanish = sourceMayVanish;
+            uploadOptions.onSent = onSent;
             auto bulk = std::make_unique<BulkUploadOperation>(
                 sftp.weak_from_this(),
                 BulkUploadOperation::BulkUploadOperationOptions{
