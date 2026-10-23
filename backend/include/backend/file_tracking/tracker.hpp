@@ -44,8 +44,11 @@ namespace FileTracking
      * @brief Organizes the file tracking of one session: holds its watches, decides what each change of a watched
      *        item does on the server and queues that, and asks the user when the server's copy changed meanwhile.
      *        Its view shows the outcome, the frontend only forwards the user's input. No two watches upload to the
-     *        same remote path or one below the other. Lives on the strand of the session: every member must be called
-     *        from it.
+     *        same remote path or one below the other. When a watch lost changes, what is there is compared with what
+     *        the server is known to have: what is gone below a directory that is there is deleted like reported, and
+     *        what changed is uploaded. A watched directory gone meanwhile was deleted with its tree on Windows, where a
+     *        move keeps the watch; elsewhere it keeps its server copy like any directory that left with its content.
+     *        Lives on the strand of the session: every member must be called from it.
      */
     class Tracker
     {

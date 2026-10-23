@@ -1,5 +1,6 @@
 #pragma once
 
+#include <backend/file_tracking/directory_watch_service.hpp>
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
@@ -1583,6 +1584,214 @@ namespace Test
         EXPECT_EQ(
             remote_->sourcesOf("remove"), (std::vector<std::string>{"/srv/project/src/main.cpp", "/srv/project/src"})
         );
+    }
+
+    // FSEvents reports only the deletions of the first entries of a larger tree removed with its content.
+#ifndef __APPLE__
+    TEST_F(TrackerTest, TheWatchedDirectoryRemovedWithALargeTreeLeavesNoServerTree)
+    {
+        const auto project = root_ / "local" / "project";
+        for (int directory = 0; directory < 8; ++directory)
+        {
+            const auto inner = project / ("d" + std::to_string(directory));
+            std::filesystem::create_directories(inner);
+            for (int file = 0; file < 8; ++file)
+                write(inner / ("f" + std::to_string(file) + ".txt"), "content");
+        }
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(remote_->server.contains("/srv/project/d7/f7.txt"));
+        const auto serverTreeLeft = [this]()
+        {
+            return std::ranges::count_if(
+                remote_->server,
+                [](auto const& entry)
+                {
+                    return entry.first.starts_with("/srv/project/");
+                }
+            );
+        };
+
+        std::filesystem::remove_all(project);
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                completeRemovesAndRenames();
+                return serverTreeLeft() == 0;
+            },
+            std::chrono::seconds{10}
+        )) << serverTreeLeft() << " entries left";
+    }
+
+    TEST_F(TrackerTest, TheWatchedDirectoryRemovedWhileItsWatchIsBusyLeavesNoServerTree)
+    {
+        const auto project = root_ / "local" / "project";
+        for (int directory = 0; directory < 4; ++directory)
+        {
+            const auto inner = project / ("d" + std::to_string(directory));
+            std::filesystem::create_directories(inner);
+            for (int file = 0; file < 8; ++file)
+                write(inner / ("f" + std::to_string(file) + ".txt"), "content");
+        }
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(remote_->server.contains("/srv/project/d3/f7.txt"));
+        // Holds up efsw's thread at every event. Windows drops what changes meanwhile once the watched directory turns
+        // delete-pending, efsw reports that as missed. Busy, a sleep on Windows lasts a timer tick and leaves efsw's
+        // thread behind the removal of the item, whose watch ends before it hears of the lost changes.
+        const auto busyListener = FileTracking::DirectoryWatchService::shared()->subscribe(
+            project,
+            /*recursive=*/true,
+            [](FileTracking::DirectoryEvent const&)
+            {
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds{1};
+                while (std::chrono::steady_clock::now() < until)
+                {
+                }
+            }
+        );
+        ASSERT_TRUE(busyListener.has_value());
+        const auto serverTreeLeft = [this]()
+        {
+            return std::ranges::count_if(
+                remote_->server,
+                [](auto const& entry)
+                {
+                    return entry.first.starts_with("/srv/project/");
+                }
+            );
+        };
+
+        std::filesystem::remove_all(project);
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                completeRemovesAndRenames();
+                return serverTreeLeft() == 0;
+            },
+            std::chrono::seconds{10}
+        )) << serverTreeLeft() << " entries left";
+    }
+#endif
+
+#ifdef __linux__
+    TEST_F(TrackerTest, AChangeTheWatchMissedIsUploadedOnceItsDirectoryIsLookedAtAnew)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        // inotify reports a write to the watches of the directory it went through only.
+        std::filesystem::create_directories(root_ / "elsewhere");
+        std::filesystem::create_hard_link(project / "src" / "main.cpp", root_ / "elsewhere" / "main.cpp");
+        write(root_ / "elsewhere" / "main.cpp", "int main() { return 2; }");
+        runFor(std::chrono::milliseconds{1000});
+        ASSERT_EQ(uploadsTo("/srv/project/src/main.cpp"), 0u);
+
+        FileTracking::DirectoryWatchService::shared()->reportMissed(project / "src");
+
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/main.cpp") == 1u;
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(remote_->of("upload").size(), 2u);
+        EXPECT_TRUE(remote_->of("remove").empty());
+    }
+
+    TEST_F(TrackerTest, AChangeOfADownloadedCopyTheWatchMissedIsUploadedOnceItsDirectoryIsLookedAtAnew)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto copy = opened->localPath.native();
+        runFor(std::chrono::milliseconds{500});
+
+        FileTracking::DirectoryWatchService::shared()->reportMissed(copy.parent_path());
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 0u);
+
+        std::filesystem::create_directories(root_ / "elsewhere");
+        std::filesystem::create_hard_link(copy, root_ / "elsewhere" / "notes.txt");
+        write(root_ / "elsewhere" / "notes.txt", "edited in the copy");
+        runFor(std::chrono::milliseconds{1000});
+        ASSERT_EQ(uploadsTo("/srv/notes.txt"), 0u);
+        FileTracking::DirectoryWatchService::shared()->reportMissed(copy.parent_path());
+
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 1u;
+            }
+        ));
+    }
+#endif
+
+    TEST_F(TrackerTest, ADeletionTheWatchMissedGoesToTheServerOnceItsDirectoryIsLookedAtAnew)
+    {
+        const auto project = root_ / "local" / "project";
+        write(project / "src" / "util.cpp", "util");
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        // Out of the item the deletion reaches no watch, the server keeps the copy of a directory that left.
+        std::filesystem::rename(project / "src", root_ / "src");
+        runFor(std::chrono::milliseconds{1000});
+        std::filesystem::remove(root_ / "src" / "main.cpp");
+        std::filesystem::rename(root_ / "src", project / "src");
+        runFor(std::chrono::milliseconds{1000});
+        completeEverything();
+        ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+
+        FileTracking::DirectoryWatchService::shared()->reportMissed(project);
+
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                completeRemovesAndRenames();
+                return !remote_->server.contains("/srv/project/src/main.cpp");
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        completeEverything();
+        EXPECT_TRUE(remote_->server.contains("/srv/project/src/util.cpp"));
+        EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/src/main.cpp"});
+    }
+
+    TEST_F(TrackerTest, AWatchedDirectoryGoneWhenItsWatchMissedTheChangesIsDeletedWithItsTreeOnlyOnWindows)
+    {
+        const auto project = root_ / "local" / "project";
+        write(project / "src" / "util.cpp", "util");
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        // Like a watched directory deleted on Windows without POSIX semantics, which loses the last deletions.
+        std::filesystem::rename(project / "src", root_ / "src");
+        runFor(std::chrono::milliseconds{1000});
+        std::filesystem::remove_all(root_ / "src");
+        ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+
+        FileTracking::DirectoryWatchService::shared()->reportMissed(project / "src");
+
+#ifdef _WIN32
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                completeRemovesAndRenames();
+                return !remote_->server.contains("/srv/project/src");
+            }
+        ));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/util.cpp"));
+#else
+        // It may have gone to the trash.
+        runFor(std::chrono::milliseconds{1000});
+        completeEverything();
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+        EXPECT_TRUE(remote_->server.contains("/srv/project/src/util.cpp"));
+#endif
+        EXPECT_TRUE(remote_->server.contains("/srv/project"));
     }
 
     TEST_F(TrackerTest, ADirectoryMovedWithinTheItemLeavesNoServerCopyAtItsOldPlace)

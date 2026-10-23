@@ -156,6 +156,17 @@ namespace FileTracking
         };
 
         /**
+         * @brief Whether a watched directory found gone when its watch lost changes went entry by entry. On Windows
+         *        only a deletion ends the read of a watch, one moved away is followed. Elsewhere it may have left as a
+         *        whole, to the trash, and keeps its server copy like any directory that left with its content.
+         */
+#ifdef _WIN32
+        constexpr bool goneWatchedDirectoryWasDeleted = true;
+#else
+        constexpr bool goneWatchedDirectoryWasDeleted = false;
+#endif
+
+        /**
          * @brief What is at @p path itself: its status, nothing when it is gone, an error when that cannot be told.
          *        Only a path that is gone counts as deleted, see Utility::checkedSymlinkStatus.
          */
@@ -1062,6 +1073,8 @@ namespace FileTracking
                 Utility::enumToString(reported.action),
                 path.toUtf8()
             );
+            if (reported.action == FileAction::Missed)
+                return onMissed(*entry, path);
             if (reported.action == FileAction::Moved && oldPath == entry->localPath)
             {
                 // The local watch follows an original renamed beside itself once it is clear the rename stays.
@@ -1165,6 +1178,112 @@ namespace FileTracking
                 return;
             }
             removeRemote(entry, path, *remotePath);
+        }
+
+        /**
+         * @brief The watch lost the changes in @p directory, what is there now is compared with what the server is
+         *        known to have. A directory around the item, the instance directory of a downloaded copy, stands for
+         *        the item.
+         */
+        void onMissed(Entry& entry, Paths::LocalPath const& directory)
+        {
+            const auto scope = entry.localPath.isWithin(directory) ? entry.localPath : directory;
+            if (!scope.isWithin(entry.localPath))
+                return;
+            const auto status = localStatusOf(scope);
+            if (!status)
+            {
+                Log::error(
+                    "FileTracking: watch {} lost the changes in '{}', which cannot be checked: {}",
+                    entry.watchId.value(),
+                    scope.toUtf8(),
+                    Utility::errorMessage(status.error())
+                );
+                return;
+            }
+            Log::info(
+                "FileTracking: watch {} lost the changes in '{}', looking at it anew", entry.watchId.value(), scope.toUtf8()
+            );
+            if (!*status)
+            {
+                if (entry.downloadedCopy())
+                    return onDeleted(entry, scope);
+                if (goneWatchedDirectoryWasDeleted)
+                    return deleteLostTree(entry, scope);
+                // Like any directory that left with its content. The item's own removal comes from its watch.
+                if (scope != entry.localPath)
+                    onDeleted(entry, scope);
+                return;
+            }
+            const auto watchId = entry.watchId;
+            deleteGoneBelow(entry, scope);
+            auto* stillWatched = find(watchId);
+            if (!stillWatched)
+                return;
+            const bool isDirectory = std::filesystem::is_directory(**status);
+            if (!isDirectory && isOnTheServerAsItIs(*stillWatched, scope))
+                return;
+            onContentChanged(*stillWatched, {.path = scope, .isDirectory = isDirectory});
+        }
+
+        /**
+         * @brief @p directory was deleted with its tree while its watch lost the changes, the deletions of the last
+         *        entries among them: what is known there is deleted like the watch would have reported it, deepest
+         *        first. The item itself waits for its removal, which its watch holds back (see LocalItemWatch).
+         */
+        void deleteLostTree(Entry const& entry, Paths::LocalPath const& directory)
+        {
+            const auto watchId = entry.watchId;
+            for (auto const& known : entry.serverContent.deepestFirst(directory))
+            {
+                auto* stillWatched = find(watchId);
+                if (!stillWatched)
+                    return;
+                // Removing the last entry of a kept directory removes the directory too.
+                if (known == stillWatched->localPath || !stillWatched->serverContent.has(known))
+                    continue;
+                onDeleted(*stillWatched, known);
+            }
+        }
+
+        /**
+         * @brief Deletes what is known below @p directory and gone locally like the watch would have reported it, a
+         *        directory as a whole: one that left with its content keeps its server copy.
+         */
+        void deleteGoneBelow(Entry const& entry, Paths::LocalPath const& directory)
+        {
+            const auto deepestFirst = entry.serverContent.deepestFirst(directory);
+            std::vector<Paths::LocalPath> gone;
+            for (auto const& known : deepestFirst | std::views::reverse)
+            {
+                const auto belowGone = std::ranges::any_of(
+                    gone,
+                    [&known](Paths::LocalPath const& removed)
+                    {
+                        return known.isWithin(removed);
+                    }
+                );
+                if (known != directory && !belowGone && isGoneLocally(known))
+                    gone.push_back(known);
+            }
+            const auto watchId = entry.watchId;
+            for (auto const& removed : gone)
+                if (auto* stillWatched = find(watchId))
+                    onDeleted(*stillWatched, removed);
+        }
+
+        /**
+         * @brief Whether the server's copy of the file at @p path holds what the file holds now: an upload sent it in
+         *        the state it has, or, for what a download brought, it has the modification time and size.
+         */
+        static bool isOnTheServerAsItIs(Entry const& entry, Paths::LocalPath const& path)
+        {
+            if (const auto sent = entry.serverContent.sentFrom(path))
+                return sent == sourceStateOf(path.native());
+            const auto states = itemStatesOf(path.native());
+            return states.size() == 1u &&
+                entry.serverContent.fileState(path) ==
+                ServerState{.mtime = states.front().mtime, .size = states.front().size};
         }
 
         /**
