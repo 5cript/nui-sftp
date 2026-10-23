@@ -182,6 +182,18 @@ namespace FileTracking
         }
 
         /**
+         * @brief What the server has of a file an upload sent in @p sent: uploads carry the modification time along,
+         *        in seconds.
+         */
+        ServerState serverStateOf(SourceState const& sent)
+        {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::file_clock::to_sys(sent.modified).time_since_epoch()
+            );
+            return ServerState{.mtime = static_cast<std::uint64_t>(seconds.count()), .size = sent.size};
+        }
+
+        /**
          * @brief Whether @p option may be on for a downloaded copy: removing or renaming a temporary copy never touches
          *        the server's file.
          */
@@ -1063,6 +1075,12 @@ namespace FileTracking
                 return;
             if (!entry.serverContent.has(path))
             {
+                // The upload of a directory above may have sent it before it went, it is looked at once that ended.
+                if (entry.pendingUploads.covers(path))
+                {
+                    entry.pendingUploads.start({.path = path});
+                    return progressChanged();
+                }
                 Log::debug("FileTracking: '{}' is not on the server, nothing to delete there.", path.toUtf8());
                 return;
             }
@@ -1374,15 +1392,38 @@ namespace FileTracking
         }
 
         /**
+         * @brief Whether the server's copy of the file of @p change holds what the file holds now: an upload sent it
+         *        in the state it has, the change was reported after that. Not while an upload that takes the file
+         *        along is on its way, the change goes after it.
+         */
+        static bool isSentAsItIs(Entry const& entry, LocalChange const& change)
+        {
+            if (change.isDirectory || entry.pendingUploads.covers(change.path))
+                return false;
+            const auto sent = entry.serverContent.sentFrom(change.path);
+            return sent && sent == sourceStateOf(change.path.native());
+        }
+
+        /**
          * @brief Uploads a change unless the same path, or a directory above it, is already on its way; the change
          *        then goes once that upload ended. It starts in the server order, after what was decided before on
-         *        its path.
+         *        its path. A file the server has as it is stays, a directory the server has goes by what it lacks.
          */
         void queueUpload(Upload upload)
         {
             auto* entry = find(upload.watchId);
             if (!entry)
                 return;
+            if (isSentAsItIs(*entry, upload.change))
+            {
+                Log::debug(
+                    "FileTracking: the server has '{}' as it is, not uploading it.", upload.change.path.toUtf8()
+                );
+                return;
+            }
+            if (upload.change.isDirectory && !entry->pendingUploads.covers(upload.change.path) &&
+                entry->serverContent.hasDirectory(upload.change.path))
+                return uploadWhatTheServerLacks(*entry, upload);
             const bool starts = entry->pendingUploads.start(upload.change);
             progressChanged();
             if (!starts)
@@ -1398,6 +1439,52 @@ namespace FileTracking
                     checkServerThenUpload(std::move(upload));
                 }
             );
+        }
+
+        /**
+         * @brief @p upload is of a directory the server has: what is below it goes on its own where the server lacks
+         *        it, a file no upload sent as it is and a directory with its content. A link the server has stays,
+         *        a change of its own retargets it. Nothing is compared with the server, the upload of the whole
+         *        directory would not either: the states recorded after the last one may be newer than what it sent.
+         */
+        void uploadWhatTheServerLacks(Entry& entry, Upload const& upload)
+        {
+            Log::debug(
+                "FileTracking: the server has the directory '{}', uploading what it lacks.", upload.change.path.toUtf8()
+            );
+            const auto watchId = entry.watchId;
+            std::vector<Paths::LocalPath> newDirectories;
+            for (auto const& state : itemStatesOf(upload.change.path.native()))
+            {
+                const auto path = Paths::LocalPath::make(state.path);
+                if (!path || *path == upload.change.path || !path->isWithin(upload.change.path))
+                    continue;
+                auto* stillWatched = find(watchId);
+                if (!stillWatched)
+                    return;
+                const auto inNewDirectory = std::ranges::any_of(
+                    newDirectories,
+                    [&path](Paths::LocalPath const& directory)
+                    {
+                        return path->isWithin(directory);
+                    }
+                );
+                const bool known = state.isDirectory ? stillWatched->serverContent.hasDirectory(*path)
+                                                     : state.isSymlink && stillWatched->serverContent.fileState(*path);
+                if (inNewDirectory || known)
+                    continue;
+                if (state.isDirectory)
+                    newDirectories.push_back(*path);
+                if (const auto destination = remotePathOf(*stillWatched, *path))
+                    queueUpload(
+                        Upload{
+                            .watchId = watchId,
+                            .change = {.path = *path, .isDirectory = state.isDirectory},
+                            .destination = *destination,
+                            .checkServer = false,
+                        }
+                    );
+            }
         }
 
         void checkServerThenUpload(Upload upload)
@@ -1617,11 +1704,55 @@ namespace FileTracking
             if (upload.change.isDirectory && !isSymlink(upload.change.path))
             {
                 rememberStates(*entry, upload.change.path);
+                rememberSentButGone(*entry, upload, ended.sentFiles);
                 removeMovedAway(*entry, upload.change.path);
             }
             else if (ended.destinationState)
                 entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
+            for (auto const& sent : ended.sentFiles)
+                if (sent.state && sent.path.isWithin(upload.change.path))
+                    entry->serverContent.rememberSent(sent.path, *sent.state);
             finishUpload(upload, UploadOutcome::Uploaded);
+        }
+
+        /**
+         * @brief What the directory upload @p upload wrote that is gone locally by now, which rememberStates() cannot
+         *        see: the files of @p sent with the directories above them, and the directory itself when the server
+         *        has it. Their deletions follow as reported, see onDeleted.
+         */
+        void rememberSentButGone(Entry& entry, Upload const& upload, std::vector<SentFile> const& sent)
+        {
+            auto const& directory = upload.change.path;
+            for (auto const& file : sent)
+            {
+                if (!file.path.isWithin(directory) || entry.serverContent.fileState(file.path) ||
+                    !isGoneLocally(file.path))
+                    continue;
+                const auto state = serverStateOfSent(entry, file);
+                if (!state)
+                    continue;
+                entry.serverContent.rememberFile(file.path, *state);
+                for (auto parent = file.path.parent(); parent && parent->isWithin(directory); parent = parent->parent())
+                    entry.serverContent.rememberDirectory(*parent);
+            }
+            if (entry.serverContent.has(directory) || !isGoneLocally(directory))
+                return;
+            if (const auto state = remote->linkStat(upload.destination); state && *state)
+                entry.serverContent.rememberDirectory(directory);
+        }
+
+        /**
+         * @brief What the server has of @p file, which an upload wrote: the state it was sent in, or else what the
+         *        server tells. Nothing when it has no file there or cannot be asked.
+         */
+        std::optional<ServerState> serverStateOfSent(Entry const& entry, SentFile const& file)
+        {
+            if (file.state)
+                return serverStateOf(*file.state);
+            const auto remotePath = remotePathOf(entry, file.path);
+            if (!remotePath)
+                return std::nullopt;
+            return remote->linkStat(*remotePath).value_or(std::nullopt);
         }
 
         /**

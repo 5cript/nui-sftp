@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <optional>
@@ -29,6 +30,18 @@ namespace FileTracking
         std::uint64_t size{0};
 
         friend bool operator==(ServerState const&, ServerState const&) = default;
+    };
+
+    /**
+     * @brief Size and modification time of a local file, as exact as its file system keeps them: the state an upload
+     *        sent it in.
+     */
+    struct SourceState
+    {
+        std::uint64_t size{0};
+        std::filesystem::file_time_type modified{};
+
+        friend bool operator==(SourceState const&, SourceState const&) = default;
     };
 
     /**
@@ -140,6 +153,29 @@ namespace FileTracking
         void rememberFile(Paths::LocalPath const& path, ServerState state)
         {
             files_.insert_or_assign(path, state);
+            sent_.erase(path);
+        }
+
+        /**
+         * @brief The server's copy of the known file at @p path holds what the file had locally in @p state, an
+         *        upload sent it so. Forgotten once the file is remembered anew.
+         */
+        void rememberSent(Paths::LocalPath const& path, SourceState state)
+        {
+            if (files_.contains(path))
+                sent_.insert_or_assign(path, state);
+        }
+
+        /**
+         * @brief The local state the server's copy of the file at @p path was sent in, see rememberSent(). Nothing
+         *        when it is not known.
+         */
+        std::optional<SourceState> sentFrom(Paths::LocalPath const& path) const
+        {
+            const auto found = sent_.find(path);
+            if (found == sent_.end())
+                return std::nullopt;
+            return found->second;
         }
 
         void rememberDirectory(Paths::LocalPath const& path)
@@ -224,9 +260,11 @@ namespace FileTracking
             files_.erase(path);
             directories_.erase(path);
             kept_.erase(path);
+            sent_.erase(path);
             eraseBelow(files_, path);
             eraseBelow(directories_, path);
             eraseBelow(kept_, path);
+            eraseBelow(sent_, path);
         }
 
         /**
@@ -237,6 +275,7 @@ namespace FileTracking
             moveIn(files_, from, to);
             moveIn(directories_, from, to);
             moveIn(kept_, from, to);
+            moveIn(sent_, from, to);
         }
 
         /**
@@ -320,7 +359,8 @@ namespace FileTracking
             return static_cast<unsigned char>(character) >= 0x80u;
         }
 
-        static Paths::LocalPath const& pathOf(std::pair<Paths::LocalPath const, ServerState> const& file)
+        template <typename StateT>
+        static Paths::LocalPath const& pathOf(std::pair<Paths::LocalPath const, StateT> const& file)
         {
             return file.first;
         }
@@ -397,6 +437,8 @@ namespace FileTracking
         std::map<Paths::LocalPath, ServerState, LocalPathText> files_;
         std::set<Paths::LocalPath, LocalPathText> directories_;
         std::set<Paths::LocalPath, LocalPathText> kept_;
+        /** @brief The local states of known files whose server copies an upload sent, see rememberSent(). */
+        std::map<Paths::LocalPath, SourceState, LocalPathText> sent_;
     };
 
     /**
@@ -586,6 +628,22 @@ namespace FileTracking
         bool isPending(Paths::LocalPath const& path) const
         {
             return std::ranges::any_of(pending_, IsAt{path});
+        }
+
+        /**
+         * @brief Whether an upload of @p path or of a directory above it is on its way, a change of it then goes
+         *        once that one finished.
+         */
+        bool covers(Paths::LocalPath const& path) const
+        {
+            return std::ranges::any_of(
+                pending_,
+                [&path](auto const& pending)
+                {
+                    auto const& current = currentPath(pending);
+                    return current == path || (pending.second.isDirectory && path.isWithin(current));
+                }
+            );
         }
 
         /**
