@@ -6,6 +6,7 @@
 #include <backend/file_tracking/tracker.hpp>
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
+#include "error_log_capture.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
@@ -25,6 +26,7 @@
 #include <set>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -582,6 +584,22 @@ namespace Test
 
         EXPECT_EQ(onlyEntry().options, defaults_);
         EXPECT_FALSE(onlyEntry().downloadedCopy);
+    }
+
+    TEST_F(TrackerTest, AnOpenRefusedForANameTheLocalSystemCannotHoldIsToldToTheCallerOnly)
+    {
+        const ErrorLogCapture errors;
+        const auto platform = std::exchange(Paths::defaultLocalPlatform(), Paths::LocalPlatform::Windows);
+        auto restore = Nui::ScopeExit{[platform]() noexcept {
+            Paths::defaultLocalPlatform() = platform;
+        }};
+
+        const auto opened = open("/srv/con", /*watch=*/true);
+
+        ASSERT_FALSE(opened.has_value());
+        EXPECT_TRUE(opened.error().has_value());
+        EXPECT_TRUE(remote_->of("download").empty());
+        EXPECT_EQ(errors.mentioning("/srv/con"), 0u);
     }
 
     TEST_F(TrackerTest, AWatchOverlappingAnotherOnTheServerIsRefusedBeforeItDownloads)

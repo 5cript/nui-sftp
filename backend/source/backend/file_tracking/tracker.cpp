@@ -706,7 +706,8 @@ namespace FileTracking
             );
             if (queued)
                 return;
-            Log::error("FileTracking: not downloading '{}': {}", remotePath.value(), queued.error());
+            // The caller shows why, an error would show it a second time.
+            Log::warn("FileTracking: not downloading '{}': {}", remotePath.value(), queued.error());
             downloading.erase(instanceId);
             instances->removeInstance(instanceId.value());
             onOpened(std::unexpected{OpenFailure{queued.error()}});
