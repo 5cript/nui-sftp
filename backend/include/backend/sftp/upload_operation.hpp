@@ -11,12 +11,34 @@
 #include <shared_data/file_operations/compared_state.hpp>
 #include <utility/shared_input_file_stream.hpp>
 
+#include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <string>
 
 class UploadOperation : public Operation
 {
   public:
+    /**
+     * @brief The local state of a regular file an upload sent: it had it from before it was opened until the upload
+     *        ended, so the server's copy holds the content it has in that state.
+     */
+    struct SentSource
+    {
+        std::uint64_t size{0};
+        std::filesystem::file_time_type modified{};
+
+        friend bool operator==(SentSource const&, SentSource const&) = default;
+    };
+
+    /**
+     * @brief Hears of the regular file @p source once it replaced the destination, with the state it was sent in
+     *        when it stayed unchanged (see SentSource). A continued upload and a file that changed meanwhile come
+     *        without one. Called on the strand of the transfer.
+     */
+    using OnSent = std::function<void(Paths::LocalPath const& source, std::optional<SentSource> const& unchanged)>;
+
     struct UploadOperationOptions
     {
         std::function<void(
@@ -54,6 +76,10 @@ class UploadOperation : public Operation
          *        For uploads that mirror local files whose deletions are handled apart, see FileTracking::Tracker.
          */
         bool sourceMayVanish{false};
+        /**
+         * @brief Hears of a regular file the upload wrote to the server, see OnSent. A link is not told.
+         */
+        OnSent onSent{};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -168,6 +194,12 @@ class UploadOperation : public Operation
      */
     void applyModificationTimeInStrand(SecureShell::SftpSession& sftp);
 
+    /**
+     * @brief Tells UploadOperationOptions::onSent of the source once it replaced the destination, with its state
+     *        unless it changed since it was opened.
+     */
+    void reportSent() const;
+
     void cleanup();
 
   private:
@@ -183,6 +215,10 @@ class UploadOperation : public Operation
     /** @brief Lets others rename or delete the file while it uploads, which a std::ifstream refuses on Windows. */
     Utility::SharedInputFileStream localFile_;
     bool isSymlink_{false};
+    /** @brief The state of the source right before it was opened, nothing when it could not be read. */
+    std::optional<SentSource> sourceBeforeOpening_{};
+    /** @brief The upload continued a temp file an earlier one left, whose content is not known to be the source's. */
+    bool continued_{false};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
     SecureShell::BufferLease buffer_;
