@@ -31,7 +31,8 @@ namespace FileTracking
 
     /**
      * @brief Receives the events of a subscription on efsw's thread, it must only hand them on (post to a strand).
-     *        Anything slower than a stat holds up the events of every watch.
+     *        Anything slower holds up the events of every watch, and on Windows loses the last changes of a watched
+     *        directory that is deleted.
      */
     using DirectoryEventSink = std::function<void(DirectoryEvent const& event)>;
 

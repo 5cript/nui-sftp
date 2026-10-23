@@ -42,7 +42,8 @@ namespace FileTracking
 
     /**
      * @brief Watches directories through the DirectoryWatchService of the process and hands their changes to its
-     *        handler on its strand. Destroying it stops the handler, the subscriptions end with their handles.
+     *        handler on its strand, in their order. What a change names is looked at on a strand of its own first.
+     *        Destroying it stops the handler, the subscriptions end with their handles.
      */
     class DirectoryWatcher
     {
