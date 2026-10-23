@@ -798,6 +798,7 @@ namespace Test
         {
             std::mutex mutex{};
             std::vector<std::string> filenames{};
+            std::vector<FileTracking::DirectoryEvent> events{};
 
             FileTracking::DirectoryEventSink sink()
             {
@@ -805,7 +806,27 @@ namespace Test
                 {
                     std::scoped_lock lock{mutex};
                     filenames.push_back(event.filename);
+                    events.push_back(event);
                 };
+            }
+
+            /**
+             * @brief The move reported to the file @p filename, nothing when none was.
+             */
+            std::optional<FileTracking::DirectoryEvent> moveTo(std::string const& filename)
+            {
+                std::scoped_lock lock{mutex};
+                const auto found = std::ranges::find_if(
+                    events,
+                    [&filename](FileTracking::DirectoryEvent const& event)
+                    {
+                        return event.action == FileTracking::FileAction::Moved &&
+                            fs::path{event.filename}.filename() == filename;
+                    }
+                );
+                if (found == events.end())
+                    return std::nullopt;
+                return *found;
             }
 
             bool has(std::string const& filename)
@@ -882,6 +903,39 @@ namespace Test
                 return first.has("deep.txt") && second.has("deep.txt");
             }
         ));
+    }
+
+    TEST_F(DirectoryWatchServiceTest, AMoveBetweenDirectoriesOfARecursiveWatchIsOneMove)
+    {
+        fs::create_directories(root_ / "other");
+        std::ofstream{root_ / "sub" / "moved.txt"} << "moved";
+        Received received;
+        const auto watch = service_->subscribe(root_, true, received.sink());
+        ASSERT_TRUE(watch.has_value());
+
+        fs::rename(root_ / "sub" / "moved.txt", root_ / "other" / "moved.txt");
+
+#ifdef __APPLE__
+        // FSEvents pairs the two halves only when they arrive together.
+        EXPECT_TRUE(waitFor(
+            [&]()
+            {
+                return received.has("moved.txt");
+            }
+        ));
+#else
+        ASSERT_TRUE(waitFor(
+            [&]()
+            {
+                return received.moveTo("moved.txt").has_value();
+            }
+        ));
+        const auto move = *received.moveTo("moved.txt");
+        EXPECT_EQ(
+            fs::path{Paths::nativeFromUtf8(move.oldFilename)}.lexically_normal(),
+            (root_ / "sub" / "moved.txt").lexically_normal()
+        );
+#endif
     }
 
     TEST_F(DirectoryWatchServiceTest, RecursiveAndPlainWatchesOfOtherDirectoriesBothDeliver)
