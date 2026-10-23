@@ -578,6 +578,10 @@ namespace FileTracking
             std::optional<Paths::LocalPath> serverCopyAt{};
             /** @brief The changes it counted as, see changeCount(), without the one more of changedAgain. */
             std::size_t counted{1};
+            /** @brief Where the upload of a file was handed on to, see sent(), nothing before that. */
+            std::optional<Paths::RemotePath> sentTo{};
+            /** @brief The partial file of the stopped upload stays for one that continues it, see keepsPartial(). */
+            bool partialKept{false};
         };
 
         /**
@@ -717,6 +721,42 @@ namespace FileTracking
         }
 
         /**
+         * @brief The upload that started at @p path was handed on to go to @p destination, as a directory when
+         *        @p isDirectory is set.
+         */
+        void sent(Paths::LocalPath const& path, Paths::RemotePath destination, bool isDirectory)
+        {
+            if (const auto found = pending_.find(path); found != pending_.end())
+            {
+                found->second.sentTo = std::move(destination);
+                found->second.sentAsDirectory = isDirectory;
+            }
+        }
+
+        /**
+         * @brief Where the upload of the file whose path is @p path now was handed on to, nothing for one handed on
+         *        as a directory and for an upload that was not handed on yet. A later change may tell another kind:
+         *        a directory removed meanwhile can no longer be told from a file.
+         */
+        std::optional<Paths::RemotePath> sentFileTo(Paths::LocalPath const& path) const
+        {
+            const auto found = std::ranges::find_if(pending_, IsAt{path});
+            if (found == pending_.end() || found->second.sentAsDirectory)
+                return std::nullopt;
+            return found->second.sentTo;
+        }
+
+        /**
+         * @brief The upload of the path that is @p path now is stopped and its partial file kept, an upload that
+         *        continues it follows, see Finished::partialKept.
+         */
+        void keepsPartial(Paths::LocalPath const& path)
+        {
+            if (const auto found = std::ranges::find_if(pending_, IsAt{path}); found != pending_.end())
+                found->second.partialKept = true;
+        }
+
+        /**
          * @brief Whether the path of the pending upload that started at @p path is no longer there, see moveWhenDone
          *        and moveBelow: reading it would fail.
          */
@@ -743,6 +783,8 @@ namespace FileTracking
                 .movedTo = std::move(found->second.movedTo),
                 .serverCopyAt = std::move(found->second.serverCopyAt),
                 .counted = counted,
+                .sentTo = std::move(found->second.sentTo),
+                .partialKept = found->second.partialKept,
             };
             pending_.erase(found);
             return finished;
@@ -777,6 +819,9 @@ namespace FileTracking
             std::optional<Paths::LocalPath> serverCopyAt{};
             /** @brief The entries the upload carries, see carries(). */
             std::size_t carried{1};
+            std::optional<Paths::RemotePath> sentTo{};
+            bool sentAsDirectory{false};
+            bool partialKept{false};
         };
 
         static std::size_t countedOf(Pending const& pending)

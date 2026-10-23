@@ -479,16 +479,19 @@ namespace Test
         }
 
         /**
-         * @brief Ends every delete and rename on its way as the server would.
+         * @brief Ends every delete, rename and discard on its way as the server would.
          */
         void completeRemovesAndRenames()
         {
             for (std::size_t index = 0; index < remote_->queued.size(); ++index)
             {
                 auto& operation = remote_->queued[index];
-                if ((operation.kind != "remove" && operation.kind != "rename") || operation.ended)
+                if ((operation.kind != "remove" && operation.kind != "rename" && operation.kind != "discard") ||
+                    operation.ended)
                     continue;
-                if (const auto found = remote_->server.find(operation.source); found != remote_->server.end())
+                // A discard removes the partial file of a stopped upload, which the fake server does not keep.
+                if (const auto found = remote_->server.find(operation.source);
+                    operation.kind != "discard" && found != remote_->server.end())
                 {
                     if (operation.kind == "rename")
                         remote_->server[operation.destination] = found->second;
@@ -522,6 +525,56 @@ namespace Test
                     return;
             }
             ADD_FAILURE() << "operations kept coming";
+        }
+
+        /**
+         * @brief Ends every upload the tracker stopped as the queue would, as cancelled.
+         */
+        void endStoppedUploads()
+        {
+            // Taken first: what follows a stop may queue the next upload to the same destination.
+            std::vector<std::size_t> stopped;
+            for (std::size_t index = 0; index < remote_->queued.size(); ++index)
+            {
+                auto const& operation = remote_->queued[index];
+                const bool wasStopped = std::ranges::contains(
+                    remote_->cancels | std::views::keys, operation.destination
+                );
+                if (operation.kind == "upload" && !operation.ended && wasStopped)
+                    stopped.push_back(index);
+            }
+            for (const auto index : stopped)
+            {
+                remote_->queued[index].ended = true;
+                // A copy: what follows may queue more and move the queued operations.
+                const auto ended = remote_->queued[index].onUploadEnded;
+                ended({.reason = SharedData::OperationCompletionReason::Canceled});
+            }
+        }
+
+        /**
+         * @brief Runs the handlers until the tracker stopped @p count uploads.
+         */
+        bool runUntilStopped(std::size_t count = 1u)
+        {
+            return runUntil(
+                [this, count]()
+                {
+                    return remote_->cancels.size() >= count;
+                }
+            );
+        }
+
+        /**
+         * @brief The upload to @p destination queued last, none when there is none.
+         */
+        FakeRemote::Queued* lastUploadTo(std::string const& destination)
+        {
+            FakeRemote::Queued* found = nullptr;
+            for (auto* upload : remote_->of("upload"))
+                if (upload->destination == destination)
+                    found = upload;
+            return found;
         }
 
         std::size_t uploadsTo(std::string const& destination)
@@ -2185,4 +2238,567 @@ namespace Test
         EXPECT_TRUE(remote_->of("remove").empty());
     }
 #endif
+
+    TEST_F(TrackerTest, ANewFileDeletedWhileItUploadsStopsTheUploadAndDeletesNothing)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/big.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::remove(file);
+
+        ASSERT_TRUE(runUntilStopped());
+        EXPECT_EQ(remote_->cancels.front().first, "/srv/project/big.bin");
+        EXPECT_EQ(remote_->cancels.front().second, FileTracking::PartialFile::Discarded);
+        endStoppedUploads();
+        completeEverything();
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_TRUE(remote_->of("discard").empty());
+        EXPECT_FALSE(remote_->server.contains("/srv/project/big.bin"));
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
+    TEST_F(TrackerTest, AKnownFileDeletedWhileItsChangeUploadsStopsItThenDeletesTheServerCopy)
+    {
+        const auto file = root_ / "local" / "project" / "src" / "main.cpp";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "int main() { return 1; }");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/main.cpp") == 1u;
+            }
+        ));
+
+        std::filesystem::remove(file);
+
+        ASSERT_TRUE(runUntilStopped());
+        endStoppedUploads();
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("remove").empty();
+            }
+        ));
+        EXPECT_EQ(remote_->of("remove").front()->source, "/srv/project/src/main.cpp");
+        EXPECT_TRUE(remote_->of("discard").empty());
+    }
+
+    TEST_F(TrackerTest, AnUploadThatFinishedBeforeItsStopStillDeletesTheServerCopy)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/big.bin") == 1u;
+            }
+        ));
+        std::filesystem::remove(file);
+        ASSERT_TRUE(runUntilStopped());
+
+        completeWith(*lastUploadTo("/srv/project/big.bin"), FileTracking::ServerState{.mtime = 1u, .size = 13u});
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("remove").empty();
+            }
+        ));
+        EXPECT_EQ(remote_->of("remove").front()->source, "/srv/project/big.bin");
+    }
+
+    TEST_F(TrackerTest, AFileDeletedAndWrittenAgainWhileItUploadsGoesOnceMore)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/big.bin") == 1u;
+            }
+        ));
+        std::filesystem::remove(file);
+        ASSERT_TRUE(runUntilStopped());
+
+        write(file, "written again");
+        runFor(std::chrono::milliseconds{500});
+        endStoppedUploads();
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/big.bin") == 2u;
+            }
+        ));
+        completeEverything();
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_EQ(remote_->server.at("/srv/project/big.bin"), stateOf(file));
+    }
+
+    TEST_F(TrackerTest, ADeleteReportedAfterTheFileCameBackStopsNothing)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/big.bin") == 1u;
+            }
+        ));
+
+        // Both happen before the tracker hears of the deletion, as when Windows holds it back.
+        std::filesystem::remove(file);
+        write(file, "written again");
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_TRUE(remote_->cancels.empty());
+        completeEverything();
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_EQ(remote_->server.at("/srv/project/big.bin"), stateOf(file));
+    }
+
+    TEST_F(TrackerTest, AFileMovedOverAKnownFileWhileItUploadsStopsIt)
+    {
+        const auto file = root_ / "local" / "project" / "src" / "new.cpp";
+        const auto known = root_ / "local" / "project" / "src" / "main.cpp";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "int main() { return 2; }");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/new.cpp") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, known);
+
+        ASSERT_TRUE(runUntilStopped());
+        EXPECT_EQ(remote_->cancels.front().first, "/srv/project/src/new.cpp");
+        EXPECT_EQ(remote_->cancels.front().second, FileTracking::PartialFile::Discarded);
+        endStoppedUploads();
+        completeEverything();
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), stateOf(known));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/new.cpp"));
+    }
+
+    TEST_F(TrackerTest, ADirectoryDeletedWhileItUploadsIsNotStopped)
+    {
+        const auto directory = root_ / "local" / "project" / "dir";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        std::filesystem::create_directory(directory);
+        write(directory / "a.txt", "a");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/dir") == 1u;
+            }
+        ));
+
+        std::filesystem::remove_all(directory);
+        runFor(std::chrono::milliseconds{1000});
+
+        for (auto const& destination : std::views::keys(remote_->cancels))
+            ADD_FAILURE() << "stopped the upload to " << destination;
+    }
+
+    TEST_F(TrackerTest, TheProgressCountsAStoppedUploadAsDone)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        runFor(std::chrono::milliseconds{500});
+        write(file, "large content");
+        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
+
+        std::filesystem::remove(file);
+        ASSERT_TRUE(runUntilStopped());
+        endStoppedUploads();
+
+        EXPECT_TRUE(runUntilProgress({.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
+    }
+
+    TEST_F(TrackerTest, StoppingAWatchLeavesItsRunningUploadAlone)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/big.bin") == 1u;
+            }
+        ));
+
+        tracker_->stop(onlyEntry().watchId);
+        runFor(std::chrono::milliseconds{200});
+
+        EXPECT_TRUE(remote_->cancels.empty());
+        EXPECT_FALSE(lastUploadTo("/srv/project/big.bin")->ended);
+    }
+
+    TEST_F(TrackerTest, AFileRenamedWhileItsFirstUploadRunsContinuesUnderTheNewName)
+    {
+        const auto file = root_ / "local" / "project" / "huge.bin";
+        const auto renamed = root_ / "local" / "project" / "renamed.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/huge.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, renamed);
+
+        ASSERT_TRUE(runUntilStopped());
+        EXPECT_EQ(remote_->cancels.front().first, "/srv/project/huge.bin");
+        EXPECT_EQ(remote_->cancels.front().second, FileTracking::PartialFile::Kept);
+        endStoppedUploads();
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/renamed.bin") == 1u;
+            }
+        ));
+        EXPECT_EQ(
+            lastUploadTo("/srv/project/renamed.bin")->upload.continuesPartialOf, remote("/srv/project/huge.bin")
+        );
+        completeEverything();
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_TRUE(remote_->of("discard").empty());
+        EXPECT_EQ(uploadsTo("/srv/project/huge.bin"), 1u);
+        EXPECT_FALSE(remote_->server.contains("/srv/project/huge.bin"));
+        EXPECT_EQ(remote_->server.at("/srv/project/renamed.bin"), stateOf(renamed));
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
+    TEST_F(TrackerTest, AKnownFileRenamedWhileItsChangeUploadsRenamesTheServerCopyThenContinues)
+    {
+        const auto file = root_ / "local" / "project" / "src" / "main.cpp";
+        const auto renamed = root_ / "local" / "project" / "src" / "start.cpp";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "int main() { return 3; }");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/main.cpp") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, renamed);
+
+        ASSERT_TRUE(runUntilStopped());
+        endStoppedUploads();
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("rename").empty();
+            }
+        ));
+        EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/main.cpp");
+        EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/src/start.cpp");
+        // The upload under the new name waits for the rename.
+        EXPECT_EQ(uploadsTo("/srv/project/src/start.cpp"), 0u);
+        completeRemovesAndRenames();
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/start.cpp") == 1u;
+            }
+        ));
+        EXPECT_EQ(
+            lastUploadTo("/srv/project/src/start.cpp")->upload.continuesPartialOf, remote("/srv/project/src/main.cpp")
+        );
+        completeEverything();
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
+        EXPECT_EQ(remote_->server.at("/srv/project/src/start.cpp"), stateOf(renamed));
+        EXPECT_TRUE(view_->questions.empty());
+    }
+
+    TEST_F(TrackerTest, AFileRenamedTwiceWhileItUploadsContinuesUnderTheLastName)
+    {
+        const auto file = root_ / "local" / "project" / "a.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/a.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, root_ / "local" / "project" / "b.bin");
+        ASSERT_TRUE(runUntilStopped());
+        std::filesystem::rename(root_ / "local" / "project" / "b.bin", root_ / "local" / "project" / "c.bin");
+        ASSERT_TRUE(runUntilStopped(2u));
+        endStoppedUploads();
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/c.bin") == 1u;
+            }
+        ));
+        EXPECT_EQ(lastUploadTo("/srv/project/c.bin")->upload.continuesPartialOf, remote("/srv/project/a.bin"));
+        completeEverything();
+        EXPECT_EQ(uploadsTo("/srv/project/b.bin"), 0u);
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_TRUE(remote_->of("discard").empty());
+    }
+
+    TEST_F(TrackerTest, AFileRenamedThenDeletedWhileItUploadsLeavesNoPartialFile)
+    {
+        const auto file = root_ / "local" / "project" / "a.bin";
+        const auto renamed = root_ / "local" / "project" / "b.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/a.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, renamed);
+        ASSERT_TRUE(runUntilStopped());
+        std::filesystem::remove(renamed);
+        runFor(std::chrono::milliseconds{500});
+        endStoppedUploads();
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("discard").empty();
+            }
+        ));
+        EXPECT_EQ(remote_->of("discard").front()->source, "/srv/project/a.bin");
+        EXPECT_EQ(uploadsTo("/srv/project/b.bin"), 0u);
+        EXPECT_TRUE(remote_->of("remove").empty());
+    }
+
+    TEST_F(TrackerTest, ARenameAfterTheUploadFinishedRenamesTheServerCopy)
+    {
+        const auto file = root_ / "local" / "project" / "a.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/a.bin") == 1u;
+            }
+        ));
+        std::filesystem::rename(file, root_ / "local" / "project" / "b.bin");
+        ASSERT_TRUE(runUntilStopped());
+
+        completeWith(*lastUploadTo("/srv/project/a.bin"), FileTracking::ServerState{.mtime = 1u, .size = 13u});
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("rename").empty();
+            }
+        ));
+        EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/a.bin");
+        EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/b.bin");
+        completeEverything();
+        EXPECT_EQ(uploadsTo("/srv/project/b.bin"), 0u);
+        EXPECT_TRUE(remote_->of("discard").empty());
+    }
+
+    TEST_F(TrackerTest, AWatchedFileRenamedWhileItUploadsContinuesUnderTheNewName)
+    {
+        const auto notes = root_ / "local" / "notes.txt";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
+        ASSERT_EQ(uploadsTo("/srv/notes.txt"), 1u);
+
+        std::filesystem::rename(notes, root_ / "local" / "memo.txt");
+
+        ASSERT_TRUE(runUntilStopped());
+        EXPECT_EQ(remote_->cancels.front().first, "/srv/notes.txt");
+        EXPECT_EQ(remote_->cancels.front().second, FileTracking::PartialFile::Kept);
+        endStoppedUploads();
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/memo.txt") == 1u;
+            }
+        ));
+        EXPECT_EQ(lastUploadTo("/srv/memo.txt")->upload.continuesPartialOf, remote("/srv/notes.txt"));
+        completeEverything();
+        EXPECT_EQ(onlyEntry().remotePath.value(), "/srv/memo.txt");
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_FALSE(remote_->server.contains("/srv/notes.txt"));
+    }
+
+    TEST_F(TrackerTest, AFileMovedOverAFileWhoseFirstUploadRunsReplacesIt)
+    {
+        const auto first = root_ / "local" / "project" / "a.bin";
+        const auto second = root_ / "local" / "project" / "b.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(first, "first content");
+        write(second, "second");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/a.bin") == 1u && uploadsTo("/srv/project/b.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(first, second);
+
+        ASSERT_TRUE(runUntilStopped());
+        EXPECT_EQ(remote_->cancels.front().first, "/srv/project/a.bin");
+        EXPECT_EQ(remote_->cancels.front().second, FileTracking::PartialFile::Discarded);
+        endStoppedUploads();
+        completeEverything();
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_FALSE(remote_->server.contains("/srv/project/a.bin"));
+        EXPECT_EQ(remote_->server.at("/srv/project/b.bin"), stateOf(second));
+    }
+
+    TEST_F(TrackerTest, AFileMovedIntoANewDirectoryWhileItUploadsLeavesNoOldServerCopy)
+    {
+        const auto known = root_ / "local" / "project" / "src" / "main.cpp";
+        const auto directory = root_ / "local" / "project" / "x";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        std::filesystem::create_directory(directory);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/x") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(known, directory / "main.cpp");
+        runFor(std::chrono::milliseconds{1000});
+        completeEverything();
+
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
+        EXPECT_TRUE(remote_->server.contains("/srv/project/x/main.cpp"));
+    }
+
+    TEST_F(TrackerTest, WithoutMirroredMovesARenamedFirstUploadStillUploadsTheNewName)
+    {
+        const auto file = root_ / "local" / "project" / "a.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        tracker_->setOption(onlyEntry().watchId, SharedData::WatchOption::MoveRemoteOnLocalMove, false);
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/a.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, root_ / "local" / "project" / "b.bin");
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/b.bin") == 1u;
+            }
+        ));
+        // A watch that reads the rename as a deletion and an addition stops the old upload, but never to go on under
+        // the new name.
+        EXPECT_TRUE(std::ranges::none_of(
+            remote_->cancels | std::views::values,
+            [](FileTracking::PartialFile partial)
+            {
+                return partial == FileTracking::PartialFile::Kept;
+            }
+        ));
+        EXPECT_FALSE(lastUploadTo("/srv/project/b.bin")->upload.continuesPartialOf.has_value());
+    }
+
+    TEST_F(TrackerTest, AFailedServerRenameUploadsTheNewName)
+    {
+        const auto file = root_ / "local" / "project" / "src" / "main.cpp";
+        const auto renamed = root_ / "local" / "project" / "src" / "start.cpp";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+
+        std::filesystem::rename(file, renamed);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !remote_->of("rename").empty();
+            }
+        ));
+        // Something unknown to the tracker is in the way on the server.
+        end(*remote_->of("rename").front(), SharedData::OperationCompletionReason::Failed);
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/start.cpp") == 1u;
+            }
+        ));
+        auto const* upload = lastUploadTo("/srv/project/src/start.cpp");
+        ASSERT_TRUE(upload->upload.expectedDestination.has_value());
+        EXPECT_FALSE(upload->upload.expectedDestination->file.has_value());
+    }
+
+    TEST_F(TrackerTest, AFileRenamedAndEditedWhileItUploadsGoesAnewUnderTheNewName)
+    {
+        const auto file = root_ / "local" / "project" / "a.bin";
+        const auto renamed = root_ / "local" / "project" / "b.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        write(file, "large content");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/a.bin") == 1u;
+            }
+        ));
+
+        std::filesystem::rename(file, renamed);
+        ASSERT_TRUE(runUntilStopped());
+        write(renamed, "edited in the middle");
+        runFor(std::chrono::milliseconds{1000});
+        endStoppedUploads();
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/b.bin") == 1u;
+            }
+        ));
+        // Its old part must not be continued, the resume compares only the end of it.
+        EXPECT_FALSE(lastUploadTo("/srv/project/b.bin")->upload.continuesPartialOf.has_value());
+        ASSERT_EQ(remote_->of("discard").size(), 1u);
+        EXPECT_EQ(remote_->of("discard").front()->source, "/srv/project/a.bin");
+        completeEverything();
+        EXPECT_EQ(remote_->server.at("/srv/project/b.bin"), stateOf(renamed));
+    }
 }
