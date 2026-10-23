@@ -840,6 +840,19 @@ namespace Test
                     }
                 );
             }
+
+            /**
+             * @brief The directories of the Missed events, in their order.
+             */
+            std::vector<fs::path> missed()
+            {
+                std::scoped_lock lock{mutex};
+                std::vector<fs::path> directories;
+                for (auto const& event : events)
+                    if (event.action == FileTracking::FileAction::Missed)
+                        directories.push_back(Paths::nativeFromUtf8(event.directory));
+                return directories;
+            }
         };
 
         void SetUp() override
@@ -1000,6 +1013,23 @@ namespace Test
             }
         ));
         EXPECT_FALSE(ended.has("again.txt"));
+    }
+
+    TEST_F(DirectoryWatchServiceTest, MissedChangesReachTheSubscriptionsOfTheWatchCoveringTheirDirectory)
+    {
+        fs::create_directories(root_ / "sub" / "deep");
+        fs::create_directories(root_ / "plain");
+        Received recursive;
+        Received plain;
+        const auto recursiveWatch = service_->subscribe(root_ / "sub", true, recursive.sink());
+        const auto plainWatch = service_->subscribe(root_ / "plain", false, plain.sink());
+        ASSERT_TRUE(recursiveWatch.has_value());
+        ASSERT_TRUE(plainWatch.has_value());
+
+        service_->reportMissed(root_ / "sub" / "deep");
+
+        EXPECT_EQ(recursive.missed(), std::vector<fs::path>{root_ / "sub" / "deep"});
+        EXPECT_TRUE(plain.missed().empty());
     }
 
     TEST_F(DirectoryWatchServiceTest, TheWatchesOfDeletedDirectoriesEnd)
@@ -1189,6 +1219,60 @@ namespace Test
         );
         EXPECT_FALSE(reported("fresh"));
         EXPECT_FALSE(reported("before.txt"));
+    }
+
+    TEST_F(DirectoryWatcherTest, MissedChangesPassTheFilterAfterTheChangesBeforeThem)
+    {
+        const auto watch = watcher_->add(
+            root_,
+            /*recursive=*/true,
+            [](FileTracking::DirectoryEvent const& event)
+            {
+                return event.filename == "before.txt";
+            }
+        );
+        ASSERT_TRUE(watch.has_value());
+        // Subscribed after the watcher, efsw's thread hands an event to it once the watcher has it.
+        const auto service = FileTracking::DirectoryWatchService::shared();
+        std::atomic<bool> handedOn{false};
+        const auto observer = service->subscribe(
+            root_,
+            /*recursive=*/true,
+            [&handedOn](FileTracking::DirectoryEvent const& event)
+            {
+                if (event.filename == "before.txt")
+                    handedOn = true;
+            }
+        );
+        ASSERT_TRUE(observer.has_value());
+
+        std::ofstream{root_ / "before.txt"} << "before";
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        while (!handedOn && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        ASSERT_TRUE(handedOn);
+        service->reportMissed(root_);
+
+        const auto isMissed = [](FileTracking::DirectoryChange const& change)
+        {
+            return change.action == FileTracking::FileAction::Missed;
+        };
+        ASSERT_TRUE(runUntil(
+            [&]()
+            {
+                return std::ranges::any_of(changes_, isMissed);
+            }
+        ));
+        const auto missed = std::ranges::find_if(changes_, isMissed);
+        EXPECT_EQ(missed->path(), root_);
+        const auto before = std::ranges::find_if(
+            changes_,
+            [](FileTracking::DirectoryChange const& change)
+            {
+                return change.filename == "before.txt";
+            }
+        );
+        EXPECT_LT(before, missed);
     }
 
     TEST_F(DirectoryWatcherTest, AnEntryWrittenBeforeAndRenamedAfterTheWatchBeganIsReported)

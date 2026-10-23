@@ -18,8 +18,12 @@ namespace FileTracking
     struct DirectoryEvent
     {
         FileAction action;
-        /** @brief The directory of the change, efsw ends it with a separator. */
+        /**
+         * @brief The directory of the change, efsw ends it with a separator. For Missed the directory whose changes
+         *        were lost, with or without one.
+         */
         std::string directory;
+        /** @brief Empty for Missed, which concerns the directory. */
         std::string filename;
         /** @brief The previous name of a move, empty otherwise. */
         std::string oldFilename;
@@ -68,6 +72,13 @@ namespace FileTracking
          * @brief Ends the subscription @p subscriptionId, the directory is no longer watched once nobody subscribes.
          */
         void unsubscribe(std::int64_t subscriptionId);
+
+        /**
+         * @brief Tells the subscriptions of the watch of @p directory, or of the recursive one above it, that the
+         *        changes in @p directory were lost, the way efsw does. For tests, efsw cannot be made to lose changes
+         *        on every platform.
+         */
+        void reportMissed(std::filesystem::path const& directory);
 
       private:
         struct Implementation;

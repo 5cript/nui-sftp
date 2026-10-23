@@ -1,4 +1,5 @@
 #include <backend/file_tracking/directory_watch_service.hpp>
+#include <backend/file_tracking/change_filter.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
 
@@ -32,6 +33,30 @@ namespace FileTracking
                 default:
                     return FileAction::Modified;
             }
+        }
+
+        DirectoryEvent eventOf(
+            std::string const& dir,
+            std::string const& filename,
+            efsw::Action action,
+            std::string const& oldFilename
+        )
+        {
+            return DirectoryEvent{
+                .action = toFileAction(action),
+                .directory = dir,
+                .filename = filename,
+                .oldFilename = oldFilename,
+            };
+        }
+
+        /**
+         * @brief The event telling that the changes in @p dir were lost, which is worth a line in the log.
+         */
+        DirectoryEvent missedIn(std::string const& dir)
+        {
+            Log::warn("DirectoryWatchService: the watch lost the changes in '{}'", dir);
+            return DirectoryEvent{.action = FileAction::Missed, .directory = dir, .filename = {}, .oldFilename = {}};
         }
 
         /**
@@ -77,6 +102,16 @@ namespace FileTracking
                 std::string const& oldFilename
             ) override
             {
+                deliver(eventOf(dir, filename, action, oldFilename));
+            }
+
+            void handleMissedFileActions(efsw::WatchID /*watchId*/, std::string const& dir) override
+            {
+                deliver(missedIn(dir));
+            }
+
+            void deliver(DirectoryEvent const& event)
+            {
                 service.dispatch(
                     [this](std::map<std::filesystem::path, Watch> const& watches) -> Watch const*
                     {
@@ -85,10 +120,7 @@ namespace FileTracking
                         return found != watches.end() && found->second.ownWatcher.get() == this ? &found->second
                                                                                                 : nullptr;
                     },
-                    dir,
-                    filename,
-                    action,
-                    oldFilename
+                    event
                 );
             }
         };
@@ -146,29 +178,36 @@ namespace FileTracking
             std::string const& oldFilename
         ) override
         {
+            deliver(watchId, eventOf(dir, filename, action, oldFilename));
+        }
+
+        void handleMissedFileActions(efsw::WatchID watchId, std::string const& dir) override
+        {
+            deliver(watchId, missedIn(dir));
+        }
+
+        /**
+         * @brief Hands @p event to the subscriptions of the watch @p watchId on the shared watcher.
+         */
+        void deliver(efsw::WatchID watchId, DirectoryEvent const& event)
+        {
             dispatch(
                 [this, watchId](std::map<std::filesystem::path, Watch> const& known) -> Watch const*
                 {
                     const auto directory = directoryOfWatch.find(watchId);
                     return directory == directoryOfWatch.end() ? nullptr : &known.at(directory->second);
                 },
-                dir,
-                filename,
-                action,
-                oldFilename
+                event
             );
         }
 
         /**
-         * @brief Hands an event to the subscriptions of the watch @p findWatch picks, it is called with the dispatch
+         * @brief Hands @p event to the subscriptions of the watch @p findWatch picks, it is called with the dispatch
          *        mutex held.
          */
         void dispatch(
             std::function<Watch const*(std::map<std::filesystem::path, Watch> const&)> const& findWatch,
-            std::string const& dir,
-            std::string const& filename,
-            efsw::Action action,
-            std::string const& oldFilename
+            DirectoryEvent const& event
         )
         {
             std::vector<DirectoryEventSink> sinks;
@@ -179,12 +218,6 @@ namespace FileTracking
                     return;
                 std::ranges::copy(watch->subscriptions | std::views::values, std::back_inserter(sinks));
             }
-            const DirectoryEvent event{
-                .action = toFileAction(action),
-                .directory = dir,
-                .filename = filename,
-                .oldFilename = oldFilename,
-            };
             for (auto const& sink : sinks)
                 sink(event);
         }
@@ -358,5 +391,25 @@ namespace FileTracking
         }
         // Joins its thread, outside the locks that thread takes.
         unusedOwnWatcher.reset();
+    }
+
+    void DirectoryWatchService::reportMissed(std::filesystem::path const& directory)
+    {
+        impl_->dispatch(
+            [key = directoryKey(directory)](
+                std::map<std::filesystem::path, Implementation::Watch> const& watches
+            ) -> Implementation::Watch const*
+            {
+                const auto covering = std::ranges::find_if(
+                    watches,
+                    [&key](auto const& watch)
+                    {
+                        return watch.first == key || (watch.second.recursive && isAtOrBelow(watch.first, key));
+                    }
+                );
+                return covering == watches.end() ? nullptr : &covering->second;
+            },
+            missedIn(Paths::nativeToUtf8(directory))
+        );
     }
 }

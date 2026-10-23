@@ -145,6 +145,8 @@ namespace FileTracking
 
     std::filesystem::path DirectoryChange::path() const
     {
+        if (filename.empty())
+            return directory.has_filename() ? directory : directory.parent_path();
         return directory / Paths::nativeFromUtf8(filename);
     }
 
@@ -184,8 +186,9 @@ namespace FileTracking
              filter = std::move(filter),
              spelling = WatchedSpelling{directory}](DirectoryEvent const& event)
             {
-                // Before the filter, which may keep state about the events it lets through.
-                if (replays.isReplay(event) || (filter && !filter(event)))
+                // Before the filter, which may keep state about the events it lets through. A missed change names
+                // no entry to judge by.
+                if (event.action != FileAction::Missed && (replays.isReplay(event) || (filter && !filter(event))))
                     return;
                 // The stat runs on efsw's thread, the strand also serves the RPCs.
                 const auto changedDirectory = spelling.of(event.directory);
