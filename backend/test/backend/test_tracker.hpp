@@ -1586,8 +1586,41 @@ namespace Test
         );
     }
 
-    // FSEvents reports only the deletions of the first entries of a larger tree removed with its content.
-#ifndef __APPLE__
+    TEST_F(TrackerTest, TheWatchedDirectoryRemovedWithItsContentLeavesNoServerTree)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+
+        std::filesystem::remove_all(project);
+
+        // Windows also reports src modified, its delete waits until that change settled.
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                completeRemovesAndRenames();
+                return !remote_->server.contains("/srv/project/src");
+            }
+        ));
+        EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
+    }
+
+    TEST_F(TrackerTest, TheWatchedDirectoryMovedAwayKeepsItsServerTree)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        std::filesystem::create_directories(root_ / "trash");
+
+        std::filesystem::rename(project, root_ / "trash" / "project");
+        runFor(std::chrono::milliseconds{1500});
+        completeEverything();
+
+        EXPECT_TRUE(remote_->of("remove").empty());
+        EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
+    }
+
     TEST_F(TrackerTest, TheWatchedDirectoryRemovedWithALargeTreeLeavesNoServerTree)
     {
         const auto project = root_ / "local" / "project";
@@ -1674,7 +1707,6 @@ namespace Test
             std::chrono::seconds{10}
         )) << serverTreeLeft() << " entries left";
     }
-#endif
 
 #ifdef __linux__
     TEST_F(TrackerTest, AChangeTheWatchMissedIsUploadedOnceItsDirectoryIsLookedAtAnew)

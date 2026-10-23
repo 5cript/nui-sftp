@@ -1,4 +1,5 @@
 #include <backend/file_tracking/tracker.hpp>
+#include <backend/file_tracking/disk_place.hpp>
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/tracking_state.hpp>
@@ -158,7 +159,8 @@ namespace FileTracking
         /**
          * @brief Whether a watched directory found gone when its watch lost changes went entry by entry. On Windows
          *        only a deletion ends the read of a watch, one moved away is followed. Elsewhere it may have left as a
-         *        whole, to the trash, and keeps its server copy like any directory that left with its content.
+         *        whole, to the trash, and keeps its server copy like any directory that left with its content. The
+         *        removal of the item itself tells more, see wasDeletedWithItsContent.
          */
 #ifdef _WIN32
         constexpr bool goneWatchedDirectoryWasDeleted = true;
@@ -1162,11 +1164,18 @@ namespace FileTracking
             // turns up elsewhere in the item or is deleted after all, see removeMovedAway and removeEmptiedKeptAbove.
             if (entry.serverContent.hasBelow(path))
             {
+                entry.serverContent.keep(path);
+                if (path == entry.localPath && wasDeletedWithItsContent(entry))
+                {
+                    Log::info(
+                        "FileTracking: '{}' was deleted with its content, deleting its server tree too.", path.toUtf8()
+                    );
+                    return deleteLostTree(entry, path);
+                }
                 Log::info(
                     "FileTracking: not deleting the server's copy of directory '{}', it was removed with its content.",
                     path.toUtf8()
                 );
-                entry.serverContent.keep(path);
                 return;
             }
             const auto remotePath = remotePathOf(entry, path);
@@ -1178,6 +1187,19 @@ namespace FileTracking
                 return;
             }
             removeRemote(entry, path, *remotePath);
+        }
+
+        /**
+         * @brief Whether the watched directory of @p entry, gone from its path, was deleted rather than moved away.
+         *        FSEvents loses the deletions below a watched directory removed with its content, its identity on
+         *        its volume tells instead, see isDeletedFromItsVolume.
+         */
+        bool wasDeletedWithItsContent(Entry const& entry) const
+        {
+            auto const* const watch = localWatches->find(entry.watchId);
+            if (!watch || !watch->place().self)
+                return false;
+            return isDeletedFromItsVolume(*watch->place().self, watch->directory()).value_or(false);
         }
 
         /**
@@ -1229,7 +1251,8 @@ namespace FileTracking
         /**
          * @brief @p directory was deleted with its tree while its watch lost the changes, the deletions of the last
          *        entries among them: what is known there is deleted like the watch would have reported it, deepest
-         *        first. The item itself waits for its removal, which its watch holds back (see LocalItemWatch).
+         *        first. The item itself waits for its removal, which its watch holds back (see LocalItemWatch), or
+         *        goes with its last entry when it was kept.
          */
         void deleteLostTree(Entry const& entry, Paths::LocalPath const& directory)
         {
