@@ -14,12 +14,15 @@
 namespace Test
 {
     /**
-     * @brief Records the messages logged as errors while it lives. The tests log nothing otherwise.
+     * @brief Records the messages logged at a level or above while it lives. The tests log nothing below it otherwise.
      */
-    class ErrorLogCapture
+    class LogCapture
     {
       public:
-        ErrorLogCapture()
+        /**
+         * @param level The lowest level recorded.
+         */
+        explicit LogCapture(spdlog::level::level_enum level)
             : sink_{std::make_shared<spdlog::sinks::callback_sink_mt>(
                   [this](spdlog::details::log_msg const& message)
                   {
@@ -29,23 +32,23 @@ namespace Test
               )}
             , previousLevel_{spdlog::get_level()}
         {
-            sink_->set_level(spdlog::level::err);
+            sink_->set_level(level);
             // Added while nothing is logged, so no other thread walks the sinks meanwhile.
             spdlog::default_logger()->sinks().push_back(sink_);
-            spdlog::set_level(spdlog::level::err);
+            spdlog::set_level(level);
         }
-        ~ErrorLogCapture()
+        ~LogCapture()
         {
             spdlog::set_level(previousLevel_);
             std::erase(spdlog::default_logger()->sinks(), sink_);
         }
-        ErrorLogCapture(ErrorLogCapture const&) = delete;
-        ErrorLogCapture& operator=(ErrorLogCapture const&) = delete;
-        ErrorLogCapture(ErrorLogCapture&&) = delete;
-        ErrorLogCapture& operator=(ErrorLogCapture&&) = delete;
+        LogCapture(LogCapture const&) = delete;
+        LogCapture& operator=(LogCapture const&) = delete;
+        LogCapture(LogCapture&&) = delete;
+        LogCapture& operator=(LogCapture&&) = delete;
 
         /**
-         * @brief How many errors mention @p text.
+         * @brief How many recorded messages mention @p text.
          */
         std::size_t mentioning(std::string_view text) const
         {
@@ -64,5 +67,16 @@ namespace Test
         std::vector<std::string> messages_{};
         std::shared_ptr<spdlog::sinks::callback_sink_mt> sink_;
         spdlog::level::level_enum previousLevel_;
+    };
+
+    /**
+     * @brief Records the messages logged as errors while it lives.
+     */
+    class ErrorLogCapture : public LogCapture
+    {
+      public:
+        ErrorLogCapture()
+            : LogCapture{spdlog::level::err}
+        {}
     };
 }
