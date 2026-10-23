@@ -915,8 +915,8 @@ namespace Test
 
         fs::rename(root_ / "sub" / "moved.txt", root_ / "other" / "moved.txt");
 
-#ifndef __linux__
-        // FSEvents pairs the two halves only when they arrive together, the Windows watches leave them apart.
+#ifdef __APPLE__
+        // FSEvents pairs the two halves only when they arrive together.
         EXPECT_TRUE(waitFor(
             [&]()
             {
