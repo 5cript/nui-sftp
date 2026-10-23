@@ -234,6 +234,12 @@ namespace FileTracking
             auto moved = change;
             moved.directory =
                 (renamed / change.directory.lexically_normal().lexically_relative(item)).lexically_normal();
+            // A move between two directories of the item names where it came from in full.
+            if (const auto oldFilename = Paths::nativeFromUtf8(change.oldFilename);
+                oldFilename.is_absolute() && isAtOrBelow(item, oldFilename))
+                moved.oldFilename = Paths::nativeToUtf8(
+                    (renamed / oldFilename.lexically_normal().lexically_relative(item)).lexically_normal()
+                );
             std::error_code statusError;
             moved.isDirectory = std::filesystem::is_directory(moved.path(), statusError);
             return moved;

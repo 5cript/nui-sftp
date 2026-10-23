@@ -200,8 +200,13 @@ namespace FileTracking
             bool recursive
         )
         {
+            // A move between two of its directories comes as one move with the absolute old path, where the platform
+            // tells that, not as a deletion and an addition.
+            std::vector<efsw::WatcherOption> options;
+            if (recursive)
+                options.emplace_back(efsw::Options::ReportCrossDirectoryMoves, 1);
             // efsw takes UTF-8, a narrow string is the ANSI code page on Windows.
-            const auto efswId = efswWatcher.addWatch(Paths::nativeToUtf8(directory), &listener, recursive);
+            const auto efswId = efswWatcher.addWatch(Paths::nativeToUtf8(directory), &listener, recursive, options);
             if (efswId < 0)
             {
                 Log::warn(
