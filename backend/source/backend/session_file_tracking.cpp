@@ -286,7 +286,8 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     {
                         return Ids::generateOperationId();
                     },
-                    cardId
+                    cardId,
+                    /*sourceMayVanish=*/true
                 );
                 // The tracker decides anew what goes once the session is back.
                 queue.discardResumeBackup(cardId);
