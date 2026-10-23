@@ -35,7 +35,9 @@ namespace FileTracking
      * reports a rename back and the new content. The removal of the item is held back for the settle time too, a
      * rename of it or the item coming back meanwhile replaces it. A rename onto a path it may not follow, or onto a
      * temporary name (see isTransientFile), is reported as the removal of the item. A directory that is created anew
-     * at the item is watched again. Lives on its strand: every member must be called from it.
+     * at the item is watched again. When a watch lost changes (FileAction::Missed) the item is looked at anew: gone,
+     * its removal is held back like a reported one, else the sink gets the Missed change to compare what is there with
+     * what it knows. Lives on its strand: every member must be called from it.
      */
     class LocalItemWatch
     {

@@ -598,6 +598,58 @@ namespace Test
         ));
     }
 
+    TEST_F(LocalWatchManagerTest, MissedChangesOfTheItemsDirectoryHaveTheItemLookedAtAnew)
+    {
+        auto watched = openRecording(root_ / "notes.txt");
+        ASSERT_TRUE(watched.has_value());
+        settleEarlierEvents();
+
+        watched->handleChange(FileTracking::DirectoryChange{
+            .action = FileTracking::FileAction::Missed,
+            .directory = root_,
+            .filename = {},
+            .oldFilename = {},
+            .isDirectory = true,
+        });
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedCount(FileTracking::FileAction::Missed, root_ / "notes.txt") == 1u;
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_FALSE(reportedRemoval());
+    }
+
+    TEST_F(LocalWatchManagerTest, AnItemFoundGoneWhenItsOwnWatchMissedChangesIsReportedRemovedOnce)
+    {
+        const auto item = root_ / "project";
+        auto watched = openRecording(item);
+        ASSERT_TRUE(watched.has_value());
+        settleEarlierEvents();
+
+        fs::remove_all(item);
+        watched->handleChange(FileTracking::DirectoryChange{
+            .action = FileTracking::FileAction::Missed,
+            .directory = item,
+            .filename = {},
+            .oldFilename = {},
+            .isDirectory = true,
+        });
+
+        EXPECT_TRUE(runUntil(
+            [&]()
+            {
+                return reportedCount(FileTracking::FileAction::Deleted, item) > 0u;
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
+        // Windows reports one of its own, the watched directory turned delete-pending.
+        EXPECT_GE(reportedCount(FileTracking::FileAction::Missed, item), 1u);
+        EXPECT_EQ(reportedCount(FileTracking::FileAction::Deleted, item), 1u);
+    }
+
     TEST_F(LocalWatchManagerTest, ARemovalReportedBeforeARenameOfTheItemIsNotReported)
     {
         auto watched = openRecording(root_ / "notes.txt");

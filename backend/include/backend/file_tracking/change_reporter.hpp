@@ -15,8 +15,8 @@ namespace FileTracking
 
     /**
      * @brief Reports the changes of one watch to its sink. Noise (see filterFileChange) is dropped, content changes of
-     *        files are reported once they settled (see SettledChanges). Lives on its strand, copies share what is held
-     *        back.
+     *        files are reported once they settled (see SettledChanges). A Missed change goes after what is held back
+     *        at and below its directory. Lives on its strand, copies share what is held back.
      */
     class ChangeReporter
     {
