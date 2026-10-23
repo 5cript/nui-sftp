@@ -860,7 +860,11 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         {
             const auto [id, operation] = takeFinished(item.queueIndex);
             deliverSyncScan(id, *operation);
-            completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Completed, id, *operation));
+            // An upload whose source may vanish and was gone ends cancelled, nothing went.
+            const auto reason = operation->state() == SharedData::OperationState::Canceled
+                ? OperationQueue::CompletionReason::Canceled
+                : OperationQueue::CompletionReason::Completed;
+            completeOperation(makeCompletedOperation(reason, id, *operation));
             return true;
         }
         else if (workStatus == Operation::WorkStatus::MoreWork)
