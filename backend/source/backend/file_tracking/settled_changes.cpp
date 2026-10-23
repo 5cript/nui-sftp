@@ -4,11 +4,28 @@
 #include <boost/asio/error.hpp>
 
 #include <algorithm>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 namespace FileTracking
 {
+    namespace
+    {
+        std::optional<SettledChanges::Appearance> appearanceOf(std::filesystem::path const& path)
+        {
+            std::error_code error{};
+            const std::filesystem::directory_entry entry{path, error};
+            const auto size = entry.file_size(error);
+            if (error)
+                return std::nullopt;
+            const auto modified = entry.last_write_time(error);
+            if (error)
+                return std::nullopt;
+            return SettledChanges::Appearance{.size = size, .modified = modified};
+        }
+    }
+
     SettledChanges::SettledChanges(
         boost::asio::strand<boost::asio::any_io_executor> strand,
         ChangeSink send,
@@ -52,6 +69,12 @@ namespace FileTracking
         auto& pending = *found->second;
         pending.change = std::move(change);
         pending.sequence = nextSequence_++;
+        pending.appearance = appearanceOf(key);
+        settle(key, pending);
+    }
+
+    void SettledChanges::settle(std::filesystem::path const& key, Pending& pending)
+    {
         const auto generation = ++pending.generation;
         pending.timer.expires_after(settleTime_);
         pending.timer.async_wait(
@@ -66,6 +89,12 @@ namespace FileTracking
                 // A wait that completed before a later change restarted the timer is not the last one.
                 if (settled == self->pending_.end() || settled->second->generation != generation)
                     return;
+                // Written on without an event.
+                if (auto appearance = appearanceOf(key); appearance != settled->second->appearance)
+                {
+                    settled->second->appearance = std::move(appearance);
+                    return self->settle(key, *settled->second);
+                }
                 const auto settledChange = std::move(settled->second->change);
                 self->pending_.erase(settled);
                 self->send_(settledChange);
