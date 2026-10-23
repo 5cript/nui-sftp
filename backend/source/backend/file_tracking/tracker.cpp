@@ -900,6 +900,21 @@ namespace FileTracking
             changesDone = 0;
         }
 
+        void connectionLost()
+        {
+            auto ended = SharedData::EndedWatches{.reason = SharedData::WatchEndReason::ConnectionLost, .entries = {}};
+            for (auto const& entry : std::views::values(entries))
+                ended.entries.push_back(shownEntryOf(entry));
+            Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
+            stopAll();
+            for (auto const& shown : ended.entries)
+                view->removeEntry(shown.watchId);
+            if (!ended.entries.empty())
+                view->showEnded(ended);
+            showProgress();
+            view->showOrphanedCount(instances->countOrphaned());
+        }
+
         /**
          * @brief Records what the server has after a download or an upload: the local states below @p below, or of
          *        the whole item without it. Transfers carry the modification time along, a symbolic link is asked
@@ -1692,5 +1707,10 @@ namespace FileTracking
     void Tracker::stopAll()
     {
         impl_->stopAll();
+    }
+
+    void Tracker::connectionLost()
+    {
+        impl_->connectionLost();
     }
 }
