@@ -4,6 +4,8 @@
 #include <backend/file_tracking/directory_watcher.hpp>
 #include <backend/file_tracking/event_spelling.hpp>
 #include <backend/file_tracking/settled_changes.hpp>
+#include <utility/checked_symlink_status.hpp>
+#include <utility/error_message.hpp>
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
@@ -160,6 +162,8 @@ namespace FileTracking
 
         void onChange(DirectoryChange const& reported)
         {
+            if (reported.action == FileAction::Missed)
+                return onMissed(reported);
             const auto change = spelledLikeKnown(reported);
             const auto path = change.path();
             const auto oldPath = change.oldPath();
@@ -195,6 +199,70 @@ namespace FileTracking
                 return holdRemoval(change);
             if (isChangeOfItem(item, path, oldPath))
                 reporter.report(change);
+        }
+
+        /**
+         * @brief A watch lost the changes in the directory of @p change, the item is looked at anew. Gone, it was
+         *        removed, and with its tree when its own watch lost them: the deletions of the last entries are what
+         *        got lost. Otherwise the sink compares what is there with what it knows, below the directory or
+         *        of the whole item. While a rename settles that waits for the new name.
+         */
+        void onMissed(DirectoryChange const& change)
+        {
+            const bool belowItem = isAtOrBelow(item, change.path());
+            if (pendingRename)
+            {
+                const auto renamed = pendingRename->change.path();
+                return pendingRename->changesAtNewName.push_back(
+                    belowItem ? movedAlong(change, renamed) : missedAt(renamed)
+                );
+            }
+            const auto status = Utility::checkedSymlinkStatus(item);
+            if (!status)
+            {
+                Log::warn(
+                    "FileTracking: watch {} lost changes and cannot look at '{}': {}",
+                    watchId.value(),
+                    Paths::nativeToUtf8(item),
+                    Utility::errorMessage(status.error())
+                );
+                return;
+            }
+            if (!*status)
+            {
+                if (belowItem)
+                    reporter.report(change);
+                if (!pendingRemoval)
+                    holdRemoval(DirectoryChange{
+                        .action = FileAction::Deleted,
+                        .directory = item.parent_path(),
+                        .filename = Paths::nativeToUtf8(item.filename()),
+                        .oldFilename = {},
+                        .isDirectory = isDirectory,
+                    });
+                return;
+            }
+            // Back or written anew meanwhile.
+            if (pendingRemoval || DiskPlace::of(item).self != place.self)
+                onItemAppeared(DirectoryChange{
+                    .action = FileAction::Added,
+                    .directory = item.parent_path(),
+                    .filename = Paths::nativeToUtf8(item.filename()),
+                    .oldFilename = {},
+                    .isDirectory = std::filesystem::is_directory(**status),
+                });
+            reporter.report(belowItem ? change : missedAt(item));
+        }
+
+        DirectoryChange missedAt(std::filesystem::path const& path) const
+        {
+            return DirectoryChange{
+                .action = FileAction::Missed,
+                .directory = path,
+                .filename = {},
+                .oldFilename = {},
+                .isDirectory = isDirectory,
+            };
         }
 
         /**

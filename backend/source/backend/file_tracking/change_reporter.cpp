@@ -24,6 +24,11 @@ namespace FileTracking
 
     void ChangeReporter::report(DirectoryChange const& change) const
     {
+        if (change.action == FileAction::Missed)
+            return settledChanges_->add(
+                ReportedChange{.action = FileAction::Missed, .path = change.path(), .isDirectory = change.isDirectory},
+                /*isFileContent=*/false
+            );
         const auto filtered = filterFileChange(
             {change.action, change.filename, change.oldFilename}, change.isDirectory, downloadTempSuffix_
         );
