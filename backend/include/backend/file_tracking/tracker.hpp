@@ -142,8 +142,9 @@ namespace FileTracking
         void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer);
 
         /**
-         * @brief Ends every watch without telling the view, for a frontend that is gone. Instances stay for the orphan
-         *        cleanup.
+         * @brief Ends every watch without telling the view, for a frontend that is gone or a session that closes. The
+         *        instances of the copies it downloaded, watched or only opened, end too: they count as orphaned then,
+         *        or go when nothing is left in them. A download on its way is dropped, it opens nothing.
          */
         void stopAll();
 
