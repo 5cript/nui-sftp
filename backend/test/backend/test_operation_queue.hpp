@@ -407,7 +407,7 @@ namespace Test
         EXPECT_EQ(remoteNames(*sftp, "/home/test/uploaded"), (std::set<std::string>{"a.txt", "b.txt"}));
     }
 
-    TEST_F(OperationQueueTests, UploadsWhoseSourceMayVanishCompleteWithoutATransferOnceItIsGone)
+    TEST_F(OperationQueueTests, UploadsWhoseSourceMayVanishEndCanceledWithoutATransferOnceItIsGone)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
@@ -455,8 +455,8 @@ namespace Test
         std::map<std::string, SharedData::OperationCompletionReason> reasons;
         for (auto const& completed : completions())
             reasons.emplace(completed.operationId.value(), completed.reason);
-        EXPECT_EQ(reasons[fileId.value()], SharedData::OperationCompletionReason::Completed);
-        EXPECT_EQ(reasons[directoryId.value()], SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(reasons[fileId.value()], SharedData::OperationCompletionReason::Canceled);
+        EXPECT_EQ(reasons[directoryId.value()], SharedData::OperationCompletionReason::Canceled);
         EXPECT_EQ(reasons[keptId.value()], SharedData::OperationCompletionReason::Failed);
         const auto names = remoteNames(*sftp, "/home/test");
         EXPECT_FALSE(names.contains("vanishing.txt"));
@@ -547,6 +547,9 @@ namespace Test
         ASSERT_EQ(finished.size(), 1u);
         EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
         EXPECT_TRUE(finished.front().failedEntries.empty());
+        // The entry did not go, which its owner hears by index.
+        ASSERT_EQ(finished.front().indexedFailures.size(), 1u);
+        EXPECT_EQ(finished.front().indexedFailures.front().index, 1u);
         EXPECT_EQ(remoteNames(*sftp, "/home/test/gathered"), std::set<std::string>{"kept.txt"});
         EXPECT_EQ(errors.mentioning("vanished.txt"), 0u);
     }

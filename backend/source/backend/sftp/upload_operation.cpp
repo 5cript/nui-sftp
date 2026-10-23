@@ -105,7 +105,8 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             if (options_.sourceMayVanish && sourceIsGone())
             {
                 Log::info("UploadOperation: '{}' is gone, nothing to upload.", options_.localPath.toUtf8());
-                state_ = Completed;
+                // Ends without a transfer, so its owner does not take the destination for uploaded.
+                state_ = Canceled;
                 options_.progressCallback(1, 1, 1, 0);
                 return WorkStatus::Complete;
             }
@@ -943,8 +944,10 @@ void UploadOperation::reportSent() const
 
 void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sftp)
 {
+    // As it was when the source was opened: renamed or deleted since, its path has none.
     std::error_code timeError{};
-    const auto localTime = std::filesystem::last_write_time(localNativePath_, timeError);
+    const auto localTime = sourceBeforeOpening_ ? sourceBeforeOpening_->modified
+                                                : std::filesystem::last_write_time(localNativePath_, timeError);
     if (timeError)
     {
         Log::warn(
