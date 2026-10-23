@@ -116,6 +116,24 @@ namespace Test
                 return {};
             }
 
+            void cancelUpload(Paths::RemotePath const& destination, FileTracking::PartialFile partial) override
+            {
+                cancels.emplace_back(destination.value(), partial);
+            }
+
+            std::expected<void, std::string>
+            discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded) override
+            {
+                queued.push_back({
+                    .kind = "discard",
+                    .source = destination.value(),
+                    .destination = {},
+                    .upload = {},
+                    .onEnded = std::move(onEnded),
+                });
+                return {};
+            }
+
             std::expected<void, std::string> remove(Paths::RemotePath const& path, OnEnded onEnded) override
             {
                 queued.push_back({
@@ -151,6 +169,8 @@ namespace Test
             std::map<std::string, FileTracking::ServerState> server{};
             std::vector<Queued> queued{};
             std::size_t stats{0};
+            /** @brief The uploads the tracker stopped, by destination, in order. */
+            std::vector<std::pair<std::string, FileTracking::PartialFile>> cancels{};
         };
 
         class FakeView : public FileTracking::TrackerView

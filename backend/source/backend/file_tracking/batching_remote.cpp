@@ -5,7 +5,9 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <system_error>
 #include <utility>
 
@@ -26,16 +28,22 @@ namespace FileTracking
         };
 
         /**
-         * @brief Whether @p request may go in a bulk: a regular file, symbolic links and directories keep the single
-         *        upload that handles them, and so does what must not create the directories above it or refreshes.
+         * @brief Whether @p request may go in a bulk: a regular file smaller than @p aloneFromBytes. Symbolic links
+         *        and directories keep the single upload that handles them, and so does what must not create the
+         *        directories above it, refreshes or continues a partial file. A large file goes alone, so it can be
+         *        stopped.
          */
-        bool fitsBulk(UploadRequest const& request)
+        bool fitsBulk(UploadRequest const& request, std::uint64_t aloneFromBytes)
         {
-            if (!request.createMissingDirectories || request.refreshListing)
+            if (!request.createMissingDirectories || request.refreshListing || request.continuesPartialOf)
                 return false;
-            std::error_code error;
-            return std::filesystem::symlink_status(request.source.native(), error).type() ==
-                std::filesystem::file_type::regular;
+            std::error_code statusError;
+            if (std::filesystem::symlink_status(request.source.native(), statusError).type() !=
+                std::filesystem::file_type::regular)
+                return false;
+            std::error_code sizeError;
+            const auto size = std::filesystem::file_size(request.source.native(), sizeError);
+            return !sizeError && size < aloneFromBytes;
         }
 
         /**
@@ -68,7 +76,7 @@ namespace FileTracking
     struct BatchingRemote::Implementation : public std::enable_shared_from_this<BatchingRemote::Implementation>
     {
         std::unique_ptr<BulkTrackerRemote> inner;
-        Timing timing;
+        Limits limits;
         boost::asio::steady_timer timer;
         std::vector<GatheredUpload> uploads{};
         std::vector<GatheredRemoval> removals{};
@@ -77,10 +85,10 @@ namespace FileTracking
         Implementation(
             boost::asio::strand<boost::asio::any_io_executor> strand,
             std::unique_ptr<BulkTrackerRemote> inner,
-            Timing timing
+            Limits limits
         )
             : inner{std::move(inner)}
-            , timing{timing}
+            , limits{limits}
             , timer{std::move(strand)}
         {}
 
@@ -92,7 +100,7 @@ namespace FileTracking
         {
             const auto now = std::chrono::steady_clock::now();
             const auto count = uploads.size() + removals.size();
-            if (count >= timing.maxEntries)
+            if (count >= limits.maxEntries)
             {
                 timer.cancel();
                 boost::asio::post(
@@ -109,7 +117,7 @@ namespace FileTracking
             }
             if (count == 1)
                 batchStart = now;
-            timer.expires_at(std::min(now + timing.quiet, batchStart + timing.longest));
+            timer.expires_at(std::min(now + limits.quiet, batchStart + limits.longest));
             timer.async_wait(
                 [weak = weak_from_this()](boost::system::error_code const& error)
                 {
@@ -134,7 +142,7 @@ namespace FileTracking
             std::vector<GatheredUpload> single;
             for (auto& upload : gathered)
             {
-                if (fitsBulk(upload.request))
+                if (fitsBulk(upload.request, limits.aloneFromBytes))
                 {
                     bulk.push_back(std::move(upload.request));
                     bulkEnds.push_back(std::move(upload.onEnded));
@@ -194,21 +202,40 @@ namespace FileTracking
                 endAll(ends, SharedData::OperationCompletionReason::Failed);
             }
         }
+
+        /**
+         * @brief Takes the gathered upload to @p destination out of the next batch, nothing when none is gathered.
+         */
+        std::optional<GatheredUpload> takeGathered(Paths::RemotePath const& destination)
+        {
+            const auto found = std::ranges::find_if(
+                uploads,
+                [&destination](GatheredUpload const& upload)
+                {
+                    return upload.request.destination == destination;
+                }
+            );
+            if (found == uploads.end())
+                return std::nullopt;
+            auto taken = std::move(*found);
+            uploads.erase(found);
+            return taken;
+        }
     };
 
     BatchingRemote::BatchingRemote(
         boost::asio::strand<boost::asio::any_io_executor> strand,
         std::unique_ptr<BulkTrackerRemote> inner,
-        Timing timing
+        Limits limits
     )
-        : impl_{std::make_shared<Implementation>(std::move(strand), std::move(inner), timing)}
+        : impl_{std::make_shared<Implementation>(std::move(strand), std::move(inner), limits)}
     {}
 
     BatchingRemote::BatchingRemote(
         boost::asio::strand<boost::asio::any_io_executor> strand,
         std::unique_ptr<BulkTrackerRemote> inner
     )
-        : BatchingRemote{std::move(strand), std::move(inner), Timing{}}
+        : BatchingRemote{std::move(strand), std::move(inner), Limits{}}
     {}
 
     BatchingRemote::~BatchingRemote() = default;
@@ -238,6 +265,29 @@ namespace FileTracking
         impl_->uploads.push_back({.request = request, .onEnded = std::move(onEnded)});
         impl_->gathered();
         return {};
+    }
+
+    void BatchingRemote::cancelUpload(Paths::RemotePath const& destination, PartialFile partial)
+    {
+        auto gathered = impl_->takeGathered(destination);
+        if (!gathered)
+            return impl_->inner->cancelUpload(destination, partial);
+        Log::debug("FileTracking: not sending the upload to '{}', it was stopped", destination.value());
+        // Ends after the call, whose caller may still be deciding what follows the stop.
+        boost::asio::post(
+            impl_->timer.get_executor(),
+            [onEnded = std::move(gathered->onEnded)]()
+            {
+                if (onEnded)
+                    onEnded({.reason = SharedData::OperationCompletionReason::Canceled});
+            }
+        );
+    }
+
+    std::expected<void, std::string>
+    BatchingRemote::discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded)
+    {
+        return impl_->inner->discardPartialUpload(destination, std::move(onEnded));
     }
 
     std::expected<void, std::string>

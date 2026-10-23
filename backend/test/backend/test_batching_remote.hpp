@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 extern std::filesystem::path temporaryRoot;
@@ -83,6 +84,18 @@ namespace Test
                 return {};
             }
 
+            void cancelUpload(Paths::RemotePath const& destination, FileTracking::PartialFile partial) override
+            {
+                cancels.emplace_back(destination.value(), partial);
+            }
+
+            std::expected<void, std::string>
+            discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded) override
+            {
+                queued.push_back({.kind = "discard", .paths = {destination.value()}, .onEnded = std::move(onEnded)});
+                return {};
+            }
+
             std::expected<void, std::string>
             rename(Paths::RemotePath const& source, Paths::RemotePath const& destination, OnEnded onEnded) override
             {
@@ -132,6 +145,7 @@ namespace Test
             }
 
             std::vector<Queued> queued{};
+            std::vector<std::pair<std::string, FileTracking::PartialFile>> cancels{};
             bool failQueueing{false};
         };
 
@@ -162,11 +176,11 @@ namespace Test
                 std::filesystem::remove_all(root_);
         }
 
-        void makeRemote(FileTracking::BatchingRemote::Timing timing)
+        void makeRemote(FileTracking::BatchingRemote::Limits limits)
         {
             auto inner = std::make_unique<FakeInner>();
             inner_ = inner.get();
-            remote_ = std::make_unique<FileTracking::BatchingRemote>(strand_, std::move(inner), timing);
+            remote_ = std::make_unique<FileTracking::BatchingRemote>(strand_, std::move(inner), limits);
         }
 
         /**
@@ -411,6 +425,85 @@ namespace Test
         EXPECT_EQ(inner_->queued[1].kind, "stat");
         EXPECT_EQ(inner_->queued[2].kind, "linkStat");
         EXPECT_EQ(inner_->queued[3].kind, "download");
+    }
+
+    TEST_F(BatchingRemoteTest, AGatheredUploadStoppedBeforeItsBatchGoesEndsCanceledAndIsNotSent)
+    {
+        upload("a.txt");
+        upload("b.txt");
+        remote_->cancelUpload(remote("/srv/a.txt"), FileTracking::PartialFile::Kept);
+
+        EXPECT_TRUE(ended_.empty());
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !inner_->queued.empty();
+            }
+        ));
+        EXPECT_EQ(ended_.at("a.txt"), SharedData::OperationCompletionReason::Canceled);
+        EXPECT_TRUE(inner_->of("uploadAll").empty());
+        ASSERT_EQ(inner_->of("upload").size(), 1u);
+        EXPECT_EQ(inner_->of("upload").front()->paths.front(), "/srv/b.txt");
+        EXPECT_TRUE(inner_->cancels.empty());
+    }
+
+    TEST_F(BatchingRemoteTest, AStopOfASentUploadAndADiscardReachTheInnerRemote)
+    {
+        upload("a.txt");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !inner_->queued.empty();
+            }
+        ));
+
+        remote_->cancelUpload(remote("/srv/a.txt"), FileTracking::PartialFile::Discarded);
+        ASSERT_TRUE(remote_->discardPartialUpload(remote("/srv/b.txt"), recordAs("discard")).has_value());
+
+        ASSERT_EQ(inner_->cancels.size(), 1u);
+        EXPECT_EQ(inner_->cancels.front().first, "/srv/a.txt");
+        EXPECT_EQ(inner_->cancels.front().second, FileTracking::PartialFile::Discarded);
+        ASSERT_EQ(inner_->of("discard").size(), 1u);
+        EXPECT_EQ(inner_->of("discard").front()->paths.front(), "/srv/b.txt");
+        inner_->of("discard").front()->onEnded(SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(ended_.at("discard"), SharedData::OperationCompletionReason::Completed);
+        EXPECT_FALSE(ended_.contains("a.txt"));
+    }
+
+    TEST_F(BatchingRemoteTest, LargeFilesAndContinuingUploadsGoOnTheirOwn)
+    {
+        makeRemote(
+            {.quiet = std::chrono::milliseconds{50},
+                .longest = std::chrono::milliseconds{400},
+                .maxEntries = 10,
+                .aloneFromBytes = 8u}
+        );
+        upload("a.txt");
+        upload("b.txt");
+        upload("large-file.txt");
+        ASSERT_TRUE(remote_
+                ->upload(
+                    FileTracking::UploadRequest{
+                        .source = file("c.txt"),
+                        .destination = remote("/srv/renamed.txt"),
+                        .createMissingDirectories = true,
+                        .continuesPartialOf = remote("/srv/c.txt"),
+                    },
+                    recordUploadAs("renamed.txt")
+                )
+                .has_value());
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !inner_->queued.empty();
+            }
+        ));
+        ASSERT_EQ(inner_->of("uploadAll").size(), 1u);
+        EXPECT_EQ(inner_->of("uploadAll").front()->paths, (std::vector<std::string>{"/srv/a.txt", "/srv/b.txt"}));
+        ASSERT_EQ(inner_->of("upload").size(), 2u);
+        EXPECT_EQ(inner_->of("upload")[0]->paths.front(), "/srv/large-file.txt");
+        EXPECT_EQ(inner_->of("upload")[1]->paths.front(), "/srv/renamed.txt");
     }
 
     TEST_F(BatchingRemoteTest, NothingGatheredIsSentOnceTheRemoteIsGone)
