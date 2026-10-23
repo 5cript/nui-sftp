@@ -15,6 +15,7 @@
 #include <deque>
 #include <map>
 #include <ranges>
+#include <set>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -342,6 +343,10 @@ namespace FileTracking
         std::function<SharedData::WatchOptions()> defaultOptions;
 
         std::map<Ids::WatchId, Entry> entries{};
+        /** @brief The instances of downloads on their way, see open(). */
+        std::set<Ids::InstanceId> downloading{};
+        /** @brief The instances of copies opened without a watch, they end with the tracker, see stopAll(). */
+        std::set<Ids::InstanceId> openedCopies{};
         /** @brief The remote paths of watches that are starting, by claim. */
         std::map<std::uint64_t, Paths::RemotePath> claims{};
         std::uint64_t nextClaimId{0};
@@ -605,6 +610,7 @@ namespace FileTracking
                     OpenFailure{Utility::localizedMessage("backend.fileTracking.instanceCreationFailed")}
                 });
             const auto instanceId = Ids::makeInstanceId(instance->instanceId());
+            downloading.insert(instanceId);
             // Canonical like the paths of the changes, which the copy's path is compared with.
             std::error_code canonicalError;
             const auto canonicalDirectory = std::filesystem::weakly_canonical(instance->instanceDir(), canonicalError);
@@ -637,6 +643,7 @@ namespace FileTracking
             if (queued)
                 return;
             Log::error("FileTracking: not downloading '{}': {}", remotePath.value(), queued.error());
+            downloading.erase(instanceId);
             instances->removeInstance(instanceId.value());
             onOpened(std::unexpected{OpenFailure{queued.error()}});
         }
@@ -650,6 +657,9 @@ namespace FileTracking
             OnOpened const& onOpened
         )
         {
+            // Dropped by stopAll() meanwhile, with its instance.
+            if (downloading.erase(copy.instanceId) == 0)
+                return onOpened(std::unexpected{OpenFailure{}});
             if (reason != SharedData::OperationCompletionReason::Completed)
             {
                 Log::warn("FileTracking: the download of '{}' did not complete", remotePath.value());
@@ -657,7 +667,10 @@ namespace FileTracking
                 return onOpened(std::unexpected{OpenFailure{}});
             }
             if (!watch)
+            {
+                openedCopies.insert(copy.instanceId);
                 return onOpened(copy);
+            }
             auto* instance = instances->findInstance(copy.instanceId.value());
             const auto watchId = Ids::generateWatchId();
             auto instanceWatch = instance
@@ -777,8 +790,23 @@ namespace FileTracking
             const auto instanceId = forget(watchId);
             if (!instanceId)
                 return;
-            instances->destroyInstance(instanceId->value());
+            releaseInstance(*instanceId);
             view->showOrphanedCount(instances->countOrphaned());
+        }
+
+        /**
+         * @brief Ends the instance of a copy that is no longer watched or opened: it counts as orphaned then, or goes
+         *        with its directory when nothing is left in it.
+         */
+        void releaseInstance(Ids::InstanceId const& instanceId)
+        {
+            const auto* instance = instances->findInstance(instanceId.value());
+            if (!instance)
+                return;
+            if (InstanceManagerDetail::hasContent(instance->instanceDir()))
+                instances->destroyInstance(instanceId.value());
+            else
+                instances->removeInstance(instanceId.value());
         }
 
         /**
@@ -841,12 +869,22 @@ namespace FileTracking
             );
             if (watched != entries.end())
                 forget(watched->first);
-            return instances->discardContent(instanceId.value(), path.native());
+            auto discarded = instances->discardContent(instanceId.value(), path.native());
+            if (discarded == DiscardOutcome::InstanceDestroyed)
+                openedCopies.erase(instanceId);
+            return discarded;
         }
 
         void stopAll()
         {
+            auto copies = std::exchange(openedCopies, {});
+            copies.merge(std::exchange(downloading, {}));
+            for (auto const& entry : std::views::values(entries))
+                if (const auto* copy = entry.downloadedCopy())
+                    copies.insert(copy->instanceId);
             entries.clear();
+            for (auto const& instanceId : copies)
+                releaseInstance(instanceId);
             claims.clear();
             auto dropped = std::exchange(waitingQuestions, {});
             if (openQuestion)
