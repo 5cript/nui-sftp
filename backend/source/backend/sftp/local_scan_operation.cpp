@@ -1,4 +1,5 @@
 #include <backend/sftp/compared_state_check.hpp>
+#include <backend/sftp/local_file_problem.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
@@ -98,7 +99,11 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
                 Utility::errorMessage(error)
             );
             return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-                {.type = ErrorType::FilesystemError, .extraInfo = Utility::errorMessage(error)}
+                {
+                    .type = ErrorType::FilesystemError,
+                    .extraInfo = Utility::errorMessage(error),
+                    .localProblem = localFileProblemOf(error),
+                }
             );
         };
         std::error_code statusError{};
@@ -241,7 +246,11 @@ LocalScanOperation::listingFailed(
         Utility::errorMessage(errorCode)
     );
     return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-        {.type = ErrorType::FilesystemError, .extraInfo = Utility::errorMessage(errorCode)}
+        {
+            .type = ErrorType::FilesystemError,
+            .extraInfo = Utility::errorMessage(errorCode),
+            .localProblem = localFileProblemOf(errorCode),
+        }
     );
 }
 
