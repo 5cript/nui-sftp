@@ -47,24 +47,36 @@ namespace FileTracking
         void removeEntry(Ids::WatchId const& watchId);
 
         /**
-         * @brief Adds or replaces @p conflict in its watch's list and updates the watch's counts, status and group.
+         * @brief Adds or replaces @p conflict as the newest of its watch and updates the watch's counts, status, group
+         *        and the rows of its page shown.
          */
         void showConflict(SharedData::WatchConflict const& conflict);
 
         /**
-         * @brief Drops the conflict @p conflictId from its watch's list and updates the watch.
+         * @brief Drops the conflicts @p conflictIds and updates each watch they belonged to once.
          */
-        void removeConflict(Ids::ConflictId const& conflictId);
+        void removeConflicts(std::vector<Ids::ConflictId> const& conflictIds);
 
         /**
-         * @brief Adds or replaces @p failure in its watch's list and updates the watch's counts, status and group.
+         * @brief Adds or replaces @p failure as the newest of its watch and updates the watch's counts, status, group
+         *        and the rows of its page shown.
          */
         void showFailure(SharedData::UploadFailure const& failure);
 
         /**
-         * @brief Drops the failure @p failureId from its watch's list and updates the watch.
+         * @brief Drops the failures @p failureIds and updates each watch they belonged to once.
          */
-        void removeFailure(Ids::FailureId const& failureId);
+        void removeFailures(std::vector<Ids::FailureId> const& failureIds);
+
+        /**
+         * @brief Shows page @p page (0-based, clamped to the pages there are) of the Conflicts tab of @p watchId.
+         */
+        void setConflictPage(Ids::WatchId const& watchId, int page);
+
+        /**
+         * @brief Shows page @p page (0-based, clamped to the pages there are) of the Failed tab of @p watchId.
+         */
+        void setFailurePage(Ids::WatchId const& watchId, int page);
 
         /**
          * @brief Updates the progress, the bars, the in-flight rows, the ring and the status of the watch @p progress
@@ -171,7 +183,7 @@ namespace FileTracking
         void setGroupExpanded(OutlinerGroup group, bool expanded);
 
         /**
-         * @brief Selects the watch of the newest conflict and its Conflicts tab.
+         * @brief Selects the watch of the newest conflict and its Conflicts tab on the first page, which shows it.
          * @return Whether there was a conflict to show.
          */
         bool focusNewestConflict();

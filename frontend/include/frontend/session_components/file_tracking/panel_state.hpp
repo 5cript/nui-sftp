@@ -4,6 +4,7 @@
 #include <utility/describe.hpp>
 
 #include <array>
+#include <cstddef>
 #include <variant>
 
 namespace FileTracking
@@ -43,6 +44,11 @@ namespace FileTracking
         DetailTab::Failed,
         DetailTab::Options,
     };
+
+    /**
+     * @brief How many conflicts or failures one page of the Conflicts and Failed tabs shows.
+     */
+    inline constexpr std::size_t problemPageSize = 100u;
 
     /**
      * @brief How Up, Down, Home and End move the selection through the expanded outliner groups.

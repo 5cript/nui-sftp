@@ -19,8 +19,8 @@ namespace FileTracking
 
     /**
      * @brief Talks to the tracker of a session, which lives in the backend as "FileTracker::<sessionId>". Registers
-     *        every event and feeds it to the TrackingStore, syncing once per event; has one method per RPC. Owns no
-     *        panel state. A refusal of a fire-and-forget RPC is only logged.
+     *        every event and feeds it to the TrackingStore, syncing once per burst of events from a task of its own;
+     *        has one method per RPC. Owns no panel state. A refusal of a fire-and-forget RPC is only logged.
      */
     class TrackerClient
     {
@@ -34,7 +34,7 @@ namespace FileTracking
 
         /**
          * @brief Follows the tracker of @p sessionId from now on: deactivates first, registers onEntry, onEntryRemoved,
-         *        onEntriesEnded, onConflict, onConflictRemoved, onFailure, onFailureRemoved, onWatchProgress and
+         *        onEntriesEnded, onConflict, onConflictsRemoved, onFailure, onFailuresRemoved, onWatchProgress and
          *        onOrphanedCopies, then asks for the orphan list.
          */
         void activate(Ids::SessionId sessionId);

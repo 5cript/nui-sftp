@@ -1,6 +1,7 @@
 #include <frontend/session_components/file_tracking/tracker_client.hpp>
 #include <frontend/session_components/file_tracking/tracking_store.hpp>
 #include <shared_data/file_tracking/orphaned_copy.hpp>
+#include <shared_data/file_tracking/removed_problems.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
 #include <shared_data/file_tracking/upload_failure.hpp>
 #include <shared_data/file_tracking/watch_progress.hpp>
@@ -10,6 +11,8 @@
 #include <log/log.hpp>
 
 #include <nui/event_system/event_context.hpp>
+#include <nui/frontend/utility/functions.hpp>
+#include <nui/frontend/val.hpp>
 #include <nui/rpc.hpp>
 
 #include <fmt/format.h>
@@ -32,6 +35,8 @@ namespace FileTracking
         std::function<void(SharedData::EndedWatches const& ended)> onEnded;
         Ids::SessionId sessionId{};
         std::vector<Nui::RpcClient::AutoUnregister> listeners{};
+        /** @brief Set from the first event after a sync until the sync it scheduled ran. */
+        bool syncScheduled{false};
         Utility::LifetimeToken lifetime{};
 
         /**
@@ -40,6 +45,27 @@ namespace FileTracking
         static void syncView()
         {
             Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+
+        /**
+         * @brief Shows what the events since the last sync changed from a task of its own, so a burst of events syncs
+         *        once. Events arriving before that task ran schedule nothing more.
+         */
+        void scheduleSync()
+        {
+            if (syncScheduled)
+                return;
+            syncScheduled = true;
+            Nui::val::global("setTimeout")(
+                Nui::bind(lifetime.guarded(
+                    [this]()
+                    {
+                        syncScheduled = false;
+                        syncView();
+                    }
+                )),
+                Nui::val{0}
+            );
         }
 
         static bool succeeded(Nui::val const& response)
@@ -80,7 +106,7 @@ namespace FileTracking
         }
 
         /**
-         * @brief Registers @p event of the tracker, @p handler gets its payload and the view syncs once after it.
+         * @brief Registers @p event of the tracker, @p handler gets its payload and a sync is scheduled after it.
          */
         template <typename PayloadT, typename HandlerT>
         void listenTo(std::string_view event, HandlerT handler)
@@ -89,10 +115,10 @@ namespace FileTracking
                 Nui::RpcClient::autoRegisterFunction(
                     rpcName(event),
                     lifetime.guarded(
-                        [handler = std::move(handler)](PayloadT const& payload)
+                        [this, handler = std::move(handler)](PayloadT const& payload)
                         {
                             handler(payload);
-                            syncView();
+                            scheduleSync();
                         }
                     )
                 )
@@ -130,11 +156,11 @@ namespace FileTracking
                     store->showConflict(conflict);
                 }
             );
-            listenTo<std::string>(
-                "onConflictRemoved",
-                [this](std::string const& conflictId)
+            listenTo<SharedData::RemovedConflicts>(
+                "onConflictsRemoved",
+                [this](SharedData::RemovedConflicts const& removed)
                 {
-                    store->removeConflict(Ids::makeConflictId(conflictId));
+                    store->removeConflicts(removed.conflictIds);
                 }
             );
             listenTo<SharedData::UploadFailure>(
@@ -144,11 +170,11 @@ namespace FileTracking
                     store->showFailure(failure);
                 }
             );
-            listenTo<std::string>(
-                "onFailureRemoved",
-                [this](std::string const& failureId)
+            listenTo<SharedData::RemovedFailures>(
+                "onFailuresRemoved",
+                [this](SharedData::RemovedFailures const& removed)
                 {
-                    store->removeFailure(Ids::makeFailureId(failureId));
+                    store->removeFailures(removed.failureIds);
                 }
             );
             listenTo<SharedData::WatchProgress>(

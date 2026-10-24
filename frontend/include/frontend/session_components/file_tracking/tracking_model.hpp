@@ -2,6 +2,7 @@
 
 #include <frontend/session_components/file_tracking/file_tracking_texts.hpp>
 #include <frontend/session_components/file_tracking/panel_state.hpp>
+#include <frontend/session_components/file_tracking/problem_list.hpp>
 #include <shared_data/file_tracking/orphaned_copy.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
 #include <shared_data/file_tracking/upload_failure.hpp>
@@ -9,6 +10,7 @@
 #include <shared_data/file_tracking/watch_progress.hpp>
 #include <ids/ids.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -23,6 +25,9 @@ namespace FileTracking
      *        contain @p filter, ASCII letters compared without case.
      */
     bool matchesFilter(std::string_view name, std::string_view filter);
+
+    using ConflictList = ProblemList<Ids::ConflictId, SharedData::WatchConflict>;
+    using FailureList = ProblemList<Ids::FailureId, SharedData::UploadFailure>;
 
     /**
      * @brief Everything the tracker of one session told the panel, and the rules that sort it into the outliner. Pure,
@@ -42,24 +47,27 @@ namespace FileTracking
         void removeEntry(Ids::WatchId const& watchId);
 
         /**
-         * @brief Adds @p conflict or replaces the one with its id. Kept even while its watch is not known yet.
+         * @brief Adds @p conflict or replaces the one with its id, as the newest of its watch. Kept even while its
+         *        watch is not known yet.
          */
         void showConflict(SharedData::WatchConflict const& conflict);
 
         /**
-         * @brief Forgets the conflict @p conflictId, it was answered or dropped.
+         * @brief Forgets the conflicts @p conflictIds, they were answered or dropped. Unknown ids are skipped.
          */
-        void removeConflict(Ids::ConflictId const& conflictId);
+        void removeConflicts(std::vector<Ids::ConflictId> const& conflictIds);
 
         /**
-         * @brief Adds @p failure or replaces the one with its id (a repeated failure keeps its id and counts attempts).
+         * @brief Adds @p failure or replaces the one with its id (a repeated failure keeps its id and counts attempts),
+         *        as the newest of its watch.
          */
         void showFailure(SharedData::UploadFailure const& failure);
 
         /**
-         * @brief Forgets the failure @p failureId, it went through, was retried or dismissed.
+         * @brief Forgets the failures @p failureIds, they went through, were retried or dismissed. Unknown ids are
+         *        skipped.
          */
-        void removeFailure(Ids::FailureId const& failureId);
+        void removeFailures(std::vector<Ids::FailureId> const& failureIds);
 
         /**
          * @brief Replaces the progress of the watch @p progress names.
@@ -102,15 +110,16 @@ namespace FileTracking
         std::optional<Ids::WatchId> watchOfFailure(Ids::FailureId const& failureId) const;
 
         /**
-         * @return The conflicts of @p watchId, newest raisedAt first, ties by the greater conflict id first like
-         *         @ref newestConflict.
+         * @return At most @p count conflicts of @p watchId from rank @p offset on, the last shown first.
          */
-        std::vector<SharedData::WatchConflict> conflictsOf(Ids::WatchId const& watchId) const;
+        std::vector<SharedData::WatchConflict>
+        conflictsOf(Ids::WatchId const& watchId, std::size_t offset, std::size_t count) const;
 
         /**
-         * @return The failures of @p watchId, newest failedAt first, ties by the greater failure id first.
+         * @return At most @p count failures of @p watchId from rank @p offset on, the last shown first.
          */
-        std::vector<SharedData::UploadFailure> failuresOf(Ids::WatchId const& watchId) const;
+        std::vector<SharedData::UploadFailure>
+        failuresOf(Ids::WatchId const& watchId, std::size_t offset, std::size_t count) const;
 
         /**
          * @return The number of conflicts of @p watchId.
@@ -171,15 +180,30 @@ namespace FileTracking
         double ringFractionOf(Ids::WatchId const& watchId) const;
 
         /**
-         * @return The conflict with the latest raisedAt among the known watches, ties by the greater conflict id.
+         * @return The conflict shown last among the known watches, the first of its watch's conflicts.
          */
         std::optional<SharedData::WatchConflict> newestConflict() const;
 
       private:
+        /**
+         * @brief The conflicts or the failures of every watch, the watch of each id, and how many the known watches
+         *        have.
+         */
+        template <typename ListT, typename IdT>
+        struct ProblemsByWatch
+        {
+            std::map<Ids::WatchId, ListT> lists{};
+            std::map<IdT, Ids::WatchId> watches{};
+            /** @brief The problems of the watches entries_ holds. */
+            std::uint64_t knownTotal{0u};
+        };
+
         std::map<Ids::WatchId, SharedData::TrackedEntry> entries_{};
         std::map<Ids::WatchId, SharedData::WatchProgress> progress_{};
-        std::map<Ids::ConflictId, SharedData::WatchConflict> conflicts_{};
-        std::map<Ids::FailureId, SharedData::UploadFailure> failures_{};
+        ProblemsByWatch<ConflictList, Ids::ConflictId> conflicts_{};
+        ProblemsByWatch<FailureList, Ids::FailureId> failures_{};
         std::vector<SharedData::OrphanedCopy> orphans_{};
+        /** @brief Orders every show of a conflict or failure, so the newest of different watches compare. */
+        std::uint64_t sequence_{0u};
     };
 }

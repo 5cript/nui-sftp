@@ -11,6 +11,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <set>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -183,12 +184,14 @@ namespace FileTracking
         }
 
         /**
-         * @brief Updates the rows of @p observed from @p values in their order: an item whose value did not change is
-         *        kept, a changed or new one is made by @p makeItem, all of them when @p rebuild is set.
+         * @brief Updates the rows of @p observed from @p values in their order: an item of @p visible whose value did
+         *        not change is kept, a changed or new one is made by @p makeItem, all of them when @p rebuild is set.
+         *        @p visible then holds the rows shown, by key.
          */
-        template <typename ItemT, typename ValueT, typename KeyOfT, typename MakeItemT>
+        template <typename ItemT, typename ValueT, typename KeyT, typename KeyOfT, typename MakeItemT>
         void syncRows(
             Nui::Observed<std::vector<std::shared_ptr<ItemT>>>& observed,
+            std::map<KeyT, std::shared_ptr<ItemT>>& visible,
             std::vector<ValueT> const& values,
             ValueT ItemT::* valueOfItem,
             KeyOfT keyOf,
@@ -196,24 +199,41 @@ namespace FileTracking
             bool rebuild
         )
         {
-            using KeyT = std::remove_cvref_t<std::invoke_result_t<KeyOfT, ValueT const&>>;
-            std::map<KeyT, std::shared_ptr<ItemT>> known{};
-            if (!rebuild)
-            {
-                for (auto const& item : observed.value())
-                    known.emplace(keyOf((*item).*valueOfItem), item);
-            }
+            std::map<KeyT, std::shared_ptr<ItemT>> shown{};
             std::vector<std::shared_ptr<ItemT>> target{};
             target.reserve(values.size());
             for (auto const& value : values)
             {
-                const auto found = known.find(keyOf(value));
-                if (found != known.end() && sameValue((*found->second).*valueOfItem, value))
-                    target.push_back(found->second);
-                else
-                    target.push_back(std::make_shared<ItemT>(makeItem(value)));
+                auto key = keyOf(value);
+                const auto found = rebuild ? visible.end() : visible.find(key);
+                auto item = found != visible.end() && sameValue((*found->second).*valueOfItem, value)
+                    ? found->second
+                    : std::make_shared<ItemT>(makeItem(value));
+                target.push_back(item);
+                shown.emplace(std::move(key), std::move(item));
             }
+            visible = std::move(shown);
             syncList(observed, target);
+        }
+
+        /**
+         * @return The pages of @p count problems, at least 1.
+         */
+        int pageCountOf(std::uint64_t count)
+        {
+            return static_cast<int>(std::max<std::uint64_t>(1u, (count + problemPageSize - 1u) / problemPageSize));
+        }
+
+        /**
+         * @brief Updates @p pageCount to the pages of @p count problems and keeps @p page within them.
+         * @return The rank of the first problem of @p page.
+         */
+        std::size_t showPages(Nui::Observed<int>& page, Nui::Observed<int>& pageCount, std::uint64_t count)
+        {
+            const auto pages = pageCountOf(count);
+            assignIfChanged(pageCount, pages);
+            assignIfChanged(page, std::clamp(page.value(), 0, pages - 1));
+            return static_cast<std::size_t>(page.value()) * problemPageSize;
         }
 
         std::size_t indexOf(OutlinerGroup group)
@@ -245,6 +265,10 @@ namespace FileTracking
             std::shared_ptr<WatchItem> item{};
             std::optional<OutlinerGroup> group{};
             InFlightRows<std::string> rows{};
+            /** @brief The rows of item->conflicts by id. */
+            std::map<Ids::ConflictId, std::shared_ptr<ConflictItem>> conflictRows{};
+            /** @brief The rows of item->failures by id. */
+            std::map<Ids::FailureId, std::shared_ptr<FailureItem>> failureRows{};
         };
 
         explicit Implementation(FileTrackingTexts texts)
@@ -450,11 +474,19 @@ namespace FileTracking
             showInFlight(watch, *progress, entry.localPath, watchedMoved);
         }
 
-        void showConflicts(WatchItem& item, SharedData::TrackedEntry const& entry, bool watchedMoved)
+        /**
+         * @brief Updates the conflict count, the pages and the rows of the page shown of @p watch.
+         */
+        void showConflicts(WatchRecord& watch, SharedData::TrackedEntry const& entry, bool watchedMoved)
         {
+            auto& item = *watch.item;
+            const auto count = model.conflictCountOf(entry.watchId);
+            assignIfChanged(*item.conflictCount, count);
+            const auto offset = showPages(*item.conflictPage, *item.conflictPageCount, count);
             syncRows(
                 item.conflicts,
-                model.conflictsOf(entry.watchId),
+                watch.conflictRows,
+                model.conflictsOf(entry.watchId, offset, problemPageSize),
                 &ConflictItem::conflict,
                 [](SharedData::WatchConflict const& conflict)
                 {
@@ -470,14 +502,21 @@ namespace FileTracking
                 },
                 watchedMoved
             );
-            assignIfChanged(*item.conflictCount, model.conflictCountOf(entry.watchId));
         }
 
-        void showFailures(WatchItem& item, SharedData::TrackedEntry const& entry, bool watchedMoved)
+        /**
+         * @brief Updates the failure count, the pages and the rows of the page shown of @p watch.
+         */
+        void showFailures(WatchRecord& watch, SharedData::TrackedEntry const& entry, bool watchedMoved)
         {
+            auto& item = *watch.item;
+            const auto count = model.failureCountOf(entry.watchId);
+            assignIfChanged(*item.failureCount, count);
+            const auto offset = showPages(*item.failurePage, *item.failurePageCount, count);
             syncRows(
                 item.failures,
-                model.failuresOf(entry.watchId),
+                watch.failureRows,
+                model.failuresOf(entry.watchId, offset, problemPageSize),
                 &FailureItem::failure,
                 [](SharedData::UploadFailure const& failure)
                 {
@@ -494,7 +533,6 @@ namespace FileTracking
                 },
                 watchedMoved
             );
-            assignIfChanged(*item.failureCount, model.failureCountOf(entry.watchId));
         }
 
         void showSummary(WatchItem& item)
@@ -525,9 +563,9 @@ namespace FileTracking
             if (parts.progress || watchedMoved)
                 showProgress(record, *entry, watchedMoved);
             if (parts.conflicts || watchedMoved)
-                showConflicts(item, *entry, watchedMoved);
+                showConflicts(record, *entry, watchedMoved);
             if (parts.failures || watchedMoved)
-                showFailures(item, *entry, watchedMoved);
+                showFailures(record, *entry, watchedMoved);
             showSummary(item);
 
             const auto group = model.groupOf(watchId);
@@ -598,12 +636,17 @@ namespace FileTracking
         impl_->notifyAttention();
     }
 
-    void TrackingStore::removeConflict(Ids::ConflictId const& conflictId)
+    void TrackingStore::removeConflicts(std::vector<Ids::ConflictId> const& conflictIds)
     {
-        const auto watchId = impl_->model.watchOfConflict(conflictId);
-        impl_->model.removeConflict(conflictId);
-        if (watchId)
-            impl_->refreshWatch(*watchId, {.conflicts = true});
+        std::set<Ids::WatchId> watchIds{};
+        for (auto const& conflictId : conflictIds)
+        {
+            if (auto watchId = impl_->model.watchOfConflict(conflictId))
+                watchIds.insert(std::move(*watchId));
+        }
+        impl_->model.removeConflicts(conflictIds);
+        for (auto const& watchId : watchIds)
+            impl_->refreshWatch(watchId, {.conflicts = true});
         impl_->notifyAttention();
     }
 
@@ -617,13 +660,38 @@ namespace FileTracking
         impl_->notifyAttention();
     }
 
-    void TrackingStore::removeFailure(Ids::FailureId const& failureId)
+    void TrackingStore::removeFailures(std::vector<Ids::FailureId> const& failureIds)
     {
-        const auto watchId = impl_->model.watchOfFailure(failureId);
-        impl_->model.removeFailure(failureId);
-        if (watchId)
-            impl_->refreshWatch(*watchId, {.failures = true});
+        std::set<Ids::WatchId> watchIds{};
+        for (auto const& failureId : failureIds)
+        {
+            if (auto watchId = impl_->model.watchOfFailure(failureId))
+                watchIds.insert(std::move(*watchId));
+        }
+        impl_->model.removeFailures(failureIds);
+        for (auto const& watchId : watchIds)
+            impl_->refreshWatch(watchId, {.failures = true});
         impl_->notifyAttention();
+    }
+
+    void TrackingStore::setConflictPage(Ids::WatchId const& watchId, int page)
+    {
+        const auto watch = impl_->watches.find(watchId);
+        if (watch == impl_->watches.end())
+            return;
+        const auto pages = pageCountOf(impl_->model.conflictCountOf(watchId));
+        assignIfChanged(*watch->second.item->conflictPage, std::clamp(page, 0, pages - 1));
+        impl_->refreshWatch(watchId, {.conflicts = true});
+    }
+
+    void TrackingStore::setFailurePage(Ids::WatchId const& watchId, int page)
+    {
+        const auto watch = impl_->watches.find(watchId);
+        if (watch == impl_->watches.end())
+            return;
+        const auto pages = pageCountOf(impl_->model.failureCountOf(watchId));
+        assignIfChanged(*watch->second.item->failurePage, std::clamp(page, 0, pages - 1));
+        impl_->refreshWatch(watchId, {.failures = true});
     }
 
     void TrackingStore::showWatchProgress(SharedData::WatchProgress const& progress)
@@ -786,6 +854,7 @@ namespace FileTracking
             return false;
         select(newest->watchId);
         setDetailTab(DetailTab::Conflicts);
+        setConflictPage(newest->watchId, 0);
         return true;
     }
 

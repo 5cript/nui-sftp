@@ -153,6 +153,53 @@ namespace FileTracking::Test
         {
             return namesOf(model.members(group, filter));
         }
+
+        inline std::vector<SharedData::WatchConflict>
+        allConflictsOf(TrackingModel const& model, std::string const& watchId)
+        {
+            return model.conflictsOf(watchIdOf(watchId), 0u, model.conflictCountOf(watchIdOf(watchId)));
+        }
+
+        inline std::vector<SharedData::UploadFailure>
+        allFailuresOf(TrackingModel const& model, std::string const& watchId)
+        {
+            return model.failuresOf(watchIdOf(watchId), 0u, model.failureCountOf(watchIdOf(watchId)));
+        }
+
+        inline std::vector<Ids::ConflictId> conflictIdsOf(Names const& names)
+        {
+            std::vector<Ids::ConflictId> conflictIds{};
+            for (auto const& name : names)
+                conflictIds.push_back(Ids::makeConflictId(name));
+            return conflictIds;
+        }
+
+        inline std::vector<Ids::FailureId> failureIdsOf(Names const& names)
+        {
+            std::vector<Ids::FailureId> failureIds{};
+            for (auto const& name : names)
+                failureIds.push_back(Ids::makeFailureId(name));
+            return failureIds;
+        }
+
+        /**
+         * @brief Shows @p count conflicts "<prefix>-0" to "<prefix>-<count - 1>" of @p watchId, in that order.
+         */
+        inline void
+        showConflicts(TrackingModel& model, std::string const& prefix, std::string const& watchId, int count)
+        {
+            for (auto index = 0; index < count; ++index)
+                model.showConflict(conflictOf(fmt::format("{}-{}", prefix, index), watchId, 100u));
+        }
+
+        /**
+         * @brief Shows @p count failures "<prefix>-0" to "<prefix>-<count - 1>" of @p watchId, in that order.
+         */
+        inline void showFailures(TrackingModel& model, std::string const& prefix, std::string const& watchId, int count)
+        {
+            for (auto index = 0; index < count; ++index)
+                model.showFailure(failureOf(fmt::format("{}-{}", prefix, index), watchId, 100u));
+        }
     }
 
     TEST(TrackingModelTests, AnUnknownWatchIsWatchingWithoutText)
@@ -310,11 +357,11 @@ namespace FileTracking::Test
 
         EXPECT_EQ(model.sideTextOf(watchIdOf("watch"), texts), "1 conflict");
 
-        model.removeConflict(Ids::makeConflictId("conflict"));
+        model.removeConflicts({Ids::makeConflictId("conflict")});
 
         EXPECT_EQ(model.sideTextOf(watchIdOf("watch"), texts), "1 failed");
 
-        model.removeFailure(Ids::makeFailureId("failure"));
+        model.removeFailures({Ids::makeFailureId("failure")});
 
         EXPECT_EQ(model.sideTextOf(watchIdOf("watch"), texts), "overlap");
     }
@@ -345,12 +392,12 @@ namespace FileTracking::Test
         model.showEntry(watchEntry("watch", "notes.txt"));
         model.showConflict(conflictOf("conflict", "watch", 100u));
         model.showFailure(failureOf("failure", "watch", 100u));
-        model.removeConflict(Ids::makeConflictId("conflict"));
+        model.removeConflicts({Ids::makeConflictId("conflict")});
 
         EXPECT_EQ(model.groupOf(watchIdOf("watch")), OutlinerGroup::NeedsYou);
         EXPECT_EQ(model.statusOf(watchIdOf("watch")), WatchStatus::Failed);
 
-        model.removeFailure(Ids::makeFailureId("failure"));
+        model.removeFailures({Ids::makeFailureId("failure")});
 
         EXPECT_EQ(model.groupOf(watchIdOf("watch")), OutlinerGroup::Watching);
         EXPECT_EQ(model.statusOf(watchIdOf("watch")), WatchStatus::Watching);
@@ -584,8 +631,8 @@ namespace FileTracking::Test
         EXPECT_EQ(model.progressOf(watchIdOf("removed")), nullptr);
         EXPECT_EQ(model.watchOfConflict(Ids::makeConflictId("removed-conflict")), std::nullopt);
         EXPECT_EQ(model.watchOfFailure(Ids::makeFailureId("removed-failure")), std::nullopt);
-        EXPECT_TRUE(model.conflictsOf(watchIdOf("removed")).empty());
-        EXPECT_TRUE(model.failuresOf(watchIdOf("removed")).empty());
+        EXPECT_TRUE(allConflictsOf(model, "removed").empty());
+        EXPECT_TRUE(allFailuresOf(model, "removed").empty());
         EXPECT_EQ(model.conflictCount(), 1u);
         EXPECT_EQ(model.failureCount(), 1u);
         EXPECT_NE(model.progressOf(watchIdOf("kept")), nullptr);
@@ -611,7 +658,7 @@ namespace FileTracking::Test
         replaced.kind = SharedData::ConflictKind::DeletedOnServer;
         model.showConflict(replaced);
 
-        const auto conflicts = model.conflictsOf(watchIdOf("first"));
+        const auto conflicts = allConflictsOf(model, "first");
         ASSERT_EQ(conflicts.size(), 1u);
         EXPECT_EQ(conflicts.front().raisedAt, 200u);
         EXPECT_EQ(conflicts.front().kind, SharedData::ConflictKind::DeletedOnServer);
@@ -635,7 +682,7 @@ namespace FileTracking::Test
         repeated.reason = SharedData::UploadFailureReason::NoSpaceOnServer;
         model.showFailure(repeated);
 
-        const auto failures = model.failuresOf(watchIdOf("watch"));
+        const auto failures = allFailuresOf(model, "watch");
         ASSERT_EQ(failures.size(), 1u);
         EXPECT_EQ(failures.front().attempts, 3u);
         EXPECT_EQ(failures.front().failedAt, 300u);
@@ -650,8 +697,8 @@ namespace FileTracking::Test
         model.showEntry(watchEntry("watch", "notes.txt"));
         model.showConflict(conflictOf("conflict", "watch", 100u));
         model.showFailure(failureOf("failure", "watch", 100u));
-        model.removeConflict(Ids::makeConflictId("unknown"));
-        model.removeFailure(Ids::makeFailureId("unknown"));
+        model.removeConflicts({Ids::makeConflictId("unknown")});
+        model.removeFailures({Ids::makeFailureId("unknown")});
         model.removeEntry(watchIdOf("unknown"));
 
         EXPECT_EQ(model.conflictCount(), 1u);
@@ -661,7 +708,7 @@ namespace FileTracking::Test
         EXPECT_EQ(model.watchOfFailure(Ids::makeFailureId("unknown")), std::nullopt);
     }
 
-    TEST(TrackingModelTests, TheConflictsOfAWatchStartWithTheNewest)
+    TEST(TrackingModelTests, TheConflictsOfAWatchStartWithTheLastShown)
     {
         using namespace TrackingModelTestDetail;
         TrackingModel model;
@@ -672,24 +719,27 @@ namespace FileTracking::Test
         model.showConflict(conflictOf("third", "watch", 200u));
         model.showConflict(conflictOf("elsewhere", "other", 400u));
 
-        EXPECT_EQ(conflictNamesOf(model.conflictsOf(watchIdOf("watch"))), (Names{"second", "third", "first"}));
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "watch")), (Names{"third", "second", "first"}));
         EXPECT_EQ(model.conflictCountOf(watchIdOf("watch")), 3u);
         EXPECT_EQ(model.conflictCountOf(watchIdOf("other")), 1u);
     }
 
-    TEST(TrackingModelTests, ConflictsRaisedAtTheSameTimeStartWithTheGreaterId)
+    TEST(TrackingModelTests, AConflictShownAgainMovesToTheFront)
     {
         using namespace TrackingModelTestDetail;
         TrackingModel model;
         model.showEntry(watchEntry("watch", "project"));
         model.showConflict(conflictOf("alpha", "watch", 100u));
-        model.showConflict(conflictOf("charlie", "watch", 50u));
         model.showConflict(conflictOf("bravo", "watch", 100u));
+        model.showConflict(conflictOf("charlie", "watch", 100u));
+        model.showConflict(conflictOf("alpha", "watch", 200u));
 
-        EXPECT_EQ(conflictNamesOf(model.conflictsOf(watchIdOf("watch"))), (Names{"bravo", "alpha", "charlie"}));
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "watch")), (Names{"alpha", "charlie", "bravo"}));
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("watch")), 3u);
+        EXPECT_EQ(model.conflictCount(), 3u);
     }
 
-    TEST(TrackingModelTests, TheFailuresOfAWatchStartWithTheNewestTiesByTheGreaterId)
+    TEST(TrackingModelTests, TheFailuresOfAWatchStartWithTheLastShown)
     {
         using namespace TrackingModelTestDetail;
         TrackingModel model;
@@ -699,8 +749,176 @@ namespace FileTracking::Test
         model.showFailure(failureOf("charlie", "watch", 100u));
         model.showFailure(failureOf("delta", "other", 500u));
 
-        EXPECT_EQ(failureNamesOf(model.failuresOf(watchIdOf("watch"))), (Names{"bravo", "charlie", "alpha"}));
+        EXPECT_EQ(failureNamesOf(allFailuresOf(model, "watch")), (Names{"charlie", "bravo", "alpha"}));
         EXPECT_EQ(model.failureCountOf(watchIdOf("watch")), 3u);
+
+        auto repeated = failureOf("alpha", "watch", 600u);
+        repeated.attempts = 2u;
+        model.showFailure(repeated);
+
+        EXPECT_EQ(failureNamesOf(allFailuresOf(model, "watch")), (Names{"alpha", "charlie", "bravo"}));
+        EXPECT_EQ(model.failureCountOf(watchIdOf("watch")), 3u);
+    }
+
+    TEST(TrackingModelTests, PagesAreSlicesOfTheConflictsOfOneWatch)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        model.showEntry(watchEntry("watch", "project"));
+        model.showEntry(watchEntry("other", "other"));
+        showConflicts(model, "conflict", "watch", 250);
+        showConflicts(model, "other", "other", 3);
+
+        const auto first = model.conflictsOf(watchIdOf("watch"), 0u, 100u);
+        ASSERT_EQ(first.size(), 100u);
+        EXPECT_EQ(first.front().conflictId, Ids::makeConflictId("conflict-249"));
+        EXPECT_EQ(first.back().conflictId, Ids::makeConflictId("conflict-150"));
+
+        const auto last = model.conflictsOf(watchIdOf("watch"), 200u, 100u);
+        ASSERT_EQ(last.size(), 50u);
+        EXPECT_EQ(last.front().conflictId, Ids::makeConflictId("conflict-49"));
+        EXPECT_EQ(last.back().conflictId, Ids::makeConflictId("conflict-0"));
+
+        EXPECT_TRUE(model.conflictsOf(watchIdOf("watch"), 250u, 100u).empty());
+        EXPECT_TRUE(model.conflictsOf(watchIdOf("unknown"), 0u, 100u).empty());
+        EXPECT_EQ(conflictNamesOf(model.conflictsOf(watchIdOf("other"), 1u, 100u)), (Names{"other-1", "other-0"}));
+    }
+
+    TEST(TrackingModelTests, PagesAreSlicesOfTheFailuresOfOneWatch)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        model.showEntry(watchEntry("watch", "project"));
+        showFailures(model, "failure", "watch", 120);
+        showFailures(model, "other", "other", 5);
+
+        const auto second = model.failuresOf(watchIdOf("watch"), 100u, 100u);
+        ASSERT_EQ(second.size(), 20u);
+        EXPECT_EQ(second.front().failureId, Ids::makeFailureId("failure-19"));
+        EXPECT_EQ(second.back().failureId, Ids::makeFailureId("failure-0"));
+        EXPECT_EQ(model.failureCountOf(watchIdOf("watch")), 120u);
+        EXPECT_EQ(model.failureCountOf(watchIdOf("other")), 5u);
+        EXPECT_EQ(model.failureCount(), 120u);
+    }
+
+    TEST(TrackingModelTests, RemovingManyConflictsAcrossWatchesUpdatesEveryCount)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        model.showEntry(watchEntry("first", "first"));
+        model.showEntry(watchEntry("second", "second"));
+        showConflicts(model, "first", "first", 4);
+        showConflicts(model, "second", "second", 3);
+        showConflicts(model, "unknown", "unknown", 2);
+
+        model.removeConflicts(conflictIdsOf({"first-1", "second-0", "unknown-0", "first-3", "missing", "first-1"}));
+
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "first")), (Names{"first-2", "first-0"}));
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "second")), (Names{"second-2", "second-1"}));
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("unknown")), 1u);
+        EXPECT_EQ(model.conflictCount(), 4u);
+        EXPECT_EQ(model.watchOfConflict(Ids::makeConflictId("first-1")), std::nullopt);
+        EXPECT_EQ(model.watchOfConflict(Ids::makeConflictId("unknown-0")), std::nullopt);
+        EXPECT_EQ(model.watchOfConflict(Ids::makeConflictId("first-2")), watchIdOf("first"));
+
+        model.removeConflicts(conflictIdsOf({"second-2", "second-1"}));
+
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("second")), 0u);
+        EXPECT_EQ(model.statusOf(watchIdOf("second")), WatchStatus::Watching);
+        EXPECT_EQ(model.conflictCount(), 2u);
+    }
+
+    TEST(TrackingModelTests, RemovingManyFailuresAcrossWatchesUpdatesEveryCount)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        model.showEntry(watchEntry("first", "first"));
+        model.showEntry(watchEntry("second", "second"));
+        showFailures(model, "first", "first", 3);
+        showFailures(model, "second", "second", 2);
+
+        model.removeFailures(failureIdsOf({"first-0", "second-1", "first-2", "missing"}));
+
+        EXPECT_EQ(failureNamesOf(allFailuresOf(model, "first")), (Names{"first-1"}));
+        EXPECT_EQ(failureNamesOf(allFailuresOf(model, "second")), (Names{"second-0"}));
+        EXPECT_EQ(model.failureCount(), 2u);
+        EXPECT_EQ(model.watchOfFailure(Ids::makeFailureId("first-0")), std::nullopt);
+
+        model.removeFailures({});
+
+        EXPECT_EQ(model.failureCount(), 2u);
+    }
+
+    TEST(TrackingModelTests, RemovingAWatchKeepsTheProblemsOfTheOthers)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        model.showEntry(watchEntry("removed", "removed"));
+        model.showEntry(watchEntry("kept", "kept"));
+        showConflicts(model, "removed", "removed", 150);
+        showFailures(model, "removed", "removed", 150);
+        showConflicts(model, "kept", "kept", 2);
+        showFailures(model, "kept", "kept", 3);
+        model.removeEntry(watchIdOf("removed"));
+
+        EXPECT_EQ(model.conflictCount(), 2u);
+        EXPECT_EQ(model.failureCount(), 3u);
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("removed")), 0u);
+        EXPECT_EQ(model.failureCountOf(watchIdOf("removed")), 0u);
+        EXPECT_TRUE(model.conflictsOf(watchIdOf("removed"), 0u, 100u).empty());
+        EXPECT_EQ(model.watchOfConflict(Ids::makeConflictId("removed-7")), std::nullopt);
+        EXPECT_EQ(model.watchOfFailure(Ids::makeFailureId("removed-7")), std::nullopt);
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "kept")), (Names{"kept-1", "kept-0"}));
+        EXPECT_EQ(model.watchOfFailure(Ids::makeFailureId("kept-2")), watchIdOf("kept"));
+
+        model.showConflict(conflictOf("removed-7", "removed", 100u));
+
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("removed")), 1u);
+        EXPECT_EQ(model.conflictCount(), 2u);
+    }
+
+    TEST(TrackingModelTests, TheTotalsFollowWatchesThatArriveAfterTheirProblems)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        showConflicts(model, "late", "late", 3);
+        showFailures(model, "late", "late", 2);
+
+        EXPECT_EQ(model.conflictCount(), 0u);
+        EXPECT_EQ(model.failureCount(), 0u);
+
+        model.showEntry(watchEntry("late", "late"));
+        model.showEntry(watchEntry("late", "late renamed"));
+
+        EXPECT_EQ(model.conflictCount(), 3u);
+        EXPECT_EQ(model.failureCount(), 2u);
+
+        model.removeConflicts(conflictIdsOf({"late-0"}));
+        model.removeEntry(watchIdOf("late"));
+
+        EXPECT_EQ(model.conflictCount(), 0u);
+        EXPECT_EQ(model.failureCount(), 0u);
+    }
+
+    TEST(TrackingModelTests, AConflictMovedToAnotherWatchCountsThere)
+    {
+        using namespace TrackingModelTestDetail;
+        TrackingModel model;
+        model.showEntry(watchEntry("known", "known"));
+        model.showConflict(conflictOf("moving", "known", 100u));
+        model.showConflict(conflictOf("staying", "known", 100u));
+        model.showConflict(conflictOf("moving", "unknown", 200u));
+
+        EXPECT_EQ(model.conflictCount(), 1u);
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("known")), 1u);
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("unknown")), 1u);
+        EXPECT_EQ(model.watchOfConflict(Ids::makeConflictId("moving")), watchIdOf("unknown"));
+
+        model.showConflict(conflictOf("moving", "known", 300u));
+
+        EXPECT_EQ(model.conflictCount(), 2u);
+        EXPECT_EQ(model.conflictCountOf(watchIdOf("unknown")), 0u);
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "known")), (Names{"moving", "staying"}));
     }
 
     TEST(TrackingModelTests, TheTotalsCountEveryKnownWatch)
@@ -720,28 +938,29 @@ namespace FileTracking::Test
         EXPECT_EQ(model.failureCount(), 1u);
     }
 
-    TEST(TrackingModelTests, TheNewestConflictHasTheLatestRaisedAt)
+    TEST(TrackingModelTests, TheNewestConflictIsTheLastShownOfAKnownWatch)
     {
         using namespace TrackingModelTestDetail;
         TrackingModel model;
         model.showEntry(watchEntry("first", "first.txt"));
         model.showEntry(watchEntry("second", "second.txt"));
         model.showConflict(conflictOf("older", "first", 100u));
-        model.showConflict(conflictOf("newest", "second", 300u));
-        model.showConflict(conflictOf("newer", "first", 200u));
+        model.showConflict(conflictOf("newer", "first", 50u));
+        model.showConflict(conflictOf("newest", "second", 10u));
         model.showConflict(conflictOf("unknown", "unknown", 900u));
 
         ASSERT_TRUE(model.newestConflict().has_value());
         EXPECT_EQ(model.newestConflict()->conflictId, Ids::makeConflictId("newest"));
         EXPECT_EQ(model.newestConflict()->watchId, watchIdOf("second"));
 
-        model.removeConflict(Ids::makeConflictId("newest"));
+        model.removeConflicts({Ids::makeConflictId("newest")});
 
         ASSERT_TRUE(model.newestConflict().has_value());
         EXPECT_EQ(model.newestConflict()->conflictId, Ids::makeConflictId("newer"));
+        EXPECT_EQ(conflictNamesOf(allConflictsOf(model, "first")).front(), "newer");
     }
 
-    TEST(TrackingModelTests, NewestConflictTiesGoToTheGreaterId)
+    TEST(TrackingModelTests, AConflictShownAgainBecomesTheNewest)
     {
         using namespace TrackingModelTestDetail;
         TrackingModel model;
@@ -749,10 +968,10 @@ namespace FileTracking::Test
         model.showEntry(watchEntry("second", "second.txt"));
         model.showConflict(conflictOf("bravo", "first", 100u));
         model.showConflict(conflictOf("alpha", "second", 100u));
+        model.showConflict(conflictOf("bravo", "first", 100u));
 
         ASSERT_TRUE(model.newestConflict().has_value());
         EXPECT_EQ(model.newestConflict()->conflictId, Ids::makeConflictId("bravo"));
-        EXPECT_EQ(conflictNamesOf(model.conflictsOf(watchIdOf("first"))).front(), "bravo");
     }
 
     TEST(TrackingModelTests, NoConflictsMeanNoNewestConflict)
@@ -764,7 +983,7 @@ namespace FileTracking::Test
 
         model.showEntry(watchEntry("watch", "notes.txt"));
         model.showConflict(conflictOf("conflict", "watch", 100u));
-        model.removeConflict(Ids::makeConflictId("conflict"));
+        model.removeConflicts({Ids::makeConflictId("conflict")});
 
         EXPECT_FALSE(model.newestConflict().has_value());
     }

@@ -105,12 +105,22 @@ namespace FileTracking
         /** @brief One row per file in flight, laid out by InFlightRows so rows do not shift. */
         Nui::Observed<std::vector<std::shared_ptr<InFlightFileItem>>> inFlight{};
 
-        /** @brief Newest first, as TrackingModel::conflictsOf orders them. */
+        /** @brief The conflicts of the page shown, newest first, as TrackingModel::conflictsOf orders them. */
         Nui::Observed<std::vector<std::shared_ptr<ConflictItem>>> conflicts{};
-        /** @brief Newest first, as TrackingModel::failuresOf orders them. */
+        /** @brief The failures of the page shown, newest first, as TrackingModel::failuresOf orders them. */
         Nui::Observed<std::vector<std::shared_ptr<FailureItem>>> failures{};
+        /** @brief Every conflict of the watch, not only those of the page shown. */
         std::shared_ptr<Nui::Observed<std::uint64_t>> conflictCount{std::make_shared<Nui::Observed<std::uint64_t>>(0u)};
+        /** @brief Every failure of the watch, not only those of the page shown. */
         std::shared_ptr<Nui::Observed<std::uint64_t>> failureCount{std::make_shared<Nui::Observed<std::uint64_t>>(0u)};
+        /** @brief The page of the Conflicts tab shown, 0-based. */
+        std::shared_ptr<Nui::Observed<int>> conflictPage{std::make_shared<Nui::Observed<int>>(0)};
+        /** @brief The pages of the Conflicts tab, at least 1. */
+        std::shared_ptr<Nui::Observed<int>> conflictPageCount{std::make_shared<Nui::Observed<int>>(1)};
+        /** @brief The page of the Failed tab shown, 0-based. */
+        std::shared_ptr<Nui::Observed<int>> failurePage{std::make_shared<Nui::Observed<int>>(0)};
+        /** @brief The pages of the Failed tab, at least 1. */
+        std::shared_ptr<Nui::Observed<int>> failurePageCount{std::make_shared<Nui::Observed<int>>(1)};
     };
 
     /**

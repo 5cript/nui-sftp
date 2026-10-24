@@ -1,9 +1,14 @@
 #include <frontend/session_components/file_tracking/tracking_model.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
+#include <map>
+#include <optional>
 #include <ranges>
 #include <utility>
+#include <vector>
 
 namespace FileTracking
 {
@@ -56,52 +61,109 @@ namespace FileTracking
             return result;
         }
 
-        bool isNewer(SharedData::WatchConflict const& conflict, SharedData::WatchConflict const& other)
+        /**
+         * @return Whether a watch id is one of @p entries.
+         */
+        auto knownIn(std::map<Ids::WatchId, SharedData::TrackedEntry> const& entries)
         {
-            if (conflict.raisedAt != other.raisedAt)
-                return conflict.raisedAt > other.raisedAt;
-            return conflict.conflictId > other.conflictId;
-        }
-
-        bool isNewer(SharedData::UploadFailure const& failure, SharedData::UploadFailure const& other)
-        {
-            if (failure.failedAt != other.failedAt)
-                return failure.failedAt > other.failedAt;
-            return failure.failureId > other.failureId;
-        }
-
-        template <typename MapT>
-        std::vector<typename MapT::mapped_type> newestFirstOf(MapT const& items, Ids::WatchId const& watchId)
-        {
-            std::vector<typename MapT::mapped_type> result;
-            for (auto const& item : items | std::views::values)
+            return [&entries](Ids::WatchId const& watchId)
             {
-                if (item.watchId == watchId)
-                    result.push_back(item);
-            }
-            std::ranges::sort(
-                result,
-                [](auto const& left, auto const& right)
-                {
-                    return isNewer(left, right);
-                }
-            );
-            return result;
+                return entries.contains(watchId);
+            };
         }
 
-        template <typename MapT, typename PredicateT>
-        std::uint64_t countOf(MapT const& items, PredicateT predicate)
+        template <typename ProblemsT>
+        std::uint64_t countOf(ProblemsT const& problems, Ids::WatchId const& watchId)
         {
-            return static_cast<std::uint64_t>(std::ranges::count_if(items | std::views::values, predicate));
+            const auto list = problems.lists.find(watchId);
+            return list == problems.lists.end() ? 0u : static_cast<std::uint64_t>(list->second.size());
         }
 
-        template <typename MapT, typename IdT>
-        std::optional<Ids::WatchId> watchOf(MapT const& items, IdT const& itemId)
+        template <typename ProblemsT, typename IdT>
+        std::optional<Ids::WatchId> watchOf(ProblemsT const& problems, IdT const& problemId)
         {
-            const auto found = items.find(itemId);
-            if (found == items.end())
+            const auto found = problems.watches.find(problemId);
+            if (found == problems.watches.end())
                 return std::nullopt;
-            return found->second.watchId;
+            return found->second;
+        }
+
+        template <typename ProblemsT>
+        auto sliceOf(ProblemsT const& problems, Ids::WatchId const& watchId, std::size_t offset, std::size_t count)
+            -> decltype(problems.lists.begin()->second.slice(offset, count))
+        {
+            const auto list = problems.lists.find(watchId);
+            if (list == problems.lists.end())
+                return {};
+            return list->second.slice(offset, count);
+        }
+
+        /**
+         * @brief Removes @p problemIds (one id or a vector of them) from the list of @p watchId, dropping the list
+         *        once it is empty. The caller keeps the id to watch lookup.
+         */
+        template <typename ProblemsT, typename IdsT>
+        void removeFromWatch(ProblemsT& problems, Ids::WatchId const& watchId, IdsT const& problemIds, bool known)
+        {
+            const auto list = problems.lists.find(watchId);
+            if (list == problems.lists.end())
+                return;
+            const auto removed = static_cast<std::uint64_t>(list->second.remove(problemIds));
+            if (known)
+                problems.knownTotal -= removed;
+            if (list->second.empty())
+                problems.lists.erase(list);
+        }
+
+        template <typename ProblemsT, typename IdT, typename ValueT, typename IsKnownT>
+        void showProblem(
+            ProblemsT& problems,
+            IdT const& problemId,
+            ValueT const& value,
+            std::uint64_t sequence,
+            IsKnownT const& isKnown
+        )
+        {
+            const auto [watch, inserted] = problems.watches.try_emplace(problemId, value.watchId);
+            if (!inserted && watch->second != value.watchId)
+            {
+                removeFromWatch(problems, watch->second, problemId, isKnown(watch->second));
+                watch->second = value.watchId;
+            }
+            if (problems.lists[value.watchId].show(problemId, value, sequence) && isKnown(value.watchId))
+                ++problems.knownTotal;
+        }
+
+        /**
+         * @brief Removes @p problemIds, one pass over the list of each watch they belong to.
+         */
+        template <typename ProblemsT, typename IdT, typename IsKnownT>
+        void removeProblems(ProblemsT& problems, std::vector<IdT> const& problemIds, IsKnownT const& isKnown)
+        {
+            std::map<Ids::WatchId, std::vector<IdT>> byWatch{};
+            for (auto const& problemId : problemIds)
+            {
+                const auto watch = problems.watches.find(problemId);
+                if (watch == problems.watches.end())
+                    continue;
+                byWatch[watch->second].push_back(problemId);
+                problems.watches.erase(watch);
+            }
+            for (auto const& [watchId, ofWatch] : byWatch)
+                removeFromWatch(problems, watchId, ofWatch, isKnown(watchId));
+        }
+
+        template <typename ProblemsT>
+        void dropWatch(ProblemsT& problems, Ids::WatchId const& watchId, bool known)
+        {
+            const auto list = problems.lists.find(watchId);
+            if (list == problems.lists.end())
+                return;
+            for (auto const& problem : list->second)
+                problems.watches.erase(problem.id);
+            if (known)
+                problems.knownTotal -= static_cast<std::uint64_t>(list->second.size());
+            problems.lists.erase(list);
         }
 
         bool isHeldByAnEntry(
@@ -130,40 +192,39 @@ namespace FileTracking
 
     void TrackingModel::showEntry(SharedData::TrackedEntry const& entry)
     {
-        entries_.insert_or_assign(entry.watchId, entry);
+        const auto [shown, inserted] = entries_.insert_or_assign(entry.watchId, entry);
+        if (!inserted)
+            return;
+        conflicts_.knownTotal += countOf(conflicts_, entry.watchId);
+        failures_.knownTotal += countOf(failures_, entry.watchId);
     }
 
     void TrackingModel::removeEntry(Ids::WatchId const& watchId)
     {
-        const auto removed = watchId;
-        const auto ofRemoved = [&removed](auto const& item)
-        {
-            return item.second.watchId == removed;
-        };
-        entries_.erase(removed);
-        progress_.erase(removed);
-        std::erase_if(conflicts_, ofRemoved);
-        std::erase_if(failures_, ofRemoved);
+        const auto known = entries_.erase(watchId) > 0u;
+        progress_.erase(watchId);
+        dropWatch(conflicts_, watchId, known);
+        dropWatch(failures_, watchId, known);
     }
 
     void TrackingModel::showConflict(SharedData::WatchConflict const& conflict)
     {
-        conflicts_.insert_or_assign(conflict.conflictId, conflict);
+        showProblem(conflicts_, conflict.conflictId, conflict, ++sequence_, knownIn(entries_));
     }
 
-    void TrackingModel::removeConflict(Ids::ConflictId const& conflictId)
+    void TrackingModel::removeConflicts(std::vector<Ids::ConflictId> const& conflictIds)
     {
-        conflicts_.erase(conflictId);
+        removeProblems(conflicts_, conflictIds, knownIn(entries_));
     }
 
     void TrackingModel::showFailure(SharedData::UploadFailure const& failure)
     {
-        failures_.insert_or_assign(failure.failureId, failure);
+        showProblem(failures_, failure.failureId, failure, ++sequence_, knownIn(entries_));
     }
 
-    void TrackingModel::removeFailure(Ids::FailureId const& failureId)
+    void TrackingModel::removeFailures(std::vector<Ids::FailureId> const& failureIds)
     {
-        failures_.erase(failureId);
+        removeProblems(failures_, failureIds, knownIn(entries_));
     }
 
     void TrackingModel::showWatchProgress(SharedData::WatchProgress const& progress)
@@ -180,8 +241,8 @@ namespace FileTracking
     {
         entries_.clear();
         progress_.clear();
-        conflicts_.clear();
-        failures_.clear();
+        conflicts_ = {};
+        failures_ = {};
         orphans_.clear();
     }
 
@@ -221,58 +282,36 @@ namespace FileTracking
         return watchOf(failures_, failureId);
     }
 
-    std::vector<SharedData::WatchConflict> TrackingModel::conflictsOf(Ids::WatchId const& watchId) const
+    std::vector<SharedData::WatchConflict>
+    TrackingModel::conflictsOf(Ids::WatchId const& watchId, std::size_t offset, std::size_t count) const
     {
-        return newestFirstOf(conflicts_, watchId);
+        return sliceOf(conflicts_, watchId, offset, count);
     }
 
-    std::vector<SharedData::UploadFailure> TrackingModel::failuresOf(Ids::WatchId const& watchId) const
+    std::vector<SharedData::UploadFailure>
+    TrackingModel::failuresOf(Ids::WatchId const& watchId, std::size_t offset, std::size_t count) const
     {
-        return newestFirstOf(failures_, watchId);
+        return sliceOf(failures_, watchId, offset, count);
     }
 
     std::uint64_t TrackingModel::conflictCountOf(Ids::WatchId const& watchId) const
     {
-        return countOf(
-            conflicts_,
-            [&watchId](SharedData::WatchConflict const& conflict)
-            {
-                return conflict.watchId == watchId;
-            }
-        );
+        return countOf(conflicts_, watchId);
     }
 
     std::uint64_t TrackingModel::failureCountOf(Ids::WatchId const& watchId) const
     {
-        return countOf(
-            failures_,
-            [&watchId](SharedData::UploadFailure const& failure)
-            {
-                return failure.watchId == watchId;
-            }
-        );
+        return countOf(failures_, watchId);
     }
 
     std::uint64_t TrackingModel::conflictCount() const
     {
-        return countOf(
-            conflicts_,
-            [this](SharedData::WatchConflict const& conflict)
-            {
-                return entries_.contains(conflict.watchId);
-            }
-        );
+        return conflicts_.knownTotal;
     }
 
     std::uint64_t TrackingModel::failureCount() const
     {
-        return countOf(
-            failures_,
-            [this](SharedData::UploadFailure const& failure)
-            {
-                return entries_.contains(failure.watchId);
-            }
-        );
+        return failures_.knownTotal;
     }
 
     WatchStatus TrackingModel::statusOf(Ids::WatchId const& watchId) const
@@ -379,12 +418,16 @@ namespace FileTracking
 
     std::optional<SharedData::WatchConflict> TrackingModel::newestConflict() const
     {
-        std::optional<SharedData::WatchConflict> newest;
-        for (auto const& conflict : conflicts_ | std::views::values)
+        ConflictList::ListedProblem const* newest = nullptr;
+        for (auto const& [watchId, list] : conflicts_.lists)
         {
-            if (entries_.contains(conflict.watchId) && (!newest.has_value() || isNewer(conflict, *newest)))
-                newest = conflict;
+            auto const* candidate = list.newest();
+            if (candidate != nullptr && entries_.contains(watchId) &&
+                (newest == nullptr || candidate->sequence > newest->sequence))
+                newest = candidate;
         }
-        return newest;
+        if (newest == nullptr)
+            return std::nullopt;
+        return newest->value;
     }
 }
