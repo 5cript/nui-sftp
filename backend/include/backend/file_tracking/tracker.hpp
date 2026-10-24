@@ -5,7 +5,6 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <ids/ids.hpp>
 #include <paths/paths.hpp>
-#include <shared_data/file_tracking/server_changed_question.hpp>
 #include <shared_data/file_tracking/watch_conflict.hpp>
 #include <shared_data/file_tracking/watch_options.hpp>
 
@@ -159,11 +158,6 @@ namespace FileTracking
          */
         std::expected<DiscardOutcome, std::string>
         discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& path);
-
-        /**
-         * @brief The user's answer to the question @p questionId, see TrackerView::ask().
-         */
-        void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer);
 
         /**
          * @brief The user's answer to the conflict @p conflictId, see TrackerView::showConflict(). ReplaceOnServer

@@ -960,20 +960,6 @@ void Session::registerRpcFileTracker()
             }
         );
 
-    on(name("answer"))
-        .perform(
-            [withTracker](
-                RpcHelper::RpcOnce&& reply, std::string const& questionId, SharedData::ServerChangedAnswer answer
-            )
-            {
-                if (const auto self = withTracker(reply))
-                {
-                    self->tracker_->answer(Ids::makeQuestionId(questionId), answer);
-                    reply({{"success", true}});
-                }
-            }
-        );
-
     // Registers a function that calls @p call on the tracker and answers {success: true}.
     const auto onCall = [this, &name, &withTracker](std::string_view function, auto call)
     {

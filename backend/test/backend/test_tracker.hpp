@@ -1433,7 +1433,6 @@ namespace Test
         ASSERT_EQ(view_->conflicts.size(), 1u);
         tracker_->answerConflict(Ids::generateConflictId(), SharedData::ConflictResolution::ReplaceOnServer);
         tracker_->answerAllConflicts(Ids::generateWatchId(), SharedData::ConflictResolution::ReplaceOnServer);
-        tracker_->answer(Ids::generateQuestionId(), SharedData::ServerChangedAnswer::Replace);
 
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_TRUE(onlyEntry().uploading);

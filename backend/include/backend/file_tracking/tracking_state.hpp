@@ -617,7 +617,7 @@ namespace FileTracking
 
         /**
          * @brief The content of @p path as it is now is being handled, by the upload reading it or by the answer to
-         *        a question about it: the changes that arrived so far need nothing more.
+         *        a conflict about it: the changes that arrived so far need nothing more.
          */
         void changesHandled(Paths::LocalPath const& path)
         {

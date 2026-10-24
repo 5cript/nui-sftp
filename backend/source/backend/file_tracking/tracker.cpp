@@ -2197,15 +2197,6 @@ namespace FileTracking
             return true;
         }
 
-        void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer)
-        {
-            Log::warn(
-                "FileTracking: ignoring the answer {} to question {}, conflicts are answered instead",
-                Utility::enumToString(answer),
-                questionId.value()
-            );
-        }
-
         void answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
         {
             auto listed = conflicts.remove(conflictId);
@@ -2877,11 +2868,6 @@ namespace FileTracking
     Tracker::discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& path)
     {
         return impl_->discard(instanceId, path);
-    }
-
-    void Tracker::answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer)
-    {
-        impl_->answer(questionId, answer);
     }
 
     void Tracker::answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)

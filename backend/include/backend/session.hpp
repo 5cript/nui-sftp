@@ -93,7 +93,8 @@ class Session
      *        open (remote path, size, watch) answers once the copy is there with {instanceId, localPath}, an error to
      *        show or neither, checkUploadAndWatch (local item, remote directory) with {item, destination},
      *        uploadAndWatch (local item, remote destination), stop (watch id), setOption (watch id, option, value),
-     *        discard (instance id, local path) with {instanceDestroyed} and answer (question id, answer). See
+     *        discard (instance id, local path) with {instanceDestroyed}, the answers to conflicts, retrying and
+     *        dismissing failures, removing stopped watches and listing and removing orphaned copies. See
      *        FileTracking::Tracker.
      */
     void registerRpcFileTracker();
