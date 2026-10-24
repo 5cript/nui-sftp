@@ -67,7 +67,8 @@ namespace FileTracking
      * @brief Owns and tracks the TemporaryDirectoryInstance objects of every session.
      *
      * The manager also owns the dead-instance cleanup policy: the retention scan runs once at start (see
-     * scheduleStartupCleanup), the user's Clean Up removes every orphaned directory at once (removeOrphaned).
+     * scheduleStartupCleanup), the user removes orphaned directories all at once (removeOrphaned) or one at a time
+     * (removeOrphanedInstance).
      * Lives on its strand: every member must be called from it.
      */
     class TempDirInstanceManager
@@ -162,7 +163,8 @@ namespace FileTracking
 
         /**
          * @brief Removes the directory of the orphaned instance @p instanceId with everything in it.
-         * @return An error when it is no orphaned instance below the root or cannot be removed.
+         * @return An error when @p instanceId is no plain directory name, names no directory below the root, the
+         *         directory is no orphan (see listOrphaned()) or it cannot be removed.
          */
         std::expected<void, std::string> removeOrphanedInstance(Ids::InstanceId const& instanceId);
 

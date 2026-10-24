@@ -191,6 +191,39 @@ namespace FileTracking
         }
 
         /**
+         * @brief @p name as a directory directly below a root: not empty, no separator, no root, not "." or "..".
+         */
+        std::expected<std::filesystem::path, std::string> plainChildName(std::string const& name)
+        {
+            if (name.empty())
+                return std::unexpected{std::string{"the instance id is empty"}};
+            const auto refused = std::unexpected{std::string{"the instance id is no plain directory name"}};
+            if (name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos ||
+                name.find('\0') != std::string::npos)
+                return refused;
+            const auto path = Paths::nativeFromUtf8(name);
+            if (path.has_root_path() || path != path.filename())
+                return refused;
+            return path;
+        }
+
+        /**
+         * @brief @p directory when it is a directory, not a link to one.
+         */
+        std::expected<std::filesystem::path, std::string> existingDirectory(std::filesystem::path const& directory)
+        {
+            std::error_code kindError;
+            const auto kind = Utility::noFollowKindOf(directory, kindError);
+            if (kindError)
+                return std::unexpected{Utility::errorMessage(kindError)};
+            if (kind == Utility::NoFollowKind::Missing)
+                return std::unexpected{std::string{"it does not exist"}};
+            if (kind != Utility::NoFollowKind::Directory)
+                return std::unexpected{std::string{"it is no directory"}};
+            return directory;
+        }
+
+        /**
          * @brief The names directly in @p instanceDirectory that are its bookkeeping, not its content: the
          *        bookkeeping directory, and the lock and metadata files of a legacy instance.
          */
@@ -545,9 +578,38 @@ namespace FileTracking
 
     std::expected<void, std::string> TempDirInstanceManager::removeOrphanedInstance(Ids::InstanceId const& instanceId)
     {
-        return std::unexpected{
-            fmt::format("Removing the orphaned instance '{}' is not implemented", instanceId.value())
-        };
+        return plainChildName(instanceId.value())
+            .and_then(
+                [this](std::filesystem::path const& name)
+                {
+                    return existingDirectory(tempRootDir_ / name);
+                }
+            )
+            .and_then(
+                [this](std::filesystem::path const& directory) -> std::expected<std::filesystem::path, std::string>
+                {
+                    if (const auto reason = notOrphanedBecause(directory, listInstanceIds()))
+                        return std::unexpected{std::string{*reason}};
+                    return directory;
+                }
+            )
+            .and_then(
+                [&instanceId](std::filesystem::path const& directory) -> std::expected<void, std::string>
+                {
+                    Log::info("Removing the orphaned instance '{}'", instanceId.value());
+                    std::error_code removeError;
+                    Utility::removeAllNoFollow(directory, removeError);
+                    if (removeError)
+                        return std::unexpected{Utility::errorMessage(removeError)};
+                    return {};
+                }
+            )
+            .transform_error(
+                [&instanceId](std::string const& reason)
+                {
+                    return fmt::format("Cannot remove the orphaned instance '{}': {}", instanceId.value(), reason);
+                }
+            );
     }
 
     TemporaryDirectoryInstance*

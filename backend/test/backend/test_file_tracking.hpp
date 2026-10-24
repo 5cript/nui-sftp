@@ -1366,4 +1366,164 @@ namespace Test
         EXPECT_FALSE(fs::exists(fs::symlink_status(directory)));
     }
 
+    // ---- removeOrphanedInstance behaviour ----
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanDeletesOnlyIt)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        const auto id = instance->instanceId();
+        fs::create_directories(directory / "tree");
+        writeFileOfSize(directory / "tree" / "file.txt", 10u);
+        mgr->destroyInstance(id);
+        makeDeadBookkeepingInstanceDir(root_, "other-orphan", std::chrono::system_clock::now() - 1h);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(id));
+
+        ASSERT_TRUE(removed.has_value()) << removed.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(directory)));
+        EXPECT_TRUE(fs::exists(root_ / "other-orphan"));
+        const auto copies = mgr->listOrphaned();
+        ASSERT_EQ(copies.size(), 1u);
+        EXPECT_EQ(copies.front().instanceId.value(), "other-orphan");
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingALegacyLayoutOrphanDeletesIt)
+    {
+        auto mgr = makeManager();
+        makeDeadInstanceDir(root_, "legacy-orphan", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "legacy-orphan" / "doc.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("legacy-orphan"));
+
+        ASSERT_TRUE(removed.has_value()) << removed.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(root_ / "legacy-orphan")));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesALiveInstance)
+    {
+        auto mgr = makeManager();
+        auto* live = mgr->createInstance();
+        ASSERT_NE(live, nullptr);
+        writeFileOfSize(live->instanceDir() / "live.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(live->instanceId()));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find(live->instanceId()), std::string::npos) << removed.error();
+        EXPECT_TRUE(fs::exists(live->instanceDir() / "live.txt"));
+        EXPECT_EQ(mgr->findInstance(live->instanceId()), live);
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesAnInstanceOfAnotherRun)
+    {
+        auto mgr = makeManager();
+        auto otherRun = makeManager();
+        auto* foreign = otherRun->createInstance();
+        ASSERT_NE(foreign, nullptr);
+        writeFileOfSize(foreign->instanceDir() / "foreign.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(foreign->instanceId()));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_TRUE(fs::exists(foreign->instanceDir() / "foreign.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesALockedInstance)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "held-elsewhere", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "held-elsewhere" / "content.txt", 3u);
+        InstanceLock heldLock{bookkeepingPaths(root_ / "held-elsewhere").lock};
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("held-elsewhere"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find("held-elsewhere"), std::string::npos) << removed.error();
+        EXPECT_TRUE(fs::exists(root_ / "held-elsewhere" / "content.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesIdsThatAreNoPlainName)
+    {
+        const auto instancesRoot = root_ / "instances";
+        fs::create_directories(instancesRoot);
+        TempDirInstanceManager mgr{boost::asio::make_strand(ioc_.get_executor()), instancesRoot, 24h};
+        makeDeadBookkeepingInstanceDir(root_, "outside", std::chrono::system_clock::now() - 1h);
+        makeDeadBookkeepingInstanceDir(instancesRoot / "nested", "inner", std::chrono::system_clock::now() - 1h);
+        const std::vector<std::string> ids{
+            "../outside",
+            "nested/inner",
+            "nested\\inner",
+            ".",
+            "..",
+            Paths::nativeToUtf8(root_ / "outside"),
+        };
+
+        for (auto const& id : ids)
+        {
+            const auto removed = mgr.removeOrphanedInstance(Ids::makeInstanceId(id));
+            ASSERT_FALSE(removed.has_value()) << id;
+            EXPECT_NE(removed.error().find("plain"), std::string::npos) << removed.error();
+        }
+
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(root_ / "outside").lock));
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(instancesRoot / "nested" / "inner").lock));
+        EXPECT_TRUE(fs::exists(instancesRoot));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesAnEmptyId)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "orphan", std::chrono::system_clock::now() - 1h);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(""));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find("empty"), std::string::npos) << removed.error();
+        EXPECT_TRUE(fs::exists(root_ / "orphan"));
+        EXPECT_TRUE(fs::exists(root_));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesAMissingInstance)
+    {
+        auto mgr = makeManager();
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("does-not-exist"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find("does-not-exist"), std::string::npos) << removed.error();
+        EXPECT_NE(removed.error().find("does not exist"), std::string::npos) << removed.error();
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesADirectoryWithoutLock)
+    {
+        auto mgr = makeManager();
+        fs::create_directories(root_ / "no-lock-dir");
+        writeFileOfSize(root_ / "no-lock-dir" / "content.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("no-lock-dir"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_TRUE(fs::exists(root_ / "no-lock-dir" / "content.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesALinkToAnOrphan)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "real-orphan", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "real-orphan" / "content.txt", 3u);
+        std::error_code linkError;
+        fs::create_directory_symlink(root_ / "real-orphan", root_ / "linked-orphan", linkError);
+        if (linkError)
+            GTEST_SKIP() << "Cannot create symlinks here: " << linkError.message();
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("linked-orphan"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_TRUE(fs::exists(fs::symlink_status(root_ / "linked-orphan")));
+        EXPECT_TRUE(fs::exists(root_ / "real-orphan" / "content.txt"));
+    }
+
 } // namespace Test
