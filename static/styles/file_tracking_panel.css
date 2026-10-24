@@ -1,132 +1,76 @@
 .file-tracking-panel {
+    container: file-tracking-panel / inline-size;
     width: 100%;
     height: 100%;
+    overflow: hidden;
+    background: var(--background-color);
+    color: var(--color);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+}
+
+.file-tracking-panel-layout {
+    display: grid;
+    grid-template-columns: clamp(180px, 34%, 260px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+}
+
+.file-tracking-panel-outliner {
     display: flex;
     flex-direction: column;
-    overflow: auto;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-header.file-tracking-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    background: linear-gradient(to bottom,
-            color-mix(in srgb, var(--background-color-fields) 6%, var(--darker-background)),
-            var(--darker-background));
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--border-color, #3a3a3a) 65%);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.38);
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
-}
-
-.file-tracking-header-stats {
-    display: flex;
-    gap: 5px;
-    flex: 1;
     min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: var(--darker-background);
+    border-right: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--border-color-fields) 65%);
+
+    &>* {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 }
 
-.file-tracking-stat {
-    display: inline-flex;
+.file-tracking-panel-detail {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+
+    &>* {
+        flex: 1 0 auto;
+        min-width: 0;
+    }
+}
+
+.file-tracking-panel [data-ft-detail="watch"] {
+    display: flex;
+    flex-direction: column;
+
+    &>:last-child {
+        flex: 1 0 auto;
+    }
+}
+
+.file-tracking-panel-placeholder {
+    display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 10px;
-    align-self: stretch;
-    border-radius: 4px;
-    border: 1px solid var(--script-nui-components-button-border-color-regular);
-    font-size: 0.82em;
-    background: var(--script-nui-components-button-color-regular);
-}
-
-.file-tracking-stat-label {
-    color: var(--color-secondary, rgba(255, 255, 255, 0.55));
-    user-select: none;
-}
-
-.file-tracking-stat-value {
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    min-width: 1.5ch;
+    justify-content: center;
+    padding: 16px;
+    color: var(--color-secondary);
     text-align: center;
 }
 
-.file-tracking-stat-orphaned {
-    color: var(--warning-color, #f5a623);
-}
-
-.file-tracking-progress {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    font-size: 0.82em;
-}
-
-.file-tracking-progress-idle {
-    display: none;
-}
-
-.file-tracking-progress-track {
-    position: relative;
-    width: 140px;
-    height: 6px;
-    flex-shrink: 0;
-    border-radius: 3px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--theme-color, #4caf50) 20%, transparent);
-}
-
-.file-tracking-progress-fill {
-    height: 100%;
-    background: var(--theme-color, #4caf50);
-    transition: width 0.2s ease-out;
-}
-
-.file-tracking-progress-track::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    width: 30%;
-    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.35), transparent);
-    animation: file-tracking-progress-sweep 1.2s linear infinite;
-}
-
-@keyframes file-tracking-progress-sweep {
-    from {
-        transform: translateX(-100%);
+@container file-tracking-panel (max-width: 520px) {
+    .file-tracking-panel-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: fit-content(40%) minmax(0, 1fr);
     }
 
-    to {
-        transform: translateX(340%);
-    }
-}
-
-.file-tracking-progress-text {
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-}
-
-.file-tracking-progress-waiting {
-    white-space: nowrap;
-    color: var(--warning-color, #f5a623);
-}
-
-.file-tracking-header-actions {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-shrink: 0;
-}
-
-.file-tracking-panel .script-nui-resizable-table {
-    flex: 1;
-    min-height: 0;
-
-    & th {
-        padding: 3px;
+    .file-tracking-panel-outliner {
+        border-right: none;
+        border-bottom: 1px solid color-mix(in srgb, var(--theme-color) 35%, var(--border-color-fields) 65%);
     }
 }
