@@ -11,6 +11,10 @@
 @import "./licenses.css";
 @import "./notification_log.css";
 @import "./file_tracking_panel.css";
+@import "./file_tracking_outliner.css";
+@import "./file_tracking_detail.css";
+@import "./file_tracking_tabs.css";
+@import "./dock_tab_attention.css";
 @import "./command_history_panel.css";
 @import "./command_snippets_panel.css";
 @import "./code_editor.css";
@@ -50,6 +54,11 @@
 @import "../../../styles/5cript-nui-components/collapsible_section.css";
 @import "../../../styles/5cript-nui-components/checkbox.css";
 @import "../../../styles/5cript-nui-components/toast.css";
+@import "../../../styles/5cript-nui-components/progress_bar.css";
+@import "../../../styles/5cript-nui-components/progress_ring.css";
+@import "../../../styles/5cript-nui-components/badge.css";
+@import "../../../styles/5cript-nui-components/tab_strip.css";
+@import "../../../styles/5cript-nui-components/list_row.css";
 
 *,
 *::before,
@@ -159,6 +168,30 @@
     --script-nui-components-button-color-primary: color-mix(in srgb, var(--theme-color) 22%, black 78%);
     --script-nui-components-button-border-color-primary: color-mix(in srgb, var(--theme-color) 55%, black 45%);
 
+    /* Badge */
+    --script-nui-components-badge-warning-background: var(--script-nui-components-toast-warning, #e0a02e);
+    --script-nui-components-badge-danger-background: var(--script-nui-components-toast-error, #d9534f);
+
+    /* Progress bar and ring */
+    --script-nui-components-progress-bar-theme: var(--theme-color);
+    --script-nui-components-progress-ring-theme: var(--theme-color);
+    --script-nui-components-progress-ring-track: var(--border-color-fields);
+
+    /* Tab strip */
+    --script-nui-components-tab-strip-color: var(--color-secondary);
+    --script-nui-components-tab-strip-color-selected: var(--color);
+    --script-nui-components-tab-strip-accent-color: var(--theme-color);
+    --script-nui-components-tab-strip-hover-background: color-mix(in srgb, var(--color) 6%, transparent);
+    --script-nui-components-tab-strip-border-color: var(--border-color-fields);
+
+    /* List row */
+    --script-nui-components-list-row-color: var(--color);
+    --script-nui-components-list-row-side-color: var(--color-secondary);
+    --script-nui-components-list-row-hover-background: color-mix(in srgb, var(--color) 5%, transparent);
+    --script-nui-components-list-row-selected-background: color-mix(in srgb, var(--theme-color) 22%, var(--brightness-mixin) 78%);
+    --script-nui-components-list-row-selected-color: var(--color);
+    --script-nui-components-list-row-focus-color: var(--theme-color);
+
     --nui-file-grid-color: var(--color);
     --nui-file-grid-background-color: var(--background-color);
     --nui-file-grid-brightness-mixin: var(--brightness-mixin);
@@ -257,6 +290,30 @@
     --sync-progress-color: rgba(56, 142, 60, 0.35);
     --sync-done-color: rgba(56, 142, 60, 0.32);
     --sync-error-color: rgba(198, 40, 40, 0.32);
+
+    /* Badge, progress, tab strip and list row: repeated so the host colors win over light.css */
+    --script-nui-components-badge-warning-background: var(--script-nui-components-toast-warning, #e0a02e);
+    --script-nui-components-badge-danger-background: var(--script-nui-components-toast-error, #d9534f);
+
+    /* Progress bar and ring */
+    --script-nui-components-progress-bar-theme: var(--theme-color);
+    --script-nui-components-progress-ring-theme: var(--theme-color);
+    --script-nui-components-progress-ring-track: var(--border-color-fields);
+
+    /* Tab strip */
+    --script-nui-components-tab-strip-color: var(--color-secondary);
+    --script-nui-components-tab-strip-color-selected: var(--color);
+    --script-nui-components-tab-strip-accent-color: var(--theme-color);
+    --script-nui-components-tab-strip-hover-background: color-mix(in srgb, var(--color) 6%, transparent);
+    --script-nui-components-tab-strip-border-color: var(--border-color-fields);
+
+    /* List row */
+    --script-nui-components-list-row-color: var(--color);
+    --script-nui-components-list-row-side-color: var(--color-secondary);
+    --script-nui-components-list-row-hover-background: color-mix(in srgb, var(--color) 5%, transparent);
+    --script-nui-components-list-row-selected-background: color-mix(in srgb, var(--theme-color) 22%, var(--brightness-mixin) 78%);
+    --script-nui-components-list-row-selected-color: var(--color);
+    --script-nui-components-list-row-focus-color: var(--theme-color);
 }
 
 .login-form>div {
