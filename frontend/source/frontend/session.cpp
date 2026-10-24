@@ -217,6 +217,7 @@ struct Session::Implementation
                 auto* const side = fileExplorerPanel.remoteFileGridSide();
                 if (side == nullptr)
                     return;
+                Nui::val::global("contentPanelManager").call<bool>("activateFileExplorer", sessionLayoutId);
                 const auto parent = path.parent();
                 const auto name = path.filename();
                 if (!parent || !name)

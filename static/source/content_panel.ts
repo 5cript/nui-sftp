@@ -178,6 +178,17 @@ export class ContentPanel {
         }
     }
 
+    /** Brings the first File Explorer tab to the front. Returns false when the panel has none. */
+    activateFileExplorer(): boolean {
+        for (const widget of this.dock.widgets()) {
+            if (widget instanceof FileExplorer) {
+                this.dock.selectWidget(widget);
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Re-applies the translated titles to every tab that has no title of its own. */
     relabel() {
         for (const widget of this.dock.widgets()) {

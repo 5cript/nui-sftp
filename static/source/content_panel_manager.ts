@@ -226,6 +226,9 @@ class ContentPanelManager {
             this.pendingFileTrackingAttention.delete(panelId);
     }
 
+    /** Brings the File Explorer tab of a panel to the front, for Reveal on Server. */
+    activateFileExplorer = (panelId: string): boolean => this.panels.get(panelId)?.activateFileExplorer() ?? false;
+
     renameTerminalById = (panelId: string, channelId: ChannelId, title: string) => {
         const panel = this.panels.get(panelId);
         if (!panel) {
