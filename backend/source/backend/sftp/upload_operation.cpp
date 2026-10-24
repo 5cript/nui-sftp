@@ -1,4 +1,5 @@
 #include <backend/sftp/compared_state_check.hpp>
+#include <backend/sftp/local_file_problem.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <backend/sftp/resume_check.hpp>
 #include <paths/native.hpp>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <future>
 #include <optional>
+#include <string>
 #include <system_error>
 #include <tuple>
 #include <utility>
@@ -32,6 +34,19 @@ namespace
         if (sizeError || timeError)
             return std::nullopt;
         return UploadOperation::SentSource{.size = static_cast<std::uint64_t>(size), .modified = modified};
+    }
+
+    /**
+     * @brief The error of a local file that could not be inspected, opened or read, with what @p cause says about it.
+     *        Without a cause the problem is Other.
+     */
+    Operation::Error localFileError(SharedData::OperationErrorType type, std::error_code const& cause)
+    {
+        return Operation::Error{
+            .type = type,
+            .extraInfo = cause ? std::optional<std::string>{Utility::errorMessage(cause)} : std::nullopt,
+            .localProblem = localFileProblemOf(cause),
+        };
     }
 }
 
@@ -199,7 +214,9 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 if (asyncTransferContext_->hasEnded())
                 {
                     if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
-                        return enterErrorState<WorkStatus>(asyncTransferError(*asyncTransferContext_));
+                        return enterErrorState<WorkStatus>(
+                            readFailure_.value_or(asyncTransferError(*asyncTransferContext_))
+                        );
                     leftToUpload_ = 0;
                     options_.progressCallback(0ull, totalSize_, totalSize(), asyncTransferContext_->bytesPerSecond());
                     state_ = Finalizing;
@@ -273,9 +290,8 @@ UploadOperation::commitFileToBuffer(SecureShell::IFileStream::SignedSizeType byt
     if (!localFile_.good())
     {
         Log::error("UploadOperation write cycle stopped: localFile_.good() == false");
-        std::ignore = enterErrorState({
-            .type = SharedData::OperationErrorType::SourceFileNotGood,
-        });
+        // Ends the transfer, the next work step fails with it. An error state entered here would not reach the owner.
+        readFailure_ = localFileError(ErrorType::SourceFileNotGood, localFile_.lastError());
         return -1;
     }
     return localFile_.gcount();
@@ -320,7 +336,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
             options_.localPath.toUtf8(),
             Utility::errorMessage(readError)
         );
-        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .extraInfo = Utility::errorMessage(readError)});
+        return std::unexpected(localFileError(ErrorType::FileStatFailed, readError));
     }
     const auto targetText = Paths::checkedNativeToUtf8(target);
     if (!targetText)
@@ -414,7 +430,7 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
     if (readCount == 0 && leftToUpload_ > 0)
     {
         Log::error("UploadOperation: The local file ended before its expected size was read.");
-        return enterErrorState<bool>({.type = ErrorType::SourceFileNotGood});
+        return enterErrorState<bool>(localFileError(ErrorType::SourceFileNotGood, localFile_.lastError()));
     }
     leftToUpload_ -= readCount;
 
@@ -639,16 +655,16 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     if (linkStatus.type() == std::filesystem::file_type::not_found)
     {
         Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
-        return std::unexpected(Error{.type = ErrorType::FileNotFound});
+        return std::unexpected(
+            Error{.type = ErrorType::FileNotFound, .localProblem = SharedData::LocalFileProblem::NotFound}
+        );
     }
     if (statusError)
     {
         Log::error(
             "UploadOperation: Cannot inspect '{}': {}", options_.localPath.toUtf8(), Utility::errorMessage(statusError)
         );
-        return std::unexpected(
-            Error{.type = ErrorType::FileStatFailed, .extraInfo = Utility::errorMessage(statusError)}
-        );
+        return std::unexpected(localFileError(ErrorType::FileStatFailed, statusError));
     }
     if (!std::filesystem::is_regular_file(linkStatus) && !std::filesystem::is_symlink(linkStatus))
     {
@@ -667,12 +683,16 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     if (status.type() == std::filesystem::file_type::not_found)
     {
         Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
-        return std::unexpected(Error{.type = ErrorType::FileNotFound});
+        return std::unexpected(
+            Error{.type = ErrorType::FileNotFound, .localProblem = SharedData::LocalFileProblem::NotFound}
+        );
     }
     if (statusError || !std::filesystem::is_regular_file(status))
     {
         Log::error("UploadOperation: Local path '{}' is not a regular file.", options_.localPath.toUtf8());
-        return std::unexpected(Error{.type = ErrorType::NotAFile});
+        return std::unexpected(
+            statusError ? localFileError(ErrorType::NotAFile, statusError) : Error{.type = ErrorType::NotAFile}
+        );
     }
 
     // Taken before the file is opened, so a change while it is read differs from it.
@@ -680,8 +700,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     localFile_.open(localNativePath_);
     if (!localFile_.is_open())
     {
-        Log::error("UploadOperation: Failed to open local file: {}", options_.localPath.toUtf8());
-        return std::unexpected(Error{.type = ErrorType::OpenFailure});
+        Log::error(
+            "UploadOperation: Failed to open local file '{}': {}",
+            options_.localPath.toUtf8(),
+            Utility::errorMessage(localFile_.lastError())
+        );
+        return std::unexpected(localFileError(ErrorType::OpenFailure, localFile_.lastError()));
     }
     localFile_.seekg(0, std::ios::end);
     leftToUpload_ = static_cast<std::size_t>(localFile_.tellg());

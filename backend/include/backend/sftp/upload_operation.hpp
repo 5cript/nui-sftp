@@ -254,6 +254,8 @@ class UploadOperation : public Operation
     /** @brief Lets others rename or delete the file while it uploads, which a std::ifstream refuses on Windows. */
     Utility::SharedInputFileStream localFile_;
     bool isSymlink_{false};
+    /** @brief Why the transfer could not read the local file, the error its next work step fails with. */
+    std::optional<Error> readFailure_{};
     /** @brief The state of the source right before it was opened, nothing when it could not be read. */
     std::optional<SentSource> sourceBeforeOpening_{};
     /** @brief The upload continued a temp file an earlier one left, whose content is not known to be the source's. */
