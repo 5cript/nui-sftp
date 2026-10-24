@@ -139,6 +139,26 @@ target_sources(
         session_components/command_history_panel.cpp
         session_components/command_snippets_panel.cpp
         session_components/file_tracking.cpp
+        session_components/file_tracking/conflicts_tab.cpp
+        session_components/file_tracking/detail_tabs.cpp
+        session_components/file_tracking/dock_tab_attention.cpp
+        session_components/file_tracking/failures_tab.cpp
+        session_components/file_tracking/file_tracking_texts.cpp
+        session_components/file_tracking/item_list_box.cpp
+        session_components/file_tracking/options_tab.cpp
+        session_components/file_tracking/orphan_detail.cpp
+        session_components/file_tracking/orphan_row.cpp
+        session_components/file_tracking/outliner.cpp
+        session_components/file_tracking/status_glyph.cpp
+        session_components/file_tracking/stop_reason_strip.cpp
+        session_components/file_tracking/sync_progress_block.cpp
+        session_components/file_tracking/tracker_client.cpp
+        session_components/file_tracking/tracking_model.cpp
+        session_components/file_tracking/tracking_store.cpp
+        session_components/file_tracking/translated_texts.cpp
+        session_components/file_tracking/watch_detail.cpp
+        session_components/file_tracking/watch_header.cpp
+        session_components/file_tracking/watch_row.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         session_components/local_operation_router.cpp
