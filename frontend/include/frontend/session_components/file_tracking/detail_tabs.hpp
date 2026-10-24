@@ -46,8 +46,8 @@ namespace FileTracking
 
     /**
      * @brief The tabStrip of the registry (data-tab-key=<DetailTab>, aria-label detailTabsLabel) on
-     *        store.detailTabKey(), calling actions.chooseTab, above the panel of the chosen tab. Tabs are the same
-     *        for every watch and the chosen one stays when the selection changes.
+     *        store.detailTabKey(), calling actions.chooseTab, above the panel of the chosen tab. Tabs are the same for
+     *        every watch and the chosen one stays when the selection changes.
      */
     Nui::ElementRenderer
     detailTabs(TrackingStore& store, TrackingActions const& actions, std::shared_ptr<WatchItem> const& item);

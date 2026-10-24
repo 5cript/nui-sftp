@@ -12,7 +12,7 @@ namespace FileTracking
 {
     /**
      * @brief Why a watch stopped: a messageStrip (data-ft-reason=<WatchStopReason>) with item->stopText, mounted always
-     * and hidden while the watch runs. Its actions slot holds Show “Y” (data-ft-action=show-other-watch, text
+     *        and hidden while the watch runs. Its actions slot holds Show “Y” (data-ft-action=show-other-watch, text
      *        showOtherWatch, actions.showWatch) for an Overlap stop that names the other watch, and Open Again
      *        (open-again, actions.openAgain) for any other stopped copy. Stopped originals get no action.
      */

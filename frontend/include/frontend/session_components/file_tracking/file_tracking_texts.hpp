@@ -130,8 +130,9 @@ namespace FileTracking
     std::string stopSideText(FileTrackingTexts const& texts, SharedData::WatchStopReason reason);
 
     /**
-     * @brief The sentence of the stop reason strip for @p stop. Overlap uses @ref
-     * FileTrackingTexts::StopReasons::overlap when movedTo and otherWatchName are set, overlapUnknown otherwise.
+     * @brief The sentence of the stop reason strip for @p stop. Overlap uses
+     *        @ref FileTrackingTexts::StopReasons::overlap when movedTo and otherWatchName are set, overlapUnknown
+     *        otherwise.
      */
     std::string stopReasonText(FileTrackingTexts const& texts, SharedData::WatchStop const& stop);
 
@@ -172,7 +173,7 @@ namespace FileTracking
 
     /**
      * @brief How a file of a watch is shown in its lists: its path below @p watched with '/' separators, or its file
-     * name when @p path is @p watched itself or not below it.
+     *        name when @p path is @p watched itself or not below it.
      */
     std::string pathWithin(Paths::LocalPath const& watched, Paths::LocalPath const& path);
 }

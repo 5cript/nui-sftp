@@ -13,8 +13,8 @@ namespace FileTracking
      * @brief Makes the File Tracking dock tab of a session count and glow. Feeds AttentionState with the steady clock
      *        and forwards only changes, through Nui::val::global("contentPanelManager")
      *        .setFileTrackingAttention(panelId, {conflicts, failed, pulse, conflictsText, failedText}): the counts as
-     *        numbers, pulse true when the glow should play now, and the translated badge titles ("5 conflicts wait",
-     *        "6 uploads failed", empty at 0).
+     *        numbers, pulse true when the glow should play now, and the translated badge titles ("5 conflicts wait", "6
+     *        uploads failed", empty at 0).
      */
     class DockTabAttention
     {

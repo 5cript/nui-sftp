@@ -33,9 +33,9 @@ namespace FileTracking
         ROAR_PIMPL_SPECIAL_FUNCTIONS_NO_MOVE(TrackerClient);
 
         /**
-         * @brief Follows the tracker of @p sessionId from now on: deactivates first, registers onEntry,
-         *        onEntryRemoved, onEntriesEnded, onConflict, onConflictRemoved, onFailure, onFailureRemoved,
-         *        onWatchProgress and onOrphanedCopies, then asks for the orphan list.
+         * @brief Follows the tracker of @p sessionId from now on: deactivates first, registers onEntry, onEntryRemoved,
+         *        onEntriesEnded, onConflict, onConflictRemoved, onFailure, onFailureRemoved, onWatchProgress and
+         *        onOrphanedCopies, then asks for the orphan list.
          */
         void activate(Ids::SessionId sessionId);
 

@@ -14,8 +14,8 @@ namespace FileTracking
      *        store.orphanMembers() with orphanRow. Its headerEnd holds countBadge(store.countOf(group)); Stopped adds a
      *        trash button (data-ft-action=remove-all-stopped, actions.removeAllStopped) and Orphaned one
      *        (data-ft-action=delete-all-orphans, actions.deleteAllOrphanedCopies). A group without members stays
-     * mounted and gets data-hidden. Up, Down, Home and End on the list call actions.moveSelection; folding a group
-     * calls actions.setGroupExpanded; typing calls actions.filter.
+     *        mounted and gets data-hidden. Up, Down, Home and End on the list call actions.moveSelection; folding a
+     *        group calls actions.setGroupExpanded; typing calls actions.filter.
      */
     Nui::ElementRenderer outliner(TrackingStore& store, TrackingActions const& actions);
 }

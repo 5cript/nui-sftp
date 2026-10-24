@@ -26,8 +26,8 @@ namespace FileTracking
     /**
      * @brief The state of the File Tracking panel of one session: the TrackingModel and its projection onto the
      *        observed items the views read, plus the selection, the detail tab, the filter and the folded groups.
-     *        TrackerClient feeds it, the views read it, TrackingActions change it. No setter syncs; the entry point
-     *        (an event handler, an RPC reply) syncs once.
+     *        TrackerClient feeds it, the views read it, TrackingActions change it. No setter syncs; the entry point (an
+     *        event handler, an RPC reply) syncs once.
      */
     class TrackingStore
     {
@@ -82,8 +82,8 @@ namespace FileTracking
         void clear();
 
         /**
-         * @return What the tracker sent, for lookups by the facade (the remote path for Open Again, a copy's name for
-         *         a confirmation).
+         * @return What the tracker sent, for lookups by the facade (the remote path for Open Again, a copy's name for a
+         *         confirmation).
          */
         TrackingModel const& model() const;
 

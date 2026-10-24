@@ -29,8 +29,8 @@ namespace FileTracking
     };
 
     /**
-     * @brief Decides when the dock tab glows and whether a click on it should jump to the newest conflict. Pure,
-     *        tested natively; DockTabAttention feeds it and forwards its results to the tab.
+     * @brief Decides when the dock tab glows and whether a click on it should jump to the newest conflict. Pure, tested
+     *        natively; DockTabAttention feeds it and forwards its results to the tab.
      */
     class AttentionState
     {
@@ -42,8 +42,8 @@ namespace FileTracking
 
         /**
          * @brief Takes the current counts, seen at @p now (any steady clock). More conflicts than before make them
-         *        unseen and pulse, unless the last pulse began less than @ref pulseWindow ago. Failures never pulse.
-         *        No conflicts left clears unseen.
+         *        unseen and pulse, unless the last pulse began less than @ref pulseWindow ago. Failures never pulse. No
+         *        conflicts left clears unseen.
          * @return What the tab shows now, nothing when neither the counts changed nor a pulse is due.
          */
         std::optional<Attention>
