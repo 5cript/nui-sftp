@@ -242,6 +242,10 @@ namespace FileTracking
                 .options = entry.options,
                 .uploading = entry.shownUploading,
                 .downloadedCopy = entry.downloadedCopy() != nullptr,
+                .localPath = entry.localPath,
+                .isDirectory = entry.downloadedCopy() == nullptr && isDirectoryLocally(entry.localPath),
+                .stop = std::nullopt,
+                .instanceId = entry.downloadedCopy() ? std::optional{entry.downloadedCopy()->instanceId} : std::nullopt,
             };
         }
 

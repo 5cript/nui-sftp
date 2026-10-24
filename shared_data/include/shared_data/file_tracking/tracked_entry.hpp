@@ -3,9 +3,11 @@
 #include <ids/ids.hpp>
 #include <shared_data/shared_data.hpp>
 #include <shared_data/file_tracking/watch_options.hpp>
+#include <shared_data/file_tracking/watch_stop.hpp>
 #include <utility/describe.hpp>
 #include <paths/paths.hpp>
 
+#include <optional>
 #include <string>
 
 namespace SharedData
@@ -28,6 +30,17 @@ namespace SharedData
          *        reach the server, the options for those stay off.
          */
         bool downloadedCopy{false};
+        /** @brief The watched local file or directory, for a downloaded copy its file in the instance directory. */
+        Paths::LocalPath localPath{};
+        bool isDirectory{false};
+        /** @brief Set once the watch stopped, the entry stays until it is removed. */
+        std::optional<WatchStop> stop{};
+        /** @brief The instance directory of a downloaded copy. */
+        std::optional<Ids::InstanceId> instanceId{};
     };
-    BOOST_DESCRIBE_STRUCT(TrackedEntry, (), (watchId, name, remotePath, options, uploading, downloadedCopy))
+    BOOST_DESCRIBE_STRUCT(
+        TrackedEntry,
+        (),
+        (watchId, name, remotePath, options, uploading, downloadedCopy, localPath, isDirectory, stop, instanceId)
+    )
 }
