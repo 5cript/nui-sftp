@@ -102,12 +102,13 @@ namespace FileTracking
         std::optional<Ids::WatchId> watchOfFailure(Ids::FailureId const& failureId) const;
 
         /**
-         * @return The conflicts of @p watchId, newest raisedAt first, ties by conflict id.
+         * @return The conflicts of @p watchId, newest raisedAt first, ties by the greater conflict id first like
+         *         @ref newestConflict.
          */
         std::vector<SharedData::WatchConflict> conflictsOf(Ids::WatchId const& watchId) const;
 
         /**
-         * @return The failures of @p watchId, newest failedAt first, ties by failure id.
+         * @return The failures of @p watchId, newest failedAt first, ties by the greater failure id first.
          */
         std::vector<SharedData::UploadFailure> failuresOf(Ids::WatchId const& watchId) const;
 
@@ -122,12 +123,14 @@ namespace FileTracking
         std::uint64_t failureCountOf(Ids::WatchId const& watchId) const;
 
         /**
-         * @return The conflicts of every known watch, for the dock tab.
+         * @return The conflicts of every known watch, for the dock tab. Conflicts of a watch not known yet are left
+         *         out.
          */
         std::uint64_t conflictCount() const;
 
         /**
-         * @return The failures of every known watch, for the dock tab.
+         * @return The failures of every known watch, for the dock tab. Failures of a watch not known yet are left
+         *         out.
          */
         std::uint64_t failureCount() const;
 
