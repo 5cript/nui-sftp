@@ -354,7 +354,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     /*sourceMayVanish=*/true,
                     comparedStateOf(request.expectedDestination),
                     sent->recorder(),
-                    request.continuesPartialOf
+                    request.continuesPartialOf,
+                    // The File Tracking panel lists the failure.
+                    Log::Toast::Skip
                 );
                 // The tracker asks the user about a server copy that changed meanwhile.
                 if (added)
@@ -492,7 +494,8 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     },
                     cardId,
                     /*sourceMayVanish=*/true,
-                    sent->recorder()
+                    sent->recorder(),
+                    Log::Toast::Skip
                 );
                 // The tracker decides anew what goes once the session is back.
                 queue.discardResumeBackup(cardId);

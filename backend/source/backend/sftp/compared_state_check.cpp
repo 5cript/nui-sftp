@@ -177,7 +177,8 @@ namespace ComparedStateCheck
         bool replace,
         std::string const& asideSuffix,
         SharedData::FileType sourceType,
-        std::optional<SharedData::ComparedState> const& compared
+        std::optional<SharedData::ComparedState> const& compared,
+        Log::Toast failureToast
     )
     {
         return requireUnchangedRemoteInStrand(sftp, to, compared)
@@ -187,7 +188,9 @@ namespace ComparedStateCheck
                     const auto moved = sftp.moveIntoPlaceInStrand(from, to, replace, asideSuffix, sourceType);
                     if (!moved)
                     {
-                        Log::error("Failed to move '{}' into place: {}", to.value(), moved.error().message);
+                        Log::error(
+                            failureToast, "Failed to move '{}' into place: {}", to.value(), moved.error().message
+                        );
                         return std::unexpected(Operation::remoteMoveError(moved.error()));
                     }
                     return {};

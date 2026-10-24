@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <log/toast.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
@@ -95,6 +96,11 @@ class UploadOperation : public Operation
          *        becomes this upload's before it is continued, see tryContinue. Unless this upload has one already.
          */
         std::optional<Paths::RemotePath> adoptPartialOf{};
+        /**
+         * @brief Whether the errors this upload logs when it fails are shown as toasts. Skipped for an owner that
+         *        lists the failures itself, see FileTracking::Tracker.
+         */
+        Log::Toast failureToast{Log::Toast::Show};
     };
 
     SecureShell::ProcessingStrand* strand() const override;

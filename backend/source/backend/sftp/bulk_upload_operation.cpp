@@ -21,6 +21,7 @@ namespace
             .concurrency = options.concurrency,
             .futureTimeout = options.individualOptions.futureTimeout,
             .progressEmitInterval = options.progressEmitInterval,
+            .failureToast = options.individualOptions.failureToast,
         };
     }
 }
@@ -119,7 +120,11 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemot
     const auto result = sftp.createDirectoryIfItDoesntExistInStrand(path, determinePerms(entry));
     if (!result.has_value())
     {
-        Log::error("BulkUploadOperation: Failed to create remote sftp directory: {}.", result.error().message);
+        Log::error(
+            individualOptions_.failureToast,
+            "BulkUploadOperation: Failed to create remote sftp directory: {}.",
+            result.error().message
+        );
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,

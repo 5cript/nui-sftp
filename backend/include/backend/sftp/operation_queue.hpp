@@ -5,6 +5,7 @@
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/remote_delete_guard.hpp>
 #include <backend/sync/sync_session.hpp>
+#include <log/toast.hpp>
 #include <persistence/state/state.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/rpc.hpp>
@@ -147,6 +148,8 @@ class OperationQueue
      * @param adoptPartialOf The destination of a cancelled upload of the file under its old name, whose temporary
      *        file this one continues, see UploadOperation::UploadOperationOptions::adoptPartialOf. A directory
      *        ignores it.
+     * @param failureToast Whether the errors logged when the upload is refused or fails are shown as toasts, see
+     *        UploadOperation::UploadOperationOptions::failureToast.
      */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -161,7 +164,8 @@ class OperationQueue
         bool sourceMayVanish = false,
         std::optional<SharedData::ComparedState> comparedDestination = std::nullopt,
         UploadOperation::OnSent onSent = {},
-        std::optional<Paths::RemotePath> adoptPartialOf = std::nullopt
+        std::optional<Paths::RemotePath> adoptPartialOf = std::nullopt,
+        Log::Toast failureToast = Log::Toast::Show
     );
 
     /**
@@ -260,6 +264,8 @@ class OperationQueue
      * @brief Upload analogue of @ref addBulkDownloadOperation.
      * @param sourceMayVanish Each entry may be gone by the time it is uploaded, see addUploadOperation.
      * @param onSent Hears of each regular file sent unchanged, see addUploadOperation.
+     * @param failureToast Whether the errors logged when an entry is refused or fails are shown as toasts, see
+     *        addUploadOperation.
      */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -267,7 +273,8 @@ class OperationQueue
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
         Ids::OperationId const& bulkCardId,
         bool sourceMayVanish = false,
-        UploadOperation::OnSent const& onSent = {}
+        UploadOperation::OnSent const& onSent = {},
+        Log::Toast failureToast = Log::Toast::Show
     );
 
     /**
@@ -432,6 +439,11 @@ class OperationQueue
     auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId) -> BulkProgressCallback;
 
     /**
+     * @brief Remembers whether the failure of the queued operation @p operationId is logged with a toast.
+     */
+    void rememberFailureToast(Ids::OperationId const& operationId, Log::Toast failureToast);
+
+    /**
      * @brief Sends the delete progress of @p operationId (current item, items handled, items in all) to the frontend.
      */
     auto makeDeleteProgressCallback(Ids::OperationId operationId)
@@ -524,6 +536,8 @@ class OperationQueue
     std::unordered_map<Ids::OperationId, ProgressObserver, Ids::IdHash> progressObservers_{};
     /** @brief See leaveChangedDestinationsToOwner(). */
     std::unordered_set<Ids::OperationId, Ids::IdHash> changedDestinationsLeftToOwner_{};
+    /** @brief The operations whose failure is logged without a toast, see rememberFailureToast(). */
+    std::unordered_set<Ids::OperationId, Ids::IdHash> failuresWithoutToast_{};
     // Transfer slots handed out per queue tick.
     int parallelism_{1};
     // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.

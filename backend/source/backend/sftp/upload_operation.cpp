@@ -94,7 +94,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
-        Log::error("UploadOperation: work umbrella timed out.");
+        Log::error(options_.failureToast, "UploadOperation: work umbrella timed out.");
         return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
     }
     return fut.get();
@@ -134,6 +134,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 {
                     Log::log(
                         failureLevelOf(prepareResult.error()),
+                        options_.failureToast,
                         "UploadOperation: Failed to prepare operation: {}",
                         prepareResult.error().toString()
                     );
@@ -151,7 +152,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 const auto result = handleSymlinkInStrand(*sftp);
                 if (!result.has_value())
                 {
-                    Log::error("UploadOperation: Failed to handle symlink: {}", result.error().toString());
+                    Log::error(
+                        options_.failureToast,
+                        "UploadOperation: Failed to handle symlink: {}",
+                        result.error().toString()
+                    );
                     return enterErrorState<WorkStatus>(result.error());
                 }
                 Log::info("UploadOperation: Symlink handled, no file to upload.");
@@ -165,7 +170,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 auto stream = fileStream_.lock();
                 if (!stream)
                 {
-                    Log::error("UploadOperation: File stream expired.");
+                    Log::error(options_.failureToast, "UploadOperation: File stream expired.");
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
                 const auto contextResult = stream->writeAsyncInStrand(
@@ -179,7 +184,11 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 );
                 if (!contextResult.has_value())
                 {
-                    Log::error("UploadOperation: Failed to start async read: {}", contextResult.error().toString());
+                    Log::error(
+                        options_.failureToast,
+                        "UploadOperation: Failed to start async read: {}",
+                        contextResult.error().toString()
+                    );
                     return enterErrorState<WorkStatus>(
                         {.type = ErrorType::SftpError, .sftpError = contextResult.error()}
                     );
@@ -195,7 +204,9 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 const auto result = writeOnceInStrand();
                 if (!result.has_value())
                 {
-                    Log::error("UploadOperation: Failed to write file: {}", result.error().toString());
+                    Log::error(
+                        options_.failureToast, "UploadOperation: Failed to write file: {}", result.error().toString()
+                    );
                     return enterErrorState<WorkStatus>(result.error());
                 }
                 if (result.value())
@@ -243,6 +254,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             {
                 Log::log(
                     failureLevelOf(finalizeResult.error()),
+                    options_.failureToast,
                     "UploadOperation: Failed to finalize operation: {}",
                     finalizeResult.error().toString()
                 );
@@ -277,7 +289,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
         }
     }
-    Log::error("UploadOperation: Unknown operation state: {}", static_cast<int>(state_));
+    Log::error(options_.failureToast, "UploadOperation: Unknown operation state: {}", static_cast<int>(state_));
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
@@ -289,7 +301,7 @@ UploadOperation::commitFileToBuffer(SecureShell::IFileStream::SignedSizeType byt
     );
     if (!localFile_.good())
     {
-        Log::error("UploadOperation write cycle stopped: localFile_.good() == false");
+        Log::error(options_.failureToast, "UploadOperation write cycle stopped: localFile_.good() == false");
         // Ends the transfer, the next work step fails with it. An error state entered here would not reach the owner.
         readFailure_ = localFileError(ErrorType::SourceFileNotGood, localFile_.lastError());
         return -1;
@@ -313,7 +325,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlink()
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
-        Log::error("UploadOperation: handleSymlink umbrella timed out.");
+        Log::error(options_.failureToast, "UploadOperation: handleSymlink umbrella timed out.");
         return std::unexpected(Error{.type = ErrorType::FutureTimeout});
     }
     return fut.get();
@@ -332,6 +344,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
     if (readError)
     {
         Log::error(
+            options_.failureToast,
             "UploadOperation: Cannot read the symlink '{}': {}.",
             options_.localPath.toUtf8(),
             Utility::errorMessage(readError)
@@ -341,7 +354,11 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
     const auto targetText = Paths::checkedNativeToUtf8(target);
     if (!targetText)
     {
-        Log::error("UploadOperation: The symlink '{}' points to a name that is not UTF-8.", options_.localPath.toUtf8());
+        Log::error(
+            options_.failureToast,
+            "UploadOperation: The symlink '{}' points to a name that is not UTF-8.",
+            options_.localPath.toUtf8()
+        );
         return std::unexpected(Error{.type = ErrorType::InvalidName, .extraInfo = targetText.error().toString()});
     }
 
@@ -358,7 +375,10 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
     if (!result.has_value())
     {
         Log::error(
-            "UploadOperation: Failed to create symlink at '{}': {}.", tempPath_.value(), result.error().message
+            options_.failureToast,
+            "UploadOperation: Failed to create symlink at '{}': {}.",
+            tempPath_.value(),
+            result.error().message
         );
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
     }
@@ -370,7 +390,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
         options_.mayOverwrite,
         Persistence::asideFileSuffix(options_.tempFileSuffix),
         SharedData::FileType::Symlink,
-        options_.comparedDestination
+        options_.comparedDestination,
+        options_.failureToast
     );
     if (!moved.has_value())
     {
@@ -393,7 +414,7 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnce()
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
-        Log::error("UploadOperation: writeOnce umbrella timed out.");
+        Log::error(options_.failureToast, "UploadOperation: writeOnce umbrella timed out.");
         return enterErrorState<bool>({.type = ErrorType::FutureTimeout});
     }
     return fut.get();
@@ -403,20 +424,20 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
 {
     if (state_ < OperationState::Prepared)
     {
-        Log::error("UploadOperation: Operation not prepared.");
+        Log::error(options_.failureToast, "UploadOperation: Operation not prepared.");
         return enterErrorState<bool>({.type = ErrorType::OperationNotPrepared});
     }
 
     if (!localFile_.is_open())
     {
-        Log::error("UploadOperation: File is not open.");
+        Log::error(options_.failureToast, "UploadOperation: File is not open.");
         return enterErrorState<bool>({.type = ErrorType::OpenFailure});
     }
 
     auto stream = fileStream_.lock();
     if (!stream)
     {
-        Log::error("UploadOperation: File stream expired.");
+        Log::error(options_.failureToast, "UploadOperation: File stream expired.");
         return enterErrorState<bool>({.type = ErrorType::FileStreamExpired});
     }
 
@@ -424,12 +445,12 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
     const auto readCount = static_cast<std::size_t>(localFile_.gcount());
     if (readCount > leftToUpload_)
     {
-        Log::error("UploadOperation: Read more data than expected.");
+        Log::error(options_.failureToast, "UploadOperation: Read more data than expected.");
         return enterErrorState<bool>({.type = ErrorType::ImplementationError});
     }
     if (readCount == 0 && leftToUpload_ > 0)
     {
-        Log::error("UploadOperation: The local file ended before its expected size was read.");
+        Log::error(options_.failureToast, "UploadOperation: The local file ended before its expected size was read.");
         return enterErrorState<bool>(localFileError(ErrorType::SourceFileNotGood, localFile_.lastError()));
     }
     leftToUpload_ -= readCount;
@@ -437,7 +458,9 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
     const auto result = stream->writeInStrand(std::string_view{buffer_.data(), readCount});
     if (!result.has_value())
     {
-        Log::error("UploadOperation: Failed to write to remote file: {}", result.error().message);
+        Log::error(
+            options_.failureToast, "UploadOperation: Failed to write to remote file: {}", result.error().message
+        );
         return enterErrorState<bool>({.type = ErrorType::SftpError, .sftpError = result.error()});
     }
 
@@ -454,7 +477,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         const auto err = result.error();
         if (err.sftpError != SSH_FX_NO_SUCH_FILE)
         {
-            Log::error("Failed to stat remote sftp file for continue: {}", err.message);
+            Log::error(options_.failureToast, "Failed to stat remote sftp file for continue: {}", err.message);
             return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = err});
         }
         // else ok — target does not yet exist.
@@ -506,7 +529,11 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
             const auto openResult = sftp.openFileInStrand(tempPath_, SecureShell::SftpSession::OpenType::Write, perms);
             if (!openResult.has_value())
             {
-                Log::error("Failed to open remote sftp file for continue: {}", openResult.error().message);
+                Log::error(
+                    options_.failureToast,
+                    "Failed to open remote sftp file for continue: {}",
+                    openResult.error().message
+                );
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
             }
             fileStream_ = openResult.value();
@@ -515,14 +542,18 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
             auto stream = fileStream_.lock();
             if (!stream)
             {
-                Log::error("UploadOperation: File stream expired.");
+                Log::error(options_.failureToast, "UploadOperation: File stream expired.");
                 return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
             }
 
             const auto seekResult = stream->seekInStrand(tempResult->size);
             if (!seekResult.has_value())
             {
-                Log::error("Failed to seek remote sftp file for continue: {}", seekResult.error().message);
+                Log::error(
+                    options_.failureToast,
+                    "Failed to seek remote sftp file for continue: {}",
+                    seekResult.error().message
+                );
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = seekResult.error()});
             }
 
@@ -550,7 +581,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     );
     if (!openResult.has_value())
     {
-        Log::error("Failed to open remote sftp file for upload: {}", openResult.error().message);
+        Log::error(options_.failureToast, "Failed to open remote sftp file for upload: {}", openResult.error().message);
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
     }
 
@@ -603,7 +634,9 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& s
         if (statResult->type == SharedData::FileType::Directory)
             return {};
         Log::error(
-            "UploadOperation: Cannot create parent '{}': path exists and is not a directory.", dir.value()
+            options_.failureToast,
+            "UploadOperation: Cannot create parent '{}': path exists and is not a directory.",
+            dir.value()
         );
         return std::unexpected(
             Error{
@@ -630,7 +663,10 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& s
     if (!mkdirResult.has_value())
     {
         Log::error(
-            "UploadOperation: Failed to create parent dir '{}': {}.", dir.value(), mkdirResult.error().message
+            options_.failureToast,
+            "UploadOperation: Failed to create parent dir '{}': {}.",
+            dir.value(),
+            mkdirResult.error().message
         );
         return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = mkdirResult.error()});
     }
@@ -647,14 +683,16 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
 {
     if (options_.localPath.empty())
     {
-        Log::error("UploadOperation: Invalid local path.");
+        Log::error(options_.failureToast, "UploadOperation: Invalid local path.");
         return std::unexpected(Error{.type = ErrorType::InvalidPath});
     }
     std::error_code statusError{};
     const auto linkStatus = std::filesystem::symlink_status(localNativePath_, statusError);
     if (linkStatus.type() == std::filesystem::file_type::not_found)
     {
-        Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
+        Log::error(
+            options_.failureToast, "UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8()
+        );
         return std::unexpected(
             Error{.type = ErrorType::FileNotFound, .localProblem = SharedData::LocalFileProblem::NotFound}
         );
@@ -662,13 +700,20 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     if (statusError)
     {
         Log::error(
-            "UploadOperation: Cannot inspect '{}': {}", options_.localPath.toUtf8(), Utility::errorMessage(statusError)
+            options_.failureToast,
+            "UploadOperation: Cannot inspect '{}': {}",
+            options_.localPath.toUtf8(),
+            Utility::errorMessage(statusError)
         );
         return std::unexpected(localFileError(ErrorType::FileStatFailed, statusError));
     }
     if (!std::filesystem::is_regular_file(linkStatus) && !std::filesystem::is_symlink(linkStatus))
     {
-        Log::error("UploadOperation: Local path '{}' is not a regular file or symlink.", options_.localPath.toUtf8());
+        Log::error(
+            options_.failureToast,
+            "UploadOperation: Local path '{}' is not a regular file or symlink.",
+            options_.localPath.toUtf8()
+        );
         return std::unexpected(Error{.type = ErrorType::NotAFile});
     }
     if (std::filesystem::is_symlink(linkStatus) &&
@@ -682,14 +727,20 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     const auto status = std::filesystem::status(localNativePath_, statusError);
     if (status.type() == std::filesystem::file_type::not_found)
     {
-        Log::error("UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8());
+        Log::error(
+            options_.failureToast, "UploadOperation: Local file '{}' does not exist.", options_.localPath.toUtf8()
+        );
         return std::unexpected(
             Error{.type = ErrorType::FileNotFound, .localProblem = SharedData::LocalFileProblem::NotFound}
         );
     }
     if (statusError || !std::filesystem::is_regular_file(status))
     {
-        Log::error("UploadOperation: Local path '{}' is not a regular file.", options_.localPath.toUtf8());
+        Log::error(
+            options_.failureToast,
+            "UploadOperation: Local path '{}' is not a regular file.",
+            options_.localPath.toUtf8()
+        );
         return std::unexpected(
             statusError ? localFileError(ErrorType::NotAFile, statusError) : Error{.type = ErrorType::NotAFile}
         );
@@ -701,6 +752,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     if (!localFile_.is_open())
     {
         Log::error(
+            options_.failureToast,
             "UploadOperation: Failed to open local file '{}': {}",
             options_.localPath.toUtf8(),
             Utility::errorMessage(localFile_.lastError())
@@ -713,7 +765,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::openLocalSource()
     localFile_.seekg(0, std::ios::beg);
     if (!localFile_.good())
     {
-        Log::error("UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8());
+        Log::error(
+            options_.failureToast, "UploadOperation: Failed to seek in local file: {}", options_.localPath.toUtf8()
+        );
         return std::unexpected(Error{.type = ErrorType::FileSeekFailure});
     }
     return {};
@@ -723,12 +777,12 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 {
     if (options_.localPath.empty())
     {
-        Log::error("UploadOperation: Invalid local path.");
+        Log::error(options_.failureToast, "UploadOperation: Invalid local path.");
         return enterErrorState({.type = ErrorType::InvalidPath});
     }
     if (remotePath_.empty() || remotePath_.isRoot() || tempPath_.empty())
     {
-        Log::error("UploadOperation: Invalid remote path '{}'.", options_.remotePath.value());
+        Log::error(options_.failureToast, "UploadOperation: Invalid remote path '{}'.", options_.remotePath.value());
         return enterErrorState({.type = ErrorType::InvalidPath, .extraInfo = options_.remotePath.value()});
     }
     if (const auto opened = openLocalSource(); !opened)
@@ -750,13 +804,13 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
     );
     if (umbrellaFut.wait_for(options_.futureTimeout) != std::future_status::ready)
     {
-        Log::error("UploadOperation: prepare umbrella timed out.");
+        Log::error(options_.failureToast, "UploadOperation: prepare umbrella timed out.");
         return enterErrorState({.type = ErrorType::FutureTimeout, .extraInfo = "Timeout preparing upload"});
     }
     auto openResult = umbrellaFut.get();
     if (!openResult.has_value())
     {
-        Log::error("UploadOperation: Failed to open file.");
+        Log::error(options_.failureToast, "UploadOperation: Failed to open file.");
         return enterErrorState(std::move(openResult).error());
     }
 
@@ -775,14 +829,14 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(Sec
     auto stream = fileStream_.lock();
     if (!stream)
     {
-        Log::error("UploadOperation: File stream expired after open.");
+        Log::error(options_.failureToast, "UploadOperation: File stream expired after open.");
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
     buffer_ = sftp.bufferProvider().leaseForTransfer(totalSize_, stream->writeLengthLimit());
     if (buffer_.empty())
     {
-        Log::error("UploadOperation: No transfer buffer available from pool.");
+        Log::error(options_.failureToast, "UploadOperation: No transfer buffer available from pool.");
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
@@ -877,7 +931,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
 {
     if (state_ == OperationState::Running)
     {
-        Log::error("UploadOperation: Cannot finalize while reading.");
+        Log::error(options_.failureToast, "UploadOperation: Cannot finalize while reading.");
         return std::unexpected(Error{.type = ErrorType::CannotFinalizeDuringRead});
     }
 
@@ -899,7 +953,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalize()
     // so allow a bit more slack than the per-call timeout.
     if (fut.wait_for(options_.futureTimeout * 4) != std::future_status::ready)
     {
-        Log::error("UploadOperation: finalize umbrella timed out.");
+        Log::error(options_.failureToast, "UploadOperation: finalize umbrella timed out.");
         return std::unexpected(Error{.type = ErrorType::FutureTimeout});
     }
     auto result = fut.get();
@@ -917,14 +971,14 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Se
     auto stream = fileStream_.lock();
     if (!stream)
     {
-        Log::error("UploadOperation: File stream expired.");
+        Log::error(options_.failureToast, "UploadOperation: File stream expired.");
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
 
     // Every byte must have been written before the temp file may replace the destination.
     if (leftToUpload_ != 0)
     {
-        Log::error("UploadOperation: {} bytes were not uploaded.", leftToUpload_);
+        Log::error(options_.failureToast, "UploadOperation: {} bytes were not uploaded.", leftToUpload_);
         return std::unexpected(
             Error{
                 .type = ErrorType::SizeMismatch,
@@ -947,7 +1001,8 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Se
         options_.mayOverwrite,
         Persistence::asideFileSuffix(options_.tempFileSuffix),
         SharedData::FileType::Regular,
-        options_.comparedDestination
+        options_.comparedDestination,
+        options_.failureToast
     );
     if (!moved.has_value())
     {

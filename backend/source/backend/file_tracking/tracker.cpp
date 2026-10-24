@@ -2139,6 +2139,7 @@ namespace FileTracking
         void onUncheckable(Upload const& upload, std::error_code const& error)
         {
             Log::error(
+                Log::Toast::Skip,
                 "FileTracking: not uploading '{}', it cannot be checked: {}",
                 upload.change.path.toUtf8(),
                 Utility::errorMessage(error)

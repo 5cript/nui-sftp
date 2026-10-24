@@ -65,7 +65,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
     );
     if (fut.wait_for(common_.futureTimeout) != std::future_status::ready)
     {
-        Log::error("{}: work umbrella timed out.", logName());
+        Log::error(common_.failureToast, "{}: work umbrella timed out.", logName());
         return enterErrorState<WorkStatus>({.type = ErrorType::FutureTimeout});
     }
     return fut.get();
@@ -77,7 +77,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 
     if (scanPhase_)
     {
-        Log::error("{}: The scan phase cannot run on the processing thread.", logName());
+        Log::error(common_.failureToast, "{}: The scan phase cannot run on the processing thread.", logName());
         return enterErrorState<WorkStatus>(
             Error{.type = ErrorType::ImplementationError, .extraInfo = "Scan phase stepped on the processing thread."}
         );
@@ -123,7 +123,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
             return std::unexpected(Error{.type = ErrorType::CannotWorkCompletedOperation});
         }
     }
-    Log::error("{}: Unknown operation state: {}", logName(), static_cast<int>(state()));
+    Log::error(common_.failureToast, "{}: Unknown operation state: {}", logName(), static_cast<int>(state()));
     return enterErrorState<WorkStatus>({.type = ErrorType::UnknownWorkState});
 }
 
@@ -132,7 +132,7 @@ BulkTransferOperation::start(SecureShell::SftpSession& sftp)
 {
     if (entrySource_ == EntrySource::None)
     {
-        Log::error("{}: Started without entries.", logName());
+        Log::error(common_.failureToast, "{}: Started without entries.", logName());
         return enterErrorState<WorkStatus>(
             Error{.type = ErrorType::ImplementationError, .extraInfo = "Neither a scan result nor a file list was set."}
         );
@@ -141,7 +141,7 @@ BulkTransferOperation::start(SecureShell::SftpSession& sftp)
     {
         if (entrySource_ == EntrySource::Tree)
         {
-            Log::error("{}: The scan delivered no entries.", logName());
+            Log::error(common_.failureToast, "{}: The scan delivered no entries.", logName());
             return enterErrorState<WorkStatus>(Error{.type = ErrorType::ScanIncomplete});
         }
         Log::info("{}: No entries to transfer.", logName());
@@ -160,14 +160,14 @@ BulkTransferOperation::start(SecureShell::SftpSession& sftp)
         auto const& root = entries_[0];
         if (!root.isDirectory() || root.parent)
         {
-            Log::error("{}: The first entry is not the root directory of the scan.", logName());
+            Log::error(common_.failureToast, "{}: The first entry is not the root directory of the scan.", logName());
             return enterErrorState<WorkStatus>(
                 Error{.type = ErrorType::ImplementationError, .extraInfo = "First entry must be a directory."}
             );
         }
         if (common_.remotePath.empty() || common_.localPath.empty())
         {
-            Log::error("{}: A scanned tree needs a remote and a local root.", logName());
+            Log::error(common_.failureToast, "{}: A scanned tree needs a remote and a local root.", logName());
             return enterErrorState<WorkStatus>(
                 Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots."}
             );
@@ -189,7 +189,7 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
 {
     if (cursor_ > entries_.size())
     {
-        Log::error("{}: Cursor out of range.", logName());
+        Log::error(common_.failureToast, "{}: Cursor out of range.", logName());
         return enterErrorState<WorkStatus>(Error{
             .type = ErrorType::ImplementationError,
             .extraInfo = "Bulk transfer cursor is beyond the item count, which should never occur."
@@ -353,6 +353,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
 
         Log::log(
             failureLevelOf(error),
+            common_.failureToast,
             "{}: Transfer failed for: {}: {}",
             logName(),
             slot.paths.remote.value(),
@@ -366,7 +367,11 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             finishSlot(slot, false);
             if (common_.failFast)
             {
-                Log::error("{}: failFast is enabled, failing the whole operation due to the error.", logName());
+                Log::error(
+                    common_.failureToast,
+                    "{}: failFast is enabled, failing the whole operation due to the error.",
+                    logName()
+                );
                 return std::unexpected(error);
             }
             continue;
@@ -725,7 +730,11 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(
             }
         );
         if (fut.wait_for(common_.futureTimeout) != std::future_status::ready)
-            Log::error("{}: cancel umbrella timed out, children stay with the processing thread.", logName());
+            Log::error(
+                common_.failureToast,
+                "{}: cancel umbrella timed out, children stay with the processing thread.",
+                logName()
+            );
     }
     else
     {

@@ -3,6 +3,7 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/scan_phase.hpp>
+#include <log/toast.hpp>
 #include <ssh/sftp_session.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
@@ -50,6 +51,11 @@ class BulkTransferOperation : public Operation
         std::chrono::seconds futureTimeout{5};
         // Minimum gap between two progress emissions; start and completion always emit.
         std::chrono::milliseconds progressEmitInterval{100};
+        /**
+         * @brief Whether the errors the bulk logs when it or one of its entries fails are shown as toasts, see
+         *        UploadOperation::UploadOperationOptions::failureToast.
+         */
+        Log::Toast failureToast{Log::Toast::Show};
     };
 
     /**

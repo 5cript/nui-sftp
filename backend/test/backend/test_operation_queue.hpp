@@ -8,6 +8,7 @@
 #include "nui_env.hpp"
 #include "real_server_tests.hpp"
 
+#include <log/log.hpp>
 #include <nui/utility/scope_exit.hpp>
 #include <paths/native.hpp>
 #include <utility/permissions.hpp>
@@ -18,11 +19,15 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <future>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <thread>
@@ -685,6 +690,132 @@ namespace Test
     }
 
 #ifndef _WIN32
+    /**
+     * @brief The messages at error level or above logged since the logger kept @p stashedBefore messages for the
+     *        frontend.
+     */
+    inline std::vector<Log::Logger::StashedMessage> errorsStashedSince(std::size_t stashedBefore)
+    {
+        const auto stashed = Log::Detail::logger.stashed();
+        std::vector<Log::Logger::StashedMessage> errors;
+        std::ranges::copy_if(
+            stashed | std::views::drop(stashedBefore),
+            std::back_inserter(errors),
+            [](Log::Logger::StashedMessage const& message)
+            {
+                return message.level >= Log::Level::Error;
+            }
+        );
+        return errors;
+    }
+
+    TEST_F(OperationQueueTests, AnUploadWhoseOwnerListsItsFailuresLogsThemWithoutAToast)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can read any file";
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto file = localDirectory_.path() / "unreadable.txt";
+        std::ofstream{file} << "unreadable";
+        std::filesystem::permissions(file, std::filesystem::perms::none);
+        const auto stashedBefore = Log::Detail::logger.stashed().size();
+        const auto added = runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(file),
+                    remote("/home/test/unreadable.txt"),
+                    true,
+                    false,
+                    false,
+                    false,
+                    SharedData::OperationMode::Queued,
+                    false,
+                    std::nullopt,
+                    {},
+                    std::nullopt,
+                    Log::Toast::Skip
+                );
+            }
+        );
+        ASSERT_TRUE(added.has_value()) << added.error().toString();
+        setPaused(false);
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Failed);
+        // Still logged, only without the toast.
+        EXPECT_GT(errors.mentioning("unreadable.txt"), 0u);
+        const auto logged = errorsStashedSince(stashedBefore);
+        EXPECT_FALSE(logged.empty());
+        for (auto const& message : logged)
+            EXPECT_EQ(message.toast, Log::Toast::Skip) << message.message;
+    }
+
+    TEST_F(OperationQueueTests, ABulkUploadWhoseOwnerListsItsFailuresLogsThemWithoutAToast)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can read any file";
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto localPath = localDirectory_.path() / "partlyUnreadable";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "kept.txt"} << "kept";
+        std::ofstream{localPath / "unreadable.txt"} << "unreadable";
+        std::filesystem::permissions(localPath / "unreadable.txt", std::filesystem::perms::none);
+        const SharedData::BulkUploadRequest request{
+            .entries =
+                {
+                    {.source = toLocal(localPath / "kept.txt"),
+                        .destination = remote("/home/test/partlyUnreadable/kept.txt"),
+                        .sizeBytes = 4},
+                    {.source = toLocal(localPath / "unreadable.txt"),
+                        .destination = remote("/home/test/partlyUnreadable/unreadable.txt"),
+                        .sizeBytes = 10},
+                },
+            .allowOverwrite = true,
+        };
+        const auto stashedBefore = Log::Detail::logger.stashed().size();
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    Ids::generateOperationId(),
+                    /*sourceMayVanish=*/true,
+                    {},
+                    Log::Toast::Skip
+                );
+            }
+        );
+        setPaused(false);
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().failedEntries.size(), 1u);
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/partlyUnreadable"), std::set<std::string>{"kept.txt"});
+        EXPECT_GT(errors.mentioning("unreadable.txt"), 0u);
+        const auto logged = errorsStashedSince(stashedBefore);
+        EXPECT_FALSE(logged.empty());
+        for (auto const& message : logged)
+            EXPECT_EQ(message.toast, Log::Toast::Skip) << message.message;
+    }
+
     TEST_F(OperationQueueTests, DirectoryUploadReportsAnUnreadableSubdirectory)
     {
         if (::geteuid() == 0)

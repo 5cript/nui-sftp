@@ -288,13 +288,14 @@ namespace
 
     /**
      * @brief Why the upload of @p localPath is refused, its status (@p status, @p statusError) unreadable. A source
-     *        that may vanish and is gone is nothing that failed.
+     *        that may vanish and is gone is nothing that failed. The error is logged with @p failureToast.
      */
     Operation::Error refusedSource(
         Paths::LocalPath const& localPath,
         std::filesystem::file_status status,
         std::error_code const& statusError,
-        bool sourceMayVanish
+        bool sourceMayVanish,
+        Log::Toast failureToast
     )
     {
         if (sourceMayVanish && status.type() == std::filesystem::file_type::not_found)
@@ -302,7 +303,9 @@ namespace
             Log::debug("Not uploading '{}', it is gone.", localPath.toUtf8());
             return Operation::Error{.type = Operation::ErrorType::FileNotFound};
         }
-        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(statusError));
+        Log::error(
+            failureToast, "Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(statusError)
+        );
         return Operation::Error{.type = Operation::ErrorType::FileStatFailed};
     }
 }
@@ -647,9 +650,13 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
 
             if (self->changedDestinationsLeftToOwner_.erase(operationCompleted.operationId) > 0)
                 leaveChangesToOwner(operationCompleted);
+            const auto failureToast = self->failuresWithoutToast_.erase(operationCompleted.operationId) > 0
+                ? Log::Toast::Skip
+                : Log::Toast::Show;
             if (operationCompleted.error)
                 Log::log(
                     Operation::failureLevelOf(*operationCompleted.error),
+                    failureToast,
                     "Operation failed: {}",
                     operationCompleted.error->toString()
                 );
@@ -695,6 +702,12 @@ void OperationQueue::discardResumeBackup(Ids::OperationId const& operationId)
 void OperationQueue::leaveChangedDestinationsToOwner(Ids::OperationId const& operationId)
 {
     changedDestinationsLeftToOwner_.insert(operationId);
+}
+
+void OperationQueue::rememberFailureToast(Ids::OperationId const& operationId, Log::Toast failureToast)
+{
+    if (failureToast == Log::Toast::Skip)
+        failuresWithoutToast_.insert(operationId);
 }
 
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
@@ -1676,7 +1689,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool sourceMayVanish,
     std::optional<SharedData::ComparedState> comparedDestination,
     UploadOperation::OnSent onSent,
-    std::optional<Paths::RemotePath> adoptPartialOf
+    std::optional<Paths::RemotePath> adoptPartialOf,
+    Log::Toast failureToast
 )
 {
     // Assumed in strand
@@ -1689,7 +1703,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     const auto symStat = std::filesystem::symlink_status(localNativePath, ec);
 
     if (ec)
-        return std::unexpected(refusedSource(localPath, symStat, ec, sourceMayVanish));
+        return std::unexpected(refusedSource(localPath, symStat, ec, sourceMayVanish, failureToast));
 
     const bool isSymlink = std::filesystem::is_symlink(symStat);
     std::filesystem::file_status stat = symStat;
@@ -1697,7 +1711,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     {
         stat = std::filesystem::status(localNativePath, ec);
         if (ec)
-            return std::unexpected(refusedSource(localPath, stat, ec, sourceMayVanish));
+            return std::unexpected(refusedSource(localPath, stat, ec, sourceMayVanish, failureToast));
     }
 
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
@@ -1720,6 +1734,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.comparedDestination = std::move(comparedDestination);
         opts.onSent = std::move(onSent);
         opts.adoptPartialOf = std::move(adoptPartialOf);
+        opts.failureToast = failureToast;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -1751,6 +1766,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         targetQueue.emplace_back(
             operationId, std::make_unique<UploadOperation>(sftp.weak_from_this(), std::move(opts))
         );
+        rememberFailureToast(operationId, failureToast);
 
         RpcHelper::callRemoteSafely(
             *hub_,
@@ -1773,6 +1789,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         auto individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
         individualOptions.sourceMayVanish = sourceMayVanish;
         individualOptions.onSent = std::move(onSent);
+        individualOptions.failureToast = failureToast;
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp.weak_from_this(),
             BulkUploadOperation::BulkUploadOperationOptions{
@@ -1789,11 +1806,13 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
                 .progressCallback = makeScanProgressCallback("onLocalScanProgress", operationId),
                 .localPath = localPath,
+                .failureToast = failureToast,
             })
         );
 
         auto& targetQueue = queueFor(mode);
         targetQueue.emplace_back(operationId, std::move(bulk));
+        rememberFailureToast(operationId, failureToast);
 
         RpcHelper::callRemoteSafely(
             *hub_,
@@ -1822,7 +1841,9 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     }
     else
     {
-        Log::error("Local path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(stat.type()));
+        Log::error(
+            failureToast, "Local path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(stat.type())
+        );
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::OperationNotPossibleOnFileType});
     }
 }
@@ -1833,7 +1854,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
     Ids::OperationId const& bulkCardId,
     bool sourceMayVanish,
-    UploadOperation::OnSent const& onSent
+    UploadOperation::OnSent const& onSent,
+    Log::Toast failureToast
 )
 {
     // Assumed in strand.
@@ -1860,11 +1882,14 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 unit.mode,
                 sourceMayVanish,
                 std::nullopt,
-                onSent
+                onSent,
+                std::nullopt,
+                failureToast
             );
             if (!result)
             {
                 Log::error(
+                    failureToast,
                     "Bulk upload: directory entry '{}' failed to queue: {}",
                     entry.source.toUtf8(),
                     result.error().toString()
@@ -1901,6 +1926,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             uploadOptions.createMissingDirectories = true;
             uploadOptions.sourceMayVanish = sourceMayVanish;
             uploadOptions.onSent = onSent;
+            uploadOptions.failureToast = failureToast;
             auto bulk = std::make_unique<BulkUploadOperation>(
                 sftp.weak_from_this(),
                 BulkUploadOperation::BulkUploadOperationOptions{
@@ -1914,6 +1940,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             );
             bulk->setPrescannedFileList(std::move(files));
             queueFor(unit.mode).emplace_back(bulkCardId, std::move(bulk));
+            rememberFailureToast(bulkCardId, failureToast);
             RpcHelper::callRemoteSafely(
                 *hub_,
                 rpcName("onOperationAdded"),
