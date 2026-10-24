@@ -43,6 +43,36 @@ namespace FileTracking
         RpcHelper::callRemoteSafely(*hub_, eventName("onProgress"), progress);
     }
 
+    void FrontendTrackerView::showConflict(SharedData::WatchConflict const& conflict)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onConflict"), conflict);
+    }
+
+    void FrontendTrackerView::removeConflict(Ids::ConflictId const& conflictId)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onConflictRemoved"), conflictId.value());
+    }
+
+    void FrontendTrackerView::showFailure(SharedData::UploadFailure const& failure)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onFailure"), failure);
+    }
+
+    void FrontendTrackerView::removeFailure(Ids::FailureId const& failureId)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onFailureRemoved"), failureId.value());
+    }
+
+    void FrontendTrackerView::showWatchProgress(SharedData::WatchProgress const& progress)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onWatchProgress"), progress);
+    }
+
+    void FrontendTrackerView::showOrphanedCopies(SharedData::OrphanedCopies const& copies)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onOrphanedCopies"), copies);
+    }
+
     std::string FrontendTrackerView::eventName(std::string_view event) const
     {
         return fmt::format("FileTracker::{}::{}", sessionId_.value(), event);

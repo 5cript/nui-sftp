@@ -208,12 +208,52 @@ namespace Test
                 progress.push_back(shown);
             }
 
+            void showConflict(SharedData::WatchConflict const& conflict) override
+            {
+                conflicts.insert_or_assign(conflict.conflictId.value(), conflict);
+            }
+
+            void removeConflict(Ids::ConflictId const& conflictId) override
+            {
+                conflicts.erase(conflictId.value());
+                removedConflicts.push_back(conflictId.value());
+            }
+
+            void showFailure(SharedData::UploadFailure const& failure) override
+            {
+                failures.insert_or_assign(failure.failureId.value(), failure);
+            }
+
+            void removeFailure(Ids::FailureId const& failureId) override
+            {
+                failures.erase(failureId.value());
+                removedFailures.push_back(failureId.value());
+            }
+
+            void showWatchProgress(SharedData::WatchProgress const& shown) override
+            {
+                watchProgress.push_back(shown);
+            }
+
+            void showOrphanedCopies(SharedData::OrphanedCopies const& copies) override
+            {
+                orphanedCopies.push_back(copies);
+            }
+
             std::map<std::string, SharedData::TrackedEntry> entries{};
             std::vector<std::string> removed{};
             std::vector<SharedData::EndedWatches> ended{};
             std::vector<SharedData::ServerChangedQuestion> questions{};
             std::vector<std::size_t> orphanedCounts{};
             std::vector<SharedData::TrackerProgress> progress{};
+            /** @brief The conflicts shown and not removed, by id. */
+            std::map<std::string, SharedData::WatchConflict> conflicts{};
+            std::vector<std::string> removedConflicts{};
+            /** @brief The failures shown and not removed, by id. */
+            std::map<std::string, SharedData::UploadFailure> failures{};
+            std::vector<std::string> removedFailures{};
+            std::vector<SharedData::WatchProgress> watchProgress{};
+            std::vector<SharedData::OrphanedCopies> orphanedCopies{};
         };
 
         using Opened = std::expected<FileTracking::Tracker::OpenedCopy, FileTracking::Tracker::OpenFailure>;
