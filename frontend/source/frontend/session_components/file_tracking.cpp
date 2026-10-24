@@ -346,11 +346,11 @@ struct FileTrackingPanel::Implementation
             "data-ft-detail"_attr = "none",
         }(
             Nui::observe(
-                *store.countOf(OutlinerGroup::NeedsYou),
-                *store.countOf(OutlinerGroup::Syncing),
-                *store.countOf(OutlinerGroup::Watching),
-                *store.countOf(OutlinerGroup::Stopped),
-                *store.countOf(OutlinerGroup::Orphaned),
+                store.countOf(OutlinerGroup::NeedsYou),
+                store.countOf(OutlinerGroup::Syncing),
+                store.countOf(OutlinerGroup::Watching),
+                store.countOf(OutlinerGroup::Stopped),
+                store.countOf(OutlinerGroup::Orphaned),
                 store.filter()
             ).generate([this]() -> Nui::ElementRenderer {
                 return Nui::Elements::text{
