@@ -1,6 +1,8 @@
 #include <backend/file_tracking/tracker.hpp>
 #include <backend/file_tracking/conflict_list.hpp>
 #include <backend/file_tracking/disk_place.hpp>
+#include <backend/file_tracking/failure_list.hpp>
+#include <backend/file_tracking/failure_reason.hpp>
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/tracking_state.hpp>
@@ -423,6 +425,15 @@ namespace FileTracking
             std::uint64_t claimId_;
         };
 
+        /**
+         * @brief The ids of the conflicts and failures the view shows of watches.
+         */
+        struct ShownProblems
+        {
+            std::vector<Ids::ConflictId> conflicts{};
+            std::vector<Ids::FailureId> failures{};
+        };
+
         using OnOpened = std::function<void(std::expected<OpenedCopy, OpenFailure> const&)>;
 
         boost::asio::strand<boost::asio::any_io_executor> strand;
@@ -443,6 +454,8 @@ namespace FileTracking
         std::uint64_t nextClaimId{0};
         /** @brief The conflicts waiting for the user's answer, each with the upload that waits for it. */
         ConflictList<Upload> conflicts{};
+        /** @brief The failed uploads waiting for Retry or Dismiss. */
+        FailureList failures{};
         /** @brief Changes that ended since nothing was on its way any more, see showProgress(). */
         std::uint64_t changesDone{0};
         SharedData::TrackerProgress shownProgress{};
@@ -950,15 +963,33 @@ namespace FileTracking
             if (node.empty())
                 return std::nullopt;
             Log::info("FileTracking: stopping watch {}", watchId.value());
+            ShownProblems shown;
+            collectShownProblems(watchId, shown);
             const auto dropped = conflicts.removeWatch(watchId);
-            for (auto const& listed : dropped)
-                view->removeConflict(listed.conflict.conflictId);
+            failures.removeWatch(watchId);
+            hideProblems(shown);
             view->removeEntry(watchId);
             progressChanged();
             for (auto const& listed : dropped)
                 leaveOrder(listed.context);
             const auto* copy = node.mapped().downloadedCopy();
             return copy ? std::optional{copy->instanceId} : std::nullopt;
+        }
+
+        void collectShownProblems(Ids::WatchId const& watchId, ShownProblems& shown) const
+        {
+            for (auto const& conflict : conflicts.conflictsOf(watchId))
+                shown.conflicts.push_back(conflict.conflictId);
+            for (auto const& failure : failures.failuresOf(watchId))
+                shown.failures.push_back(failure.failureId);
+        }
+
+        void hideProblems(ShownProblems const& shown)
+        {
+            for (auto const& conflictId : shown.conflicts)
+                view->removeConflict(conflictId);
+            for (auto const& failureId : shown.failures)
+                view->removeFailure(failureId);
         }
 
         void setOption(Ids::WatchId const& watchId, SharedData::WatchOption option, bool value)
@@ -1010,6 +1041,7 @@ namespace FileTracking
                 releaseInstance(instanceId);
             claims.clear();
             const auto dropped = conflicts.removeAll();
+            failures.removeAll();
             const auto waiting = std::exchange(waitingOperations, {});
             for (auto const& listed : dropped)
                 leaveOrder(listed.context);
@@ -1025,21 +1057,19 @@ namespace FileTracking
         void connectionLost()
         {
             auto ended = SharedData::EndedWatches{.reason = SharedData::WatchEndReason::ConnectionLost, .entries = {}};
-            std::vector<Ids::ConflictId> droppedConflicts;
+            ShownProblems shown;
             for (auto const& entry : std::views::values(entries))
             {
                 ended.entries.push_back(shownEntryOf(entry));
-                for (auto const& conflict : conflicts.conflictsOf(entry.watchId))
-                    droppedConflicts.push_back(conflict.conflictId);
+                collectShownProblems(entry.watchId, shown);
             }
             Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
             // stopAll() forgets the progress shown, this view still shows it.
             const bool progressShown = shownProgress != SharedData::TrackerProgress{};
             stopAll();
-            for (auto const& conflictId : droppedConflicts)
-                view->removeConflict(conflictId);
-            for (auto const& shown : ended.entries)
-                view->removeEntry(shown.watchId);
+            hideProblems(shown);
+            for (auto const& endedEntry : ended.entries)
+                view->removeEntry(endedEntry.watchId);
             if (!ended.entries.empty())
                 view->showEnded(ended);
             if (progressShown)
@@ -1076,6 +1106,33 @@ namespace FileTracking
                 else
                     entry.serverContent.rememberFile(*path, ServerState{.mtime = state.mtime, .size = state.size});
                 ++recorded;
+            }
+            return recorded;
+        }
+
+        /**
+         * @brief Records what the server has after the upload of @p directory, see rememberStates(), but for the
+         *        entries it left out (@p failedEntries), which keep what the server was known to have of them.
+         * @return How many entries it recorded.
+         */
+        std::size_t rememberUploadedStates(
+            Entry& entry,
+            Paths::LocalPath const& directory,
+            std::vector<FailedUploadEntry> const& failedEntries
+        )
+        {
+            std::vector<std::pair<Paths::LocalPath, std::optional<ServerState>>> known;
+            for (auto const& failed : failedEntries)
+                if (failed.path != directory && failed.path.isWithin(directory) &&
+                    !entry.serverContent.hasDirectory(failed.path))
+                    known.emplace_back(failed.path, entry.serverContent.fileState(failed.path));
+            const auto recorded = rememberStates(entry, directory);
+            for (auto const& [path, state] : known)
+            {
+                if (state)
+                    entry.serverContent.rememberFile(path, *state);
+                else
+                    entry.serverContent.forget(path);
             }
             return recorded;
         }
@@ -1900,6 +1957,8 @@ namespace FileTracking
                 upload.change.path.toUtf8(),
                 Utility::errorMessage(error)
             );
+            if (const auto* entry = find(upload.watchId))
+                recordFailure(*entry, upload.change.path, upload.destination, failureInfoOf(error));
             finishUpload(upload, UploadOutcome::NotUploaded);
         }
 
@@ -2021,22 +2080,134 @@ namespace FileTracking
 
         void retryFailure(Ids::FailureId const& failureId)
         {
-            Log::warn("FileTracking: retrying failure {} is not implemented", failureId.value());
+            const auto retried = failures.retry(failureId);
+            if (!retried)
+            {
+                Log::warn("FileTracking: there is no failure {} to retry", failureId.value());
+                return;
+            }
+            view->removeFailure(failureId);
+            retryUpload(*retried);
+        }
+
+        /**
+         * @brief Uploads the path of @p failure again like a change of it, compared with the server first, also when
+         *        its watch does not upload changes on its own.
+         */
+        void retryUpload(SharedData::UploadFailure const& failure)
+        {
+            const auto* entry = find(failure.watchId);
+            if (!entry)
+                return;
+            const auto destination = remotePathOf(*entry, failure.localPath);
+            if (!destination)
+            {
+                Log::warn(
+                    "FileTracking: not retrying '{}' in watch {}: {}",
+                    failure.localPath.toUtf8(),
+                    failure.watchId.value(),
+                    destination.error().toString()
+                );
+                return;
+            }
+            Log::info("FileTracking: retrying the upload of '{}'", failure.localPath.toUtf8());
+            queueUpload(
+                Upload{
+                    .watchId = failure.watchId,
+                    .change = {.path = failure.localPath, .isDirectory = isDirectoryLocally(failure.localPath)},
+                    .destination = *destination,
+                }
+            );
         }
 
         void dismissFailure(Ids::FailureId const& failureId)
         {
-            Log::warn("FileTracking: dismissing failure {} is not implemented", failureId.value());
+            if (!failures.remove(failureId))
+            {
+                Log::warn("FileTracking: there is no failure {} to dismiss", failureId.value());
+                return;
+            }
+            view->removeFailure(failureId);
         }
 
         void retryAllFailures(Ids::WatchId const& watchId)
         {
-            Log::warn("FileTracking: retrying the failures of watch {} is not implemented", watchId.value());
+            const auto listed = failures.failuresOf(watchId);
+            if (listed.empty())
+                Log::warn("FileTracking: watch {} has no failures to retry", watchId.value());
+            for (auto const& failure : listed)
+                retryFailure(failure.failureId);
         }
 
         void dismissAllFailures(Ids::WatchId const& watchId)
         {
-            Log::warn("FileTracking: dismissing the failures of watch {} is not implemented", watchId.value());
+            const auto listed = failures.failuresOf(watchId);
+            if (listed.empty())
+                Log::warn("FileTracking: watch {} has no failures to dismiss", watchId.value());
+            for (auto const& failure : listed)
+                dismissFailure(failure.failureId);
+        }
+
+        /**
+         * @brief Lists that the upload of @p localPath to @p remotePath failed as @p failure, or counts one attempt
+         *        more of it. Not for a path that is gone or moved away, its deletion or move follows.
+         * @return Whether it was listed.
+         */
+        bool recordFailure(
+            Entry const& entry,
+            Paths::LocalPath const& localPath,
+            Paths::RemotePath const& remotePath,
+            UploadFailureInfo const& failure
+        )
+        {
+            if (entry.pendingUploads.movedAway(localPath) || isGoneLocally(localPath))
+                return false;
+            const auto listed = failures.record({
+                .failureId = {},
+                .watchId = entry.watchId,
+                .localPath = localPath,
+                .remotePath = remotePath,
+                .reason = failure.reason,
+                .detail = failure.detail,
+                .failedAt = secondsSinceEpochNow(),
+                .attempts = 1u,
+            });
+            Log::warn(
+                "FileTracking: uploading '{}' failed ({}, attempt {}): {}",
+                localPath.toUtf8(),
+                Utility::enumToString(listed.reason),
+                listed.attempts,
+                listed.detail.value_or("")
+            );
+            view->showFailure(listed);
+            return true;
+        }
+
+        /**
+         * @brief @p localPath of the watch @p watchId uploaded, its failure is over.
+         */
+        void clearFailure(Ids::WatchId const& watchId, Paths::LocalPath const& localPath)
+        {
+            if (const auto cleared = failures.removePath(watchId, localPath))
+                view->removeFailure(cleared->failureId);
+        }
+
+        /**
+         * @brief The directory upload @p upload completed but left out @p failedEntries: they are listed, the failures
+         *        at and below the directory that it did not leave out are over.
+         */
+        void
+        recordLeftOut(Entry const& entry, Upload const& upload, std::vector<FailedUploadEntry> const& failedEntries)
+        {
+            std::set<Paths::LocalPath> leftOut;
+            for (auto const& failed : failedEntries)
+            {
+                const auto remotePath = remotePathOfChange(failed.path, upload.change.path, upload.destination);
+                if (remotePath && recordFailure(entry, failed.path, *remotePath, failed.failure))
+                    leftOut.insert(failed.path);
+            }
+            for (auto const& cleared : failures.removeWithin(entry.watchId, upload.change.path, leftOut))
+                view->removeFailure(cleared.failureId);
         }
 
         void removeStopped(Ids::WatchId const& watchId)
@@ -2111,6 +2282,13 @@ namespace FileTracking
                 return;
             // A temporary file an editor already renamed or removed ends up here.
             Log::warn("FileTracking: did not upload '{}': {}", upload.change.path.toUtf8(), queued.error());
+            if (const auto* stillWatched = find(upload.watchId))
+                recordFailure(
+                    *stillWatched,
+                    upload.change.path,
+                    upload.destination,
+                    {.reason = SharedData::UploadFailureReason::NotQueued, .detail = queued.error()}
+                );
             finishUpload(upload, UploadOutcome::NotUploaded);
         }
 
@@ -2138,6 +2316,10 @@ namespace FileTracking
                 // Nobody continues the partial file of a watch that ended meanwhile.
                 if (!entry && !upload.change.isDirectory)
                     discardPartial(upload.destination);
+                if (entry && ended.reason == SharedData::OperationCompletionReason::Failed)
+                    recordFailure(
+                        *entry, upload.change.path, upload.destination, ended.failure.value_or(UploadFailureInfo{})
+                    );
                 return finishUpload(upload, UploadOutcome::NotUploaded);
             }
             // Uploads carry the local modification time, so the local states are what the server has now. A link
@@ -2145,12 +2327,17 @@ namespace FileTracking
             std::optional<std::size_t> carried{};
             if (upload.change.isDirectory && !isSymlink(upload.change.path))
             {
-                carried = rememberStates(*entry, upload.change.path);
+                carried = rememberUploadedStates(*entry, upload.change.path, ended.failedEntries);
                 rememberSentButGone(*entry, upload, ended.sentFiles);
                 removeMovedAway(*entry, upload.change.path);
+                recordLeftOut(*entry, upload, ended.failedEntries);
             }
-            else if (ended.destinationState)
-                entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
+            else
+            {
+                if (ended.destinationState)
+                    entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
+                clearFailure(entry->watchId, upload.change.path);
+            }
             for (auto const& sent : ended.sentFiles)
                 if (sent.state && sent.path.isWithin(upload.change.path))
                     entry->serverContent.rememberSent(sent.path, *sent.state);

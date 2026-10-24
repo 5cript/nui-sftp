@@ -2844,10 +2844,22 @@ namespace Test
             std::error_code errorCode{};
             std::filesystem::permissions(source, std::filesystem::perms::owner_all, errorCode);
         }};
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !view_->failures.empty();
+            }
+        ));
+        runFor(std::chrono::milliseconds{500});
 
         EXPECT_EQ(uploadsTo("/srv/project/src/new.cpp"), 0u);
         EXPECT_TRUE(remote_->of("remove").empty());
+        ASSERT_EQ(view_->failures.size(), 1u);
+        const auto failure = view_->failures.begin()->second;
+        EXPECT_EQ(failure.localPath.native(), source / "new.cpp");
+        EXPECT_EQ(failure.remotePath.value(), "/srv/project/src/new.cpp");
+        EXPECT_EQ(failure.reason, SharedData::UploadFailureReason::PermissionDeniedLocally);
+        EXPECT_TRUE(failure.detail.has_value());
     }
 #endif
 
@@ -3412,5 +3424,404 @@ namespace Test
         EXPECT_EQ(remote_->of("discard").front()->source, "/srv/project/a.bin");
         completeEverything();
         EXPECT_EQ(remote_->server.at("/srv/project/b.bin"), stateOf(renamed));
+    }
+
+    /**
+     * @brief Watches notes.txt and the project, both uploaded, and fails the uploads of their saves as told.
+     */
+    class TrackerFailuresTest : public TrackerTest
+    {
+      protected:
+        std::filesystem::path notes_;
+        std::filesystem::path main_;
+        std::filesystem::path util_;
+        FakeRemote::Queued notQueued_{};
+
+        void SetUp() override
+        {
+            TrackerTest::SetUp();
+            notes_ = root_ / "local" / "notes.txt";
+            main_ = root_ / "local" / "project" / "src" / "main.cpp";
+            util_ = root_ / "local" / "project" / "src" / "util.cpp";
+            write(util_, "util");
+        }
+
+        void watchNotes()
+        {
+            ASSERT_TRUE(tracker_->uploadAndWatch(local(notes_), remote("/srv/notes.txt")).has_value());
+            completeEverything();
+        }
+
+        void watchProject()
+        {
+            ASSERT_TRUE(
+                tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value()
+            );
+            completeEverything();
+        }
+
+        static FileTracking::UploadEnd
+        failedAs(SharedData::UploadFailureReason reason, std::optional<std::string> detail = std::nullopt)
+        {
+            return {
+                .reason = SharedData::OperationCompletionReason::Failed,
+                .failure = FileTracking::UploadFailureInfo{.reason = reason, .detail = std::move(detail)},
+            };
+        }
+
+        /**
+         * @brief Writes @p content to @p path and runs until the upload number @p count to @p destination is queued.
+         * @return That upload, or one that cannot end when none was queued.
+         */
+        FakeRemote::Queued& save(
+            std::filesystem::path const& path,
+            std::string const& content,
+            std::string const& destination,
+            std::size_t count
+        )
+        {
+            write(path, content);
+            const bool queued = runUntil(
+                [this, &destination, count]()
+                {
+                    return uploadsTo(destination) == count;
+                }
+            );
+            EXPECT_TRUE(queued) << destination;
+            return queued ? *lastUploadTo(destination) : notQueued_;
+        }
+
+        SharedData::UploadFailure onlyFailure() const
+        {
+            EXPECT_EQ(view_->failures.size(), 1u);
+            return view_->failures.empty() ? SharedData::UploadFailure{} : view_->failures.begin()->second;
+        }
+
+        std::optional<SharedData::UploadFailure> shownFailureAt(std::filesystem::path const& localPath) const
+        {
+            for (auto const& failure : std::views::values(view_->failures))
+                if (failure.localPath.native() == localPath)
+                    return failure;
+            return std::nullopt;
+        }
+
+        Ids::FailureId failureIdAt(std::filesystem::path const& localPath) const
+        {
+            return shownFailureAt(localPath).value_or(SharedData::UploadFailure{}).failureId;
+        }
+    };
+
+    TEST_F(TrackerFailuresTest, AFailedUploadIsListedWithItsReasonAndDetailAndNothingRetriesIt)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u),
+            failedAs(SharedData::UploadFailureReason::PermissionDeniedOnServer, "Permission denied")
+        );
+
+        ASSERT_EQ(view_->failures.size(), 1u);
+        const auto failure = onlyFailure();
+        EXPECT_EQ(failure.watchId, onlyEntry().watchId);
+        EXPECT_EQ(failure.localPath.native(), notes_);
+        EXPECT_EQ(failure.remotePath.value(), "/srv/notes.txt");
+        EXPECT_EQ(failure.reason, SharedData::UploadFailureReason::PermissionDeniedOnServer);
+        EXPECT_EQ(failure.detail, std::optional<std::string>{"Permission denied"});
+        EXPECT_EQ(failure.attempts, 1u);
+        EXPECT_GT(failure.failedAt, 0u);
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
+        EXPECT_FALSE(onlyEntry().uploading);
+    }
+
+    TEST_F(TrackerFailuresTest, FailingAgainKeepsTheIdAndCountsAttemptsUntilAGoodUploadClearsIt)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "first", "/srv/notes.txt", 2u),
+            failedAs(SharedData::UploadFailureReason::ConnectionProblem, "Channel closed")
+        );
+        const auto first = onlyFailure();
+
+        endAs(save(notes_, "second", "/srv/notes.txt", 3u), failedAs(SharedData::UploadFailureReason::NoSpaceOnServer));
+
+        const auto again = onlyFailure();
+        EXPECT_EQ(again.failureId, first.failureId);
+        EXPECT_EQ(again.attempts, 2u);
+        EXPECT_EQ(again.reason, SharedData::UploadFailureReason::NoSpaceOnServer);
+        EXPECT_FALSE(again.detail.has_value());
+        EXPECT_TRUE(view_->removedFailures.empty());
+
+        save(notes_, "third", "/srv/notes.txt", 4u);
+        completeUploads();
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->removedFailures, std::vector<std::string>{first.failureId.value()});
+
+        endAs(save(notes_, "fourth", "/srv/notes.txt", 5u), failedAs(SharedData::UploadFailureReason::Unknown));
+        EXPECT_NE(onlyFailure().failureId, first.failureId);
+        EXPECT_EQ(onlyFailure().attempts, 1u);
+    }
+
+    TEST_F(TrackerFailuresTest, AnUploadTheQueueRefusedIsListedAsNotQueued)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u),
+            failedAs(SharedData::UploadFailureReason::NotQueued, "The queue is closed")
+        );
+
+        EXPECT_EQ(onlyFailure().reason, SharedData::UploadFailureReason::NotQueued);
+        EXPECT_EQ(onlyFailure().detail, std::optional<std::string>{"The queue is closed"});
+    }
+
+    TEST_F(TrackerFailuresTest, AFailedEndWithoutAReasonIsListedAsUnknownAndACancelledOneIsNoFailure)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u),
+            {.reason = SharedData::OperationCompletionReason::Canceled}
+        );
+        EXPECT_TRUE(view_->failures.empty());
+
+        endAs(
+            save(notes_, "changed again", "/srv/notes.txt", 3u),
+            {.reason = SharedData::OperationCompletionReason::Failed}
+        );
+        EXPECT_EQ(onlyFailure().reason, SharedData::UploadFailureReason::Unknown);
+    }
+
+    TEST_F(TrackerFailuresTest, ADirectoryUploadListsTheEntriesItLeftOutAndClearsTheRest)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        endAs(*lastUploadTo("/srv/project"), failedAs(SharedData::UploadFailureReason::ConnectionProblem));
+        const auto projectFailure = failureIdAt(project);
+        endAs(
+            save(main_, "changed main", "/srv/project/src/main.cpp", 1u),
+            failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        const auto mainFailure = failureIdAt(main_);
+        ASSERT_EQ(view_->failures.size(), 2u);
+
+        tracker_->retryFailure(projectFailure);
+
+        EXPECT_EQ(view_->removedFailures, std::vector<std::string>{projectFailure.value()});
+        ASSERT_EQ(uploadsTo("/srv/project"), 2u);
+        serve(project, "/srv/project");
+        remote_->server.erase("/srv/project/src/util.cpp");
+        auto sent = sentFilesOf(project);
+        std::erase_if(
+            sent,
+            [this](FileTracking::SentFile const& file)
+            {
+                return file.path.native() == util_;
+            }
+        );
+        endAs(
+            *lastUploadTo("/srv/project"),
+            {.reason = SharedData::OperationCompletionReason::Completed,
+                .sentFiles = sent,
+                .failedEntries = {
+                    {.path = local(util_),
+                        .failure = {
+                            .reason = SharedData::UploadFailureReason::PermissionDeniedLocally, .detail = "denied"
+                        }}
+                }}
+        );
+
+        ASSERT_EQ(view_->failures.size(), 1u);
+        const auto leftOut = onlyFailure();
+        EXPECT_EQ(leftOut.localPath.native(), util_);
+        EXPECT_EQ(leftOut.remotePath.value(), "/srv/project/src/util.cpp");
+        EXPECT_EQ(leftOut.reason, SharedData::UploadFailureReason::PermissionDeniedLocally);
+        EXPECT_EQ(leftOut.attempts, 1u);
+        EXPECT_EQ(view_->removedFailures, (std::vector<std::string>{projectFailure.value(), mainFailure.value()}));
+
+        // The server is not taken to have what the upload left out: its retry expects nothing there.
+        tracker_->retryFailure(leftOut.failureId);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/util.cpp") == 1u;
+            }
+        ));
+        auto const& expected = lastUploadTo("/srv/project/src/util.cpp")->upload.expectedDestination;
+        ASSERT_TRUE(expected.has_value());
+        EXPECT_FALSE(expected->file.has_value());
+        completeUploads();
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_EQ(remote_->server.at("/srv/project/src/util.cpp"), stateOf(util_));
+    }
+
+    TEST_F(TrackerFailuresTest, ARetryUploadsAgainAndClearsTheFailureOnceItWentThrough)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u), failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        const auto failureId = onlyFailure().failureId;
+
+        tracker_->retryFailure(failureId);
+
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->removedFailures, std::vector<std::string>{failureId.value()});
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 3u;
+            }
+        ));
+        // Compared with the server like any change.
+        EXPECT_TRUE(lastUploadTo("/srv/notes.txt")->upload.expectedDestination.has_value());
+        completeUploads();
+        EXPECT_EQ(remote_->server.at("/srv/notes.txt"), stateOf(notes_));
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_FALSE(onlyEntry().uploading);
+
+        endAs(save(notes_, "changed again", "/srv/notes.txt", 4u), failedAs(SharedData::UploadFailureReason::Unknown));
+        EXPECT_NE(onlyFailure().failureId, failureId);
+        EXPECT_EQ(onlyFailure().attempts, 1u);
+    }
+
+    TEST_F(TrackerFailuresTest, ARetryThatFailsAgainKeepsTheIdAndCountsTheAttempt)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u),
+            failedAs(SharedData::UploadFailureReason::LockedLocally, "locked")
+        );
+        const auto failureId = onlyFailure().failureId;
+
+        tracker_->retryFailure(failureId);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 3u;
+            }
+        ));
+        endAs(
+            *lastUploadTo("/srv/notes.txt"), failedAs(SharedData::UploadFailureReason::LockedLocally, "still locked")
+        );
+
+        const auto again = onlyFailure();
+        EXPECT_EQ(again.failureId, failureId);
+        EXPECT_EQ(again.attempts, 2u);
+        EXPECT_EQ(again.detail, std::optional<std::string>{"still locked"});
+    }
+
+    TEST_F(TrackerFailuresTest, RetryAllRetriesEveryFailureOfTheWatchAndARetryCanRaiseAConflict)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchProject());
+        endAs(
+            save(main_, "changed main", "/srv/project/src/main.cpp", 1u),
+            failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        endAs(
+            save(util_, "changed util", "/srv/project/src/util.cpp", 1u),
+            failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        ASSERT_EQ(view_->failures.size(), 2u);
+        remote_->server["/srv/project/src/util.cpp"].mtime += 100u;
+        const auto uploadsBefore = remote_->of("upload").size();
+
+        tracker_->retryAllFailures(onlyEntry().watchId);
+
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->removedFailures.size(), 2u);
+        ASSERT_TRUE(runUntil(
+            [this, uploadsBefore]()
+            {
+                return remote_->of("upload").size() == uploadsBefore + 2u;
+            }
+        ));
+        const auto uploads = remote_->sourcesOf("upload");
+        EXPECT_EQ(uploads[uploadsBefore], main_.string());
+        EXPECT_EQ(uploads[uploadsBefore + 1u], util_.string());
+        completeUploads();
+        EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), stateOf(main_));
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        EXPECT_EQ(view_->conflicts.begin()->second.localPath.native(), util_);
+        EXPECT_TRUE(view_->failures.empty());
+    }
+
+    TEST_F(TrackerFailuresTest, DismissTakesAFailureOffAndDismissAllTheRestOfTheWatch)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchProject());
+        endAs(
+            save(main_, "changed main", "/srv/project/src/main.cpp", 1u),
+            failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        endAs(
+            save(util_, "changed util", "/srv/project/src/util.cpp", 1u),
+            failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        const auto mainFailure = failureIdAt(main_);
+        const auto utilFailure = failureIdAt(util_);
+        const auto uploadsBefore = remote_->of("upload").size();
+
+        tracker_->dismissFailure(mainFailure);
+        EXPECT_EQ(view_->failures.size(), 1u);
+        EXPECT_EQ(view_->removedFailures, std::vector<std::string>{mainFailure.value()});
+
+        tracker_->dismissFailure(mainFailure);
+        tracker_->retryFailure(mainFailure);
+        tracker_->dismissFailure(Ids::generateFailureId());
+        tracker_->retryAllFailures(Ids::generateWatchId());
+        tracker_->dismissAllFailures(Ids::generateWatchId());
+        EXPECT_EQ(view_->failures.size(), 1u);
+
+        tracker_->dismissAllFailures(onlyEntry().watchId);
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->removedFailures, (std::vector<std::string>{mainFailure.value(), utilFailure.value()}));
+        runFor(std::chrono::milliseconds{200});
+        EXPECT_EQ(remote_->of("upload").size(), uploadsBefore);
+    }
+
+    TEST_F(TrackerFailuresTest, StoppingAWatchDropsItsFailuresAndTellsTheView)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u), failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        const auto failureId = onlyFailure().failureId;
+
+        tracker_->stop(onlyEntry().watchId);
+
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->removedFailures, std::vector<std::string>{failureId.value()});
+        tracker_->retryFailure(failureId);
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
+    }
+
+    TEST_F(TrackerFailuresTest, ALostConnectionDropsTheFailuresAndTellsTheView)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u), failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        const auto failureId = onlyFailure().failureId;
+
+        tracker_->connectionLost();
+
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->removedFailures, std::vector<std::string>{failureId.value()});
+    }
+
+    TEST_F(TrackerFailuresTest, StoppingAllDropsTheFailuresWithoutTellingTheView)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchNotes());
+        endAs(
+            save(notes_, "changed locally", "/srv/notes.txt", 2u), failedAs(SharedData::UploadFailureReason::Unknown)
+        );
+        const auto failureId = onlyFailure().failureId;
+
+        tracker_->stopAll();
+
+        EXPECT_EQ(view_->failures.size(), 1u);
+        EXPECT_TRUE(view_->removedFailures.empty());
+        tracker_->retryFailure(failureId);
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
     }
 }
