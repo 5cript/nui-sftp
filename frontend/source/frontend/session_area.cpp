@@ -55,6 +55,28 @@ struct ReconnectState
     std::unique_ptr<ProtoSession> candidate;
 };
 
+namespace
+{
+    /**
+     * @brief The most reconnect attempts @p options allow, -1 for no limit.
+     */
+    int maximumReconnectAttemptsOf(Persistence::SessionOptions const& options)
+    {
+        if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
+            return ssh->maxReconnectAttempts;
+        return -1;
+    }
+
+    /**
+     * @brief Whether the reconnect cycle of @p state gives up when its current attempt fails.
+     */
+    bool isFinalAttempt(ReconnectState const& state)
+    {
+        const auto maximumAttempts = maximumReconnectAttemptsOf(state.engineOptions);
+        return maximumAttempts >= 0 && state.attempt >= maximumAttempts;
+    }
+}
+
 struct SessionArea::Implementation
 {
     Persistence::StateHolder* stateHolder;
@@ -612,6 +634,8 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
             protoParams.onFailed = [this, tabId](ProtoSession*, std::string const& info) {
                 onProtoFailed(tabId, info);
             };
+            // A failure that is retried shows in the lost-connection overlay, the last one also as a toast.
+            protoParams.failureToast = isFinalAttempt(reconnectState) ? Log::Toast::Show : Log::Toast::Skip;
             reconnectState.candidate = std::make_unique<ProtoSession>(std::move(protoParams));
             reconnectState.candidate->start();
         },
@@ -739,25 +763,21 @@ void SessionArea::scheduleReconnectRetry(int tabId)
     }
     auto& reconnectState = rcIter->second;
 
-    // Cap attempts against the session's max setting.  -1 means unlimited.
-    int maxAttempts = -1;
-    int maxBackoffMs = 16000;
-    if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&reconnectState.engineOptions.engine))
-    {
-        maxAttempts = ssh->maxReconnectAttempts;
-        maxBackoffMs = ssh->maxReconnectBackoffMs;
-    }
-
-    if (maxAttempts >= 0 && reconnectState.attempt >= maxAttempts)
+    // Cap attempts against the session's max setting.
+    if (isFinalAttempt(reconnectState))
     {
         Log::warn(
-            "scheduleReconnectRetry: reached max attempts ({}) for tabId {} — giving up",
-            maxAttempts,
+            "scheduleReconnectRetry: reached max attempts ({}) for tabId {}, giving up",
+            maximumReconnectAttemptsOf(reconnectState.engineOptions),
             tabId
         );
         abortReconnectCycle(tabId);
         return;
     }
+
+    int maxBackoffMs = 16000;
+    if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&reconnectState.engineOptions.engine))
+        maxBackoffMs = ssh->maxReconnectBackoffMs;
 
     // Exponential backoff: 1s → 2s → 4s → 8s → 16s (capped at maxBackoffMs).
     const int clampedAttempt = std::min(reconnectState.attempt, 30); // prevent shift overflow
