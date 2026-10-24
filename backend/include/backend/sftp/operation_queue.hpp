@@ -15,7 +15,9 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
+#include <shared_data/file_operations/transfer_progress.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/sync/diff.hpp>
@@ -35,6 +37,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <atomic>
 
 class OperationQueue
@@ -47,6 +50,9 @@ class OperationQueue
     using Error = SharedData::OperationErrorType;
     using OperationCompleted = SharedData::OperationCompleted;
     using CompletionReason = SharedData::OperationCompletionReason;
+    /** @brief What the frontend hears of a running transfer: a single file's, or a bulk's or directory's. */
+    using OperationProgress = std::variant<SharedData::TransferProgress, SharedData::BulkProgress>;
+    using ProgressObserver = std::function<void(OperationProgress const&)>;
 
   public:
     OperationQueue(
@@ -374,6 +380,12 @@ class OperationQueue
     void whenCompleted(Ids::OperationId const& operationId, std::function<void(OperationCompleted const&)> callback);
 
     /**
+     * @brief Calls @p observer on the strand with each progress of the operation @p operationId the frontend hears of,
+     *        until it completed. Must be called from the strand, before the operation starts.
+     */
+    void whenProgressing(Ids::OperationId const& operationId, ProgressObserver observer);
+
+    /**
      * @brief Keeps no resume backup of the operation @p operationId, a reconnect does not queue it again. For an owner
      *        that decides anew what goes to the server. Must be called from the strand.
      */
@@ -508,6 +520,8 @@ class OperationQueue
     std::function<void(OperationCompleted const&)> completionObserver_{};
     std::unordered_map<Ids::OperationId, std::function<void(OperationCompleted const&)>, Ids::IdHash>
         completionCallbacks_{};
+    /** @brief See whenProgressing(). */
+    std::unordered_map<Ids::OperationId, ProgressObserver, Ids::IdHash> progressObservers_{};
     /** @brief See leaveChangedDestinationsToOwner(). */
     std::unordered_set<Ids::OperationId, Ids::IdHash> changedDestinationsLeftToOwner_{};
     // Transfer slots handed out per queue tick.

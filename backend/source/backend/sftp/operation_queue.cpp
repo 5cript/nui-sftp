@@ -580,6 +580,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             // completion (success, failure, or cancel) and no longer needs
             // a backup for reconnect adoption.
             self->bulkResumeStash_.erase(operationCompleted.operationId);
+            self->progressObservers_.erase(operationCompleted.operationId);
 
             if (self->completionObserver_)
                 self->completionObserver_(operationCompleted);
@@ -601,6 +602,11 @@ void OperationQueue::whenCompleted(
 )
 {
     completionCallbacks_.insert_or_assign(operationId, std::move(callback));
+}
+
+void OperationQueue::whenProgressing(Ids::OperationId const& operationId, ProgressObserver observer)
+{
+    progressObservers_.insert_or_assign(operationId, std::move(observer));
 }
 
 void OperationQueue::discardResumeBackup(Ids::OperationId const& operationId)
