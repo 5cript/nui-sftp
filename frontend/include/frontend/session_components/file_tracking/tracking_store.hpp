@@ -36,7 +36,8 @@ namespace FileTracking
         ROAR_PIMPL_SPECIAL_FUNCTIONS_NO_MOVE(TrackingStore);
 
         /**
-         * @brief Adds or updates the item of @p entry, moving it between groups as its status changes.
+         * @brief Adds or updates the item of @p entry, moving it between groups as its status changes. A new watch that
+         *        is not stopped is selected while nothing is.
          */
         void showEntry(SharedData::TrackedEntry const& entry);
 

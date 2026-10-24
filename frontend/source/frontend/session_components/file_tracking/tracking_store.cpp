@@ -558,6 +558,8 @@ namespace FileTracking
 
         impl_->model.showEntry(entry);
         impl_->refreshWatch(entry.watchId, inserted ? everyPart : WatchParts{.entry = true});
+        if (inserted && !entry.stop && std::holds_alternative<std::monostate>(impl_->selection.value()))
+            impl_->selection = Selection{entry.watchId};
         if (heldInstance || entry.instanceId)
             impl_->refreshOrphans();
         impl_->notifyAttention();
