@@ -177,7 +177,6 @@ target_sources(
         terminal/file_engine.cpp
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
-        components/progress_bar.cpp
         components/code_editor.cpp
         onboarding/onboarding.cpp
         file_explorer/side_model.cpp
