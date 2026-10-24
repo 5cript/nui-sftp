@@ -192,6 +192,19 @@ namespace FileTracking
         }
 
         /**
+         * @brief @p bytes as a raw number in an attribute that follows it, for the end-to-end tests.
+         */
+        auto bytesAttributeValue(std::shared_ptr<Nui::Observed<std::int64_t>> const& bytes)
+        {
+            return Nui::observe(bytes).generate(
+                [bytes]()
+                {
+                    return std::to_string(bytes->value());
+                }
+            );
+        }
+
+        /**
          * @brief One row of the files in flight: the path below the watched item and its bar. A free row keeps its
          *        place (data-free, hidden by CSS), so the rows below it do not move.
          */
@@ -240,6 +253,8 @@ namespace FileTracking
                                 return row->path.value();
                             }
                         ),
+                        "data-ft-bytes-done"_attr = bytesAttributeValue(row->bytes),
+                        "data-ft-bytes-total"_attr = bytesAttributeValue(row->totalBytes),
                     },
                 })
             );
@@ -335,6 +350,8 @@ namespace FileTracking
                         .colorMode = ScriptNuiComponents::ProgressColorMode::Hue,
                         .attributes = {
                             "data-ft-progress-total"_attr = true,
+                            "data-ft-bytes-done"_attr = bytesAttributeValue(item->bytesDone),
+                            "data-ft-bytes-total"_attr = bytesAttributeValue(item->bytesTotal),
                         },
                     })
                 ),
