@@ -8,14 +8,18 @@
 #include <paths/native.hpp>
 #include <persistence/state/sftp_options.hpp>
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
 #include <ids/id.hpp>
 #include <log/log.hpp>
 
 #include <chrono>
+#include <expected>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <system_error>
+#include <utility>
 
 namespace FileTracking
 {
@@ -33,6 +37,29 @@ namespace FileTracking
             if (const auto created = createBookkeepingDirectory(dir); !created)
                 throw std::runtime_error{fmt::format("Failed to create instance directory: {}", created.error())};
             return dir;
+        }
+
+        /**
+         * @brief Reads the metadata of @p instanceDirectory, lets @p change update it and writes it back with every
+         *        other field kept. Metadata that is missing or no object starts over with the instance id.
+         */
+        template <typename ChangeT>
+        std::expected<void, std::string>
+        updateMetadata(std::filesystem::path const& instanceDirectory, std::string const& instanceId, ChangeT&& change)
+        {
+            return readMetadata(instanceDirectory)
+                .and_then(
+                    [&](std::optional<nlohmann::json> meta)
+                    {
+                        auto updated = std::move(meta).value_or(nlohmann::json::object());
+                        if (!updated.is_object())
+                            updated = nlohmann::json::object();
+                        if (!updated.contains("instanceId"))
+                            updated["instanceId"] = instanceId;
+                        change(updated);
+                        return FileTracking::writeMetadata(instanceDirectory, updated);
+                    }
+                );
         }
     } // namespace
 
@@ -154,8 +181,24 @@ namespace FileTracking
 
     std::expected<void, std::string> TemporaryDirectoryInstance::recordOrigin(Paths::RemotePath const& remotePath)
     {
-        Log::debug("recordOrigin: not recording '{}' for instance '{}' yet", remotePath.value(), impl_->instanceId);
-        return {};
+        if (!isValid())
+            return std::unexpected{
+                fmt::format("Cannot record the origin of instance '{}': it was cleaned up", impl_->instanceId)
+            };
+        return updateMetadata(
+            impl_->instanceDir,
+            impl_->instanceId,
+            [&remotePath](nlohmann::json& meta)
+            {
+                meta["remotePath"] = remotePath.value();
+            }
+        )
+            .transform_error(
+                [this](std::string const& error)
+                {
+                    return fmt::format("Cannot record the origin of instance '{}': {}", impl_->instanceId, error);
+                }
+            );
     }
 
     void TemporaryDirectoryInstance::cleanupNow()
@@ -198,16 +241,14 @@ namespace FileTracking
 
     void TemporaryDirectoryInstance::writeDeadTimestamp()
     {
-        const auto written =
-            readMetadata(impl_->instanceDir)
-                .and_then(
-                    [this](std::optional<nlohmann::json> meta)
-                    {
-                        auto updated = std::move(meta).value_or(nlohmann::json{{"instanceId", impl_->instanceId}});
-                        updated["deadAt"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-                        return FileTracking::writeMetadata(impl_->instanceDir, updated);
-                    }
-                );
+        const auto written = updateMetadata(
+            impl_->instanceDir,
+            impl_->instanceId,
+            [](nlohmann::json& meta)
+            {
+                meta["deadAt"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            }
+        );
         if (!written)
             Log::error("writeDeadTimestamp: failed for instance '{}': {}", impl_->instanceId, written.error());
     }

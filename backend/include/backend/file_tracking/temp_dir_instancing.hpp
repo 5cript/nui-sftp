@@ -108,7 +108,7 @@ namespace FileTracking
         /**
          * @brief Records in the metadata that the instance holds a download of @p remotePath, beside the fields older
          *        builds read.
-         * @return An error when the metadata cannot be written.
+         * @return An error when the metadata cannot be written or cleanupNow() ran.
          */
         std::expected<void, std::string> recordOrigin(Paths::RemotePath const& remotePath);
 

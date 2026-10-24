@@ -6,6 +6,8 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <paths/native.hpp>
+#include <paths/paths.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -15,12 +17,18 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 using namespace FileTracking;
 using namespace std::chrono_literals;
@@ -66,6 +74,40 @@ namespace Test
     {
         std::ifstream input{path};
         return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    }
+
+    /**
+     * @brief @p path as a remote path, it must be a valid one.
+     */
+    inline Paths::RemotePath remotePathOf(std::string_view path)
+    {
+        return Paths::RemotePath::make(path).value();
+    }
+
+    /**
+     * @brief Writes @p size bytes into @p path.
+     */
+    inline void writeFileOfSize(fs::path const& path, std::size_t size)
+    {
+        std::ofstream{path, std::ios::binary} << std::string(size, 'x');
+    }
+
+    /**
+     * @brief The copy of the instance @p instanceId in @p copies, nothing when it is not listed.
+     */
+    inline std::optional<SharedData::OrphanedCopy>
+    listedCopyOf(std::vector<SharedData::OrphanedCopy> const& copies, std::string const& instanceId)
+    {
+        const auto found = std::ranges::find_if(
+            copies,
+            [&instanceId](SharedData::OrphanedCopy const& copy)
+            {
+                return copy.instanceId.value() == instanceId;
+            }
+        );
+        if (found == copies.end())
+            return std::nullopt;
+        return *found;
     }
 
     /**
@@ -560,6 +602,67 @@ namespace Test
         InstanceWatch moved{std::move(*watch)};
         EXPECT_FALSE(watch->isValid());
         EXPECT_TRUE(moved.isValid());
+    }
+
+    // ---- recordOrigin behaviour ----
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordedOriginKeepsTheLegacyFields)
+    {
+        auto inst = makeInstance();
+        const auto metaPath = bookkeepingPaths(inst->instanceDir()).metadata;
+        const auto before = readJson(metaPath);
+
+        const auto recorded = inst->recordOrigin(remotePathOf("/srv/data/report.txt"));
+
+        ASSERT_TRUE(recorded.has_value()) << recorded.error();
+        const auto after = readJson(metaPath);
+        EXPECT_EQ(after["instanceId"], inst->instanceId());
+        EXPECT_EQ(after["createdAt"], before["createdAt"]);
+        ASSERT_TRUE(after.contains("deadAt"));
+        EXPECT_TRUE(after["deadAt"].is_null());
+        EXPECT_EQ(after["remotePath"], "/srv/data/report.txt");
+        const auto read = readMetadata(inst->instanceDir());
+        ASSERT_TRUE(read.has_value()) << read.error();
+        ASSERT_TRUE(read->has_value());
+        EXPECT_EQ(**read, after);
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordedOriginSurvivesTheDeathTimestamp)
+    {
+        fs::path metaPath;
+        nlohmann::json before;
+        {
+            auto inst = makeInstance();
+            metaPath = bookkeepingPaths(inst->instanceDir()).metadata;
+            ASSERT_TRUE(inst->recordOrigin(remotePathOf("/srv/data/report.txt")).has_value());
+            before = readJson(metaPath);
+        }
+        const auto after = readJson(metaPath);
+        EXPECT_EQ(after["instanceId"], before["instanceId"]);
+        EXPECT_EQ(after["createdAt"], before["createdAt"]);
+        EXPECT_TRUE(after["deadAt"].is_number_integer());
+        EXPECT_EQ(after["remotePath"], "/srv/data/report.txt");
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordingTheOriginAgainReplacesIt)
+    {
+        auto inst = makeInstance();
+        ASSERT_TRUE(inst->recordOrigin(remotePathOf("/srv/first.txt")).has_value());
+        ASSERT_TRUE(inst->recordOrigin(remotePathOf("/srv/second.txt")).has_value());
+        EXPECT_EQ(readJson(bookkeepingPaths(inst->instanceDir()).metadata)["remotePath"], "/srv/second.txt");
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordingTheOriginAfterCleanupNowFails)
+    {
+        auto inst = makeInstance();
+        const auto dir = inst->instanceDir();
+        inst->cleanupNow();
+
+        const auto recorded = inst->recordOrigin(remotePathOf("/srv/data/report.txt"));
+
+        ASSERT_FALSE(recorded.has_value());
+        EXPECT_NE(recorded.error().find(inst->instanceId()), std::string::npos) << recorded.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(dir)));
     }
 
     // =========================================================================
