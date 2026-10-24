@@ -156,9 +156,11 @@ namespace FileTracking
                 return failureSummary(storeTexts, texts, progress, failureCount);
             if (!progress.lastSync)
                 return {.text = storeTexts.statuses.upToDate};
+            const auto changes = progress.lastSync->changes;
             return {
                 .text = formatted(texts.upToDateLastUpload, localClockTime(progress.lastSync->endedAt)),
-                .bar = BarValues{.current = progress.lastSync->changes, .maximum = progress.lastSync->changes},
+                .bar = changes > 0u ? std::optional<BarValues>{BarValues{.current = changes, .maximum = changes}}
+                                    : std::nullopt,
             };
         }
 
