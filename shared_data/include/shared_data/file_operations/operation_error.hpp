@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/shared_data.hpp>
+#include <shared_data/file_operations/local_file_problem.hpp>
 #include <shared_data/file_operations/operation_error_type.hpp>
 #include <ssh/sftp_error.hpp>
 
@@ -55,6 +56,8 @@ namespace SharedData
         OperationErrorType type;
         std::optional<SecureShell::SftpError> sftpError = std::nullopt;
         std::optional<std::string> extraInfo = std::nullopt;
+        /** @brief Why the local file could not be read or written, for an error on the local side. */
+        std::optional<LocalFileProblem> localProblem = std::nullopt;
 
         std::string toString() const
         {
@@ -73,5 +76,5 @@ namespace SharedData
             return enumString;
         }
     };
-    BOOST_DESCRIBE_STRUCT(OperationError, (), (type, sftpError))
+    BOOST_DESCRIBE_STRUCT(OperationError, (), (type, sftpError, localProblem))
 }

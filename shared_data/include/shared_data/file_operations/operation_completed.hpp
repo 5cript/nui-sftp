@@ -2,6 +2,7 @@
 
 #include <ids/ids.hpp>
 #include <shared_data/shared_data.hpp>
+#include <shared_data/file_operations/local_file_problem.hpp>
 #include <shared_data/file_operations/operation_error.hpp>
 #include <utility/describe.hpp>
 #include <paths/paths.hpp>
@@ -26,8 +27,12 @@ namespace SharedData
     {
         std::uint32_t index{0};
         OperationErrorType type{OperationErrorType::UnknownError};
+        /** @brief Why the local file could not be read, for an error on the local side. */
+        std::optional<LocalFileProblem> localProblem{};
+        /** @brief The server's SFTP status code, for an error the server answered with. */
+        std::optional<int> sftpErrorCode{};
     };
-    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type))
+    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type, localProblem, sftpErrorCode))
 
     struct OperationCompleted
     {
