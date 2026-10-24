@@ -1,7 +1,6 @@
 #include <frontend/sync_dialog/sync_progress_dialog.hpp>
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/components/icon_panel.hpp>
-#include <frontend/components/progress_bar.hpp>
 #include <frontend/svgs/decline.hpp>
 
 #include <utility/language.hpp>
@@ -23,6 +22,7 @@
 #include <ui5-sap-icons/icons/synchronize.hpp>
 
 #include <script-nui-components/button.hpp>
+#include <script-nui-components/progress_bar.hpp>
 #include <script-nui-components/spinner.hpp>
 #include <script-nui-components/style_variant.hpp>
 
@@ -49,11 +49,11 @@ struct SyncProgressDialog::Implementation
     std::string failureReason_{};
 
     // Hashing progress bar — total becomes known when comparing finishes
-    Components::ProgressBar hashProgressBar_{Components::ProgressBar::Settings{
+    ScriptNuiComponents::ProgressBar hashProgressBar_{ScriptNuiComponents::ProgressBar::Settings{
         .height = "10px",
-        .min = 0,
-        .max = 0,
-        .showMinMax = true,
+        .minimum = 0,
+        .maximum = 0,
+        .showMinimumAndMaximum = true,
     }};
 
     std::filesystem::path localPath_{};
@@ -107,7 +107,7 @@ void SyncProgressDialog::open(
     impl_->localListed_ = 0ull;
     impl_->remoteListed_ = 0ull;
     impl_->compared_ = 0ull;
-    impl_->hashProgressBar_.max(0);
+    impl_->hashProgressBar_.setMaximum(0);
     impl_->open_ = true;
     Nui::globalEventContext.executeActiveEventsImmediately();
 
