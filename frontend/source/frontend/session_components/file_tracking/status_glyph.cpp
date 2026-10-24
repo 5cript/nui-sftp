@@ -2,8 +2,8 @@
 #include <utility/enum_string_convert.hpp>
 
 #include <ui5-sap-icons/icons/accept.hpp>
-#include <ui5-sap-icons/icons/border.hpp>
 #include <ui5-sap-icons/icons/document.hpp>
+#include <ui5-sap-icons/icons/status-inactive.hpp>
 #include <ui5-sap-icons/icons/sys-help.hpp>
 #include <ui5-sap-icons/icons/warning.hpp>
 
@@ -26,7 +26,7 @@ namespace FileTracking
                 case WatchStatus::Failed:
                     return Ui5Icons::warning();
                 case WatchStatus::Stopped:
-                    return Ui5Icons::border();
+                    return Ui5Icons::status_inactive();
                 case WatchStatus::Watching:
                 case WatchStatus::Syncing:
                     break;
