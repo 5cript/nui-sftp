@@ -220,4 +220,8 @@
     margin-top: 8px;
     color: var(--color-secondary);
     font-size: 0.72rem;
+
+    &[hidden] {
+        display: none;
+    }
 }

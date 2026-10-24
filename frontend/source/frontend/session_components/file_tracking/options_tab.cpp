@@ -9,11 +9,11 @@
 #include <nui/frontend/api/mouse_event.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
-#include <nui/frontend/elements/nil.hpp>
 
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace FileTracking
 {
@@ -28,7 +28,7 @@ namespace FileTracking
             std::string label;
             std::string description;
             std::shared_ptr<Nui::Observed<bool>> enabled;
-            /** @brief Off and disabled on a downloaded copy, which never moves or deletes the server's file. */
+            /** @brief Disabled on a downloaded copy, the tracker keeps it off there. */
             bool neverForCopy;
         };
 
@@ -66,7 +66,8 @@ namespace FileTracking
             };
         }
 
-        Nui::ElementRenderer lockedOptionRow(OptionSwitch const& option)
+        Nui::ElementRenderer
+        optionRow(TrackingActions const& actions, std::shared_ptr<WatchItem> const& item, OptionSwitch const& option)
         {
             using namespace Nui::Elements;
             using namespace Nui::Attributes;
@@ -74,42 +75,26 @@ namespace FileTracking
             using Nui::Elements::div;
             using Nui::Elements::span;
 
-            // clang-format off
-            return div{
-                class_ = "file-tracking-option",
-                "data-ft-option"_attr = Utility::enumToString(option.option),
-                "data-locked"_attr = true,
-                title = language->get("fileTracking", "downloadedCopyOptionHint"),
-            }(
-                ScriptNuiComponents::switch_({
-                    .isChecked = false,
-                    .attributes = {
-                        role = "switch",
-                        "aria-checked"_attr = "false",
-                        "aria-label"_attr = option.label,
-                        disabled = true,
-                    },
-                }),
-                span{class_ = "file-tracking-option-label"}(option.label),
-                span{class_ = "file-tracking-option-description"}(
-                    language->get("fileTracking", "optionNeverForCopy")
-                )
-            );
-            // clang-format on
-        }
-
-        Nui::ElementRenderer
-        optionRow(TrackingActions const& actions, Ids::WatchId const& watchId, OptionSwitch const& option)
-        {
-            using namespace Nui::Elements;
-            using namespace Nui::Attributes;
-            using Nui::Elements::div;
-            using Nui::Elements::span;
+            const auto lockedNow = [item, neverForCopy = option.neverForCopy]()
+            {
+                return neverForCopy && item->downloadedCopy.value();
+            };
+            const auto textWhileLocked = [lockedNow](std::string unlocked, std::string locked)
+            {
+                return [lockedNow, unlocked = std::move(unlocked), locked = std::move(locked)]()
+                {
+                    return lockedNow() ? locked : unlocked;
+                };
+            };
 
             // clang-format off
             return div{
                 class_ = "file-tracking-option",
                 "data-ft-option"_attr = Utility::enumToString(option.option),
+                "data-locked"_attr = Nui::observe(item->downloadedCopy).generate(lockedNow),
+                title = Nui::observe(item->downloadedCopy).generate(
+                    textWhileLocked("", language->get("fileTracking", "downloadedCopyOptionHint"))
+                ),
             }(
                 ScriptNuiComponents::switch_({
                     .isChecked = option.enabled,
@@ -122,52 +107,23 @@ namespace FileTracking
                             }
                         ),
                         "aria-label"_attr = option.label,
+                        disabled = Nui::observe(item->downloadedCopy).generate(lockedNow),
                     },
-                    .onChange = [&actions, watchId, which = option.option](bool enabled, Nui::WebApi::MouseEvent const&)
+                    .onChange = [&actions, watchId = item->watchId, which = option.option](
+                        bool enabled,
+                        Nui::WebApi::MouseEvent const&
+                    )
                     {
                         if (actions.setOption)
                             actions.setOption(watchId, which, enabled);
                     },
                 }),
                 span{class_ = "file-tracking-option-label"}(option.label),
-                span{class_ = "file-tracking-option-description"}(option.description)
-            );
-            // clang-format on
-        }
-
-        Nui::ElementRenderer optionsBody(TrackingActions const& actions, WatchItem const& item, bool downloadedCopy)
-        {
-            using namespace Nui::Elements;
-            using namespace Nui::Attributes;
-            using Nui::Elements::div;
-
-            const auto switches = optionSwitchesOf(item);
-            const auto rowOf = [&actions, &item, downloadedCopy](OptionSwitch const& option)
-            {
-                if (downloadedCopy && option.neverForCopy)
-                    return lockedOptionRow(option);
-                return optionRow(actions, item.watchId, option);
-            };
-            const auto copyHint = [downloadedCopy]() -> Nui::ElementRenderer
-            {
-                if (!downloadedCopy)
-                    return Nui::nil();
-                // clang-format off
-                return div{class_ = "file-tracking-options-hint"}(
-                    language->get("fileTracking", "downloadedCopyOptionHint")
-                );
-                // clang-format on
-            };
-
-            // clang-format off
-            return div{class_ = "file-tracking-options-body"}(
-                div{class_ = "file-tracking-options"}(
-                    rowOf(switches[0]),
-                    rowOf(switches[1]),
-                    rowOf(switches[2]),
-                    rowOf(switches[3])
-                ),
-                copyHint()
+                span{class_ = "file-tracking-option-description"}(
+                    text{Nui::observe(item->downloadedCopy).generate(
+                        textWhileLocked(option.description, language->get("fileTracking", "optionNeverForCopy"))
+                    )}()
+                )
             );
             // clang-format on
         }
@@ -183,14 +139,25 @@ namespace FileTracking
         using namespace Nui::Attributes;
         using Nui::Elements::div;
 
+        const auto switches = optionSwitchesOf(*item);
+
         // clang-format off
         return div{class_ = "file-tracking-options-tab"}(
-            Nui::observe(item->downloadedCopy).generate(
-                [&actions, item](bool downloadedCopy) -> Nui::ElementRenderer
-                {
-                    return optionsBody(actions, *item, downloadedCopy);
-                }
-            )
+            div{class_ = "file-tracking-options"}(
+                optionRow(actions, item, switches[0]),
+                optionRow(actions, item, switches[1]),
+                optionRow(actions, item, switches[2]),
+                optionRow(actions, item, switches[3])
+            ),
+            div{
+                class_ = "file-tracking-options-hint",
+                hidden = Nui::observe(item->downloadedCopy).generate(
+                    [item]()
+                    {
+                        return !item->downloadedCopy.value();
+                    }
+                ),
+            }(language->get("fileTracking", "downloadedCopyOptionHint"))
         );
         // clang-format on
     }
