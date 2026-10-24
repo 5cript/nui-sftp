@@ -38,6 +38,7 @@ struct FileTrackingPanel::Implementation
 {
     explicit Implementation(Params params)
         : confirmDialog{params.confirmDialog}
+        , attention{std::move(params.sessionLayoutId)}
         , store{FileTracking::translatedTexts()}
         , client{
               store,
@@ -46,7 +47,6 @@ struct FileTrackingPanel::Implementation
                   notifyEnded(ended);
               }
           }
-        , attention{std::move(params.sessionLayoutId)}
     {
         store.onAttentionChanged(
             [this](FileTracking::AttentionCounts const& counts)
@@ -58,9 +58,9 @@ struct FileTrackingPanel::Implementation
     }
 
     ConfirmDialog* confirmDialog;
+    FileTracking::DockTabAttention attention;
     FileTracking::TrackingStore store;
     FileTracking::TrackerClient client;
-    FileTracking::DockTabAttention attention;
     FileTracking::TrackingActions actions{};
     std::function<void(Paths::RemotePath const& path)> revealOnServer{};
     Utility::LifetimeToken lifetime{};
