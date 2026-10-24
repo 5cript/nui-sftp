@@ -8,6 +8,7 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
+#include <shared_data/file_tracking/watch_conflict.hpp>
 #include <log/log.hpp>
 
 #include <boost/asio/post.hpp>
@@ -894,6 +895,78 @@ void Session::registerRpcFileTracker()
                     self->tracker_->answer(Ids::makeQuestionId(questionId), answer);
                     reply({{"success", true}});
                 }
+            }
+        );
+
+    // Registers a function that calls @p call on the tracker and answers {success: true}.
+    const auto onCall = [this, &name, &withTracker](std::string_view function, auto call)
+    {
+        on(name(function))
+            .perform(
+                [withTracker, call](RpcHelper::RpcOnce&& reply)
+                {
+                    if (const auto self = withTracker(reply))
+                    {
+                        std::invoke(call, *self->tracker_);
+                        reply({{"success", true}});
+                    }
+                }
+            );
+    };
+    // Like onCall, @p call gets the id the frontend sent, made with @p makeId.
+    const auto onIdCall = [this, &name, &withTracker](std::string_view function, auto makeId, auto call)
+    {
+        on(name(function))
+            .perform(
+                [withTracker, makeId, call](RpcHelper::RpcOnce&& reply, std::string const& id)
+                {
+                    if (const auto self = withTracker(reply))
+                    {
+                        std::invoke(call, *self->tracker_, makeId(id));
+                        reply({{"success", true}});
+                    }
+                }
+            );
+    };
+    // Like onIdCall, @p call gets the resolution the frontend sent too.
+    const auto onAnswerCall = [this, &name, &withTracker](std::string_view function, auto makeId, auto call)
+    {
+        on(name(function))
+            .perform(
+                [withTracker,
+                    makeId,
+                    call](RpcHelper::RpcOnce&& reply, std::string const& id, SharedData::ConflictResolution resolution)
+                {
+                    if (const auto self = withTracker(reply))
+                    {
+                        std::invoke(call, *self->tracker_, makeId(id), resolution);
+                        reply({{"success", true}});
+                    }
+                }
+            );
+    };
+
+    onAnswerCall("answerConflict", &Ids::makeConflictId, &FileTracking::Tracker::answerConflict);
+    onAnswerCall("answerAllConflicts", &Ids::makeWatchId, &FileTracking::Tracker::answerAllConflicts);
+    onIdCall("retryFailure", &Ids::makeFailureId, &FileTracking::Tracker::retryFailure);
+    onIdCall("dismissFailure", &Ids::makeFailureId, &FileTracking::Tracker::dismissFailure);
+    onIdCall("retryAllFailures", &Ids::makeWatchId, &FileTracking::Tracker::retryAllFailures);
+    onIdCall("dismissAllFailures", &Ids::makeWatchId, &FileTracking::Tracker::dismissAllFailures);
+    onIdCall("removeStopped", &Ids::makeWatchId, &FileTracking::Tracker::removeStopped);
+    onCall("removeAllStopped", &FileTracking::Tracker::removeAllStopped);
+    onCall("listOrphanedCopies", &FileTracking::Tracker::listOrphanedCopies);
+    onCall("removeAllOrphanedCopies", &FileTracking::Tracker::removeAllOrphanedCopies);
+
+    on(name("removeOrphanedCopy"))
+        .perform(
+            [withTracker](RpcHelper::RpcOnce&& reply, std::string const& instanceId)
+            {
+                if (const auto self = withTracker(reply))
+                    replyWith(
+                        reply,
+                        self->tracker_->removeOrphanedCopy(Ids::makeInstanceId(instanceId)),
+                        nlohmann::json::object()
+                    );
             }
         );
 }

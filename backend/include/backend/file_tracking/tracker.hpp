@@ -6,6 +6,7 @@
 #include <ids/ids.hpp>
 #include <paths/paths.hpp>
 #include <shared_data/file_tracking/server_changed_question.hpp>
+#include <shared_data/file_tracking/watch_conflict.hpp>
 #include <shared_data/file_tracking/watch_options.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -162,6 +163,65 @@ namespace FileTracking
          * @brief The user's answer to the question @p questionId, see TrackerView::ask().
          */
         void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer);
+
+        /**
+         * @brief The user's answer to the conflict @p conflictId, see TrackerView::showConflict(). ReplaceOnServer
+         *        checks the path again and uploads it, KeepServers asks again on the next save. Either removes the
+         *        conflict.
+         */
+        void answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution);
+
+        /**
+         * @brief Answers every conflict of the watch @p watchId with @p resolution, see answerConflict().
+         */
+        void answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution);
+
+        /**
+         * @brief Uploads the path of the failure @p failureId again, see TrackerView::showFailure().
+         */
+        void retryFailure(Ids::FailureId const& failureId);
+
+        /**
+         * @brief Forgets the failure @p failureId, its path waits for its next change.
+         */
+        void dismissFailure(Ids::FailureId const& failureId);
+
+        /**
+         * @brief Retries every failure of the watch @p watchId, see retryFailure().
+         */
+        void retryAllFailures(Ids::WatchId const& watchId);
+
+        /**
+         * @brief Dismisses every failure of the watch @p watchId, see dismissFailure().
+         */
+        void dismissAllFailures(Ids::WatchId const& watchId);
+
+        /**
+         * @brief Removes the stopped watch @p watchId from the view, a stopped copy's instance becomes an orphan.
+         */
+        void removeStopped(Ids::WatchId const& watchId);
+
+        /**
+         * @brief Removes every stopped watch, see removeStopped().
+         */
+        void removeAllStopped();
+
+        /**
+         * @brief Shows the orphaned copies again, see TrackerView::showOrphanedCopies(). Those of stopped watches are
+         *        left out.
+         */
+        void listOrphanedCopies();
+
+        /**
+         * @brief Removes the orphaned copy @p instanceId with its directory.
+         * @return An error when it is no orphaned copy or cannot be removed.
+         */
+        std::expected<void, std::string> removeOrphanedCopy(Ids::InstanceId const& instanceId);
+
+        /**
+         * @brief Removes every orphaned copy, see removeOrphanedCopy().
+         */
+        void removeAllOrphanedCopies();
 
         /**
          * @brief Ends every watch without telling the view, for a frontend that is gone or a session that closes. The

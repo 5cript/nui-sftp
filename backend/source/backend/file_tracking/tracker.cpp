@@ -1910,6 +1910,70 @@ namespace FileTracking
             askNextServerChanged();
         }
 
+        void answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
+        {
+            Log::warn(
+                "FileTracking: answering conflict {} with {} is not implemented",
+                conflictId.value(),
+                Utility::enumToString(resolution)
+            );
+        }
+
+        void answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution)
+        {
+            Log::warn(
+                "FileTracking: answering the conflicts of watch {} with {} is not implemented",
+                watchId.value(),
+                Utility::enumToString(resolution)
+            );
+        }
+
+        void retryFailure(Ids::FailureId const& failureId)
+        {
+            Log::warn("FileTracking: retrying failure {} is not implemented", failureId.value());
+        }
+
+        void dismissFailure(Ids::FailureId const& failureId)
+        {
+            Log::warn("FileTracking: dismissing failure {} is not implemented", failureId.value());
+        }
+
+        void retryAllFailures(Ids::WatchId const& watchId)
+        {
+            Log::warn("FileTracking: retrying the failures of watch {} is not implemented", watchId.value());
+        }
+
+        void dismissAllFailures(Ids::WatchId const& watchId)
+        {
+            Log::warn("FileTracking: dismissing the failures of watch {} is not implemented", watchId.value());
+        }
+
+        void removeStopped(Ids::WatchId const& watchId)
+        {
+            Log::warn("FileTracking: removing the stopped watch {} is not implemented", watchId.value());
+        }
+
+        void removeAllStopped()
+        {
+            Log::warn("FileTracking: removing the stopped watches is not implemented");
+        }
+
+        void listOrphanedCopies()
+        {
+            Log::warn("FileTracking: listing the orphaned copies is not implemented");
+        }
+
+        std::expected<void, std::string> removeOrphanedCopy(Ids::InstanceId const& instanceId)
+        {
+            Log::warn("FileTracking: removing the orphaned copy {} is not implemented", instanceId.value());
+            return std::unexpected{std::string{"Removing an orphaned copy is not implemented"}};
+        }
+
+        void removeAllOrphanedCopies()
+        {
+            Log::warn("FileTracking: removing the orphaned copies is not implemented");
+        }
+
         /**
          * @brief Another dialog replaced the question for @p upload: it and the waiting questions are asked again on
          *        the next save, nothing opens now over the dialog that replaced it.
@@ -2282,6 +2346,61 @@ namespace FileTracking
     void Tracker::answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer)
     {
         impl_->answer(questionId, answer);
+    }
+
+    void Tracker::answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
+    {
+        impl_->answerConflict(conflictId, resolution);
+    }
+
+    void Tracker::answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution)
+    {
+        impl_->answerAllConflicts(watchId, resolution);
+    }
+
+    void Tracker::retryFailure(Ids::FailureId const& failureId)
+    {
+        impl_->retryFailure(failureId);
+    }
+
+    void Tracker::dismissFailure(Ids::FailureId const& failureId)
+    {
+        impl_->dismissFailure(failureId);
+    }
+
+    void Tracker::retryAllFailures(Ids::WatchId const& watchId)
+    {
+        impl_->retryAllFailures(watchId);
+    }
+
+    void Tracker::dismissAllFailures(Ids::WatchId const& watchId)
+    {
+        impl_->dismissAllFailures(watchId);
+    }
+
+    void Tracker::removeStopped(Ids::WatchId const& watchId)
+    {
+        impl_->removeStopped(watchId);
+    }
+
+    void Tracker::removeAllStopped()
+    {
+        impl_->removeAllStopped();
+    }
+
+    void Tracker::listOrphanedCopies()
+    {
+        impl_->listOrphanedCopies();
+    }
+
+    std::expected<void, std::string> Tracker::removeOrphanedCopy(Ids::InstanceId const& instanceId)
+    {
+        return impl_->removeOrphanedCopy(instanceId);
+    }
+
+    void Tracker::removeAllOrphanedCopies()
+    {
+        impl_->removeAllOrphanedCopies();
     }
 
     void Tracker::stopAll()
