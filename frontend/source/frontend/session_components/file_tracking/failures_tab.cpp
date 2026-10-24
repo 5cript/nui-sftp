@@ -133,6 +133,15 @@ namespace FileTracking
                 .hint = language->get("fileTracking", "notRetriedAutomatically"),
                 .emptyText = language->get("fileTracking", "noFailures"),
                 .count = item->failureCount,
+                .paging = ItemListBoxPaging{
+                    .page = item->failurePage,
+                    .pageCount = item->failurePageCount,
+                    .onPageChange = [&actions, watchId](int page)
+                    {
+                        if (actions.showFailurePage)
+                            actions.showFailurePage(watchId, page);
+                    },
+                },
                 .attributes = {"data-class"_attr = "failures"},
             },
             div{class_ = "file-tracking-item-list", role = "list"}(

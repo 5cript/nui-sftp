@@ -101,6 +101,15 @@ namespace FileTracking
                 .hint = language->get("fileTracking", "keepAsksAgain"),
                 .emptyText = language->get("fileTracking", "noConflicts"),
                 .count = item->conflictCount,
+                .paging = ItemListBoxPaging{
+                    .page = item->conflictPage,
+                    .pageCount = item->conflictPageCount,
+                    .onPageChange = [&actions, watchId = item->watchId](int page)
+                    {
+                        if (actions.showConflictPage)
+                            actions.showConflictPage(watchId, page);
+                    },
+                },
                 .attributes = {"data-class"_attr = "conflicts"},
             },
             div{class_ = "file-tracking-item-list", role = "list"}(

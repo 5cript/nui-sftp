@@ -15,6 +15,19 @@
 namespace FileTracking
 {
     /**
+     * @brief The pages of a list too long for one, for @ref itemListBox. Both observed values are required.
+     */
+    struct ItemListBoxPaging
+    {
+        /** @brief The page shown, 0-based, the value of data-ft-page. */
+        std::shared_ptr<Nui::Observed<int>> page = {};
+        /** @brief The number of pages, the value of data-ft-page-count. The bar shows nothing for one page. */
+        std::shared_ptr<Nui::Observed<int>> pageCount = {};
+        /** @brief Gets the page the user chose. */
+        std::function<void(int page)> onPageChange = {};
+    };
+
+    /**
      * @brief The options of @ref itemListBox, for designated initializers in this order. Every field has a default.
      */
     struct ItemListBoxOptions
@@ -27,16 +40,20 @@ namespace FileTracking
         std::string emptyText = {};
         /** @brief The number of items, data-empty is on the root while it is 0. A null pointer counts as not empty. */
         std::shared_ptr<Nui::Observed<std::uint64_t>> count = {};
+        /** @brief A pagination bar below the box, staying in place while the rows scroll. */
+        std::optional<ItemListBoxPaging> paging = std::nullopt;
         /** @brief Merged onto the root, for example data-class="conflicts" or "failures" for the box colours. */
         std::vector<Nui::Attribute> attributes = {};
     };
 
     /**
      * @brief A toolbar above a box that scrolls on its own, or an empty text instead of both. Markup:
-     *        div.file-tracking-item-list-box[data-empty] > div.file-tracking-item-list-box-toolbar
-     *        (div.file-tracking-item-list-box-actions holding the actions, then span.file-tracking-item-list-box-hint),
-     *        div.file-tracking-item-list-box-items (@p content) and div.file-tracking-item-list-box-empty (emptyText).
-     *        Kept in the host until a second user (the queue's Failed tab) adopts it.
+     *        div.file-tracking-item-list-box[data-empty][data-ft-page][data-ft-page-count] >
+     *        div.file-tracking-item-list-box-toolbar (div.file-tracking-item-list-box-actions holding the actions, then
+     *        span.file-tracking-item-list-box-hint), div.file-tracking-item-list-box-items (@p content),
+     *        div.file-tracking-item-list-box-pagination (with paging only: the pagination bar, a page change scrolls
+     *        the items to the top) and div.file-tracking-item-list-box-empty (emptyText). The page attributes are set
+     *        with paging only. Kept in the host until a second user (the queue's Failed tab) adopts it.
      * @param content The rows, usually an element holding a Nui::range.
      */
     Nui::ElementRenderer itemListBox(ItemListBoxOptions options, Nui::ElementRenderer content);

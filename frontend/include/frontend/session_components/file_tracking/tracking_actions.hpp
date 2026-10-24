@@ -32,6 +32,10 @@ namespace FileTracking
         std::function<void(Ids::WatchId const& watchId)> retryAllFailures{};
         /** @brief Dismiss All for the failures of a watch. */
         std::function<void(Ids::WatchId const& watchId)> dismissAllFailures{};
+        /** @brief A page of the Conflicts tab of a watch was chosen, 0-based. */
+        std::function<void(Ids::WatchId const& watchId, int page)> showConflictPage{};
+        /** @brief A page of the Failed tab of a watch was chosen, 0-based. */
+        std::function<void(Ids::WatchId const& watchId, int page)> showFailurePage{};
         /** @brief A switch of the Options tab changed. */
         std::function<void(Ids::WatchId const& watchId, SharedData::WatchOption option, bool enabled)> setOption{};
         /** @brief Stop on a running watch; it stays listed under Stopped. */

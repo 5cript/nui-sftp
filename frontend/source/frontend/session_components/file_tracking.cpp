@@ -240,6 +240,16 @@ struct FileTrackingPanel::Implementation
             {
                 client.dismissAllFailures(watchId);
             },
+            .showConflictPage =
+                [this](Ids::WatchId const& watchId, int page)
+            {
+                store.setConflictPage(watchId, page);
+            },
+            .showFailurePage =
+                [this](Ids::WatchId const& watchId, int page)
+            {
+                store.setFailurePage(watchId, page);
+            },
             .setOption =
                 [this](Ids::WatchId const& watchId, SharedData::WatchOption option, bool enabled)
             {

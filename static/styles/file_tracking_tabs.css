@@ -59,7 +59,18 @@
 
     &[data-empty] > .file-tracking-item-list-box-toolbar,
     &[data-empty] > .file-tracking-item-list-box-items,
-    &:not([data-empty]) > .file-tracking-item-list-box-empty {
+    &[data-empty] > .file-tracking-item-list-box-pagination,
+    &:not([data-empty]) > .file-tracking-item-list-box-pagination {
+    display: flex;
+    flex-shrink: 0;
+    justify-content: center;
+
+    &:not(:has(.script-nui-pagination-bar)) {
+        display: none;
+    }
+}
+
+.file-tracking-item-list-box-empty {
         display: none;
     }
 
@@ -108,6 +119,16 @@
     border: 1px solid color-mix(in srgb, var(--file-tracking-item-list-box-accent) 45%, var(--brightness-mixin) 55%);
     border-radius: 4px;
     background: color-mix(in srgb, var(--file-tracking-item-list-box-accent) 7%, var(--brightness-mixin) 93%);
+}
+
+.file-tracking-item-list-box-pagination {
+    display: flex;
+    flex-shrink: 0;
+    justify-content: center;
+
+    &:not(:has(.script-nui-pagination-bar)) {
+        display: none;
+    }
 }
 
 .file-tracking-item-list-box-empty {
