@@ -213,8 +213,7 @@ namespace Test
 
             void showOrphanedCount(std::size_t count) override
             {
-                orphanedCounts.push_back(count);
-                events.push_back("orphanedCount " + std::to_string(count));
+                ADD_FAILURE() << "the tracker lists the orphaned copies, it counted " << count;
             }
 
             void showProgress(SharedData::TrackerProgress const&) override
@@ -265,7 +264,6 @@ namespace Test
             std::map<std::string, SharedData::TrackedEntry> entries{};
             std::vector<std::string> removed{};
             std::vector<SharedData::EndedWatches> ended{};
-            std::vector<std::size_t> orphanedCounts{};
             /** @brief The conflicts shown and not removed, by id. */
             std::map<std::string, SharedData::WatchConflict> conflicts{};
             /** @brief Every conflict shown, in order. */
@@ -1634,6 +1632,7 @@ namespace Test
                 "removeFailure " + failureId,
                 "progress " + watchId.value(),
                 "entry " + watchId.value() + " StoppedByUser",
+                "orphans 0",
             })
         );
         EXPECT_TRUE(view_->conflicts.empty());
@@ -2169,6 +2168,14 @@ namespace Test
             },
             FileTracking::copyReturnTime + std::chrono::seconds{2}
         ));
+        const auto watchId = onlyEntry().watchId;
+        ASSERT_GE(view_->events.size(), 4u);
+        EXPECT_EQ(
+            std::vector<std::string>(view_->events.end() - 4, view_->events.end()),
+            (std::vector<std::string>{
+                "progress " + watchId.value(), "entry " + watchId.value() + " CopyGone", "ended CopyGone", "orphans 0"
+            })
+        );
         write(renamed, "edited after the rename");
         runFor(std::chrono::milliseconds{1000});
 
@@ -2178,6 +2185,15 @@ namespace Test
         EXPECT_TRUE(remote_->of("rename").empty());
         EXPECT_TRUE(std::filesystem::exists(renamed));
         EXPECT_EQ(instances_->countOrphaned(), 1u);
+        EXPECT_TRUE(view_->orphanedCopies.back().copies.empty());
+
+        tracker_->removeStopped(watchId);
+
+        ASSERT_EQ(view_->orphanedCopies.back().copies.size(), 1u);
+        auto const& orphan = view_->orphanedCopies.back().copies.front();
+        EXPECT_EQ(orphan.instanceId, opened->instanceId);
+        EXPECT_EQ(orphan.name, "renamed.txt");
+        EXPECT_EQ(orphan.remotePath, std::optional{remote("/srv/notes.txt")});
     }
 
     TEST_F(TrackerTest, StoppingADownloadedCopyEndsItsInstance)
@@ -2193,7 +2209,10 @@ namespace Test
         EXPECT_TRUE(view_->removed.empty());
         EXPECT_TRUE(view_->ended.empty());
         EXPECT_EQ(instances_->findInstance(opened->instanceId.value()), nullptr);
-        EXPECT_FALSE(view_->orphanedCounts.empty());
+        // An orphan on disk, which the list leaves out while its watch is listed as stopped.
+        EXPECT_EQ(instances_->countOrphaned(), 1u);
+        ASSERT_FALSE(view_->orphanedCopies.empty());
+        EXPECT_TRUE(view_->orphanedCopies.back().copies.empty());
         EXPECT_TRUE(open("/srv/notes.txt", /*watch=*/true).has_value());
     }
 
@@ -2233,7 +2252,9 @@ namespace Test
 
         EXPECT_EQ(
             view_->events,
-            (std::vector<std::string>{"progress " + watchId.value(), "entry " + watchId.value() + " StoppedByUser"})
+            (std::vector<std::string>{
+                "progress " + watchId.value(), "entry " + watchId.value() + " StoppedByUser", "orphans 0"
+            })
         );
         auto const& entry = onlyEntry();
         ASSERT_TRUE(entry.stop.has_value());
@@ -2262,11 +2283,11 @@ namespace Test
         );
         write(notes, "changed again");
         runFor(std::chrono::milliseconds{1000});
-        EXPECT_EQ(view_->events.size(), 2u);
+        EXPECT_EQ(view_->events.size(), 3u);
         EXPECT_TRUE(view_->failures.empty());
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
         tracker_->stop(watchId);
-        EXPECT_EQ(view_->events.size(), 2u);
+        EXPECT_EQ(view_->events.size(), 3u);
     }
 
     TEST_F(TrackerTest, AStoppedDirectoryWatchStaysADirectoryAfterItsItemWasDeleted)
@@ -2329,7 +2350,10 @@ namespace Test
         EXPECT_EQ(
             view_->events,
             (std::vector<std::string>{
-                "progress " + secondId.value(), "entry " + secondId.value() + " Overlap", "ended Overlap"
+                "progress " + secondId.value(),
+                "entry " + secondId.value() + " Overlap",
+                "ended Overlap",
+                "orphans 0",
             })
         );
         EXPECT_FALSE(stopOf(firstId).has_value());
@@ -2340,7 +2364,7 @@ namespace Test
         EXPECT_TRUE(remote_->of("rename").empty());
         EXPECT_EQ(uploadsTo("/srv/R5/f1.txt"), 1u);
         EXPECT_EQ(remote_->server, serverBefore);
-        EXPECT_EQ(view_->events.size(), 3u);
+        EXPECT_EQ(view_->events.size(), 4u);
     }
 
     TEST_F(TrackerTest, ANewWatchOfAStoppedItemOrServerPathWorksWhileTheStoppedOneIsListed)
@@ -2436,6 +2460,153 @@ namespace Test
         EXPECT_TRUE(view_->removed.empty());
     }
 
+    TEST_F(TrackerTest, OpenRecordsWhereTheCopyCameFromForTheOrphanList)
+    {
+        const auto opened = open("/srv/docs/notes.txt", /*watch=*/false);
+        ASSERT_TRUE(opened.has_value());
+        instances_->destroyInstance(opened->instanceId.value());
+
+        tracker_->listOrphanedCopies();
+
+        EXPECT_EQ(view_->events, std::vector<std::string>{"orphans 1"});
+        ASSERT_EQ(view_->orphanedCopies.size(), 1u);
+        ASSERT_EQ(view_->orphanedCopies.back().copies.size(), 1u);
+        auto const& copy = view_->orphanedCopies.back().copies.front();
+        EXPECT_EQ(copy.instanceId, opened->instanceId);
+        EXPECT_EQ(copy.name, "notes.txt");
+        EXPECT_EQ(copy.remotePath, std::optional{remote("/srv/docs/notes.txt")});
+        EXPECT_EQ(copy.copyPath, std::optional{opened->localPath});
+        EXPECT_EQ(copy.sizeBytes, std::string{"server content"}.size());
+    }
+
+    TEST_F(TrackerTest, AStoppedCopyIsListedOnlyAsStoppedUntilItsStoppedWatchIsRemoved)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
+
+        tracker_->stop(watchId);
+
+        EXPECT_EQ(view_->events.back(), "orphans 0");
+        EXPECT_EQ(instances_->countOrphaned(), 1u);
+        tracker_->listOrphanedCopies();
+        ASSERT_EQ(view_->orphanedCopies.size(), 2u);
+        EXPECT_TRUE(view_->orphanedCopies.back().copies.empty());
+        view_->events.clear();
+
+        tracker_->removeStopped(watchId);
+
+        EXPECT_EQ(view_->events, (std::vector<std::string>{"removeEntry " + watchId.value(), "orphans 1"}));
+        ASSERT_EQ(view_->orphanedCopies.back().copies.size(), 1u);
+        auto const& copy = view_->orphanedCopies.back().copies.front();
+        EXPECT_EQ(copy.instanceId, opened->instanceId);
+        EXPECT_EQ(copy.name, "notes.txt");
+        EXPECT_EQ(copy.remotePath, std::optional{remote("/srv/notes.txt")});
+        EXPECT_TRUE(copy.downloadedAt.has_value());
+        EXPECT_TRUE(copy.endedAt.has_value());
+    }
+
+    TEST_F(TrackerTest, RemovingAllStoppedWatchesListsTheirCopiesAsOrphaned)
+    {
+        ASSERT_TRUE(
+            tracker_->uploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv/notes.txt")).has_value()
+        );
+        const auto first = open("/srv/first.txt", /*watch=*/true);
+        const auto second = open("/srv/second.txt", /*watch=*/true);
+        ASSERT_TRUE(first.has_value());
+        ASSERT_TRUE(second.has_value());
+        const auto watchIds = std::views::keys(view_->entries) | std::ranges::to<std::vector>();
+        for (auto const& watchId : watchIds)
+            tracker_->stop(Ids::makeWatchId(watchId));
+        EXPECT_TRUE(view_->orphanedCopies.back().copies.empty());
+        view_->events.clear();
+
+        tracker_->removeAllStopped();
+
+        ASSERT_EQ(view_->events.size(), 4u);
+        EXPECT_EQ(view_->events.back(), "orphans 2");
+        EXPECT_TRUE(view_->entries.empty());
+        const auto listed = view_->orphanedCopies.back().copies |
+            std::views::transform(&SharedData::OrphanedCopy::instanceId) | std::ranges::to<std::vector>();
+        EXPECT_TRUE(std::ranges::contains(listed, first->instanceId));
+        EXPECT_TRUE(std::ranges::contains(listed, second->instanceId));
+    }
+
+    TEST_F(TrackerTest, RemovingAnOrphanedCopyRefusesTheCopyOfAStoppedWatchAndALiveOne)
+    {
+        const auto stoppedCopy = open("/srv/stopped.txt", /*watch=*/true);
+        const auto liveCopy = open("/srv/live.txt", /*watch=*/true);
+        const auto openedCopy = open("/srv/opened.txt", /*watch=*/false);
+        const auto orphan = open("/srv/orphan.txt", /*watch=*/true);
+        ASSERT_TRUE(stoppedCopy.has_value());
+        ASSERT_TRUE(liveCopy.has_value());
+        ASSERT_TRUE(openedCopy.has_value());
+        ASSERT_TRUE(orphan.has_value());
+        const auto orphanId = watchIdNamed("orphan.txt");
+        tracker_->stop(watchIdNamed("stopped.txt"));
+        tracker_->stop(orphanId);
+        tracker_->removeStopped(orphanId);
+        ASSERT_EQ(view_->orphanedCopies.back().copies.size(), 1u);
+        const auto pushes = view_->orphanedCopies.size();
+
+        const auto ofStoppedWatch = tracker_->removeOrphanedCopy(stoppedCopy->instanceId);
+        ASSERT_FALSE(ofStoppedWatch.has_value());
+        EXPECT_NE(ofStoppedWatch.error().find("stopped watch"), std::string::npos) << ofStoppedWatch.error();
+        for (auto const& refused :
+             {liveCopy->instanceId, openedCopy->instanceId, Ids::makeInstanceId("../x"), Ids::generateInstanceId()})
+            EXPECT_FALSE(tracker_->removeOrphanedCopy(refused).has_value()) << refused.value();
+
+        // Each answer shows the list again, which did not change.
+        EXPECT_EQ(view_->orphanedCopies.size(), pushes + 5u);
+        EXPECT_EQ(view_->orphanedCopies.back().copies.size(), 1u);
+        EXPECT_TRUE(std::filesystem::exists(stoppedCopy->localPath.native()));
+        EXPECT_TRUE(std::filesystem::exists(liveCopy->localPath.native()));
+        EXPECT_TRUE(std::filesystem::exists(openedCopy->localPath.native()));
+
+        const auto removed = tracker_->removeOrphanedCopy(orphan->instanceId);
+
+        ASSERT_TRUE(removed.has_value()) << removed.error();
+        EXPECT_FALSE(std::filesystem::exists(orphan->localPath.native().parent_path()));
+        EXPECT_EQ(view_->orphanedCopies.size(), pushes + 6u);
+        EXPECT_TRUE(view_->orphanedCopies.back().copies.empty());
+        EXPECT_EQ(instances_->countOrphaned(), 1u);
+    }
+
+    TEST_F(TrackerTest, RemovingAllOrphanedCopiesRemovesWhatTheListShowsAndKeepsStoppedCopies)
+    {
+        const auto first = open("/srv/first.txt", /*watch=*/true);
+        const auto second = open("/srv/second.txt", /*watch=*/true);
+        const auto stoppedCopy = open("/srv/stopped.txt", /*watch=*/true);
+        const auto liveCopy = open("/srv/live.txt", /*watch=*/true);
+        ASSERT_TRUE(first.has_value());
+        ASSERT_TRUE(second.has_value());
+        ASSERT_TRUE(stoppedCopy.has_value());
+        ASSERT_TRUE(liveCopy.has_value());
+        const auto stoppedId = watchIdNamed("stopped.txt");
+        for (auto const& name : {"first.txt", "second.txt"})
+        {
+            const auto watchId = watchIdNamed(name);
+            tracker_->stop(watchId);
+            tracker_->removeStopped(watchId);
+        }
+        tracker_->stop(stoppedId);
+        ASSERT_EQ(view_->orphanedCopies.back().copies.size(), 2u);
+        view_->events.clear();
+
+        tracker_->removeAllOrphanedCopies();
+
+        EXPECT_EQ(view_->events, std::vector<std::string>{"orphans 0"});
+        EXPECT_FALSE(std::filesystem::exists(first->localPath.native().parent_path()));
+        EXPECT_FALSE(std::filesystem::exists(second->localPath.native().parent_path()));
+        EXPECT_TRUE(std::filesystem::exists(stoppedCopy->localPath.native()));
+        EXPECT_TRUE(std::filesystem::exists(liveCopy->localPath.native()));
+        EXPECT_EQ(instances_->countOrphaned(), 1u);
+
+        tracker_->removeStopped(stoppedId);
+        ASSERT_EQ(view_->orphanedCopies.back().copies.size(), 1u);
+        EXPECT_EQ(view_->orphanedCopies.back().copies.front().instanceId, stoppedCopy->instanceId);
+    }
+
     TEST_F(TrackerTest, DiscardingADownloadEndsItsWatchAndItsInstance)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
@@ -2522,11 +2693,13 @@ namespace Test
         EXPECT_EQ(countsOf(*lastProgressOf(notesId)), ProgressCounts{});
         ASSERT_EQ(view_->events.size(), 6u);
         EXPECT_EQ(view_->events[4], "ended ConnectionLost");
+        EXPECT_EQ(view_->events[5], "orphans 0");
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_EQ(uploadsTo("/srv/copy.txt"), 0u);
         EXPECT_EQ(instances_->findInstance(copy->instanceId.value()), nullptr);
-        ASSERT_FALSE(view_->orphanedCounts.empty());
-        EXPECT_EQ(view_->orphanedCounts.back(), 1u);
+        EXPECT_EQ(instances_->countOrphaned(), 1u);
+        ASSERT_EQ(view_->orphanedCopies.size(), 1u);
+        EXPECT_TRUE(view_->orphanedCopies.back().copies.empty());
         EXPECT_TRUE(tracker_->checkUploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv")).has_value());
     }
 

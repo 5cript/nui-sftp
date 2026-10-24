@@ -214,13 +214,13 @@ namespace FileTracking
         void listOrphanedCopies();
 
         /**
-         * @brief Removes the orphaned copy @p instanceId with its directory.
-         * @return An error when it is no orphaned copy or cannot be removed.
+         * @brief Removes the orphaned copy @p instanceId with its directory, the view shows the orphaned copies again.
+         * @return An error when it is no orphaned copy, is the copy of a stopped watch or cannot be removed.
          */
         std::expected<void, std::string> removeOrphanedCopy(Ids::InstanceId const& instanceId);
 
         /**
-         * @brief Removes every orphaned copy, see removeOrphanedCopy().
+         * @brief Removes every orphaned copy listOrphanedCopies() shows, see removeOrphanedCopy().
          */
         void removeAllOrphanedCopies();
 

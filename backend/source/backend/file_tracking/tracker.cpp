@@ -13,10 +13,12 @@
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
 #include <shared_data/file_tracking/watch_stop.hpp>
 
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <chrono>
@@ -865,6 +867,9 @@ namespace FileTracking
                     OpenFailure{Utility::localizedMessage("backend.fileTracking.instanceCreationFailed")}
                 });
             const auto instanceId = Ids::makeInstanceId(instance->instanceId());
+            // Only the orphan list shows it, the copy opens without it.
+            if (const auto recorded = instance->recordOrigin(remotePath); !recorded)
+                Log::warn("FileTracking: {}", recorded.error());
             downloading.insert(instanceId);
             // Canonical like the paths of the changes, which the copy's path is compared with.
             std::error_code canonicalError;
@@ -1045,9 +1050,8 @@ namespace FileTracking
 
         void stop(Ids::WatchId const& watchId)
         {
-            const auto retired = retire(watchId, watchStopOf(SharedData::WatchStopReason::StoppedByUser));
-            if (retired && retired->instanceId)
-                view->showOrphanedCount(instances->countOrphaned());
+            if (retire(watchId, watchStopOf(SharedData::WatchStopReason::StoppedByUser)))
+                showOrphanedCopies();
         }
 
         /**
@@ -1233,7 +1237,7 @@ namespace FileTracking
                 leaveOrder(ticket);
             if (!ended.entries.empty())
                 view->showEnded(ended);
-            view->showOrphanedCount(instances->countOrphaned());
+            showOrphanedCopies();
         }
 
         /**
@@ -1622,7 +1626,7 @@ namespace FileTracking
             if (!retired)
                 return;
             view->showEnded({.reason = SharedData::WatchEndReason::CopyGone, .entries = {*std::move(retired)}});
-            view->showOrphanedCount(instances->countOrphaned());
+            showOrphanedCopies();
         }
 
         /**
@@ -1692,8 +1696,10 @@ namespace FileTracking
             stop.movedTo = movedTo;
             stop.wouldGoTo = wouldGoTo;
             auto retired = retire(watchId, std::move(stop));
-            if (retired)
-                view->showEnded({.reason = SharedData::WatchEndReason::Overlap, .entries = {*std::move(retired)}});
+            if (!retired)
+                return;
+            view->showEnded({.reason = SharedData::WatchEndReason::Overlap, .entries = {*std::move(retired)}});
+            showOrphanedCopies();
         }
 
         void onMoved(Entry& entry, Paths::LocalPath const& oldPath, LocalChange const& change)
@@ -2401,6 +2407,8 @@ namespace FileTracking
             }
             Log::info("FileTracking: removing the stopped watch {}", watchId.value());
             view->removeEntry(watchId);
+            // A stopped copy is an orphan from now on.
+            showOrphanedCopies();
         }
 
         void removeAllStopped()
@@ -2409,22 +2417,78 @@ namespace FileTracking
             Log::info("FileTracking: removing {} stopped watch(es)", removed.size());
             for (auto const& watchId : std::views::keys(removed))
                 view->removeEntry(watchId);
+            showOrphanedCopies();
         }
 
         void listOrphanedCopies()
         {
-            Log::warn("FileTracking: listing the orphaned copies is not implemented");
+            showOrphanedCopies();
         }
 
         std::expected<void, std::string> removeOrphanedCopy(Ids::InstanceId const& instanceId)
         {
-            Log::warn("FileTracking: removing the orphaned copy {} is not implemented", instanceId.value());
-            return std::unexpected{std::string{"Removing an orphaned copy is not implemented"}};
+            const auto removed = refuseStoppedCopy(instanceId).and_then(
+                [this, &instanceId]()
+                {
+                    return instances->removeOrphanedInstance(instanceId);
+                }
+            );
+            if (!removed)
+                Log::warn("FileTracking: {}", removed.error());
+            showOrphanedCopies();
+            return removed;
         }
 
         void removeAllOrphanedCopies()
         {
-            Log::warn("FileTracking: removing the orphaned copies is not implemented");
+            const auto listed = orphanedCopies();
+            Log::info("FileTracking: removing {} orphaned copies", listed.copies.size());
+            for (auto const& copy : listed.copies)
+                if (const auto removed = instances->removeOrphanedInstance(copy.instanceId); !removed)
+                    Log::warn("FileTracking: {}", removed.error());
+            showOrphanedCopies();
+        }
+
+        /**
+         * @brief The orphaned copies as the view lists them: those of stopped watches are left out, the view shows
+         *        them as stopped until they are removed.
+         */
+        SharedData::OrphanedCopies orphanedCopies() const
+        {
+            auto copies = instances->listOrphaned();
+            std::erase_if(
+                copies,
+                [this](SharedData::OrphanedCopy const& copy)
+                {
+                    return isStoppedCopy(copy.instanceId);
+                }
+            );
+            return {.copies = std::move(copies)};
+        }
+
+        void showOrphanedCopies()
+        {
+            view->showOrphanedCopies(orphanedCopies());
+        }
+
+        bool isStoppedCopy(Ids::InstanceId const& instanceId) const
+        {
+            return std::ranges::any_of(
+                std::views::values(stopped),
+                [&instanceId](SharedData::TrackedEntry const& entry)
+                {
+                    return entry.instanceId == instanceId;
+                }
+            );
+        }
+
+        std::expected<void, std::string> refuseStoppedCopy(Ids::InstanceId const& instanceId) const
+        {
+            if (!isStoppedCopy(instanceId))
+                return {};
+            return std::unexpected{fmt::format(
+                "Cannot remove the orphaned instance '{}': it is the copy of a stopped watch", instanceId.value()
+            )};
         }
 
         /**
