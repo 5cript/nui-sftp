@@ -226,8 +226,8 @@ namespace Test::ConflictListCases
 
         EXPECT_EQ(labelsOf(dropped), (std::vector<std::string>{"first", "second"}));
         ASSERT_EQ(dropped.size(), 2u);
-        EXPECT_EQ(dropped[0].conflict.conflictId, first.conflict.conflictId);
-        EXPECT_EQ(dropped[1].conflict.conflictId, second.conflict.conflictId);
+        EXPECT_EQ(dropped.front().conflict.conflictId, first.conflict.conflictId);
+        EXPECT_EQ(dropped.back().conflict.conflictId, second.conflict.conflictId);
         EXPECT_EQ(conflicts_.find(first.conflict.conflictId), nullptr);
         EXPECT_EQ(conflicts_.find(watch_, localPathOf("/watched/a.txt")), nullptr);
         EXPECT_EQ(conflicts_.countOf(watch_), 0u);

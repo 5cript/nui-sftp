@@ -185,7 +185,7 @@ namespace FileTracking
         struct Stored
         {
             SharedData::UploadFailure failure;
-            std::uint64_t arrival{0};
+            std::uint64_t arrival{0u};
         };
 
         /**
@@ -216,6 +216,6 @@ namespace FileTracking
 
         std::map<Ids::FailureId, Stored> failures_{};
         std::map<Ids::WatchId, WatchIndex> watches_{};
-        std::uint64_t nextArrival_{0};
+        std::uint64_t nextArrival_{0u};
     };
 }

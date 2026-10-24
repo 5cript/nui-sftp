@@ -175,7 +175,7 @@ namespace FileTracking
         struct Stored
         {
             Listed listed;
-            std::uint64_t arrival{0};
+            std::uint64_t arrival{0u};
         };
 
         /**
@@ -206,6 +206,6 @@ namespace FileTracking
 
         std::map<Ids::ConflictId, Stored> conflicts_{};
         std::map<Ids::WatchId, WatchIndex> watches_{};
-        std::uint64_t nextArrival_{0};
+        std::uint64_t nextArrival_{0u};
     };
 }
