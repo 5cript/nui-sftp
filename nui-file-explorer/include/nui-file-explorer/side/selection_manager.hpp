@@ -93,8 +93,15 @@ namespace NuiFileExplorer
 
         /// Jump the cursor to @p index as if it were a plain click: clears the ctrl mask,
         /// collapses the range to a single-item selection at @p index, and scrolls it
-        /// into view. Used by type-ahead.
+        /// into view, also when it was the last item scrolled to. Used by type-ahead.
         void jumpTo(std::size_t index);
+
+        /**
+         * @brief Jumps to the selectable item at @p path as @ref jumpTo(std::size_t) does.
+         *
+         * @return Whether there is such an item.
+         */
+        bool jumpTo(std::filesystem::path const& path);
 
         /**
          * @brief Ctrl+box-drag: adds the selectable items to the mask without touching the range.

@@ -205,7 +205,18 @@ namespace NuiFileExplorer
             return;
         selection_.collapseTo(index);
         rebuildSelection();
-        maybeScrollActiveIntoView();
+        lastScrolledIndex_ = index;
+        if (scrollIntoView_)
+            scrollIntoView_(index);
+    }
+
+    bool SelectionManager::jumpTo(std::filesystem::path const& path)
+    {
+        const auto index = itemIndex(path);
+        if (!index || !isSelectablePath(*index))
+            return false;
+        jumpTo(*index);
+        return true;
     }
 
     void SelectionManager::ctrlAddRange(std::size_t begin, std::size_t endInclusive)

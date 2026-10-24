@@ -55,7 +55,8 @@ namespace NuiFileExplorer
         // listing arrives, so the listener only has to mark the start.
         impl_->currentPathListener = Nui::smartListen(
             impl_->model->currentPath(),
-            [this](auto const&) {
+            [this](auto const& path) {
+                impl_->pendingSelection.onPathChanged(path);
                 beginNavigationLoading();
             }
         );
@@ -434,6 +435,7 @@ namespace NuiFileExplorer
         }
 
         Nui::globalEventContext.executeActiveEventsImmediately();
+        selectPendingItem();
     }
 
     void Side::beginNavigationLoading()
@@ -696,6 +698,27 @@ namespace NuiFileExplorer
     {
         model().navigateTo(path);
         // Do NOT call onPathChange here. That is intentional.
+    }
+
+    void Side::navigateAndSelect(std::filesystem::path const& directory, std::filesystem::path const& name)
+    {
+        model().navigateTo(directory);
+        impl_->pendingSelection.request(model().currentPath().value(), name);
+    }
+
+    void Side::selectPendingItem()
+    {
+        const auto itemPath = impl_->pendingSelection.take(model().currentPath().value());
+        if (!itemPath || !impl_->selectionManager.jumpTo(*itemPath))
+            return;
+        closeMenus();
+        if (const auto sideElement = impl_->sideElement.lock(); sideElement)
+        {
+            auto options = Nui::val::object();
+            options.set("preventScroll", true);
+            sideElement->val().call<void>("focus", options);
+        }
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     std::filesystem::path Side::path()

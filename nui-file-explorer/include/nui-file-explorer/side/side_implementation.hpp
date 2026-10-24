@@ -5,6 +5,7 @@
 #include <nui-file-explorer/icon_size.hpp>
 #include <nui-file-explorer/side/side_settings.hpp>
 #include <nui-file-explorer/side/selection_manager.hpp>
+#include <nui-file-explorer/side/pending_selection.hpp>
 #include <nui-file-explorer/side/item_order.hpp>
 
 #include <nui/frontend/val.hpp>
@@ -65,6 +66,7 @@ namespace NuiFileExplorer
         Nui::Observed<bool> showLoadingHint{false};
         Nui::val loadingHintTimerHandle{Nui::val::undefined()};
         Nui::ListenRemover<Nui::Observed<std::filesystem::path>> currentPathListener{};
+        PendingSelection pendingSelection{};
 
         // Pagination: render-only slicing. SelectionManager remains index-absolute against
         // the full items vector. Default pageSize is intentionally large (the user prefers
