@@ -165,9 +165,7 @@ struct FileTrackingPanel::Implementation
                             [name](std::string const& error)
                             {
                                 Notifications::error(fmt::format(
-                                    fmt::runtime(language->get("fileTracking", "deleteOrphanFailed")),
-                                    name,
-                                    language->translate(error)
+                                    fmt::runtime(language->get("fileTracking", "deleteOrphanFailed")), name, error
                                 ));
                             }
                         )
