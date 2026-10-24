@@ -200,7 +200,7 @@ namespace Test
 
             void ask(SharedData::ServerChangedQuestion const& question) override
             {
-                questions.push_back(question);
+                ADD_FAILURE() << "the tracker lists conflicts, it asked about " << question.remotePath.value();
             }
 
             void showOrphanedCount(std::size_t count) override
@@ -216,6 +216,7 @@ namespace Test
             void showConflict(SharedData::WatchConflict const& conflict) override
             {
                 conflicts.insert_or_assign(conflict.conflictId.value(), conflict);
+                shownConflicts.push_back(conflict);
             }
 
             void removeConflict(Ids::ConflictId const& conflictId) override
@@ -248,11 +249,12 @@ namespace Test
             std::map<std::string, SharedData::TrackedEntry> entries{};
             std::vector<std::string> removed{};
             std::vector<SharedData::EndedWatches> ended{};
-            std::vector<SharedData::ServerChangedQuestion> questions{};
             std::vector<std::size_t> orphanedCounts{};
             std::vector<SharedData::TrackerProgress> progress{};
             /** @brief The conflicts shown and not removed, by id. */
             std::map<std::string, SharedData::WatchConflict> conflicts{};
+            /** @brief Every conflict shown, in order. */
+            std::vector<SharedData::WatchConflict> shownConflicts{};
             std::vector<std::string> removedConflicts{};
             /** @brief The failures shown and not removed, by id. */
             std::map<std::string, SharedData::UploadFailure> failures{};
@@ -420,7 +422,9 @@ namespace Test
                 return operation.onUploadEnded({.reason = reason});
             if (!holdsExpected(operation))
                 return operation.onUploadEnded(
-                    {.reason = SharedData::OperationCompletionReason::Failed, .changedOnServer = true}
+                    {.reason = SharedData::OperationCompletionReason::Failed,
+                        .changedOnServer = true,
+                        .destinationState = serverStateAt(operation.destination)}
                 );
             operation.onUploadEnded(
                 {.reason = SharedData::OperationCompletionReason::Completed,
@@ -658,6 +662,36 @@ namespace Test
             return view_->entries.begin()->second;
         }
 
+        SharedData::WatchConflict onlyConflict()
+        {
+            EXPECT_EQ(view_->conflicts.size(), 1u);
+            return view_->conflicts.empty() ? SharedData::WatchConflict{} : view_->conflicts.begin()->second;
+        }
+
+        /**
+         * @brief The conflict the view shows about @p localPath, none when it shows none.
+         */
+        std::optional<SharedData::WatchConflict> shownConflictAt(std::filesystem::path const& localPath) const
+        {
+            for (auto const& conflict : std::views::values(view_->conflicts))
+                if (conflict.localPath.native() == localPath)
+                    return conflict;
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Runs the handlers until the view shows @p count conflicts.
+         */
+        bool runUntilConflicts(std::size_t count)
+        {
+            return runUntil(
+                [this, count]()
+                {
+                    return view_->conflicts.size() == count;
+                }
+            );
+        }
+
         /**
          * @brief The progress the view showed last, nothing on its way before it showed any.
          */
@@ -801,7 +835,7 @@ namespace Test
                 return uploadsTo("/srv/notes.txt") == 1u;
             }
         ));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_TRUE(onlyEntry().uploading);
         const auto& expected = remote_->of("upload").back()->upload.expectedDestination;
         ASSERT_TRUE(expected.has_value());
@@ -835,12 +869,12 @@ namespace Test
         EXPECT_EQ(expected->file, kept);
         completeUploads();
         runFor(std::chrono::milliseconds{200});
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), stateOf(notes));
         EXPECT_EQ(remote_->stats, 0u);
     }
 
-    TEST_F(TrackerTest, AServerCopyChangedMeanwhileIsAskedAboutOnceTheUploadFoundIt)
+    TEST_F(TrackerTest, AServerCopyChangedMeanwhileIsListedAsAConflictOnceTheUploadFoundIt)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
@@ -854,23 +888,29 @@ namespace Test
                 return uploadsTo("/srv/notes.txt") == 1u;
             }
         ));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return !view_->questions.empty();
-            }
-        ));
-        EXPECT_EQ(view_->questions.back().remotePath.value(), "/srv/notes.txt");
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        const auto conflict = onlyConflict();
+        EXPECT_EQ(conflict.watchId, onlyEntry().watchId);
+        EXPECT_EQ(conflict.kind, SharedData::ConflictKind::ChangedOnServer);
+        EXPECT_EQ(conflict.localPath, opened->localPath);
+        EXPECT_EQ(conflict.remotePath.value(), "/srv/notes.txt");
+        EXPECT_EQ(conflict.serverModifiedAt, std::optional{changedOnServer.mtime});
+        EXPECT_EQ(conflict.localModifiedAt, std::optional{stateOf(opened->localPath.native()).mtime});
+        EXPECT_GT(conflict.raisedAt, 0u);
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), changedOnServer);
         EXPECT_TRUE(onlyEntry().uploading);
-        tracker_->answer(view_->questions.back().questionId, SharedData::ServerChangedAnswer::Keep);
+
+        tracker_->answerConflict(conflict.conflictId, SharedData::ConflictResolution::KeepServers);
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_EQ(view_->removedConflicts, std::vector<std::string>{conflict.conflictId.value()});
         runFor(std::chrono::milliseconds{200});
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_FALSE(onlyEntry().uploading);
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), changedOnServer);
 
+        // The server's version was kept, the next save raises the conflict again.
         write(opened->localPath.native(), "changed again");
         ASSERT_TRUE(runUntil(
             [this]()
@@ -879,22 +919,21 @@ namespace Test
             }
         ));
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return view_->questions.size() == 2u;
-            }
-        ));
-        tracker_->answer(view_->questions.back().questionId, SharedData::ServerChangedAnswer::Replace);
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        const auto again = onlyConflict();
+        EXPECT_NE(again.conflictId, conflict.conflictId);
+        tracker_->answerConflict(again.conflictId, SharedData::ConflictResolution::ReplaceOnServer);
+        EXPECT_TRUE(view_->conflicts.empty());
         ASSERT_EQ(uploadsTo("/srv/notes.txt"), 3u);
         EXPECT_FALSE(remote_->of("upload").back()->upload.expectedDestination.has_value());
         completeUploads();
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), stateOf(opened->localPath.native()));
         EXPECT_FALSE(onlyEntry().uploading);
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(remote_->stats, 0u);
     }
 
-    TEST_F(TrackerTest, AFileTheServerLostIsAskedAboutBeforeItIsUploadedAgain)
+    TEST_F(TrackerTest, AFileTheServerLostIsListedAsDeletedOnTheServerBeforeItIsUploadedAgain)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
@@ -908,20 +947,19 @@ namespace Test
             }
         ));
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return !view_->questions.empty();
-            }
-        ));
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        const auto conflict = onlyConflict();
+        EXPECT_EQ(conflict.kind, SharedData::ConflictKind::DeletedOnServer);
+        EXPECT_FALSE(conflict.serverModifiedAt.has_value());
+        EXPECT_TRUE(conflict.localModifiedAt.has_value());
         EXPECT_FALSE(remote_->server.contains("/srv/notes.txt"));
-        tracker_->answer(view_->questions.back().questionId, SharedData::ServerChangedAnswer::Replace);
+        tracker_->answerConflict(conflict.conflictId, SharedData::ConflictResolution::ReplaceOnServer);
         ASSERT_EQ(uploadsTo("/srv/notes.txt"), 2u);
         completeUploads();
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), stateOf(opened->localPath.native()));
     }
 
-    TEST_F(TrackerTest, AFileThatAppearedOnTheServerBeforeItsFirstUploadIsAskedAbout)
+    TEST_F(TrackerTest, AFileThatAppearedOnTheServerBeforeItsFirstUploadIsListedAsCreatedOnTheServer)
     {
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
         // FSEvents also delivers the creation of src from just before the watch. Coming after new.cpp, it would
@@ -947,13 +985,12 @@ namespace Test
         EXPECT_FALSE(expected->file.has_value());
         remote_->server["/srv/project/src/new.cpp"] = {.mtime = 7u, .size = 9u};
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return !view_->questions.empty();
-            }
-        ));
-        EXPECT_EQ(view_->questions.back().remotePath.value(), "/srv/project/src/new.cpp");
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        const auto conflict = onlyConflict();
+        EXPECT_EQ(conflict.kind, SharedData::ConflictKind::CreatedOnServer);
+        EXPECT_EQ(conflict.remotePath.value(), "/srv/project/src/new.cpp");
+        EXPECT_EQ(conflict.localPath.native(), root_ / "local" / "project" / "src" / "new.cpp");
+        EXPECT_EQ(conflict.serverModifiedAt, std::optional{std::uint64_t{7u}});
         EXPECT_EQ(remote_->server.at("/srv/project/src/new.cpp"), (FileTracking::ServerState{.mtime = 7u, .size = 9u}));
     }
 
@@ -983,7 +1020,7 @@ namespace Test
         ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
         completeUploads();
         ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 1u}));
-        tracker_->answer(view_->questions.back().questionId, SharedData::ServerChangedAnswer::Keep);
+        tracker_->answerConflict(onlyConflict().conflictId, SharedData::ConflictResolution::KeepServers);
         ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
     }
 
@@ -1017,7 +1054,7 @@ namespace Test
         EXPECT_GE(lastProgress().done, 1u);
     }
 
-    TEST_F(TrackerTest, AnAnswerToAnotherQuestionChangesNothing)
+    TEST_F(TrackerTest, AnAnswerToAnUnknownConflictChangesNothing)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
@@ -1031,16 +1068,254 @@ namespace Test
             }
         ));
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return !view_->questions.empty();
-            }
-        ));
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        tracker_->answerConflict(Ids::generateConflictId(), SharedData::ConflictResolution::ReplaceOnServer);
+        tracker_->answerAllConflicts(Ids::generateWatchId(), SharedData::ConflictResolution::ReplaceOnServer);
         tracker_->answer(Ids::generateQuestionId(), SharedData::ServerChangedAnswer::Replace);
 
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_TRUE(onlyEntry().uploading);
+        EXPECT_EQ(view_->conflicts.size(), 1u);
+        EXPECT_TRUE(view_->removedConflicts.empty());
+    }
+
+    /**
+     * @brief Uploads and watches the project with a second file beside main.cpp, then changes both on the server
+     *        and locally: each upload finds the server's copy changed and lists a conflict, main.cpp's first.
+     */
+    class TrackerConflictsTest : public TrackerTest
+    {
+      protected:
+        std::filesystem::path main_;
+        std::filesystem::path util_;
+
+        void raiseTwoConflicts()
+        {
+            const auto source = root_ / "local" / "project" / "src";
+            main_ = source / "main.cpp";
+            util_ = source / "util.cpp";
+            write(util_, "util");
+            ASSERT_TRUE(
+                tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value()
+            );
+            completeEverything();
+            remote_->server["/srv/project/src/main.cpp"].mtime += 100u;
+            remote_->server["/srv/project/src/util.cpp"].mtime += 100u;
+
+            write(main_, "changed main");
+            ASSERT_TRUE(runUntil(
+                [this]()
+                {
+                    return uploadsTo("/srv/project/src/main.cpp") == 1u;
+                }
+            ));
+            write(util_, "changed util");
+            ASSERT_TRUE(runUntil(
+                [this]()
+                {
+                    return uploadsTo("/srv/project/src/util.cpp") == 1u;
+                }
+            ));
+            completeUploads();
+            ASSERT_EQ(view_->conflicts.size(), 2u);
+            ASSERT_TRUE(shownConflictAt(main_).has_value());
+            ASSERT_TRUE(shownConflictAt(util_).has_value());
+        }
+
+        Ids::ConflictId conflictIdAt(std::filesystem::path const& localPath) const
+        {
+            return shownConflictAt(localPath).value_or(SharedData::WatchConflict{}).conflictId;
+        }
+    };
+
+    TEST_F(TrackerConflictsTest, TwoConflictsOfADirectoryWatchAreListedAtOnceAndReplaceAllUploadsBothInOrder)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto mainConflict = conflictIdAt(main_);
+        const auto utilConflict = conflictIdAt(util_);
+        EXPECT_NE(mainConflict, utilConflict);
+        EXPECT_EQ(view_->shownConflicts.front().conflictId, mainConflict);
+        EXPECT_TRUE(onlyEntry().uploading);
+        const auto uploadsBefore = remote_->of("upload").size();
+
+        tracker_->answerAllConflicts(onlyEntry().watchId, SharedData::ConflictResolution::ReplaceOnServer);
+
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_EQ(view_->removedConflicts, (std::vector<std::string>{mainConflict.value(), utilConflict.value()}));
+        const auto uploads = remote_->sourcesOf("upload");
+        ASSERT_EQ(uploads.size(), uploadsBefore + 2u);
+        EXPECT_EQ(uploads[uploadsBefore], main_.string());
+        EXPECT_EQ(uploads[uploadsBefore + 1u], util_.string());
+        EXPECT_FALSE(lastUploadTo("/srv/project/src/main.cpp")->upload.expectedDestination.has_value());
+        EXPECT_FALSE(lastUploadTo("/srv/project/src/util.cpp")->upload.expectedDestination.has_value());
+        completeUploads();
+        EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), stateOf(main_));
+        EXPECT_EQ(remote_->server.at("/srv/project/src/util.cpp"), stateOf(util_));
+        EXPECT_FALSE(onlyEntry().uploading);
+    }
+
+    TEST_F(TrackerConflictsTest, KeepAllKeepsTheServersVersionsAndTheNextSaveAsksAgain)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto keptMain = remote_->server.at("/srv/project/src/main.cpp");
+        const auto keptUtil = remote_->server.at("/srv/project/src/util.cpp");
+
+        tracker_->answerAllConflicts(onlyEntry().watchId, SharedData::ConflictResolution::KeepServers);
+
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_EQ(view_->removedConflicts.size(), 2u);
+        runFor(std::chrono::milliseconds{200});
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
+        EXPECT_EQ(uploadsTo("/srv/project/src/util.cpp"), 1u);
+        EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), keptMain);
+        EXPECT_EQ(remote_->server.at("/srv/project/src/util.cpp"), keptUtil);
+        EXPECT_FALSE(onlyEntry().uploading);
+
+        write(main_, "changed main again");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/main.cpp") == 2u;
+            }
+        ));
+        completeUploads();
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        EXPECT_EQ(onlyConflict().localPath.native(), main_);
+    }
+
+    TEST_F(TrackerConflictsTest, ASingleReplaceAndASingleKeepAnswerOnlyTheirOwnConflict)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto keptUtil = remote_->server.at("/srv/project/src/util.cpp");
+
+        tracker_->answerConflict(conflictIdAt(main_), SharedData::ConflictResolution::ReplaceOnServer);
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 2u);
+        EXPECT_EQ(uploadsTo("/srv/project/src/util.cpp"), 1u);
+        ASSERT_EQ(view_->conflicts.size(), 1u);
+        EXPECT_EQ(onlyConflict().localPath.native(), util_);
+
+        tracker_->answerConflict(conflictIdAt(util_), SharedData::ConflictResolution::KeepServers);
+        EXPECT_TRUE(view_->conflicts.empty());
+        completeUploads();
+        runFor(std::chrono::milliseconds{200});
+        EXPECT_EQ(uploadsTo("/srv/project/src/util.cpp"), 1u);
+        EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), stateOf(main_));
+        EXPECT_EQ(remote_->server.at("/srv/project/src/util.cpp"), keptUtil);
+        EXPECT_FALSE(onlyEntry().uploading);
+    }
+
+    TEST_F(TrackerConflictsTest, StoppingAWatchDropsItsConflictsAndTellsTheView)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto mainConflict = conflictIdAt(main_);
+        const auto utilConflict = conflictIdAt(util_);
+
+        tracker_->stop(onlyEntry().watchId);
+
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_EQ(view_->removedConflicts, (std::vector<std::string>{mainConflict.value(), utilConflict.value()}));
+        tracker_->answerConflict(mainConflict, SharedData::ConflictResolution::ReplaceOnServer);
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
+
+        // The uploads that waited left the server order: a new watch of the same path goes at once.
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        EXPECT_EQ(uploadsTo("/srv/project"), 2u);
+    }
+
+    TEST_F(TrackerTest, StoppingADownloadedCopyWithAConflictFreesItsServerPath)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        remote_->server["/srv/notes.txt"].mtime += 100u;
+        write(opened->localPath.native(), "changed locally");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 1u;
+            }
+        ));
+        completeUploads();
+        const auto conflictId = onlyConflict().conflictId;
+
+        tracker_->stop(onlyEntry().watchId);
+        EXPECT_EQ(view_->removedConflicts, std::vector<std::string>{conflictId.value()});
+
+        const auto reopened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(reopened.has_value());
+        write(reopened->localPath.native(), "changed in the new copy");
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 2u;
+            }
+        ));
+    }
+
+    TEST_F(TrackerConflictsTest, StoppingAllDropsTheConflictsWithoutTellingTheView)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+
+        tracker_->stopAll();
+
+        EXPECT_EQ(view_->conflicts.size(), 2u);
+        EXPECT_TRUE(view_->removedConflicts.empty());
+        tracker_->answerAllConflicts(
+            view_->conflicts.begin()->second.watchId, SharedData::ConflictResolution::ReplaceOnServer
+        );
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        EXPECT_EQ(uploadsTo("/srv/project"), 2u);
+    }
+
+    TEST_F(TrackerConflictsTest, ALostConnectionDropsTheConflictsAndTellsTheView)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto mainConflict = conflictIdAt(main_);
+        const auto utilConflict = conflictIdAt(util_);
+
+        tracker_->connectionLost();
+
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_EQ(view_->removedConflicts, (std::vector<std::string>{mainConflict.value(), utilConflict.value()}));
+        EXPECT_EQ(lastProgress().waitingForAnswer, 0u);
+    }
+
+    TEST_F(TrackerConflictsTest, AConflictWhosePathWasDeletedLocallyBeforeTheAnswerUploadsNothing)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        std::filesystem::remove(main_);
+        // The deletion stops the upload, which already ended, and waits for its answer.
+        ASSERT_TRUE(runUntilStopped());
+        EXPECT_TRUE(remote_->of("remove").empty());
+
+        tracker_->answerConflict(conflictIdAt(main_), SharedData::ConflictResolution::ReplaceOnServer);
+
+        EXPECT_FALSE(shownConflictAt(main_).has_value());
+        EXPECT_EQ(view_->conflicts.size(), 1u);
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
+        // Like any deletion, it goes to the server.
+        EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/src/main.cpp"});
+    }
+
+    TEST_F(TrackerConflictsTest, AConflictWhoseFileMovedAwayBeforeTheAnswerGoesToItsNewName)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto renamed = main_.parent_path() / "renamed.cpp";
+        std::filesystem::rename(main_, renamed);
+        ASSERT_TRUE(runUntilStopped());
+
+        tracker_->answerConflict(conflictIdAt(main_), SharedData::ConflictResolution::ReplaceOnServer);
+
+        EXPECT_FALSE(shownConflictAt(main_).has_value());
+        EXPECT_EQ(view_->conflicts.size(), 1u);
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
+        // The server's copy follows the rename, then the file goes over it.
+        ASSERT_EQ(remote_->of("rename").size(), 1u);
+        EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/main.cpp");
+        EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/project/src/renamed.cpp");
+        completeRemovesAndRenames();
+        ASSERT_EQ(uploadsTo("/srv/project/src/renamed.cpp"), 1u);
+        EXPECT_FALSE(lastUploadTo("/srv/project/src/renamed.cpp")->upload.expectedDestination.has_value());
     }
 
     TEST_F(TrackerTest, UploadAndWatchUploadsTheCanonicalItemFirst)
@@ -1129,7 +1404,7 @@ namespace Test
         ));
         runFor(std::chrono::milliseconds{500});
         EXPECT_TRUE(remote_->of("remove").empty());
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(onlyEntry().name, "notes.txt");
         EXPECT_EQ(onlyEntry().remotePath.value(), "/srv/notes.txt");
         const auto renames = remote_->of("rename");
@@ -1582,11 +1857,11 @@ namespace Test
         ASSERT_TRUE(runUntil(
             [this]()
             {
-                return uploadsTo("/srv/project/src/main.cpp") == 1u || !view_->questions.empty();
+                return uploadsTo("/srv/project/src/main.cpp") == 1u || !view_->conflicts.empty();
             }
         ));
 
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_TRUE(remote_->of("remove").empty());
     }
 
@@ -1606,11 +1881,11 @@ namespace Test
         write(file, "int main() { return 1; }");
         runFor(std::chrono::milliseconds{1000});
 
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 0u);
         completeRemovesAndRenames();
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, TheDeleteOfADirectoryWaitsForTheDeletesOfItsContent)
@@ -1897,7 +2172,7 @@ namespace Test
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/x/main.c"));
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/x"));
         EXPECT_TRUE(remote_->server.contains("/srv/project/docs/x/y/deep.txt"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
 #ifndef __APPLE__
         // The watch reports the move between directories as one, the server renames the directory.
         ASSERT_EQ(remote_->of("rename").size(), 1u);
@@ -1927,7 +2202,7 @@ namespace Test
 
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
         EXPECT_TRUE(remote_->server.contains("/srv/project/lib/main.cpp"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
 #ifndef __APPLE__
         ASSERT_EQ(remote_->of("rename").size(), 1u);
         EXPECT_EQ(remote_->of("rename").front()->source, "/srv/project/src/main.cpp");
@@ -1992,12 +2267,12 @@ namespace Test
         ASSERT_TRUE(runUntil(
             [this]()
             {
-                return !remote_->of("remove").empty() || !view_->questions.empty();
+                return !remote_->of("remove").empty() || !view_->conflicts.empty();
             }
         ));
         runFor(std::chrono::milliseconds{500});
 
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/src/main.cpp"});
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 0u);
     }
@@ -2028,7 +2303,7 @@ namespace Test
             if (operation.source == "/srv/project/kind" || operation.destination == "/srv/project/kind")
                 atKind.push_back(operation.kind);
         EXPECT_EQ(atKind, (std::vector<std::string>{"upload", "remove", "upload"}));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_TRUE(remote_->server.contains("/srv/project/kind/inside.txt"));
     }
 
@@ -2060,7 +2335,7 @@ namespace Test
         EXPECT_EQ(uploadsTo("/srv/project/dir"), 1u);
         EXPECT_EQ(uploadsTo("/srv/project/dir/a.txt"), 1u);
         EXPECT_TRUE(remote_->server.contains("/srv/project/dir/a.txt"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, ADirectoryRemovedJustAfterItsUploadSentItLeavesNothingOnTheServer)
@@ -2095,7 +2370,7 @@ namespace Test
         const auto removed = remote_->sourcesOf("remove");
         ASSERT_FALSE(removed.empty());
         EXPECT_EQ(removed.back(), "/srv/project/moved-dir");
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, ADirectoryRemovedWhileItUploadsLeavesNothingOfWhatTheUploadSent)
@@ -2132,7 +2407,7 @@ namespace Test
         const auto removed = remote_->sourcesOf("remove");
         ASSERT_FALSE(removed.empty());
         EXPECT_EQ(removed.back(), "/srv/project/moved-dir");
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, AnEmptyDirectoryAnUploadLeftAfterItsFilesWentIsDeletedOnTheServer)
@@ -2159,7 +2434,7 @@ namespace Test
         completeEverything();
 
         EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, AFileDeletedWhileItsDirectoryUploadsIsDeletedOnTheServerIfTheUploadSentIt)
@@ -2192,7 +2467,7 @@ namespace Test
 
         EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/moved-in/gone.txt"});
         EXPECT_TRUE(remote_->server.contains("/srv/project/moved-in/keep.txt"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, ALinkUploadedWithItsDirectoryIsDeletedOnTheServerToo)
@@ -2261,11 +2536,11 @@ namespace Test
         ASSERT_TRUE(runUntil(
             [this]()
             {
-                return uploadsTo("/srv/project/in") == 1u || !view_->questions.empty();
+                return uploadsTo("/srv/project/in") == 1u || !view_->conflicts.empty();
             }
         ));
 
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, AnOpenedCopyIsNotUploadedBackUnchanged)
@@ -2367,7 +2642,7 @@ namespace Test
         completeEverything();
 
         EXPECT_EQ(remote_->server.at("/srv/project/new/one.txt"), stateOf(project / "new" / "one.txt"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, ASubdirectoryReportedWhileItsParentUploadsGoesWithIt)
@@ -2599,7 +2874,7 @@ namespace Test
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_TRUE(remote_->of("discard").empty());
         EXPECT_FALSE(remote_->server.contains("/srv/project/big.bin"));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, AKnownFileDeletedWhileItsChangeUploadsStopsItThenDeletesTheServerCopy)
@@ -2828,7 +3103,7 @@ namespace Test
         EXPECT_EQ(uploadsTo("/srv/project/huge.bin"), 1u);
         EXPECT_FALSE(remote_->server.contains("/srv/project/huge.bin"));
         EXPECT_EQ(remote_->server.at("/srv/project/renamed.bin"), stateOf(renamed));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, AKnownFileRenamedWhileItsChangeUploadsRenamesTheServerCopyThenContinues)
@@ -2872,7 +3147,7 @@ namespace Test
         completeEverything();
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
         EXPECT_EQ(remote_->server.at("/srv/project/src/start.cpp"), stateOf(renamed));
-        EXPECT_TRUE(view_->questions.empty());
+        EXPECT_TRUE(view_->conflicts.empty());
     }
 
     TEST_F(TrackerTest, AFileRenamedTwiceWhileItUploadsContinuesUnderTheLastName)

@@ -1,4 +1,5 @@
 #include <backend/file_tracking/tracker.hpp>
+#include <backend/file_tracking/conflict_list.hpp>
 #include <backend/file_tracking/disk_place.hpp>
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
@@ -15,7 +16,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <deque>
 #include <expected>
 #include <filesystem>
 #include <map>
@@ -199,16 +199,70 @@ namespace FileTracking
             return status && *status && std::filesystem::is_directory(**status);
         }
 
+        std::uint64_t secondsSinceEpochOf(std::filesystem::file_time_type time)
+        {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::file_clock::to_sys(time).time_since_epoch()
+            );
+            return static_cast<std::uint64_t>(seconds.count());
+        }
+
+        std::uint64_t secondsSinceEpochNow()
+        {
+            const auto seconds =
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+            return static_cast<std::uint64_t>(seconds.count());
+        }
+
         /**
          * @brief What the server has of a file an upload sent in @p sent: uploads carry the modification time along,
          *        in seconds.
          */
         ServerState serverStateOf(SourceState const& sent)
         {
-            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::file_clock::to_sys(sent.modified).time_since_epoch()
-            );
-            return ServerState{.mtime = static_cast<std::uint64_t>(seconds.count()), .size = sent.size};
+            return ServerState{.mtime = secondsSinceEpochOf(sent.modified), .size = sent.size};
+        }
+
+        /**
+         * @brief What the server has at the destination of an upload instead of what the tracker left there.
+         */
+        struct ServerChange
+        {
+            SharedData::ConflictKind kind{SharedData::ConflictKind::ChangedOnServer};
+            /** @brief What it has there now, nothing when it has nothing there or could not be asked. */
+            std::optional<ServerState> current{};
+        };
+
+        /**
+         * @brief How the server changed where the tracker knew of something there (@p knownThere) or of nothing, and
+         *        it has @p current now. Changed when that cannot be told.
+         */
+        ServerChange serverChangeOf(bool knownThere, std::optional<ServerState> const& current)
+        {
+            if (!knownThere && current)
+                return {.kind = SharedData::ConflictKind::CreatedOnServer, .current = current};
+            if (knownThere && !current)
+                return {.kind = SharedData::ConflictKind::DeletedOnServer, .current = std::nullopt};
+            return {.kind = SharedData::ConflictKind::ChangedOnServer, .current = current};
+        }
+
+        /**
+         * @brief The conflict @p upload raised, the server changed its destination as @p change tells. Its id is set
+         *        when it is listed.
+         */
+        SharedData::WatchConflict conflictOf(Upload const& upload, ServerChange const& change)
+        {
+            const auto localState = sourceStateOf(upload.change.path.native());
+            return {
+                .conflictId = {},
+                .watchId = upload.watchId,
+                .kind = change.kind,
+                .localPath = upload.change.path,
+                .remotePath = upload.destination,
+                .serverModifiedAt = change.current ? std::optional{change.current->mtime} : std::nullopt,
+                .localModifiedAt = localState ? std::optional{secondsSinceEpochOf(localState->modified)} : std::nullopt,
+                .raisedAt = secondsSinceEpochNow(),
+            };
         }
 
         /**
@@ -369,15 +423,6 @@ namespace FileTracking
             std::uint64_t claimId_;
         };
 
-        /**
-         * @brief A question the view asks, see TrackerView::ask().
-         */
-        struct OpenQuestion
-        {
-            Ids::QuestionId questionId;
-            Upload upload;
-        };
-
         using OnOpened = std::function<void(std::expected<OpenedCopy, OpenFailure> const&)>;
 
         boost::asio::strand<boost::asio::any_io_executor> strand;
@@ -396,9 +441,8 @@ namespace FileTracking
         /** @brief The remote paths of watches that are starting, by claim. */
         std::map<std::uint64_t, Paths::RemotePath> claims{};
         std::uint64_t nextClaimId{0};
-        /** @brief Questions waiting for the one the view asks, so no question replaces another. */
-        std::deque<Upload> waitingQuestions{};
-        std::optional<OpenQuestion> openQuestion{};
+        /** @brief The conflicts waiting for the user's answer, each with the upload that waits for it. */
+        ConflictList<Upload> conflicts{};
         /** @brief Changes that ended since nothing was on its way any more, see showProgress(). */
         std::uint64_t changesDone{0};
         SharedData::TrackerProgress shownProgress{};
@@ -523,7 +567,7 @@ namespace FileTracking
             return {
                 .pending = pending,
                 .done = changesDone,
-                .waitingForAnswer = waitingQuestions.size() + (openQuestion ? 1u : 0u),
+                .waitingForAnswer = conflicts.size(),
             };
         }
 
@@ -532,7 +576,7 @@ namespace FileTracking
          */
         bool nothingOnItsWay() const
         {
-            return !openQuestion && waitingQuestions.empty() &&
+            return conflicts.empty() &&
                 std::ranges::all_of(
                     std::views::values(entries),
                     [](Entry const& entry)
@@ -906,21 +950,13 @@ namespace FileTracking
             if (node.empty())
                 return std::nullopt;
             Log::info("FileTracking: stopping watch {}", watchId.value());
-            std::vector<Upload> dropped;
-            std::erase_if(
-                waitingQuestions,
-                [&watchId, &dropped](Upload const& upload)
-                {
-                    if (upload.watchId != watchId)
-                        return false;
-                    dropped.push_back(upload);
-                    return true;
-                }
-            );
+            const auto dropped = conflicts.removeWatch(watchId);
+            for (auto const& listed : dropped)
+                view->removeConflict(listed.conflict.conflictId);
             view->removeEntry(watchId);
             progressChanged();
-            for (auto const& upload : dropped)
-                leaveOrder(upload);
+            for (auto const& listed : dropped)
+                leaveOrder(listed.context);
             const auto* copy = node.mapped().downloadedCopy();
             return copy ? std::optional{copy->instanceId} : std::nullopt;
         }
@@ -973,13 +1009,10 @@ namespace FileTracking
             for (auto const& instanceId : copies)
                 releaseInstance(instanceId);
             claims.clear();
-            auto dropped = std::exchange(waitingQuestions, {});
-            if (openQuestion)
-                dropped.push_back(std::move(openQuestion->upload));
-            openQuestion.reset();
+            const auto dropped = conflicts.removeAll();
             const auto waiting = std::exchange(waitingOperations, {});
-            for (auto const& upload : dropped)
-                leaveOrder(upload);
+            for (auto const& listed : dropped)
+                leaveOrder(listed.context);
             for (auto const& ticket : std::views::keys(waiting))
                 leaveOrder(ticket);
             progressTimer.cancel();
@@ -992,12 +1025,19 @@ namespace FileTracking
         void connectionLost()
         {
             auto ended = SharedData::EndedWatches{.reason = SharedData::WatchEndReason::ConnectionLost, .entries = {}};
+            std::vector<Ids::ConflictId> droppedConflicts;
             for (auto const& entry : std::views::values(entries))
+            {
                 ended.entries.push_back(shownEntryOf(entry));
+                for (auto const& conflict : conflicts.conflictsOf(entry.watchId))
+                    droppedConflicts.push_back(conflict.conflictId);
+            }
             Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
             // stopAll() forgets the progress shown, this view still shows it.
             const bool progressShown = shownProgress != SharedData::TrackerProgress{};
             stopAll();
+            for (auto const& conflictId : droppedConflicts)
+                view->removeConflict(conflictId);
             for (auto const& shown : ended.entries)
                 view->removeEntry(shown.watchId);
             if (!ended.entries.empty())
@@ -1802,16 +1842,16 @@ namespace FileTracking
                 auto expected = ExpectedDestination{.file = entry->serverContent.fileState(upload.change.path)};
                 return enqueueUpload(std::move(upload), std::move(expected));
             }
-            if (serverChangedMeanwhile(*entry, upload))
-                return askServerChanged(std::move(upload));
+            if (const auto change = serverChangeAt(*entry, upload))
+                return askServerChanged(std::move(upload), *change);
             enqueueUpload(std::move(upload));
         }
 
         /**
-         * @brief Whether the server's copy at the destination of @p upload, a directory or a symbolic link, is not
-         *        what this tracker left there. A symbolic link is compared as itself.
+         * @brief How the server's copy at the destination of @p upload, a directory or a symbolic link, is not what
+         *        this tracker left there, nothing when it is. A symbolic link is compared as itself.
          */
-        bool serverChangedMeanwhile(Entry const& entry, Upload const& upload)
+        std::optional<ServerChange> serverChangeAt(Entry const& entry, Upload const& upload)
         {
             const auto current =
                 isSymlink(upload.change.path) ? remote->linkStat(upload.destination) : remote->stat(upload.destination);
@@ -1821,11 +1861,18 @@ namespace FileTracking
                     "FileTracking: cannot check '{}' on the server: {}", upload.destination.value(), current.error()
                 );
                 // An unanswered check counts as changed.
-                return true;
+                return ServerChange{};
             }
             if (upload.change.isDirectory)
-                return current->has_value() && !entry.serverContent.has(upload.change.path);
-            return serverChanged(entry.serverContent.fileState(upload.change.path), *current);
+            {
+                if (!current->has_value() || entry.serverContent.has(upload.change.path))
+                    return std::nullopt;
+                return serverChangeOf(/*knownThere=*/false, *current);
+            }
+            const auto known = entry.serverContent.fileState(upload.change.path);
+            if (!serverChanged(known, *current))
+                return std::nullopt;
+            return serverChangeOf(known.has_value(), *current);
         }
 
         /**
@@ -1856,76 +1903,120 @@ namespace FileTracking
             finishUpload(upload, UploadOutcome::NotUploaded);
         }
 
-        void askServerChanged(Upload upload)
+        /**
+         * @brief Lists the conflict @p upload raised, the server changed its destination as @p change tells, unless
+         *        it no longer stands, see conflictStands(). The upload waits for the answer, see answerConflict().
+         */
+        void askServerChanged(Upload upload, ServerChange const& change)
         {
-            waitingQuestions.push_back(std::move(upload));
-            askNextServerChanged();
-        }
-
-        void askNextServerChanged()
-        {
-            while (!openQuestion && !waitingQuestions.empty())
+            if (conflictStands(upload))
             {
-                auto upload = std::move(waitingQuestions.front());
-                waitingQuestions.pop_front();
-                const auto* entry = find(upload.watchId);
-                if (!entry)
-                    continue;
-                // Nothing to ask about a path that moved meanwhile, it goes again at the new one.
-                if (entry->pendingUploads.movedAway(upload.change.path))
+                auto added = conflicts.add(conflictOf(upload, change), std::move(upload));
+                // PendingUploads lets one upload of a path wait at most, this is never expected.
+                if (added.replaced)
                 {
-                    enqueueUpload(std::move(upload));
-                    continue;
+                    Log::warn(
+                        "FileTracking: the conflict about '{}' replaced another one", added.conflict.localPath.toUtf8()
+                    );
+                    leaveOrder(*added.replaced);
                 }
-                if (isGoneLocally(upload.change.path))
-                {
-                    onGoneLocally(*entry, upload);
-                    continue;
-                }
-                openQuestion = OpenQuestion{.questionId = Ids::generateQuestionId(), .upload = std::move(upload)};
-                view->ask({.questionId = openQuestion->questionId, .remotePath = openQuestion->upload.destination});
+                Log::info(
+                    "FileTracking: '{}' changed on the server, waiting for an answer about it",
+                    added.conflict.remotePath.value()
+                );
+                view->showConflict(added.conflict);
             }
             progressChanged();
+        }
+
+        /**
+         * @brief Whether the conflict about @p upload still stands, checked when it is raised and once it is answered:
+         *        a path that moved away meanwhile goes again at the new one, one that is gone locally has its deletion
+         *        mirrored, and nothing is asked about a path that no longer is the watch's. Either ends @p upload.
+         */
+        bool conflictStands(Upload const& upload)
+        {
+            const auto* entry = find(upload.watchId);
+            if (!entry || entry->pendingUploads.movedAway(upload.change.path) ||
+                !upload.change.path.isWithin(entry->localPath))
+            {
+                finishUpload(upload, UploadOutcome::NotUploaded);
+                return false;
+            }
+            if (isGoneLocally(upload.change.path))
+            {
+                onGoneLocally(*entry, upload);
+                return false;
+            }
+            return true;
         }
 
         void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer)
         {
-            if (!openQuestion || openQuestion->questionId != questionId)
-                return;
-            auto upload = std::move(openQuestion->upload);
-            openQuestion.reset();
-            progressChanged();
-            switch (answer)
-            {
-                case SharedData::ServerChangedAnswer::Replace:
-                    enqueueUpload(std::move(upload));
-                    break;
-                case SharedData::ServerChangedAnswer::Keep:
-                    Log::info("FileTracking: kept the server's version of '{}'.", upload.destination.value());
-                    declineUpload(upload);
-                    break;
-                case SharedData::ServerChangedAnswer::Dismissed:
-                    return abandonServerChangedQuestions(upload);
-            }
-            askNextServerChanged();
+            Log::warn(
+                "FileTracking: ignoring the answer {} to question {}, conflicts are answered instead",
+                Utility::enumToString(answer),
+                questionId.value()
+            );
         }
 
         void answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
         {
-            Log::warn(
-                "FileTracking: answering conflict {} with {} is not implemented",
-                conflictId.value(),
-                Utility::enumToString(resolution)
-            );
+            auto listed = conflicts.remove(conflictId);
+            if (!listed)
+            {
+                Log::warn("FileTracking: there is no conflict {} to answer", conflictId.value());
+                return;
+            }
+            resolveConflict(std::move(listed->context), resolution);
+            view->removeConflict(conflictId);
+            progressChanged();
         }
 
         void answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution)
         {
-            Log::warn(
-                "FileTracking: answering the conflicts of watch {} with {} is not implemented",
+            auto listed = conflicts.removeWatch(watchId);
+            if (listed.empty())
+            {
+                Log::warn("FileTracking: watch {} has no conflicts to answer", watchId.value());
+                return;
+            }
+            Log::info(
+                "FileTracking: answering {} conflict(s) of watch {} with {}",
+                listed.size(),
                 watchId.value(),
                 Utility::enumToString(resolution)
             );
+            for (auto& conflict : listed)
+            {
+                resolveConflict(std::move(conflict.context), resolution);
+                view->removeConflict(conflict.conflict.conflictId);
+            }
+            progressChanged();
+        }
+
+        void resolveConflict(Upload upload, SharedData::ConflictResolution resolution)
+        {
+            switch (resolution)
+            {
+                case SharedData::ConflictResolution::ReplaceOnServer:
+                    Log::info("FileTracking: replacing the server's version of '{}'.", upload.destination.value());
+                    return replaceOnServer(std::move(upload));
+                case SharedData::ConflictResolution::KeepServers:
+                    Log::info("FileTracking: kept the server's version of '{}'.", upload.destination.value());
+                    return declineUpload(upload);
+            }
+        }
+
+        /**
+         * @brief Uploads @p upload over whatever the server has, once the path is checked again.
+         */
+        void replaceOnServer(Upload upload)
+        {
+            if (!conflictStands(upload))
+                return;
+            upload.checkServer = false;
+            checkServerThenUpload(std::move(upload));
         }
 
         void retryFailure(Ids::FailureId const& failureId)
@@ -1975,22 +2066,8 @@ namespace FileTracking
         }
 
         /**
-         * @brief Another dialog replaced the question for @p upload: it and the waiting questions are asked again on
-         *        the next save, nothing opens now over the dialog that replaced it.
-         */
-        void abandonServerChangedQuestions(Upload const& upload)
-        {
-            Log::info(
-                "FileTracking: the question about '{}' was replaced by another dialog.", upload.destination.value()
-            );
-            declineUpload(upload);
-            for (auto const& waiting : std::exchange(waitingQuestions, {}))
-                declineUpload(waiting);
-        }
-
-        /**
-         * @brief The change is not uploaded, and the changes that arrived while it was asked about wait for the next
-         *        save.
+         * @brief The change is not uploaded, and the changes that arrived while its conflict waited wait for the next
+         *        save, which raises it again.
          */
         void declineUpload(Upload const& upload)
         {
@@ -2020,13 +2097,13 @@ namespace FileTracking
                     .refreshListing = upload.refreshListing,
                     // Below the item a directory renamed without mirroring has no server counterpart yet.
                     .createMissingDirectories = upload.change.path != entry->localPath,
-                    .expectedDestination = std::move(expected),
+                    .expectedDestination = expected,
                     .continuesPartialOf = upload.continuesPartialOf,
                 },
-                [weak = weak_from_this(), upload](UploadEnd const& ended)
+                [weak = weak_from_this(), upload, expected](UploadEnd const& ended)
                 {
                     if (const auto self = weak.lock())
-                        self->onUploadEnded(upload, ended);
+                        self->onUploadEnded(upload, expected, ended);
                 },
                 {}
             );
@@ -2040,8 +2117,10 @@ namespace FileTracking
         /**
          * @brief Once an upload ended, what the server has now is the state the next check compares with. The upload
          *        stays on its way until the remote told that state.
+         * @param expected What the upload expected the server to have at its destination.
          */
-        void onUploadEnded(Upload const& upload, UploadEnd const& ended)
+        void
+        onUploadEnded(Upload const& upload, std::optional<ExpectedDestination> const& expected, UploadEnd const& ended)
         {
             auto* entry = find(upload.watchId);
             // The server's copy changed meanwhile and stayed, the upload asks about it now unless the user stopped
@@ -2049,7 +2128,9 @@ namespace FileTracking
             if (entry && ended.changedOnServer)
             {
                 if (entry->options.checkRemoteChanges)
-                    return askServerChanged(upload);
+                    return askServerChanged(
+                        upload, serverChangeOf(expected && expected->file.has_value(), ended.destinationState)
+                    );
                 return enqueueUpload(upload);
             }
             if (ended.reason != SharedData::OperationCompletionReason::Completed || !entry)
