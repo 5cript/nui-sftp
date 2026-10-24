@@ -217,7 +217,11 @@ struct Session::Implementation
                 auto* const side = fileExplorerPanel.remoteFileGridSide();
                 if (side == nullptr)
                     return;
-                side->path(path.parent().value_or(path).value());
+                const auto parent = path.parent();
+                const auto name = path.filename();
+                if (!parent || !name)
+                    return side->path(path.value());
+                side->navigateAndSelect(parent->value(), name->value());
             }
         );
     }
