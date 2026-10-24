@@ -46,10 +46,20 @@ namespace FileTracking
          *        conflicts left clears unseen.
          * @return What the tab shows now, nothing when neither the counts changed nor a pulse is due.
          */
-        std::optional<Attention>
-        update([[maybe_unused]] AttentionCounts const& counts, [[maybe_unused]] std::chrono::milliseconds now)
+        std::optional<Attention> update(AttentionCounts const& counts, std::chrono::milliseconds now)
         {
-            return std::nullopt;
+            if (counts == counts_)
+                return std::nullopt;
+            const auto arrived = counts.conflicts > counts_.conflicts;
+            counts_ = counts;
+            if (counts_.conflicts == 0u)
+                unseen_ = false;
+            else if (arrived)
+                unseen_ = true;
+            const auto pulse = arrived && (!lastPulse_.has_value() || now - *lastPulse_ >= pulseWindow);
+            if (pulse)
+                lastPulse_ = now;
+            return Attention{.counts = counts_, .pulse = pulse};
         }
 
         /**
@@ -64,7 +74,9 @@ namespace FileTracking
          * @brief The user jumped to the newest conflict, what arrived so far counts as seen.
          */
         void acknowledge()
-        {}
+        {
+            unseen_ = false;
+        }
 
         /**
          * @return The counts of the last @ref update.
@@ -78,7 +90,11 @@ namespace FileTracking
          * @brief Forgets the counts, unseen and the last pulse, the session ended.
          */
         void reset()
-        {}
+        {
+            counts_ = {};
+            lastPulse_.reset();
+            unseen_ = false;
+        }
 
       private:
         AttentionCounts counts_{};
