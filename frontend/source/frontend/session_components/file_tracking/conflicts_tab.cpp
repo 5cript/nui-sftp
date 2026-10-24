@@ -1,6 +1,7 @@
 #include <frontend/session_components/file_tracking/conflicts_tab.hpp>
 #include <frontend/session_components/file_tracking/item_list_box.hpp>
 #include <shared_data/file_tracking/watch_conflict.hpp>
+#include <utility/enum_string_convert.hpp>
 #include <utility/language.hpp>
 
 #include <script-nui-components/style_variant.hpp>
@@ -37,6 +38,8 @@ namespace FileTracking
                 class_ = "file-tracking-item-row file-tracking-conflict-row",
                 role = "listitem",
                 "data-ft-conflict-id"_attr = conflictId.value(),
+                "data-ft-kind"_attr = Utility::enumToString(item.conflict.kind),
+                "data-ft-path"_attr = item.conflict.localPath.toUtf8(),
             }(
                 div{class_ = "file-tracking-item-row-text"}(
                     div{class_ = "file-tracking-item-row-file", title = item.file}(item.file),

@@ -53,6 +53,8 @@ namespace FileTracking
                 role = "listitem",
                 "data-ft-failure-id"_attr = failureId.value(),
                 "data-ft-reason"_attr = Utility::enumToString(item.failure.reason),
+                "data-ft-attempts"_attr = std::to_string(item.failure.attempts),
+                "data-ft-path"_attr = item.failure.localPath.toUtf8(),
             }(
                 div{class_ = "file-tracking-item-row-text"}(
                     div{class_ = "file-tracking-item-row-file", title = item.file}(item.file),
