@@ -86,8 +86,7 @@ namespace FileTracking
         {
             if (entry.stop)
                 return false;
-            return entry.uploading || !progress.inFlight.empty() ||
-                progress.changesPending > progress.waitingForAnswer;
+            return entry.uploading || !progress.inFlight.empty() || progress.changesPending > progress.waitingForAnswer;
         }
 
         template <typename... ArgumentsT>
@@ -169,8 +168,10 @@ namespace FileTracking
          */
         Nui::ElementRenderer fixedCountBar(BarValues values)
         {
-            const auto current = std::make_shared<Nui::Observed<std::int64_t>>(static_cast<std::int64_t>(values.current));
-            const auto maximum = std::make_shared<Nui::Observed<std::int64_t>>(static_cast<std::int64_t>(values.maximum));
+            const auto current =
+                std::make_shared<Nui::Observed<std::int64_t>>(static_cast<std::int64_t>(values.current));
+            const auto maximum =
+                std::make_shared<Nui::Observed<std::int64_t>>(static_cast<std::int64_t>(values.maximum));
             auto bar = ScriptNuiComponents::progressBar({
                 .current = current,
                 .maximum = maximum,

@@ -55,16 +55,14 @@ namespace FileTracking
                     .text = fmt::format(
                         fmt::runtime(language->get("fileTracking", "showOtherWatch")), otherWatchNameOf(store, *stop)
                     ),
-                    .attributes =
+                    .attributes = {
+                        "data-ft-action"_attr = "show-other-watch",
+                        onClick = [actions, otherWatchId = *stop->otherWatchId](Nui::val)
                         {
-                            "data-ft-action"_attr = "show-other-watch",
-                            onClick =
-                                [actions, otherWatchId = *stop->otherWatchId](Nui::val)
-                            {
-                                if (actions->showWatch)
-                                    actions->showWatch(otherWatchId);
-                            },
+                            if (actions->showWatch)
+                                actions->showWatch(otherWatchId);
                         },
+                    },
                 });
             }
 

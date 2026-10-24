@@ -38,7 +38,9 @@ namespace FileTracking
             using Nui::Elements::div;
 
             const auto origin = copy.remotePath
-                ? fmt::format(fmt::runtime(language->get("fileTracking", "orphanDownloadedFrom")), copy.remotePath->value())
+                ? fmt::format(
+                      fmt::runtime(language->get("fileTracking", "orphanDownloadedFrom")), copy.remotePath->value()
+                  )
                 : language->get("fileTracking", "orphanOriginUnknown");
 
             // clang-format off
@@ -79,12 +81,13 @@ namespace FileTracking
         TrackingActions const* actionsPointer = &actions;
         const auto nameText = [item]()
         {
-            return Nui::observe(item->name).generate(
-                [item]()
-                {
-                    return item->name.value();
-                }
-            );
+            return Nui::observe(item->name)
+                .generate(
+                    [item]()
+                    {
+                        return item->name.value();
+                    }
+                );
         };
 
         // clang-format off

@@ -157,12 +157,13 @@ namespace FileTracking
 
         const auto nameText = [item]()
         {
-            return Nui::observe(item->name).generate(
-                [item]()
-                {
-                    return item->name.value();
-                }
-            );
+            return Nui::observe(item->name)
+                .generate(
+                    [item]()
+                    {
+                        return item->name.value();
+                    }
+                );
         };
         const auto localText = [item, temporaryCopy]()
         {
