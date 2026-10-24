@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -71,7 +72,21 @@ namespace FileTracking
             };
         }
 
-        const UploadEnd failedUpload{.reason = SharedData::OperationCompletionReason::Failed};
+        /**
+         * @brief How an upload the inner remote refused with @p error ends: as cancelled when its source is gone,
+         *        whose deletion is mirrored apart, otherwise as failed for not being queued.
+         */
+        UploadEnd refusedUpload(UploadRequest const& request, std::string const& error)
+        {
+            std::error_code statusError;
+            if (std::filesystem::symlink_status(request.source.native(), statusError).type() ==
+                std::filesystem::file_type::not_found)
+                return {.reason = SharedData::OperationCompletionReason::Canceled};
+            return {
+                .reason = SharedData::OperationCompletionReason::Failed,
+                .failure = UploadFailureInfo{.reason = SharedData::UploadFailureReason::NotQueued, .detail = error},
+            };
+        }
     }
 
     struct BatchingRemote::Implementation : public std::enable_shared_from_this<BatchingRemote::Implementation>
@@ -166,7 +181,9 @@ namespace FileTracking
                     !queued)
                 {
                     Log::warn("FileTracking: did not upload {} changed files: {}", bulk.size(), queued.error());
-                    endAll(bulkEnds, failedUpload);
+                    for (std::size_t index = 0; index < bulk.size(); ++index)
+                        if (bulkEnds[index])
+                            bulkEnds[index](refusedUpload(bulk[index], queued.error()));
                 }
             }
             for (auto& upload : single)
@@ -177,7 +194,7 @@ namespace FileTracking
                     // A temporary file an editor already renamed or removed ends up here.
                     Log::warn("FileTracking: did not upload '{}': {}", upload.request.source.toUtf8(), queued.error());
                     if (upload.onEnded)
-                        upload.onEnded(failedUpload);
+                        upload.onEnded(refusedUpload(upload.request, queued.error()));
                 }
             }
         }

@@ -172,6 +172,10 @@ namespace Test
         std::map<std::string, SharedData::OperationCompletionReason> ended_{};
         /** @brief What the server had at the destination of each upload of the test that ended, by its name. */
         std::map<std::string, std::optional<FileTracking::ServerState>> destinationStates_{};
+        /** @brief Why each upload of the test that ended failed, by its name. */
+        std::map<std::string, std::optional<FileTracking::UploadFailureInfo>> failures_{};
+        /** @brief The progress each upload of the test heard, by its name. */
+        std::map<std::string, std::vector<FileTracking::UploadProgress>> progress_{};
 
         void SetUp() override
         {
@@ -225,6 +229,15 @@ namespace Test
             {
                 ended_[name] = ended.reason;
                 destinationStates_[name] = ended.destinationState;
+                failures_[name] = ended.failure;
+            };
+        }
+
+        FileTracking::TrackerRemote::OnUploadProgress recordProgressAs(std::string name)
+        {
+            return [this, name = std::move(name)](FileTracking::UploadProgress const& progress)
+            {
+                progress_[name].push_back(progress);
             };
         }
 
@@ -238,7 +251,7 @@ namespace Test
                             .createMissingDirectories = createMissingDirectories,
                         },
                         recordUploadAs(name),
-                        {}
+                        recordProgressAs(name)
                     )
                     .has_value());
         }
@@ -427,6 +440,50 @@ namespace Test
         ));
         EXPECT_EQ(ended_.at("a.txt"), SharedData::OperationCompletionReason::Failed);
         EXPECT_EQ(ended_.at("b.txt"), SharedData::OperationCompletionReason::Failed);
+        for (auto const* name : {"a.txt", "b.txt"})
+        {
+            ASSERT_TRUE(failures_.at(name).has_value()) << name;
+            EXPECT_EQ(failures_.at(name)->reason, SharedData::UploadFailureReason::NotQueued) << name;
+            EXPECT_EQ(failures_.at(name)->detail, "refused") << name;
+        }
+    }
+
+    TEST_F(BatchingRemoteTest, AnUploadTheQueueRefusesEndsFailedAsNotQueuedAndTellsWhy)
+    {
+        inner_->failQueueing = true;
+        upload("a.txt");
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return ended_.contains("a.txt");
+            }
+        ));
+        EXPECT_EQ(ended_.at("a.txt"), SharedData::OperationCompletionReason::Failed);
+        ASSERT_TRUE(failures_.at("a.txt").has_value());
+        EXPECT_EQ(failures_.at("a.txt")->reason, SharedData::UploadFailureReason::NotQueued);
+        EXPECT_EQ(failures_.at("a.txt")->detail, "refused");
+        EXPECT_FALSE(progress_.contains("a.txt"));
+    }
+
+    TEST_F(BatchingRemoteTest, ARefusedUploadWhoseSourceIsGoneEndsCanceledWithoutAFailure)
+    {
+        inner_->failQueueing = true;
+        upload("a.txt");
+        upload("b.txt");
+        std::filesystem::remove(root_ / "a.txt");
+
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return ended_.size() == 2u;
+            }
+        ));
+        EXPECT_EQ(ended_.at("a.txt"), SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(failures_.at("a.txt").has_value());
+        EXPECT_EQ(ended_.at("b.txt"), SharedData::OperationCompletionReason::Failed);
+        ASSERT_TRUE(failures_.at("b.txt").has_value());
+        EXPECT_EQ(failures_.at("b.txt")->reason, SharedData::UploadFailureReason::NotQueued);
     }
 
     TEST_F(BatchingRemoteTest, EverythingElsePassesThroughAtOnce)
@@ -521,6 +578,86 @@ namespace Test
         ASSERT_EQ(inner_->of("upload").size(), 2u);
         EXPECT_EQ(inner_->of("upload")[0]->paths.front(), "/srv/large-file.txt");
         EXPECT_EQ(inner_->of("upload")[1]->paths.front(), "/srv/renamed.txt");
+    }
+
+    TEST_F(BatchingRemoteTest, AnUploadSentOnItsOwnHearsWhatTheInnerRemoteTellsOfIt)
+    {
+        upload("a.txt");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !inner_->queued.empty();
+            }
+        ));
+        ASSERT_EQ(inner_->of("upload").size(), 1u);
+        auto const* sent = inner_->of("upload").front();
+        ASSERT_TRUE(sent->onUploadProgress);
+
+        sent->onUploadProgress({.bytesSent = 3u, .bytesTotal = 5u, .filesDone = 0u, .fileCount = 1u});
+
+        ASSERT_EQ(progress_["a.txt"].size(), 1u);
+        EXPECT_EQ(progress_["a.txt"].front().bytesSent, 3u);
+        EXPECT_EQ(progress_["a.txt"].front().bytesTotal, 5u);
+    }
+
+    TEST_F(BatchingRemoteTest, EachUploadOfABulkHearsTheProgressAtTheIndexOfItsRequest)
+    {
+        upload("a.txt");
+        upload("b.txt");
+        upload("c.txt");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !inner_->queued.empty();
+            }
+        ));
+        const auto bulks = inner_->of("uploadAll");
+        ASSERT_EQ(bulks.size(), 1u);
+        ASSERT_EQ(bulks.front()->paths, (std::vector<std::string>{"/srv/a.txt", "/srv/b.txt", "/srv/c.txt"}));
+        ASSERT_TRUE(bulks.front()->onUploadEntryProgress);
+
+        bulks.front()->onUploadEntryProgress(2, {.bytesSent = 2u, .bytesTotal = 5u});
+        bulks.front()->onUploadEntryProgress(0, {.bytesSent = 1u, .bytesTotal = 5u});
+        bulks.front()->onUploadEntryProgress(2, {.bytesSent = 5u, .bytesTotal = 5u, .transferred = true});
+        bulks.front()->onUploadEntryProgress(3, {.bytesSent = 9u, .bytesTotal = 9u});
+
+        ASSERT_EQ(progress_["a.txt"].size(), 1u);
+        EXPECT_EQ(progress_["a.txt"].front().bytesSent, 1u);
+        EXPECT_FALSE(progress_.contains("b.txt"));
+        ASSERT_EQ(progress_["c.txt"].size(), 2u);
+        EXPECT_EQ(progress_["c.txt"][0].bytesSent, 2u);
+        EXPECT_TRUE(progress_["c.txt"][1].transferred);
+    }
+
+    TEST_F(BatchingRemoteTest, AGatheredUploadStoppedBeforeItsBatchGoesHearsNothingMore)
+    {
+        upload("a.txt");
+        upload("b.txt");
+        upload("c.txt");
+        remote_->cancelUpload(remote("/srv/b.txt"), FileTracking::PartialFile::Kept);
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return !inner_->queued.empty();
+            }
+        ));
+        const auto bulks = inner_->of("uploadAll");
+        ASSERT_EQ(bulks.size(), 1u);
+        ASSERT_EQ(bulks.front()->paths, (std::vector<std::string>{"/srv/a.txt", "/srv/c.txt"}));
+
+        bulks.front()->onUploadEntryProgress(0, {.bytesSent = 1u, .bytesTotal = 5u});
+        bulks.front()->onUploadEntryProgress(1, {.bytesSent = 4u, .bytesTotal = 5u});
+        bulks.front()->onUploadEntryEnded(0, {.reason = SharedData::OperationCompletionReason::Completed});
+        bulks.front()->onUploadEntryEnded(1, {.reason = SharedData::OperationCompletionReason::Completed});
+
+        EXPECT_EQ(ended_.at("b.txt"), SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(progress_.contains("b.txt"));
+        ASSERT_EQ(progress_["a.txt"].size(), 1u);
+        EXPECT_EQ(progress_["a.txt"].front().bytesSent, 1u);
+        ASSERT_EQ(progress_["c.txt"].size(), 1u);
+        EXPECT_EQ(progress_["c.txt"].front().bytesSent, 4u);
+        EXPECT_EQ(ended_.at("a.txt"), SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(ended_.at("c.txt"), SharedData::OperationCompletionReason::Completed);
     }
 
     TEST_F(BatchingRemoteTest, NothingGatheredIsSentOnceTheRemoteIsGone)
