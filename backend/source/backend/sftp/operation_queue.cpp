@@ -28,6 +28,8 @@
 #include <iterator>
 #include <optional>
 #include <span>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -66,6 +68,77 @@ namespace
         std::ranges::transform(files, std::back_inserter(paths), member);
         auto parent = Paths::commonParentOf(std::span<PathT const>{paths});
         return parent ? *std::move(parent) : PathT{};
+    }
+
+    using ProgressObservers = std::unordered_map<Ids::OperationId, OperationQueue::ProgressObserver, Ids::IdHash>;
+
+    /**
+     * @brief Holds back the progress the operations of a queue report while a batch of them works on this thread, so
+     *        the queue hands it on before the completions of that batch instead of after them.
+     */
+    class HeldProgress
+    {
+      public:
+        using Delivery = std::function<void()>;
+
+        /**
+         * @brief Holds back the progress of the operations of @p queue in @p deliveries until destroyed.
+         */
+        HeldProgress(OperationQueue const& queue, std::vector<Delivery>& deliveries)
+            : queue_{&queue}
+            , deliveries_{&deliveries}
+            , outer_{std::exchange(current_, this)}
+        {}
+        ~HeldProgress()
+        {
+            current_ = outer_;
+        }
+        HeldProgress(HeldProgress const&) = delete;
+        HeldProgress& operator=(HeldProgress const&) = delete;
+        HeldProgress(HeldProgress&&) = delete;
+        HeldProgress& operator=(HeldProgress&&) = delete;
+
+        /**
+         * @brief Holds @p delivery back when a batch of @p queue works on this thread.
+         * @return False when none does, @p delivery is left as it was then.
+         */
+        static bool holdBack(OperationQueue const& queue, Delivery& delivery)
+        {
+            if (current_ == nullptr || current_->queue_ != &queue)
+                return false;
+            current_->deliveries_->push_back(std::move(delivery));
+            return true;
+        }
+
+      private:
+        inline static thread_local HeldProgress* current_{nullptr};
+        OperationQueue const* queue_;
+        std::vector<Delivery>* deliveries_;
+        HeldProgress* outer_;
+    };
+
+    /**
+     * @brief Runs @p delivery of progress on the strand of @p queue: after the batch it was reported in when that works
+     *        on this thread, else as soon as the strand is free.
+     */
+    void deliverProgress(OperationQueue const& queue, HeldProgress::Delivery delivery)
+    {
+        if (!HeldProgress::holdBack(queue, delivery))
+            queue.within_strand_do(std::move(delivery));
+    }
+
+    /**
+     * @brief Tells the observer of the operation of @p progress in @p observers, if it has one. It runs as a copy, so
+     *        it may end its operation, which drops it from @p observers.
+     */
+    template <typename ProgressT>
+    void tellObserver(ProgressObservers const& observers, ProgressT const& progress)
+    {
+        const auto found = observers.find(progress.operationId);
+        if (found == observers.end())
+            return;
+        const auto observer = found->second;
+        observer(OperationQueue::OperationProgress{progress});
     }
 
     bool changedSinceCompare(SharedData::OperationError const& error)
@@ -270,8 +343,9 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
         if (!self)
             return;
         // May be invoked from the SFTP processing strand (batched umbrella), so the RPC call goes back onto the asio
-        // strand that owns the hub.
-        self->within_strand_do(
+        // strand that owns the hub, in order with the transfer progress of the same batch.
+        deliverProgress(
+            *self,
             [weak, name, operationId, totalBytes, currentIndex, totalScanned]()
             {
                 auto self = weak.lock();
@@ -326,13 +400,15 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
         // Invoked from the SFTP processing strand, marshal the RPC call back onto the asio
         // strand that owns the hub.
         progress.operationId = operationId;
-        self->within_strand_do(
+        deliverProgress(
+            *self,
             [weak, name, progress = std::move(progress)]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
                 RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                tellObserver(self->progressObservers_, progress);
             }
         );
     };
@@ -371,6 +447,8 @@ void OperationQueue::dropAll()
 
             self->operations_.clear();
             self->priorityOperations_.clear();
+            // Progress they reported may still be on its way to the strand.
+            self->progressObservers_.clear();
             auto waiting = std::exchange(self->syncScanCallbacks_, {});
             for (auto& [id, callback] : waiting)
                 callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
@@ -791,8 +869,17 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         return !item.result.has_value() || item.result.value() == Operation::WorkStatus::Complete;
     };
 
-    auto runBatch = [&queue, &eligible, &isTerminal](std::optional<bool> onlyUsesStrand)
+    // Posted, the progress of the batch would reach the strand only after the completions handed on below.
+    std::vector<HeldProgress::Delivery> heldProgress;
+    const auto deliverHeldProgress = [&heldProgress]()
     {
+        for (auto const& delivery : std::exchange(heldProgress, {}))
+            delivery();
+    };
+
+    auto runBatch = [this, &queue, &eligible, &isTerminal, &heldProgress](std::optional<bool> onlyUsesStrand)
+    {
+        const HeldProgress holding{*this, heldProgress};
         std::vector<ItemResult> out;
         out.reserve(eligible.size());
         for (const auto& item : eligible)
@@ -833,7 +920,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         results = runBatch(std::nullopt);
     }
 
-    // Out of the queue before its owner hears of it, who may cancel or queue operations then.
+    // Out of the queue before its owner hears of its progress or end, who may cancel or queue operations then.
     const auto takeFinished = [&queue](std::size_t index)
     {
         auto finished = std::move(queue[index]);
@@ -847,6 +934,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         if (!item.result.has_value())
         {
             const auto [id, operation] = takeFinished(item.queueIndex);
+            deliverHeldProgress();
             failSyncScan(
                 id,
                 Utility::localizedMessage(
@@ -865,6 +953,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         if (workStatus == Operation::WorkStatus::Complete)
         {
             const auto [id, operation] = takeFinished(item.queueIndex);
+            deliverHeldProgress();
             deliverSyncScan(id, *operation);
             // An upload whose source may vanish and was gone ends cancelled, nothing went.
             const auto reason = operation->state() == SharedData::OperationState::Canceled
@@ -879,6 +968,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
             continue;
         }
     }
+    deliverHeldProgress();
     return moreWork;
 }
 
@@ -1076,23 +1166,22 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             if (!self)
                 return;
             // Invoked from the SFTP processing strand via workInStrand, marshal back.
-            self->within_strand_do(
+            deliverProgress(
+                *self,
                 [weak, name, operationId, min, max, current, bytesPerSecond]()
                 {
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    RpcHelper::callRemoteSafely(
-                        *self->hub_,
-                        name,
-                        SharedData::TransferProgress{
-                            .operationId = operationId,
-                            .min = min,
-                            .max = max,
-                            .current = current,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
+                    const SharedData::TransferProgress progress{
+                        .operationId = operationId,
+                        .min = min,
+                        .max = max,
+                        .current = current,
+                        .bytesPerSecond = bytesPerSecond,
+                    };
+                    RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                    tellObserver(self->progressObservers_, progress);
                 }
             );
         };
@@ -1290,23 +1379,22 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         auto self = weak.lock();
         if (!self)
             return;
-        self->within_strand_do(
+        deliverProgress(
+            *self,
             [weak, name, operationId, min, max, current, bytesPerSecond]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::TransferProgress{
-                        .operationId = operationId,
-                        .min = min,
-                        .max = max,
-                        .current = current,
-                        .bytesPerSecond = bytesPerSecond,
-                    }
-                );
+                const SharedData::TransferProgress progress{
+                    .operationId = operationId,
+                    .min = min,
+                    .max = max,
+                    .current = current,
+                    .bytesPerSecond = bytesPerSecond,
+                };
+                RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                tellObserver(self->progressObservers_, progress);
             }
         );
     };
@@ -1419,23 +1507,22 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         auto self = weak.lock();
         if (!self)
             return;
-        self->within_strand_do(
+        deliverProgress(
+            *self,
             [weak, name, operationId, min, max, current, bytesPerSecond]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::TransferProgress{
-                        .operationId = operationId,
-                        .min = min,
-                        .max = max,
-                        .current = current,
-                        .bytesPerSecond = bytesPerSecond,
-                    }
-                );
+                const SharedData::TransferProgress progress{
+                    .operationId = operationId,
+                    .min = min,
+                    .max = max,
+                    .current = current,
+                    .bytesPerSecond = bytesPerSecond,
+                };
+                RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                tellObserver(self->progressObservers_, progress);
             }
         );
     };
@@ -1640,23 +1727,22 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             auto self = weak.lock();
             if (!self)
                 return;
-            self->within_strand_do(
+            deliverProgress(
+                *self,
                 [weak, name, operationId, min, max, current, bytesPerSecond]()
                 {
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    RpcHelper::callRemoteSafely(
-                        *self->hub_,
-                        name,
-                        SharedData::TransferProgress{
-                            .operationId = operationId,
-                            .min = min,
-                            .max = max,
-                            .current = current,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
+                    const SharedData::TransferProgress progress{
+                        .operationId = operationId,
+                        .min = min,
+                        .max = max,
+                        .current = current,
+                        .bytesPerSecond = bytesPerSecond,
+                    };
+                    RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                    tellObserver(self->progressObservers_, progress);
                 }
             );
         };
