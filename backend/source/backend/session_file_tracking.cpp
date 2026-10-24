@@ -1,5 +1,7 @@
 #include <backend/session.hpp>
 #include <backend/file_tracking/batching_remote.hpp>
+#include <backend/file_tracking/bulk_entry_progress.hpp>
+#include <backend/file_tracking/failure_reason.hpp>
 #include <backend/file_tracking/frontend_tracker_view.hpp>
 #include <backend/file_tracking/tracker.hpp>
 #include <backend/rpc_path_parameters.hpp>
@@ -10,6 +12,7 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_tracking/watch_conflict.hpp>
 #include <log/log.hpp>
+#include <utility/visit_overloaded.hpp>
 
 #include <boost/asio/post.hpp>
 #include <fmt/format.h>
@@ -29,6 +32,8 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace
 {
@@ -153,6 +158,94 @@ namespace
     }
 
     /**
+     * @brief The progress observer and the completion callback of one queued operation, the observer stays silent
+     *        once the operation completed.
+     */
+    struct ProgressUntilEnd
+    {
+        OperationQueue::ProgressObserver observer;
+        std::function<void(SharedData::OperationCompleted const&)> onCompleted;
+    };
+
+    /**
+     * @brief Hands the progress of an operation to @p observer until @p onCompleted hears it completed, both on the
+     *        strand. The observer is empty for an empty @p observer.
+     */
+    ProgressUntilEnd progressUntilEnd(
+        OperationQueue::ProgressObserver observer,
+        std::function<void(SharedData::OperationCompleted const&)> onCompleted
+    )
+    {
+        const auto ended = std::make_shared<bool>(false);
+        ProgressUntilEnd result{
+            .observer = {},
+            .onCompleted =
+                [ended, onCompleted = std::move(onCompleted)](SharedData::OperationCompleted const& completed)
+            {
+                *ended = true;
+                if (onCompleted)
+                    onCompleted(completed);
+            },
+        };
+        if (observer)
+            result.observer = [ended, observer = std::move(observer)](OperationQueue::OperationProgress const& progress)
+            {
+                if (!*ended)
+                    observer(progress);
+            };
+        return result;
+    }
+
+    /**
+     * @brief Tells @p onProgress how far the single upload of @p request is, that of a directory by its entries.
+     */
+    OperationQueue::ProgressObserver singleUploadProgress(
+        FileTracking::UploadRequest const& request,
+        FileTracking::TrackerRemote::OnUploadProgress onProgress
+    )
+    {
+        const auto directory = std::make_shared<FileTracking::BulkEntryProgress>(
+            FileTracking::BulkEntryProgress::ofDirectory(request.source, request.destination)
+        );
+        return [source = request.source,
+                   directory,
+                   onProgress = std::move(onProgress)](OperationQueue::OperationProgress const& progress)
+        {
+            Utility::visitOverloaded(
+                progress,
+                [&source, &onProgress](SharedData::TransferProgress const& transfer)
+                {
+                    onProgress(FileTracking::uploadProgressOf(transfer, source));
+                },
+                [&directory, &onProgress](SharedData::BulkProgress const& bulk)
+                {
+                    for (auto const& entry : directory->update(bulk))
+                        onProgress(entry.progress);
+                }
+            );
+        };
+    }
+
+    /**
+     * @brief Tells @p onProgress how far each upload of the bulk of @p files is, by the index of its request.
+     */
+    OperationQueue::ProgressObserver bulkUploadProgress(
+        std::vector<FileTracking::BulkEntryProgress::File> files,
+        FileTracking::BulkTrackerRemote::OnUploadEntryProgress onProgress
+    )
+    {
+        const auto entries = std::make_shared<FileTracking::BulkEntryProgress>(
+            FileTracking::BulkEntryProgress::ofFiles(std::move(files))
+        );
+        return [entries, onProgress = std::move(onProgress)](OperationQueue::OperationProgress const& progress)
+        {
+            if (auto const* bulk = std::get_if<SharedData::BulkProgress>(&progress))
+                for (auto const& entry : entries->update(*bulk))
+                    onProgress(entry.index, entry.progress);
+        };
+    }
+
+    /**
      * @brief Gathers the files an upload sent unchanged, told on the strands of its transfers, until it ended.
      */
     class SentFiles : public std::enable_shared_from_this<SentFiles>
@@ -231,17 +324,20 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         );
     }
 
-    std::expected<void, std::string> upload(
-        FileTracking::UploadRequest const& request,
-        OnUploadEnded onEnded,
-        [[maybe_unused]] OnUploadProgress onProgress
-    ) override
+    std::expected<void, std::string>
+    upload(FileTracking::UploadRequest const& request, OnUploadEnded onEnded, OnUploadProgress onProgress) override
     {
         const bool isDirectory = isDirectoryLocally(request.source);
         const auto sent = std::make_shared<SentFiles>();
+        auto progressing = progressUntilEnd(
+            onProgress ? singleUploadProgress(request, std::move(onProgress)) : OperationQueue::ProgressObserver{},
+            forgettingSentUpload(
+                request.destination, endOfUpload(session_, request, isDirectory, sent, std::move(onEnded))
+            )
+        );
         std::optional<Ids::OperationId> queuedAs{};
         auto queued = queue(
-            [&request, &sent, &queuedAs](
+            [&request, &sent, &queuedAs, &observer = progressing.observer](
                 OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId
             )
             {
@@ -264,13 +360,13 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 if (added)
                 {
                     queue.leaveChangedDestinationsToOwner(operationId);
+                    if (observer)
+                        queue.whenProgressing(operationId, std::move(observer));
                     queuedAs = operationId;
                 }
                 return added;
             },
-            forgettingSentUpload(
-                request.destination, endOfUpload(session_, request.destination, isDirectory, sent, std::move(onEnded))
-            )
+            std::move(progressing.onCompleted)
         );
         if (queued && queuedAs)
             sentUploads_->insert_or_assign(request.destination.value(), *queuedAs);
@@ -354,30 +450,36 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     std::expected<void, std::string> uploadAll(
         std::vector<FileTracking::UploadRequest> const& requests,
         OnUploadEntryEnded onEnded,
-        [[maybe_unused]] OnUploadEntryProgress onProgress
+        OnUploadEntryProgress onProgress
     ) override
     {
         return withChannel(
             [&requests,
-                &onEnded](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
+                &onEnded,
+                &onProgress](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
             {
                 const auto sent = std::make_shared<SentFiles>();
                 SharedData::BulkUploadRequest bulk{
                     .allowOverwrite = true,
                     .mode = SharedData::OperationMode::PriorityQueued,
                 };
+                // Entry indices are request indices, the progress and the ends rely on it.
+                std::vector<FileTracking::BulkEntryProgress::File> files;
                 bulk.entries.reserve(requests.size());
+                files.reserve(requests.size());
                 for (auto const& request : requests)
                 {
                     std::error_code sizeError;
-                    const auto sizeBytes = std::filesystem::file_size(request.source.native(), sizeError);
+                    const auto size = std::filesystem::file_size(request.source.native(), sizeError);
+                    const auto sizeBytes = sizeError ? 0u : static_cast<std::uint64_t>(size);
                     bulk.entries.push_back({
                         .source = request.source,
                         .destination = request.destination,
-                        .sizeBytes = sizeError ? 0u : static_cast<std::uint64_t>(sizeBytes),
+                        .sizeBytes = sizeBytes,
                         .mayOverwrite = true,
                         .comparedDestination = comparedStateOf(request.expectedDestination),
                     });
+                    files.push_back({.source = request.source, .sizeBytes = sizeBytes});
                 }
                 auto& queue = *session.operationQueue_;
                 const auto cardId = Ids::generateOperationId();
@@ -395,8 +497,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 // The tracker decides anew what goes once the session is back.
                 queue.discardResumeBackup(cardId);
                 queue.leaveChangedDestinationsToOwner(cardId);
-                queue.whenCompleted(
-                    cardId,
+                auto progressing = progressUntilEnd(
+                    onProgress ? bulkUploadProgress(std::move(files), std::move(onProgress))
+                               : OperationQueue::ProgressObserver{},
                     [session = session.weak_from_this(),
                         onEnded = std::move(onEnded),
                         sent,
@@ -408,6 +511,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         endUploads(session, completed, sources, destinations, sent->take(), onEnded);
                     }
                 );
+                if (progressing.observer)
+                    queue.whenProgressing(cardId, std::move(progressing.observer));
+                queue.whenCompleted(cardId, std::move(progressing.onCompleted));
                 session.resetQueueThrottle();
                 return {};
             }
@@ -457,12 +563,13 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
 
   private:
     /**
-     * @brief Hands the end of an upload to @p onEnded, a completed one of anything but a directory once the server
-     *        told what it has at @p destination, with the files @p sent tells of. Nothing for an empty @p onEnded.
+     * @brief Hands the end of the upload of @p request to @p onEnded, with the files @p sent tells of. A completed
+     *        one of anything but a directory, and one whose destination changed on the server, once the server told
+     *        what it has there. Nothing for an empty @p onEnded.
      */
     static std::function<void(SharedData::OperationCompleted const&)> endOfUpload(
         std::weak_ptr<Session> session,
-        Paths::RemotePath destination,
+        FileTracking::UploadRequest const& request,
         bool isDirectory,
         std::shared_ptr<SentFiles> sent,
         OnUploadEnded onEnded
@@ -471,37 +578,34 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         if (!onEnded)
             return {};
         return [session = std::move(session),
-                   destination = std::move(destination),
+                   source = request.source,
+                   destination = request.destination,
                    isDirectory,
                    sent = std::move(sent),
                    onEnded = std::move(onEnded)](SharedData::OperationCompleted const& completed)
         {
-            const bool uploaded = completed.reason == SharedData::OperationCompletionReason::Completed;
-            if (!uploaded || isDirectory)
-                return onEnded({
-                    .reason = completed.reason,
-                    .changedOnServer =
-                        completed.error && completed.error->type == SharedData::OperationErrorType::ChangedSinceCompare,
-                    .sentFiles = uploaded ? sent->take() : std::vector<FileTracking::SentFile>{},
-                });
+            auto ended = FileTracking::uploadEndOf(completed, source, isDirectory);
+            if (ended.reason == SharedData::OperationCompletionReason::Completed)
+                ended.sentFiles = sent->take();
+            if (!FileTracking::asksDestinationState(ended, isDirectory))
+                return onEnded(ended);
             askStatesThen(
                 session,
                 {destination},
-                [onEnded, sentFiles = sent->take()](DestinationStates::States const& states)
+                [onEnded, ended = std::move(ended)](DestinationStates::States const& states)
                 {
-                    onEnded({
-                        .reason = SharedData::OperationCompletionReason::Completed,
-                        .destinationState = states.front(),
-                        .sentFiles = sentFiles,
-                    });
+                    auto told = ended;
+                    told.destinationState = states.front();
+                    onEnded(told);
                 }
             );
         };
     }
 
     /**
-     * @brief Hands each upload of a bulk that ended as @p completed its end: a completed one once the server told
-     *        what it has at its destination, of @p destinations by index, with its source when it is among @p sent.
+     * @brief Hands each upload of a bulk that ended as @p completed its end, by the index of its request in
+     *        @p sources and @p destinations, with its source when it is among @p sent. A completed one, and one whose
+     *        destination changed on the server, once the server told what it has there.
      */
     static void endUploads(
         std::weak_ptr<Session> const& session,
@@ -512,40 +616,6 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         OnUploadEntryEnded const& onEnded
     )
     {
-        if (completed.reason != SharedData::OperationCompletionReason::Completed)
-        {
-            for (std::size_t index = 0; index < destinations.size(); ++index)
-                onEnded(index, {.reason = completed.reason});
-            return;
-        }
-        const auto skipped = completed.indexedFailures |
-            std::views::transform(
-                [](SharedData::IndexedFailure const& failure)
-                {
-                    return std::pair{static_cast<std::size_t>(failure.index), failure.type};
-                }
-            ) |
-            std::ranges::to<std::map>();
-        std::vector<std::size_t> uploaded;
-        std::vector<Paths::RemotePath> uploadedDestinations;
-        for (std::size_t index = 0; index < destinations.size(); ++index)
-        {
-            if (const auto failure = skipped.find(index); failure != skipped.end())
-                onEnded(
-                    index,
-                    {
-                        .reason = SharedData::OperationCompletionReason::Failed,
-                        .changedOnServer = failure->second == SharedData::OperationErrorType::ChangedSinceCompare,
-                    }
-                );
-            else
-            {
-                uploaded.push_back(index);
-                uploadedDestinations.push_back(destinations[index]);
-            }
-        }
-        if (uploaded.empty())
-            return;
         const auto sentBySource = sent |
             std::views::transform(
                 [](FileTracking::SentFile const& file)
@@ -554,30 +624,36 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 }
             ) |
             std::ranges::to<std::map>();
-        const auto sentFilesOf = [&sentBySource, &sources](std::size_t index)
+        auto ends = FileTracking::entryEndsOf(completed, sources);
+        std::vector<std::pair<std::size_t, FileTracking::UploadEnd>> asking;
+        std::vector<Paths::RemotePath> askedDestinations;
+        for (std::size_t index = 0; index < ends.size(); ++index)
         {
-            const auto found = sentBySource.find(sources[index].toUtf8());
-            if (found == sentBySource.end())
-                return std::vector<FileTracking::SentFile>{};
-            return std::vector{found->second};
-        };
-        auto uploadedSent = uploaded | std::views::transform(sentFilesOf) | std::ranges::to<std::vector>();
+            auto& ended = ends[index];
+            if (ended.reason == SharedData::OperationCompletionReason::Completed)
+                if (const auto found = sentBySource.find(sources[index].toUtf8()); found != sentBySource.end())
+                    ended.sentFiles = {found->second};
+            if (!FileTracking::asksDestinationState(ended, /*isDirectory=*/false))
+            {
+                onEnded(index, ended);
+                continue;
+            }
+            asking.emplace_back(index, std::move(ended));
+            askedDestinations.push_back(destinations[index]);
+        }
+        if (asking.empty())
+            return;
         askStatesThen(
             session,
-            std::move(uploadedDestinations),
-            [onEnded,
-                uploaded = std::move(uploaded),
-                uploadedSent = std::move(uploadedSent)](DestinationStates::States const& states)
+            std::move(askedDestinations),
+            [onEnded, asking = std::move(asking)](DestinationStates::States const& states)
             {
-                for (std::size_t position = 0; position < uploaded.size(); ++position)
-                    onEnded(
-                        uploaded[position],
-                        {
-                            .reason = SharedData::OperationCompletionReason::Completed,
-                            .destinationState = states[position],
-                            .sentFiles = uploadedSent[position],
-                        }
-                    );
+                for (std::size_t position = 0; position < asking.size(); ++position)
+                {
+                    auto told = asking[position].second;
+                    told.destinationState = states[position];
+                    onEnded(asking[position].first, told);
+                }
             }
         );
     }
