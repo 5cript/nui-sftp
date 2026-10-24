@@ -3,6 +3,7 @@
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 #include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 
+#include <script-nui-components/progress_bar.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
 #include <utility/language.hpp>
 
@@ -36,10 +37,9 @@ struct DisplayedDeleteOperation
         , recursive_{scanning}
         , progressBar_({
               .height = std::string{progressHeight},
-              .min = 0,
-              .max = 0,
-              .showMinMax = true,
-              .byteMode = false,
+              .minimum = 0,
+              .maximum = 0,
+              .texts = {.percent = "{:.0f}%"},
           })
     {}
 
@@ -52,7 +52,10 @@ struct DisplayedDeleteOperation
     {
         OperationCard::state(newState);
         if (isCompletedState())
+        {
+            progressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Counts);
             progressBar_.setZeroAsComplete();
+        }
     }
 
     void setProgress(SharedData::BulkDeleteProgress const& progress)
@@ -66,8 +69,9 @@ struct DisplayedDeleteOperation
         if (totalFiles_.value() != progress.totalFiles)
             totalFiles_ = progress.totalFiles;
 
+        progressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Counts);
         progressBar_.setProgress(progress.filesDeleted);
-        progressBar_.max(static_cast<long long>(progress.totalFiles));
+        progressBar_.setMaximum(static_cast<long long>(progress.totalFiles));
 
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
@@ -141,5 +145,6 @@ struct DisplayedDeleteOperation
     Paths::RemotePath target_;
     /** @brief The delete scanned a directory, so it removes content and resumes doing the same. */
     bool recursive_{false};
-    Components::ProgressBar progressBar_;
+    /** @brief Shows "0%" until the first progress or the end, then counts. */
+    ScriptNuiComponents::ProgressBar progressBar_;
 };
