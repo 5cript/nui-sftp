@@ -55,6 +55,7 @@ namespace Test
                 FileTracking::UploadRequest upload{};
                 OnEnded onEnded{};
                 OnUploadEnded onUploadEnded{};
+                OnUploadProgress onUploadProgress{};
                 bool ended{false};
             };
 
@@ -90,8 +91,11 @@ namespace Test
                 return {};
             }
 
-            std::expected<void, std::string>
-            upload(FileTracking::UploadRequest const& request, OnUploadEnded onEnded) override
+            std::expected<void, std::string> upload(
+                FileTracking::UploadRequest const& request,
+                OnUploadEnded onEnded,
+                OnUploadProgress onProgress
+            ) override
             {
                 queued.push_back({
                     .kind = "upload",
@@ -100,6 +104,7 @@ namespace Test
                     .upload = request,
                     .onEnded = {},
                     .onUploadEnded = std::move(onEnded),
+                    .onUploadProgress = std::move(onProgress),
                 });
                 return {};
             }

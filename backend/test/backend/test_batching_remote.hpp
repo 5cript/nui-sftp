@@ -40,6 +40,8 @@ namespace Test
                 OnEntryEnded onEntryEnded{};
                 OnUploadEnded onUploadEnded{};
                 OnUploadEntryEnded onUploadEntryEnded{};
+                OnUploadProgress onUploadProgress{};
+                OnUploadEntryProgress onUploadEntryProgress{};
             };
 
             std::expected<std::optional<FileTracking::ServerState>, std::string>
@@ -71,8 +73,11 @@ namespace Test
                 return {};
             }
 
-            std::expected<void, std::string>
-            upload(FileTracking::UploadRequest const& request, OnUploadEnded onEnded) override
+            std::expected<void, std::string> upload(
+                FileTracking::UploadRequest const& request,
+                OnUploadEnded onEnded,
+                OnUploadProgress onProgress
+            ) override
             {
                 if (failQueueing)
                     return std::unexpected{std::string{"refused"}};
@@ -80,6 +85,7 @@ namespace Test
                     .kind = "upload",
                     .paths = {request.destination.value()},
                     .onUploadEnded = std::move(onEnded),
+                    .onUploadProgress = std::move(onProgress),
                 });
                 return {};
             }
@@ -113,12 +119,20 @@ namespace Test
                 return {};
             }
 
-            std::expected<void, std::string>
-            uploadAll(std::vector<FileTracking::UploadRequest> const& requests, OnUploadEntryEnded onEnded) override
+            std::expected<void, std::string> uploadAll(
+                std::vector<FileTracking::UploadRequest> const& requests,
+                OnUploadEntryEnded onEnded,
+                OnUploadEntryProgress onProgress
+            ) override
             {
                 if (failQueueing)
                     return std::unexpected{std::string{"refused"}};
-                Queued bulk{.kind = "uploadAll", .paths = {}, .onUploadEntryEnded = std::move(onEnded)};
+                Queued bulk{
+                    .kind = "uploadAll",
+                    .paths = {},
+                    .onUploadEntryEnded = std::move(onEnded),
+                    .onUploadEntryProgress = std::move(onProgress),
+                };
                 for (auto const& request : requests)
                     bulk.paths.push_back(request.destination.value());
                 queued.push_back(std::move(bulk));
@@ -223,7 +237,8 @@ namespace Test
                             .destination = remote("/srv/" + name),
                             .createMissingDirectories = createMissingDirectories,
                         },
-                        recordUploadAs(name)
+                        recordUploadAs(name),
+                        {}
                     )
                     .has_value());
         }
@@ -312,7 +327,8 @@ namespace Test
                         .destination = remote("/srv/directory"),
                         .createMissingDirectories = true,
                     },
-                    recordUploadAs("directory")
+                    recordUploadAs("directory"),
+                    {}
                 )
                 .has_value());
 
@@ -489,7 +505,8 @@ namespace Test
                         .createMissingDirectories = true,
                         .continuesPartialOf = remote("/srv/c.txt"),
                     },
-                    recordUploadAs("renamed.txt")
+                    recordUploadAs("renamed.txt"),
+                    {}
                 )
                 .has_value());
 

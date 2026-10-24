@@ -1963,7 +1963,8 @@ namespace FileTracking
                 {
                     if (const auto self = weak.lock())
                         self->onUploadEnded(upload, ended);
-                }
+                },
+                {}
             );
             if (queued)
                 return;

@@ -230,7 +230,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         );
     }
 
-    std::expected<void, std::string> upload(FileTracking::UploadRequest const& request, OnUploadEnded onEnded) override
+    std::expected<void, std::string> upload(
+        FileTracking::UploadRequest const& request,
+        OnUploadEnded onEnded,
+        [[maybe_unused]] OnUploadProgress onProgress
+    ) override
     {
         const bool isDirectory = isDirectoryLocally(request.source);
         const auto sent = std::make_shared<SentFiles>();
@@ -346,8 +350,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         );
     }
 
-    std::expected<void, std::string>
-    uploadAll(std::vector<FileTracking::UploadRequest> const& requests, OnUploadEntryEnded onEnded) override
+    std::expected<void, std::string> uploadAll(
+        std::vector<FileTracking::UploadRequest> const& requests,
+        OnUploadEntryEnded onEnded,
+        [[maybe_unused]] OnUploadEntryProgress onProgress
+    ) override
     {
         return withChannel(
             [&requests,

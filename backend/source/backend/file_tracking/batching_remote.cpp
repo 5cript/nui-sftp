@@ -19,6 +19,7 @@ namespace FileTracking
         {
             UploadRequest request;
             TrackerRemote::OnUploadEnded onEnded;
+            TrackerRemote::OnUploadProgress onProgress;
         };
 
         struct GatheredRemoval
@@ -58,15 +59,15 @@ namespace FileTracking
         }
 
         /**
-         * @brief Hands the end of each entry of a bulk to the callback it was gathered with.
+         * @brief Hands what a bulk tells of each entry, its end or its progress, to the callback it was gathered with.
          */
         template <typename CallbackT>
-        auto entryEndsOf(std::vector<CallbackT> onEnded)
+        auto perEntry(std::vector<CallbackT> callbacks)
         {
-            return [onEnded = std::move(onEnded)](std::size_t index, auto const& ended)
+            return [callbacks = std::move(callbacks)](std::size_t index, auto const& told)
             {
-                if (index < onEnded.size() && onEnded[index])
-                    onEnded[index](ended);
+                if (index < callbacks.size() && callbacks[index])
+                    callbacks[index](told);
             };
         }
 
@@ -139,6 +140,7 @@ namespace FileTracking
         {
             std::vector<UploadRequest> bulk;
             std::vector<OnUploadEnded> bulkEnds;
+            std::vector<OnUploadProgress> bulkProgress;
             std::vector<GatheredUpload> single;
             for (auto& upload : gathered)
             {
@@ -146,16 +148,22 @@ namespace FileTracking
                 {
                     bulk.push_back(std::move(upload.request));
                     bulkEnds.push_back(std::move(upload.onEnded));
+                    bulkProgress.push_back(std::move(upload.onProgress));
                 }
                 else
                     single.push_back(std::move(upload));
             }
             if (bulk.size() == 1)
-                single.push_back({.request = std::move(bulk.front()), .onEnded = std::move(bulkEnds.front())});
+                single.push_back({
+                    .request = std::move(bulk.front()),
+                    .onEnded = std::move(bulkEnds.front()),
+                    .onProgress = std::move(bulkProgress.front()),
+                });
             else if (!bulk.empty())
             {
                 Log::info("FileTracking: uploading {} changed files as one operation", bulk.size());
-                if (const auto queued = inner->uploadAll(bulk, entryEndsOf(bulkEnds)); !queued)
+                if (const auto queued = inner->uploadAll(bulk, perEntry(bulkEnds), perEntry(std::move(bulkProgress)));
+                    !queued)
                 {
                     Log::warn("FileTracking: did not upload {} changed files: {}", bulk.size(), queued.error());
                     endAll(bulkEnds, failedUpload);
@@ -163,7 +171,8 @@ namespace FileTracking
             }
             for (auto& upload : single)
             {
-                if (const auto queued = inner->upload(upload.request, upload.onEnded); !queued)
+                if (const auto queued = inner->upload(upload.request, upload.onEnded, std::move(upload.onProgress));
+                    !queued)
                 {
                     // A temporary file an editor already renamed or removed ends up here.
                     Log::warn("FileTracking: did not upload '{}': {}", upload.request.source.toUtf8(), queued.error());
@@ -196,7 +205,7 @@ namespace FileTracking
                 ends.push_back(std::move(removal.onEnded));
             }
             Log::info("FileTracking: deleting {} paths as one operation", paths.size());
-            if (const auto queued = inner->removeAll(paths, entryEndsOf(ends)); !queued)
+            if (const auto queued = inner->removeAll(paths, perEntry(ends)); !queued)
             {
                 Log::error("FileTracking: did not delete {} paths: {}", paths.size(), queued.error());
                 endAll(ends, SharedData::OperationCompletionReason::Failed);
@@ -260,9 +269,12 @@ namespace FileTracking
         return impl_->inner->download(source, destination, sizeBytes, std::move(onEnded));
     }
 
-    std::expected<void, std::string> BatchingRemote::upload(UploadRequest const& request, OnUploadEnded onEnded)
+    std::expected<void, std::string>
+    BatchingRemote::upload(UploadRequest const& request, OnUploadEnded onEnded, OnUploadProgress onProgress)
     {
-        impl_->uploads.push_back({.request = request, .onEnded = std::move(onEnded)});
+        impl_->uploads.push_back(
+            {.request = request, .onEnded = std::move(onEnded), .onProgress = std::move(onProgress)}
+        );
         impl_->gathered();
         return {};
     }
