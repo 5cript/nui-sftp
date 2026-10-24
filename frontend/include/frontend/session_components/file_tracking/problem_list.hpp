@@ -32,7 +32,7 @@ namespace FileTracking
             ValueT value;
         };
 
-        using const_iterator = typename std::deque<ListedProblem>::const_iterator;
+        using ConstIterator = typename std::deque<ListedProblem>::const_iterator;
 
         /**
          * @brief Shows @p value under @p id, replacing what @p id held and moving it to its place by @p sequence.
@@ -178,7 +178,7 @@ namespace FileTracking
         /**
          * @return The first problem, the newest, for iterating newest first.
          */
-        const_iterator begin() const
+        ConstIterator begin() const
         {
             return problems_.cbegin();
         }
@@ -186,7 +186,7 @@ namespace FileTracking
         /**
          * @return Past the oldest problem.
          */
-        const_iterator end() const
+        ConstIterator end() const
         {
             return problems_.cend();
         }
