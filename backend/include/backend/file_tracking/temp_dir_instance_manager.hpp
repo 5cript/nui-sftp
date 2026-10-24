@@ -155,7 +155,8 @@ namespace FileTracking
 
         /**
          * @brief The instance directories below the root that no live process holds, with what they hold and where
-         *        it came from.
+         *        it came from, sorted by instance id. The orphan test is the one of countOrphaned(). An instance that
+         *        holds nothing has an empty name and no copy path.
          */
         std::vector<SharedData::OrphanedCopy> listOrphaned() const;
 
