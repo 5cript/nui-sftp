@@ -11,6 +11,7 @@
 #include <log/log.hpp>
 
 #include <nui/event_system/event_context.hpp>
+#include <nui/frontend/utility/functions.hpp>
 #include <nui/frontend/val.hpp>
 #include <nui/rpc.hpp>
 
@@ -34,6 +35,8 @@ namespace FileTracking
         std::function<void(SharedData::EndedWatches const& ended)> onEnded;
         Ids::SessionId sessionId{};
         std::vector<Nui::RpcClient::AutoUnregister> listeners{};
+        /** @brief Set from the first event after a sync until the sync it scheduled ran. */
+        bool syncScheduled{false};
         Utility::LifetimeToken lifetime{};
 
         /**
@@ -42,6 +45,27 @@ namespace FileTracking
         static void syncView()
         {
             Nui::globalEventContext.executeActiveEventsImmediately();
+        }
+
+        /**
+         * @brief Shows what the events since the last sync changed from a task of its own, so a burst of events syncs
+         *        once. Events arriving before that task ran schedule nothing more.
+         */
+        void scheduleSync()
+        {
+            if (syncScheduled)
+                return;
+            syncScheduled = true;
+            Nui::val::global("setTimeout")(
+                Nui::bind(lifetime.guarded(
+                    [this]()
+                    {
+                        syncScheduled = false;
+                        syncView();
+                    }
+                )),
+                Nui::val{0}
+            );
         }
 
         static bool succeeded(Nui::val const& response)
@@ -82,9 +106,7 @@ namespace FileTracking
         }
 
         /**
-         * @brief Registers @p event of the tracker, @p handler gets its payload and the view syncs once after it. Not
-         *        coalesced over a burst: Nui's range tracking loses its place when erase and insert pairs of the page
-         *        rows pile up between syncs, and a page holds at most problemPageSize rows, so a sync stays cheap.
+         * @brief Registers @p event of the tracker, @p handler gets its payload and a sync is scheduled after it.
          */
         template <typename PayloadT, typename HandlerT>
         void listenTo(std::string_view event, HandlerT handler)
@@ -93,10 +115,10 @@ namespace FileTracking
                 Nui::RpcClient::autoRegisterFunction(
                     rpcName(event),
                     lifetime.guarded(
-                        [handler = std::move(handler)](PayloadT const& payload)
+                        [this, handler = std::move(handler)](PayloadT const& payload)
                         {
                             handler(payload);
-                            syncView();
+                            scheduleSync();
                         }
                     )
                 )
