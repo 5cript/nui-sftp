@@ -210,6 +210,16 @@ struct Session::Implementation
         );
 
         fileExplorerPanel.dropLayoutMetadata(sessionLayoutId);
+
+        fileTrackingPanel.setRevealOnServer(
+            [this](Paths::RemotePath const& path)
+            {
+                auto* const side = fileExplorerPanel.remoteFileGridSide();
+                if (side == nullptr)
+                    return;
+                side->path(path.parent().value_or(path).value());
+            }
+        );
     }
 
     /**
