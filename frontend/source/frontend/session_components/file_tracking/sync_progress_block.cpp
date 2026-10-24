@@ -86,7 +86,10 @@ namespace FileTracking
         {
             if (entry.stop)
                 return false;
-            return entry.uploading || !progress.inFlight.empty() || progress.changesPending > progress.waitingForAnswer;
+            if (!progress.inFlight.empty() || progress.changesPending > progress.waitingForAnswer)
+                return true;
+            // Uploads that wait for an answer keep the entry uploading; before the first progress only the flag tells.
+            return entry.uploading && progress.waitingForAnswer == 0u;
         }
 
         template <typename... ArgumentsT>
