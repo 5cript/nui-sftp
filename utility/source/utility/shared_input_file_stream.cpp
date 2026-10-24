@@ -9,8 +9,11 @@
 #endif
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -61,7 +64,29 @@ namespace Utility
             int descriptor_;
         };
 
-        std::FILE* openShared(std::filesystem::path const& path)
+        /**
+         * @brief Forgets the errors noted so far, so the next failing call of the C runtime leaves only its own.
+         */
+        void clearSystemError()
+        {
+            errno = 0;
+            _doserrno = 0;
+        }
+
+        /**
+         * @brief The error the last failing call of the C runtime noted: the Windows code it got, if any, otherwise
+         *        its errno value, and an I/O error when it noted neither.
+         */
+        std::error_code lastSystemError()
+        {
+            if (_doserrno != 0)
+                return std::error_code{static_cast<int>(_doserrno), std::system_category()};
+            if (errno != 0)
+                return std::error_code{errno, std::generic_category()};
+            return std::make_error_code(std::errc::io_error);
+        }
+
+        std::expected<std::FILE*, std::error_code> openShared(std::filesystem::path const& path)
         {
             auto handle = std::unique_ptr<std::remove_pointer_t<HANDLE>, HandleCloser>{::CreateFileW(
                 path.c_str(),
@@ -74,19 +99,23 @@ namespace Utility
             )};
             if (handle.get() == INVALID_HANDLE_VALUE)
             {
+                const std::error_code error{static_cast<int>(::GetLastError()), std::system_category()};
                 std::ignore = handle.release();
-                return nullptr;
+                return std::unexpected(error);
             }
+            clearSystemError();
             OwnedDescriptor descriptor{
                 ::_open_osfhandle(reinterpret_cast<std::intptr_t>(handle.get()), _O_RDONLY | _O_BINARY)
             };
             if (descriptor.get() == -1)
-                return nullptr;
+                return std::unexpected(lastSystemError());
             // The descriptor owns the handle now.
             std::ignore = handle.release();
+            clearSystemError();
             auto* file = ::_fdopen(descriptor.get(), "rb");
-            if (file != nullptr)
-                std::ignore = descriptor.release();
+            if (file == nullptr)
+                return std::unexpected(lastSystemError());
+            std::ignore = descriptor.release();
             return file;
         }
 
@@ -100,9 +129,28 @@ namespace Utility
             return ::_ftelli64(file);
         }
 #else
-        std::FILE* openShared(std::filesystem::path const& path)
+        void clearSystemError()
         {
-            return std::fopen(path.c_str(), "rb");
+            errno = 0;
+        }
+
+        /**
+         * @brief The errno value the last failing call noted, an I/O error when it noted none.
+         */
+        std::error_code lastSystemError()
+        {
+            if (errno != 0)
+                return std::error_code{errno, std::generic_category()};
+            return std::make_error_code(std::errc::io_error);
+        }
+
+        std::expected<std::FILE*, std::error_code> openShared(std::filesystem::path const& path)
+        {
+            clearSystemError();
+            auto* file = std::fopen(path.c_str(), "rb");
+            if (file == nullptr)
+                return std::unexpected(lastSystemError());
+            return file;
         }
 
         int seekFile(std::FILE* file, std::int64_t offset, int origin)
@@ -134,7 +182,9 @@ namespace Utility
     bool SharedInputFileBuffer::open(std::filesystem::path const& path)
     {
         close();
-        file_.reset(openShared(path));
+        auto opened = openShared(path);
+        lastError_ = opened ? std::error_code{} : opened.error();
+        file_.reset(opened.value_or(nullptr));
         return isOpen();
     }
 
@@ -149,13 +199,29 @@ namespace Utility
         setg(buffer_.data(), buffer_.data(), buffer_.data());
     }
 
+    std::error_code SharedInputFileBuffer::lastError() const
+    {
+        return lastError_;
+    }
+
+    std::size_t SharedInputFileBuffer::readInto(char* destination, std::size_t count)
+    {
+        // The error indicator of the file is sticky, a later short read would take it for its own.
+        std::clearerr(file_.get());
+        clearSystemError();
+        const auto read = std::fread(destination, 1, count, file_.get());
+        if (read < count && std::ferror(file_.get()) != 0)
+            lastError_ = lastSystemError();
+        return read;
+    }
+
     SharedInputFileBuffer::int_type SharedInputFileBuffer::underflow()
     {
         if (gptr() < egptr())
             return traits_type::to_int_type(*gptr());
         if (!file_)
             return traits_type::eof();
-        const auto count = std::fread(buffer_.data(), 1, buffer_.size(), file_.get());
+        const auto count = readInto(buffer_.data(), buffer_.size());
         if (count == 0)
             return traits_type::eof();
         setg(buffer_.data(), buffer_.data(), buffer_.data() + count);
@@ -174,9 +240,7 @@ namespace Utility
             return buffered;
         // The rest goes straight into the destination, the buffer would only copy it once more.
         return buffered +
-            static_cast<std::streamsize>(
-                   std::fread(destination + buffered, 1, static_cast<std::size_t>(count - buffered), file_.get())
-            );
+            static_cast<std::streamsize>(readInto(destination + buffered, static_cast<std::size_t>(count - buffered)));
     }
 
     SharedInputFileBuffer::pos_type
@@ -221,5 +285,10 @@ namespace Utility
     void SharedInputFileStream::close()
     {
         buffer_.close();
+    }
+
+    std::error_code SharedInputFileStream::lastError() const
+    {
+        return buffer_.lastError();
     }
 }

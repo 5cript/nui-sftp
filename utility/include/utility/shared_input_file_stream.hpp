@@ -6,6 +6,7 @@
 #include <istream>
 #include <memory>
 #include <streambuf>
+#include <system_error>
 
 namespace Utility
 {
@@ -31,6 +32,13 @@ namespace Utility
         bool isOpen() const;
         void close();
 
+        /**
+         * @brief Why the last open or read failed, kept until the next open, empty when none failed. On Windows the
+         *        system's own code comes in std::system_category(), an error of the C runtime as its errno value in
+         *        std::generic_category(). Elsewhere it is always errno in std::generic_category().
+         */
+        std::error_code lastError() const;
+
       protected:
         int_type underflow() override;
         std::streamsize xsgetn(char_type* destination, std::streamsize count) override;
@@ -43,9 +51,16 @@ namespace Utility
             void operator()(std::FILE* file) const;
         };
 
+        /**
+         * @brief Reads up to @p count bytes into @p destination, noting why when that fails.
+         * @return How many bytes were read.
+         */
+        std::size_t readInto(char* destination, std::size_t count);
+
       private:
         std::unique_ptr<std::FILE, FileCloser> file_{};
         std::array<char, 64 * 1024> buffer_{};
+        std::error_code lastError_{};
     };
 
     /**
@@ -68,6 +83,11 @@ namespace Utility
         void open(std::filesystem::path const& path);
         bool is_open() const;
         void close();
+
+        /**
+         * @brief Why the last open or read failed, see SharedInputFileBuffer::lastError.
+         */
+        std::error_code lastError() const;
 
       private:
         SharedInputFileBuffer buffer_;
