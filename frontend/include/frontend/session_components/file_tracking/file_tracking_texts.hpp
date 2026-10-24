@@ -152,6 +152,11 @@ namespace FileTracking
     std::string clockTime(std::uint64_t secondsSinceEpoch, std::int64_t utcOffsetSeconds);
 
     /**
+     * @brief "YYYY-MM-DD HH:MM" of @p secondsSinceEpoch, a UTC time, shifted by @p utcOffsetSeconds.
+     */
+    std::string dateTime(std::uint64_t secondsSinceEpoch, std::int64_t utcOffsetSeconds);
+
+    /**
      * @brief The offset of the local time zone from UTC at @p secondsSinceEpoch, in seconds.
      */
     std::int64_t localUtcOffset(std::uint64_t secondsSinceEpoch);
