@@ -145,7 +145,8 @@ namespace FileTracking
         uploadAndWatch(Paths::LocalPath const& item, Paths::RemotePath const& destination);
 
         /**
-         * @brief Ends the watch @p watchId: a downloaded copy's instance ends with it, an uploaded original stays.
+         * @brief Ends the watch @p watchId: a downloaded copy's instance ends with it, an uploaded original stays. The
+         *        view keeps showing it as stopped by the user until removeStopped(), it claims no remote path.
          */
         void stop(Ids::WatchId const& watchId);
 
@@ -226,13 +227,15 @@ namespace FileTracking
         /**
          * @brief Ends every watch without telling the view, for a frontend that is gone or a session that closes. The
          *        instances of the copies it downloaded, watched or only opened, end too: they count as orphaned then,
-         *        or go when nothing is left in them. A download on its way is dropped, it opens nothing.
+         *        or go when nothing is left in them. A download on its way is dropped, it opens nothing. No stopped
+         *        watch is kept.
          */
         void stopAll();
 
         /**
-         * @brief The session lost its connection: every watch ends like in stopAll(), either side may change until it
-         *        is back, and the view shows why. The user watches anew.
+         * @brief The session lost its connection: every watch stops like in stop(), the view shows them as stopped
+         *        for that and why, either side may change until it is back. The rest ends like in stopAll(). The user
+         *        watches anew.
          */
         void connectionLost();
 

@@ -13,6 +13,7 @@
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
+#include <shared_data/file_tracking/watch_stop.hpp>
 
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -221,6 +222,11 @@ namespace FileTracking
             return static_cast<std::uint64_t>(seconds.count());
         }
 
+        SharedData::WatchStop watchStopOf(SharedData::WatchStopReason reason)
+        {
+            return {.reason = reason, .stoppedAt = secondsSinceEpochNow()};
+        }
+
         /**
          * @brief What the server has of a file an upload sent in @p sent: uploads carry the modification time along,
          *        in seconds.
@@ -297,6 +303,18 @@ namespace FileTracking
                 .raisedAt = secondsSinceEpochNow(),
             };
         }
+
+        /**
+         * @brief The remote path of another watch, or of one that starts, that a remote path overlaps.
+         */
+        struct RemoteOverlap
+        {
+            Paths::RemotePath remotePath;
+            /** @brief Nothing for a watch that starts, see Implementation::claimRemote(). */
+            std::optional<Ids::WatchId> watchId{};
+            /** @brief The name of its item, nothing for a watch that starts. */
+            std::optional<std::string> watchName{};
+        };
 
         /**
          * @brief Whether @p option may be on for a downloaded copy: removing or renaming a temporary copy never touches
@@ -476,6 +494,8 @@ namespace FileTracking
         std::function<SharedData::WatchOptions()> defaultOptions;
 
         std::map<Ids::WatchId, Entry> entries{};
+        /** @brief The watches that stopped, as the view shows them until they are removed, see retire(). */
+        std::map<Ids::WatchId, SharedData::TrackedEntry> stopped{};
         /** @brief The instances of downloads on their way, see open(). */
         std::set<Ids::InstanceId> downloading{};
         /** @brief The instances of copies opened without a watch, they end with the tracker, see stopAll(). */
@@ -771,22 +791,37 @@ namespace FileTracking
             std::optional<Ids::WatchId> const& ignoredWatchId = std::nullopt
         ) const
         {
-            auto taken = claims | std::views::values | std::ranges::to<std::vector>();
-            for (auto const& entry : std::views::values(entries))
-                if (entry.watchId != ignoredWatchId)
-                    taken.push_back(entry.remotePath);
-            const auto overlapping = std::ranges::find_if(
-                taken,
-                [&remotePath](Paths::RemotePath const& other)
-                {
-                    return remotePath.isWithin(other) || other.isWithin(remotePath);
-                }
-            );
-            if (overlapping == taken.end())
+            const auto overlap = remoteOverlapOf(remotePath, ignoredWatchId);
+            if (!overlap)
                 return {};
             return std::unexpected{Utility::localizedMessage(
-                "backend.fileTracking.remoteOverlaps", remotePath.value(), overlapping->value()
+                "backend.fileTracking.remoteOverlaps", remotePath.value(), overlap->remotePath.value()
             )};
+        }
+
+        /**
+         * @brief What @p remotePath overlaps, see refuseRemoteOverlap(). Stopped watches claim nothing.
+         */
+        std::optional<RemoteOverlap> remoteOverlapOf(
+            Paths::RemotePath const& remotePath,
+            std::optional<Ids::WatchId> const& ignoredWatchId = std::nullopt
+        ) const
+        {
+            const auto overlaps = [&remotePath](Paths::RemotePath const& other)
+            {
+                return remotePath.isWithin(other) || other.isWithin(remotePath);
+            };
+            for (auto const& entry : std::views::values(entries))
+                if (entry.watchId != ignoredWatchId && overlaps(entry.remotePath))
+                    return RemoteOverlap{
+                        .remotePath = entry.remotePath,
+                        .watchId = entry.watchId,
+                        .watchName = shownNameOf(entry.localPath),
+                    };
+            for (auto const& claimed : std::views::values(claims))
+                if (overlaps(claimed))
+                    return RemoteOverlap{.remotePath = claimed};
+            return std::nullopt;
         }
 
         std::expected<std::shared_ptr<Claim>, std::string> claimRemote(Paths::RemotePath const& remotePath)
@@ -1010,11 +1045,49 @@ namespace FileTracking
 
         void stop(Ids::WatchId const& watchId)
         {
-            const auto instanceId = forget(watchId);
-            if (!instanceId)
-                return;
-            releaseInstance(*instanceId);
-            view->showOrphanedCount(instances->countOrphaned());
+            const auto retired = retire(watchId, watchStopOf(SharedData::WatchStopReason::StoppedByUser));
+            if (retired && retired->instanceId)
+                view->showOrphanedCount(instances->countOrphaned());
+        }
+
+        /**
+         * @brief Ends the watch @p watchId like forget(), but the view keeps showing it as stopped by @p stop until
+         *        removeStopped(). A downloaded copy's instance ends, and the watch claims no remote path any more.
+         * @return The stopped entry as the view shows it, nothing when there is no such watch.
+         */
+        std::optional<SharedData::TrackedEntry> retire(Ids::WatchId watchId, SharedData::WatchStop stop)
+        {
+            if (!entries.contains(watchId))
+                return std::nullopt;
+            Log::info("FileTracking: stopping watch {}: {}", watchId.value(), Utility::enumToString(stop.reason));
+            auto shown = endWatch(watchId, stop.stoppedAt);
+            shown.stop = std::move(stop);
+            if (shown.instanceId)
+                releaseInstance(*shown.instanceId);
+            view->showEntry(shown);
+            stopped.insert_or_assign(watchId, shown);
+            return shown;
+        }
+
+        /**
+         * @brief Ends the watch @p watchId, which exists: its conflicts and failures leave the view, which hears of its
+         *        last progress, its burst ends at @p endedAt. What is on its way goes on unshown.
+         * @return The entry as the view shows it once it ended.
+         */
+        SharedData::TrackedEntry endWatch(Ids::WatchId const& watchId, std::uint64_t endedAt)
+        {
+            auto node = entries.extract(watchId);
+            auto& entry = node.mapped();
+            dropProblems(watchId);
+            entry.progress.dropPending();
+            entry.progress.finishBurst(endedAt);
+            view->showWatchProgress(entry.progress.snapshot());
+            auto shown = shownEntryOf(entry);
+            shown.uploading = false;
+            // The item may be gone or elsewhere by now, its watch knows what it was.
+            if (auto const* const watch = localWatches->find(watchId))
+                shown.isDirectory = watch->isDirectory();
+            return shown;
         }
 
         /**
@@ -1033,25 +1106,31 @@ namespace FileTracking
         }
 
         /**
-         * @brief Ends the watch @p watchId and takes its entry off the view.
-         * @return The instance of a downloaded copy, nothing for an uploaded original or no such watch.
+         * @brief Ends the watch @p watchId and takes its entry off the view. The instance of a downloaded copy stays.
          */
-        std::optional<Ids::InstanceId> forget(Ids::WatchId const& watchId)
+        void forget(Ids::WatchId const& watchId)
         {
             auto node = entries.extract(watchId);
             if (node.empty())
-                return std::nullopt;
-            Log::info("FileTracking: stopping watch {}", watchId.value());
+                return;
+            Log::info("FileTracking: forgetting watch {}", watchId.value());
+            dropProblems(watchId);
+            view->removeEntry(watchId);
+        }
+
+        /**
+         * @brief Drops the conflicts and failures of the watch @p watchId and takes them off the view, conflicts
+         *        first. The uploads that waited for an answer leave the server order.
+         */
+        void dropProblems(Ids::WatchId const& watchId)
+        {
             ShownProblems shown;
             collectShownProblems(watchId, shown);
             const auto dropped = conflicts.removeWatch(watchId);
             failures.removeWatch(watchId);
             hideProblems(shown);
-            view->removeEntry(watchId);
             for (auto const& listed : dropped)
                 leaveOrder(listed.context);
-            const auto* copy = node.mapped().downloadedCopy();
-            return copy ? std::optional{copy->instanceId} : std::nullopt;
         }
 
         void collectShownProblems(Ids::WatchId const& watchId, ShownProblems& shown) const
@@ -1109,6 +1188,16 @@ namespace FileTracking
 
         void stopAll()
         {
+            endEverything();
+            stopped.clear();
+        }
+
+        /**
+         * @brief Ends every watch, opened copy and download without telling the view, see Tracker::stopAll(). The
+         *        stopped watches stay.
+         */
+        void endEverything()
+        {
             auto copies = std::exchange(openedCopies, {});
             copies.merge(std::exchange(downloading, {}));
             for (auto const& entry : std::views::values(entries))
@@ -1131,18 +1220,17 @@ namespace FileTracking
 
         void connectionLost()
         {
+            Log::info("FileTracking: the connection was lost, ending {} watch(es)", entries.size());
+            // Nothing that waits in the server order starts any more.
+            const auto waiting = std::exchange(waitingOperations, {});
+            const auto stop = watchStopOf(SharedData::WatchStopReason::ConnectionLost);
             auto ended = SharedData::EndedWatches{.reason = SharedData::WatchEndReason::ConnectionLost, .entries = {}};
-            ShownProblems shown;
-            for (auto const& entry : std::views::values(entries))
-            {
-                ended.entries.push_back(shownEntryOf(entry));
-                collectShownProblems(entry.watchId, shown);
-            }
-            Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
-            stopAll();
-            hideProblems(shown);
-            for (auto const& endedEntry : ended.entries)
-                view->removeEntry(endedEntry.watchId);
+            for (auto const& watchId : std::views::keys(entries) | std::ranges::to<std::vector>())
+                if (auto retired = retire(watchId, stop))
+                    ended.entries.push_back(*std::move(retired));
+            endEverything();
+            for (auto const& ticket : std::views::keys(waiting))
+                leaveOrder(ticket);
             if (!ended.entries.empty())
                 view->showEnded(ended);
             view->showOrphanedCount(instances->countOrphaned());
@@ -1530,11 +1618,11 @@ namespace FileTracking
                 entry->localPath.toUtf8(),
                 watchId.value()
             );
-            const auto ended = SharedData::EndedWatches{
-                .reason = SharedData::WatchEndReason::CopyGone, .entries = {shownEntryOf(*entry)}
-            };
-            stop(watchId);
-            view->showEnded(ended);
+            auto retired = retire(watchId, watchStopOf(SharedData::WatchStopReason::CopyGone));
+            if (!retired)
+                return;
+            view->showEnded({.reason = SharedData::WatchEndReason::CopyGone, .entries = {*std::move(retired)}});
+            view->showOrphanedCount(instances->countOrphaned());
         }
 
         /**
@@ -1554,16 +1642,8 @@ namespace FileTracking
                 return;
             }
             // The server copy may not follow onto the path of another watch, which writes there.
-            if (const auto free = refuseRemoteOverlap(*newRemotePath, entry.watchId); !free)
-            {
-                Log::warn(
-                    "FileTracking: stopping watch {}, its move overlaps another watch: {}",
-                    entry.watchId.value(),
-                    free.error()
-                );
-                const auto watchId = entry.watchId;
-                return stop(watchId);
-            }
+            if (const auto overlap = remoteOverlapOf(*newRemotePath, entry.watchId))
+                return stopOverlapping(entry.watchId, newPath, *newRemotePath, *overlap);
             Log::info(
                 "FileTracking: watch {} moved from '{}' to '{}'",
                 entry.watchId.value(),
@@ -1585,6 +1665,35 @@ namespace FileTracking
             entry.localPath = newPath;
             entry.remotePath = *newRemotePath;
             show(entry);
+        }
+
+        /**
+         * @brief The item of the watch @p watchId moved to @p movedTo, its server copy would follow to @p wouldGoTo,
+         *        which @p overlap holds or lies below: the watch stops, its server copy stays where it is.
+         */
+        void stopOverlapping(
+            Ids::WatchId watchId,
+            Paths::LocalPath const& movedTo,
+            Paths::RemotePath const& wouldGoTo,
+            RemoteOverlap const& overlap
+        )
+        {
+            Log::warn(
+                "FileTracking: stopping watch {}, its item moved to '{}' and its server copy would go to '{}', which "
+                "overlaps '{}' of another watch",
+                watchId.value(),
+                movedTo.toUtf8(),
+                wouldGoTo.value(),
+                overlap.remotePath.value()
+            );
+            auto stop = watchStopOf(SharedData::WatchStopReason::Overlap);
+            stop.otherWatchId = overlap.watchId;
+            stop.otherWatchName = overlap.watchName;
+            stop.movedTo = movedTo;
+            stop.wouldGoTo = wouldGoTo;
+            auto retired = retire(watchId, std::move(stop));
+            if (retired)
+                view->showEnded({.reason = SharedData::WatchEndReason::Overlap, .entries = {*std::move(retired)}});
         }
 
         void onMoved(Entry& entry, Paths::LocalPath const& oldPath, LocalChange const& change)
@@ -2285,12 +2394,21 @@ namespace FileTracking
 
         void removeStopped(Ids::WatchId const& watchId)
         {
-            Log::warn("FileTracking: removing the stopped watch {} is not implemented", watchId.value());
+            if (stopped.erase(watchId) == 0)
+            {
+                Log::warn("FileTracking: there is no stopped watch {} to remove", watchId.value());
+                return;
+            }
+            Log::info("FileTracking: removing the stopped watch {}", watchId.value());
+            view->removeEntry(watchId);
         }
 
         void removeAllStopped()
         {
-            Log::warn("FileTracking: removing the stopped watches is not implemented");
+            const auto removed = std::exchange(stopped, {});
+            Log::info("FileTracking: removing {} stopped watch(es)", removed.size());
+            for (auto const& watchId : std::views::keys(removed))
+                view->removeEntry(watchId);
         }
 
         void listOrphanedCopies()

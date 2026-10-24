@@ -5,6 +5,7 @@
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/file_tracking/tracker.hpp>
+#include <utility/enum_string_convert.hpp>
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include "error_log_capture.hpp"
@@ -186,17 +187,23 @@ namespace Test
             void showEntry(SharedData::TrackedEntry const& entry) override
             {
                 entries.insert_or_assign(entry.watchId.value(), entry);
+                events.push_back(
+                    "entry " + entry.watchId.value() +
+                    (entry.stop ? " " + Utility::enumToString(entry.stop->reason) : std::string{})
+                );
             }
 
             void removeEntry(Ids::WatchId const& watchId) override
             {
                 entries.erase(watchId.value());
                 removed.push_back(watchId.value());
+                events.push_back("removeEntry " + watchId.value());
             }
 
             void showEnded(SharedData::EndedWatches const& shown) override
             {
                 ended.push_back(shown);
+                events.push_back("ended " + Utility::enumToString(shown.reason));
             }
 
             void ask(SharedData::ServerChangedQuestion const& question) override
@@ -207,6 +214,7 @@ namespace Test
             void showOrphanedCount(std::size_t count) override
             {
                 orphanedCounts.push_back(count);
+                events.push_back("orphanedCount " + std::to_string(count));
             }
 
             void showProgress(SharedData::TrackerProgress const&) override
@@ -218,34 +226,40 @@ namespace Test
             {
                 conflicts.insert_or_assign(conflict.conflictId.value(), conflict);
                 shownConflicts.push_back(conflict);
+                events.push_back("conflict " + conflict.conflictId.value());
             }
 
             void removeConflict(Ids::ConflictId const& conflictId) override
             {
                 conflicts.erase(conflictId.value());
                 removedConflicts.push_back(conflictId.value());
+                events.push_back("removeConflict " + conflictId.value());
             }
 
             void showFailure(SharedData::UploadFailure const& failure) override
             {
                 failures.insert_or_assign(failure.failureId.value(), failure);
+                events.push_back("failure " + failure.failureId.value());
             }
 
             void removeFailure(Ids::FailureId const& failureId) override
             {
                 failures.erase(failureId.value());
                 removedFailures.push_back(failureId.value());
+                events.push_back("removeFailure " + failureId.value());
             }
 
             void showWatchProgress(SharedData::WatchProgress const& shown) override
             {
                 watchProgress.push_back(shown);
                 watchProgressShownAt.push_back(std::chrono::steady_clock::now());
+                events.push_back("progress " + shown.watchId.value());
             }
 
             void showOrphanedCopies(SharedData::OrphanedCopies const& copies) override
             {
                 orphanedCopies.push_back(copies);
+                events.push_back("orphans " + std::to_string(copies.copies.size()));
             }
 
             std::map<std::string, SharedData::TrackedEntry> entries{};
@@ -264,6 +278,8 @@ namespace Test
             /** @brief When each of watchProgress was shown. */
             std::vector<std::chrono::steady_clock::time_point> watchProgressShownAt{};
             std::vector<SharedData::OrphanedCopies> orphanedCopies{};
+            /** @brief Every call, in order: what it was and the id it was about. */
+            std::vector<std::string> events{};
         };
 
         /**
@@ -712,6 +728,31 @@ namespace Test
                 {
                     return view_->conflicts.size() == count;
                 }
+            );
+        }
+
+        /**
+         * @brief Why the view shows the watch @p watchId as stopped, nothing when it shows it running or not at all.
+         */
+        std::optional<SharedData::WatchStop> stopOf(Ids::WatchId const& watchId) const
+        {
+            const auto found = view_->entries.find(watchId.value());
+            if (found == view_->entries.end())
+                return std::nullopt;
+            return found->second.stop;
+        }
+
+        std::optional<SharedData::WatchStopReason> stopReasonOf(Ids::WatchId const& watchId) const
+        {
+            const auto stop = stopOf(watchId);
+            return stop ? std::optional{stop->reason} : std::nullopt;
+        }
+
+        static std::uint64_t secondsNow()
+        {
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+                    .count()
             );
         }
 
@@ -1374,10 +1415,13 @@ namespace Test
         const auto onCopyProgress = lastUploadTo("/srv/notes.txt")->onUploadProgress;
         onFileProgress(fileProgress(file, 3u, 13u));
         onCopyProgress(fileProgress(opened->localPath.native(), 4u, 12u));
-        const auto shownOfProject = progressOf(projectId).size();
         const auto shownOfCopy = progressOf(copyId).size();
 
         tracker_->stop(projectId);
+        // The stopped watch shows its progress once more, with nothing on its way.
+        const auto shownOfProject = progressOf(projectId).size();
+        EXPECT_EQ(progressOf(projectId).back().changesPending, 0u);
+        EXPECT_TRUE(progressOf(projectId).back().inFlight.empty());
         ASSERT_TRUE(tracker_->discard(opened->instanceId, opened->localPath).has_value());
         onFileProgress(fileProgress(file, 13u, 13u, /*transferred=*/true));
         onCopyProgress(fileProgress(opened->localPath.native(), 12u, 12u, /*transferred=*/true));
@@ -1557,6 +1601,55 @@ namespace Test
         EXPECT_EQ(uploadsTo("/srv/project"), 2u);
     }
 
+    TEST_F(TrackerConflictsTest, StoppingAWatchRemovesItsConflictsAndFailuresBeforeItShowsTheStop)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto readme = root_ / "local" / "project" / "readme.md";
+        write(readme, "readme");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/readme.md") == 1u;
+            }
+        ));
+        endAs(
+            *lastUploadTo("/srv/project/readme.md"),
+            {.reason = SharedData::OperationCompletionReason::Failed,
+                .failure = FileTracking::UploadFailureInfo{.reason = SharedData::UploadFailureReason::Unknown}}
+        );
+        ASSERT_EQ(view_->failures.size(), 1u);
+        const auto watchId = onlyEntry().watchId;
+        const auto failureId = view_->failures.begin()->first;
+        const auto mainConflict = conflictIdAt(main_);
+        const auto utilConflict = conflictIdAt(util_);
+        view_->events.clear();
+
+        tracker_->stop(watchId);
+
+        EXPECT_EQ(
+            view_->events,
+            (std::vector<std::string>{
+                "removeConflict " + mainConflict.value(),
+                "removeConflict " + utilConflict.value(),
+                "removeFailure " + failureId,
+                "progress " + watchId.value(),
+                "entry " + watchId.value() + " StoppedByUser",
+            })
+        );
+        EXPECT_TRUE(view_->conflicts.empty());
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(view_->watchProgress.back().changesPending, 0u);
+        EXPECT_EQ(view_->watchProgress.back().waitingForAnswer, 0u);
+        EXPECT_FALSE(onlyEntry().uploading);
+        const auto events = view_->events.size();
+        tracker_->answerAllConflicts(watchId, SharedData::ConflictResolution::ReplaceOnServer);
+        tracker_->retryFailure(Ids::makeFailureId(failureId));
+        runFor(std::chrono::milliseconds{500});
+        EXPECT_EQ(view_->events.size(), events);
+        EXPECT_EQ(uploadsTo("/srv/project/readme.md"), 1u);
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
+    }
+
     TEST_F(TrackerTest, StoppingADownloadedCopyWithAConflictFreesItsServerPath)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
@@ -1621,9 +1714,11 @@ namespace Test
 
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(view_->removedConflicts, (std::vector<std::string>{mainConflict.value(), utilConflict.value()}));
-        // The view drops the progress with the entry.
+        // The stopped watch shows its progress once more, waiting for nothing.
+        ASSERT_EQ(view_->watchProgress.size(), shown + 1u);
+        EXPECT_EQ(countsOf(view_->watchProgress.back()), ProgressCounts{.synced = 4u});
         runFor(std::chrono::milliseconds{300});
-        EXPECT_EQ(view_->watchProgress.size(), shown);
+        EXPECT_EQ(view_->watchProgress.size(), shown + 1u);
     }
 
     TEST_F(TrackerConflictsTest, TheProgressCountsTheChangesWaitingForAnAnswerFromTheConflicts)
@@ -2036,13 +2131,28 @@ namespace Test
         ASSERT_EQ(view_->ended.front().entries.size(), 1u);
         EXPECT_EQ(view_->ended.front().entries.front().watchId, watchId);
         EXPECT_EQ(view_->ended.front().entries.front().name, "notes.txt");
-        EXPECT_TRUE(view_->entries.empty());
+        // Listed as stopped until the user removes it.
+        auto const& entry = onlyEntry();
+        ASSERT_TRUE(entry.stop.has_value());
+        EXPECT_EQ(entry.stop->reason, SharedData::WatchStopReason::CopyGone);
+        EXPECT_GT(entry.stop->stoppedAt, 0u);
+        EXPECT_FALSE(entry.stop->otherWatchId.has_value());
+        EXPECT_FALSE(entry.stop->movedTo.has_value());
+        EXPECT_EQ(entry.instanceId, std::optional{opened->instanceId});
+        ASSERT_TRUE(view_->ended.front().entries.front().stop.has_value());
+        EXPECT_EQ(view_->ended.front().entries.front().stop->reason, SharedData::WatchStopReason::CopyGone);
+        EXPECT_EQ(view_->ended.front().entries.front().stop->stoppedAt, entry.stop->stoppedAt);
+        EXPECT_TRUE(view_->removed.empty());
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_EQ(instances_->findInstance(opened->instanceId.value()), nullptr);
         // Nothing was left in the instance, it went with its directory.
         EXPECT_FALSE(std::filesystem::exists(opened->localPath.native().parent_path()));
         EXPECT_EQ(instances_->countOrphaned(), 0u);
+        const auto shown = progressOf(watchId).size();
         EXPECT_TRUE(open("/srv/notes.txt", /*watch=*/true).has_value());
+        runFor(std::chrono::milliseconds{300});
+        EXPECT_EQ(progressOf(watchId).size(), shown);
+        EXPECT_EQ(stopReasonOf(watchId), SharedData::WatchStopReason::CopyGone);
     }
 
     TEST_F(TrackerTest, ADownloadedCopyRenamedAwayEndsItsWatchAndStaysForTheCleanup)
@@ -2063,7 +2173,7 @@ namespace Test
         runFor(std::chrono::milliseconds{1000});
 
         EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::CopyGone);
-        EXPECT_TRUE(view_->entries.empty());
+        EXPECT_EQ(stopReasonOf(onlyEntry().watchId), SharedData::WatchStopReason::CopyGone);
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 0u);
         EXPECT_TRUE(remote_->of("rename").empty());
         EXPECT_TRUE(std::filesystem::exists(renamed));
@@ -2078,8 +2188,10 @@ namespace Test
 
         tracker_->stop(watchId);
 
-        EXPECT_TRUE(view_->entries.empty());
-        EXPECT_EQ(view_->removed, std::vector<std::string>{watchId.value()});
+        EXPECT_EQ(stopReasonOf(watchId), SharedData::WatchStopReason::StoppedByUser);
+        EXPECT_EQ(onlyEntry().instanceId, std::optional{opened->instanceId});
+        EXPECT_TRUE(view_->removed.empty());
+        EXPECT_TRUE(view_->ended.empty());
         EXPECT_EQ(instances_->findInstance(opened->instanceId.value()), nullptr);
         EXPECT_FALSE(view_->orphanedCounts.empty());
         EXPECT_TRUE(open("/srv/notes.txt", /*watch=*/true).has_value());
@@ -2093,9 +2205,235 @@ namespace Test
 
         tracker_->stop(onlyEntry().watchId);
 
-        EXPECT_TRUE(view_->entries.empty());
+        EXPECT_EQ(stopReasonOf(onlyEntry().watchId), SharedData::WatchStopReason::StoppedByUser);
         EXPECT_TRUE(std::filesystem::exists(root_ / "local" / "notes.txt"));
         EXPECT_TRUE(tracker_->checkUploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv")).has_value());
+    }
+
+    TEST_F(TrackerTest, AWatchStoppedByTheUserStaysListedWithItsLastSyncAndHearsNothingMore)
+    {
+        const auto notes = root_ / "local" / "notes.txt";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
+        const auto watchId = onlyEntry().watchId;
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
+        write(notes, "changed locally");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 2u;
+            }
+        ));
+        const auto onProgress = lastUploadTo("/srv/notes.txt")->onUploadProgress;
+        const auto onEnded = lastUploadTo("/srv/notes.txt")->onUploadEnded;
+        const auto before = secondsNow();
+        view_->events.clear();
+
+        tracker_->stop(watchId);
+
+        EXPECT_EQ(
+            view_->events,
+            (std::vector<std::string>{"progress " + watchId.value(), "entry " + watchId.value() + " StoppedByUser"})
+        );
+        auto const& entry = onlyEntry();
+        ASSERT_TRUE(entry.stop.has_value());
+        EXPECT_EQ(entry.stop->reason, SharedData::WatchStopReason::StoppedByUser);
+        EXPECT_GE(entry.stop->stoppedAt, before);
+        EXPECT_LE(entry.stop->stoppedAt, secondsNow());
+        EXPECT_FALSE(entry.stop->otherWatchId.has_value());
+        EXPECT_FALSE(entry.stop->otherWatchName.has_value());
+        EXPECT_FALSE(entry.stop->movedTo.has_value());
+        EXPECT_FALSE(entry.stop->wouldGoTo.has_value());
+        EXPECT_FALSE(entry.uploading);
+        EXPECT_FALSE(entry.isDirectory);
+        EXPECT_EQ(entry.localPath.native(), notes);
+        EXPECT_EQ(entry.remotePath.value(), "/srv/notes.txt");
+        const auto last = *lastProgressOf(watchId);
+        EXPECT_EQ(countsOf(last), ProgressCounts{.synced = 1u});
+        EXPECT_EQ(last.bytesTotal, 0u);
+        EXPECT_TRUE(last.inFlight.empty());
+        EXPECT_TRUE(view_->ended.empty());
+
+        // What was on its way ends unshown, and what changes later goes nowhere.
+        onProgress(fileProgress(notes, 15u, 15u, /*transferred=*/true));
+        onEnded(
+            {.reason = SharedData::OperationCompletionReason::Failed,
+                .failure = FileTracking::UploadFailureInfo{.reason = SharedData::UploadFailureReason::Unknown}}
+        );
+        write(notes, "changed again");
+        runFor(std::chrono::milliseconds{1000});
+        EXPECT_EQ(view_->events.size(), 2u);
+        EXPECT_TRUE(view_->failures.empty());
+        EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
+        tracker_->stop(watchId);
+        EXPECT_EQ(view_->events.size(), 2u);
+    }
+
+    TEST_F(TrackerTest, AStoppedDirectoryWatchStaysADirectoryAfterItsItemWasDeleted)
+    {
+        const auto project = root_ / "local" / "project";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        completeEverything();
+        std::filesystem::remove_all(project);
+
+        tracker_->stop(onlyEntry().watchId);
+
+        ASSERT_TRUE(onlyEntry().stop.has_value());
+        EXPECT_TRUE(onlyEntry().isDirectory);
+    }
+
+    TEST_F(TrackerTest, AWatchedFileRenamedOntoTheServerPathOfAnotherWatchStopsAsOverlapping)
+    {
+        const auto first = root_ / "local" / "a" / "f1.txt";
+        const auto second = root_ / "local" / "b" / "g.txt";
+        const auto moved = root_ / "local" / "b" / "f1.txt";
+        std::filesystem::create_directories(first.parent_path());
+        std::filesystem::create_directories(second.parent_path());
+        write(first, "first");
+        write(second, "second");
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(first), remote("/srv/R5/f1.txt")).has_value());
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(second), remote("/srv/R5/g.txt")).has_value());
+        completeEverything();
+        const auto firstId = watchIdNamed("f1.txt");
+        const auto secondId = watchIdNamed("g.txt");
+        const auto serverBefore = remote_->server;
+        runFor(std::chrono::milliseconds{300});
+        view_->events.clear();
+
+        std::filesystem::rename(second, moved);
+
+        ASSERT_TRUE(runUntil(
+            [this, &secondId]()
+            {
+                return stopOf(secondId).has_value();
+            },
+            std::chrono::seconds{10}
+        ));
+        const auto stop = *stopOf(secondId);
+        EXPECT_EQ(stop.reason, SharedData::WatchStopReason::Overlap);
+        EXPECT_GT(stop.stoppedAt, 0u);
+        EXPECT_EQ(stop.otherWatchId, std::optional{firstId});
+        EXPECT_EQ(stop.otherWatchName, std::optional<std::string>{"f1.txt"});
+        EXPECT_EQ(stop.movedTo, std::optional{local(moved)});
+        EXPECT_EQ(stop.wouldGoTo, std::optional{remote("/srv/R5/f1.txt")});
+        auto const& stoppedEntry = view_->entries.at(secondId.value());
+        EXPECT_EQ(stoppedEntry.remotePath.value(), "/srv/R5/g.txt");
+        EXPECT_EQ(stoppedEntry.localPath.native(), second);
+        EXPECT_EQ(stoppedEntry.name, "g.txt");
+        ASSERT_EQ(view_->ended.size(), 1u);
+        EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::Overlap);
+        ASSERT_EQ(view_->ended.front().entries.size(), 1u);
+        EXPECT_EQ(view_->ended.front().entries.front().watchId, secondId);
+        ASSERT_TRUE(view_->ended.front().entries.front().stop.has_value());
+        EXPECT_EQ(view_->ended.front().entries.front().stop->otherWatchId, std::optional{firstId});
+        EXPECT_EQ(
+            view_->events,
+            (std::vector<std::string>{
+                "progress " + secondId.value(), "entry " + secondId.value() + " Overlap", "ended Overlap"
+            })
+        );
+        EXPECT_FALSE(stopOf(firstId).has_value());
+
+        // Both server copies stay as they are, the moved file's edits go nowhere.
+        write(moved, "edited after the move");
+        runFor(std::chrono::milliseconds{1000});
+        EXPECT_TRUE(remote_->of("rename").empty());
+        EXPECT_EQ(uploadsTo("/srv/R5/f1.txt"), 1u);
+        EXPECT_EQ(remote_->server, serverBefore);
+        EXPECT_EQ(view_->events.size(), 3u);
+    }
+
+    TEST_F(TrackerTest, ANewWatchOfAStoppedItemOrServerPathWorksWhileTheStoppedOneIsListed)
+    {
+        const auto notes = root_ / "local" / "notes.txt";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
+        const auto opened = open("/srv/copy.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        completeEverything();
+        const auto notesId = watchIdNamed("notes.txt");
+        const auto copyId = watchIdNamed("copy.txt");
+        tracker_->stop(notesId);
+        tracker_->stop(copyId);
+
+        ASSERT_TRUE(tracker_->checkUploadAndWatch(local(notes), remote("/srv")).has_value());
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
+        const auto reopened = open("/srv/copy.txt", /*watch=*/true);
+        ASSERT_TRUE(reopened.has_value());
+
+        ASSERT_EQ(view_->entries.size(), 4u);
+        EXPECT_TRUE(stopOf(notesId).has_value());
+        EXPECT_TRUE(stopOf(copyId).has_value());
+        completeEverything();
+        write(notes, "changed locally");
+        write(reopened->localPath.native(), "changed copy");
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/notes.txt") == 3u && uploadsTo("/srv/copy.txt") == 1u;
+            }
+        ));
+    }
+
+    TEST_F(TrackerTest, RemoveStoppedTakesOneStoppedWatchOffTheViewAndRemoveAllTheRest)
+    {
+        ASSERT_TRUE(
+            tracker_->uploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv/notes.txt")).has_value()
+        );
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        const auto opened = open("/srv/copy.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        completeEverything();
+        const auto notesId = watchIdNamed("notes.txt");
+        const auto projectId = watchIdNamed("project");
+        const auto copyId = watchIdNamed("copy.txt");
+        tracker_->stop(notesId);
+        tracker_->stop(copyId);
+
+        tracker_->removeStopped(notesId);
+        EXPECT_EQ(view_->removed, std::vector<std::string>{notesId.value()});
+        // Neither a running watch nor one removed already.
+        tracker_->removeStopped(projectId);
+        tracker_->removeStopped(notesId);
+        EXPECT_EQ(view_->removed, std::vector<std::string>{notesId.value()});
+        EXPECT_TRUE(view_->entries.contains(projectId.value()));
+        EXPECT_FALSE(stopOf(projectId).has_value());
+
+        tracker_->removeAllStopped();
+        EXPECT_EQ(view_->removed, (std::vector<std::string>{notesId.value(), copyId.value()}));
+        ASSERT_EQ(view_->entries.size(), 1u);
+        EXPECT_EQ(onlyEntry().watchId, projectId);
+        tracker_->removeAllStopped();
+        EXPECT_EQ(view_->removed.size(), 2u);
+
+        write(root_ / "local" / "project" / "src" / "main.cpp", "changed locally");
+        EXPECT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/main.cpp") == 1u;
+            }
+        ));
+    }
+
+    TEST_F(TrackerTest, StoppingAllSendsNothingAndKeepsNoStoppedWatch)
+    {
+        ASSERT_TRUE(
+            tracker_->uploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv/notes.txt")).has_value()
+        );
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        completeEverything();
+        const auto notesId = watchIdNamed("notes.txt");
+        tracker_->stop(notesId);
+        runFor(std::chrono::milliseconds{300});
+        view_->events.clear();
+
+        tracker_->stopAll();
+        write(root_ / "local" / "project" / "src" / "main.cpp", "changed locally");
+        runFor(std::chrono::milliseconds{1000});
+
+        EXPECT_TRUE(view_->events.empty());
+        tracker_->removeStopped(notesId);
+        tracker_->removeAllStopped();
+        EXPECT_TRUE(view_->removed.empty());
     }
 
     TEST_F(TrackerTest, DiscardingADownloadEndsItsWatchAndItsInstance)
@@ -2155,19 +2493,35 @@ namespace Test
         ASSERT_TRUE(runUntilProgress(watchIdNamed("notes.txt"), {.pending = 1u}));
         const auto shown = view_->watchProgress.size();
 
+        const auto copyId = watchIdNamed("copy.txt");
+        const auto notesId = watchIdNamed("notes.txt");
+        view_->events.clear();
+
         tracker_->connectionLost();
         write(root_ / "local" / "notes.txt", "changed locally");
         write(copy->localPath.native(), "changed copy");
         runFor(std::chrono::milliseconds{1000});
 
-        EXPECT_TRUE(view_->entries.empty());
-        EXPECT_EQ(view_->removed.size(), 2u);
+        ASSERT_EQ(view_->entries.size(), 2u);
+        for (auto const& watchId : {copyId, notesId})
+        {
+            const auto stop = stopOf(watchId);
+            ASSERT_TRUE(stop.has_value());
+            EXPECT_EQ(stop->reason, SharedData::WatchStopReason::ConnectionLost);
+            EXPECT_GT(stop->stoppedAt, 0u);
+            EXPECT_FALSE(view_->entries.at(watchId.value()).uploading);
+        }
+        EXPECT_TRUE(view_->removed.empty());
         ASSERT_EQ(view_->ended.size(), 1u);
         EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::ConnectionLost);
         const auto names = view_->ended.front().entries | std::views::transform(&SharedData::TrackedEntry::name) |
             std::ranges::to<std::set>();
         EXPECT_EQ(names, (std::set<std::string>{"copy.txt", "notes.txt"}));
-        EXPECT_EQ(view_->watchProgress.size(), shown);
+        // Each shows its progress once more, nothing on its way, then the toast follows.
+        ASSERT_EQ(view_->watchProgress.size(), shown + 2u);
+        EXPECT_EQ(countsOf(*lastProgressOf(notesId)), ProgressCounts{});
+        ASSERT_EQ(view_->events.size(), 6u);
+        EXPECT_EQ(view_->events[4], "ended ConnectionLost");
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_EQ(uploadsTo("/srv/copy.txt"), 0u);
         EXPECT_EQ(instances_->findInstance(copy->instanceId.value()), nullptr);
