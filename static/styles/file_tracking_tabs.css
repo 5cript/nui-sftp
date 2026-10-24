@@ -138,8 +138,7 @@
     min-width: 0;
 }
 
-.file-tracking-item-row-file,
-.file-tracking-item-row-detail {
+.file-tracking-item-row-file {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -148,6 +147,7 @@
 .file-tracking-item-row-detail {
     color: var(--color-secondary);
     font-size: 0.75rem;
+    overflow-wrap: anywhere;
 }
 
 .file-tracking-item-row-actions {
