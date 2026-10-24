@@ -93,7 +93,7 @@
             return n + " B";
         };
 
-        // Mirrors the hue ramp from frontend/source/frontend/components/progress_bar.cpp (red → green).
+        // Mirrors the hue ramp from script-nui-components/progress_color.hpp of 5cript-nui-components (red → green).
         const hueFor = (pct, done) => done ? 120 : Math.max(5, 120 * Math.pow(pct / 100, 1.8));
 
         const updateProgress = (received, total, label) => {
