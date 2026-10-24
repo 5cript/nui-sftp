@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -213,11 +214,17 @@ namespace Test
                 events.push_back("conflict " + conflict.conflictId.value());
             }
 
-            void removeConflict(Ids::ConflictId const& conflictId) override
+            void removeConflicts(SharedData::RemovedConflicts const& removal) override
             {
-                conflicts.erase(conflictId.value());
-                removedConflicts.push_back(conflictId.value());
-                events.push_back("removeConflict " + conflictId.value());
+                std::string event{"removeConflicts"};
+                for (auto const& conflictId : removal.conflictIds)
+                {
+                    conflicts.erase(conflictId.value());
+                    removedConflicts.push_back(conflictId.value());
+                    event += " " + conflictId.value();
+                }
+                conflictRemovals.push_back(removal.conflictIds.size());
+                events.push_back(std::move(event));
             }
 
             void showFailure(SharedData::UploadFailure const& failure) override
@@ -226,11 +233,17 @@ namespace Test
                 events.push_back("failure " + failure.failureId.value());
             }
 
-            void removeFailure(Ids::FailureId const& failureId) override
+            void removeFailures(SharedData::RemovedFailures const& removal) override
             {
-                failures.erase(failureId.value());
-                removedFailures.push_back(failureId.value());
-                events.push_back("removeFailure " + failureId.value());
+                std::string event{"removeFailures"};
+                for (auto const& failureId : removal.failureIds)
+                {
+                    failures.erase(failureId.value());
+                    removedFailures.push_back(failureId.value());
+                    event += " " + failureId.value();
+                }
+                failureRemovals.push_back(removal.failureIds.size());
+                events.push_back(std::move(event));
             }
 
             void showWatchProgress(SharedData::WatchProgress const& shown) override
@@ -253,10 +266,16 @@ namespace Test
             std::map<std::string, SharedData::WatchConflict> conflicts{};
             /** @brief Every conflict shown, in order. */
             std::vector<SharedData::WatchConflict> shownConflicts{};
+            /** @brief Every conflict id removed, in order, flattened over the messages. */
             std::vector<std::string> removedConflicts{};
+            /** @brief How many conflicts each removal message carried. */
+            std::vector<std::size_t> conflictRemovals{};
             /** @brief The failures shown and not removed, by id. */
             std::map<std::string, SharedData::UploadFailure> failures{};
+            /** @brief Every failure id removed, in order, flattened over the messages. */
             std::vector<std::string> removedFailures{};
+            /** @brief How many failures each removal message carried. */
+            std::vector<std::size_t> failureRemovals{};
             std::vector<SharedData::WatchProgress> watchProgress{};
             /** @brief When each of watchProgress was shown. */
             std::vector<std::chrono::steady_clock::time_point> watchProgressShownAt{};
@@ -1503,6 +1522,7 @@ namespace Test
 
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(view_->removedConflicts, (std::vector<std::string>{mainConflict.value(), utilConflict.value()}));
+        EXPECT_EQ(view_->conflictRemovals, std::vector<std::size_t>{2u}) << "one message for all answered conflicts";
         const auto uploads = remote_->sourcesOf("upload");
         ASSERT_EQ(uploads.size(), uploadsBefore + 2u);
         EXPECT_EQ(uploads[uploadsBefore], main_.string());
@@ -1611,9 +1631,8 @@ namespace Test
         EXPECT_EQ(
             view_->events,
             (std::vector<std::string>{
-                "removeConflict " + mainConflict.value(),
-                "removeConflict " + utilConflict.value(),
-                "removeFailure " + failureId,
+                "removeConflicts " + mainConflict.value() + " " + utilConflict.value(),
+                "removeFailures " + failureId,
                 "progress " + watchId.value(),
                 "entry " + watchId.value() + " StoppedByUser",
                 "orphans 0",
@@ -4605,6 +4624,7 @@ namespace Test
 
         EXPECT_TRUE(view_->failures.empty());
         EXPECT_EQ(view_->removedFailures.size(), 2u);
+        EXPECT_EQ(view_->failureRemovals, std::vector<std::size_t>{2u}) << "one message for all retried failures";
         ASSERT_TRUE(runUntil(
             [this, uploadsBefore]()
             {
@@ -4650,6 +4670,7 @@ namespace Test
         tracker_->dismissAllFailures(onlyEntry().watchId);
         EXPECT_TRUE(view_->failures.empty());
         EXPECT_EQ(view_->removedFailures, (std::vector<std::string>{mainFailure.value(), utilFailure.value()}));
+        EXPECT_EQ(view_->failureRemovals.back(), 1u) << "the rest of the watch left in one message";
         runFor(std::chrono::milliseconds{200});
         EXPECT_EQ(remote_->of("upload").size(), uploadsBefore);
     }

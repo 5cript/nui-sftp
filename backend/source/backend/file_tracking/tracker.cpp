@@ -14,6 +14,7 @@
 #include <paths/native.hpp>
 #include <log/log.hpp>
 #include <shared_data/file_tracking/orphaned_copy.hpp>
+#include <shared_data/file_tracking/removed_problems.hpp>
 #include <shared_data/file_tracking/watch_stop.hpp>
 
 #include <boost/asio/post.hpp>
@@ -24,6 +25,7 @@
 #include <chrono>
 #include <expected>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -439,6 +441,38 @@ namespace FileTracking
                     }
                 );
         }
+
+        /**
+         * @brief The conflicts of @p listed, as the view takes them off in one message.
+         */
+        template <typename ListedT>
+        SharedData::RemovedConflicts removedConflictsOf(std::vector<ListedT> const& listed)
+        {
+            SharedData::RemovedConflicts removed;
+            removed.conflictIds.reserve(listed.size());
+            std::ranges::transform(
+                listed,
+                std::back_inserter(removed.conflictIds),
+                [](ListedT const& conflict)
+                {
+                    return conflict.conflict.conflictId;
+                }
+            );
+            return removed;
+        }
+
+        /**
+         * @brief @p failures, as the view takes them off in one message.
+         */
+        SharedData::RemovedFailures removedFailuresOf(std::vector<SharedData::UploadFailure> const& failures)
+        {
+            SharedData::RemovedFailures removed;
+            removed.failureIds.reserve(failures.size());
+            std::ranges::transform(
+                failures, std::back_inserter(removed.failureIds), &SharedData::UploadFailure::failureId
+            );
+            return removed;
+        }
     }
 
     struct Tracker::Implementation : public std::enable_shared_from_this<Tracker::Implementation>
@@ -474,15 +508,6 @@ namespace FileTracking
           private:
             std::weak_ptr<Implementation> tracker_;
             std::uint64_t claimId_;
-        };
-
-        /**
-         * @brief The ids of the conflicts and failures the view shows of watches.
-         */
-        struct ShownProblems
-        {
-            std::vector<Ids::ConflictId> conflicts{};
-            std::vector<Ids::FailureId> failures{};
         };
 
         using OnOpened = std::function<void(std::expected<OpenedCopy, OpenFailure> const&)>;
@@ -1128,29 +1153,29 @@ namespace FileTracking
          */
         void dropProblems(Ids::WatchId const& watchId)
         {
-            ShownProblems shown;
-            collectShownProblems(watchId, shown);
             const auto dropped = conflicts.removeWatch(watchId);
-            failures.removeWatch(watchId);
-            hideProblems(shown);
+            hideConflicts(removedConflictsOf(dropped));
+            hideFailures(removedFailuresOf(failures.removeWatch(watchId)));
             for (auto const& listed : dropped)
                 leaveOrder(listed.context);
         }
 
-        void collectShownProblems(Ids::WatchId const& watchId, ShownProblems& shown) const
+        /**
+         * @brief Takes the conflicts of @p removed off the view in one message, none for an empty list.
+         */
+        void hideConflicts(SharedData::RemovedConflicts const& removed)
         {
-            for (auto const& conflict : conflicts.conflictsOf(watchId))
-                shown.conflicts.push_back(conflict.conflictId);
-            for (auto const& failure : failures.failuresOf(watchId))
-                shown.failures.push_back(failure.failureId);
+            if (!removed.conflictIds.empty())
+                view->removeConflicts(removed);
         }
 
-        void hideProblems(ShownProblems const& shown)
+        /**
+         * @brief Takes the failures of @p removed off the view in one message, none for an empty list.
+         */
+        void hideFailures(SharedData::RemovedFailures const& removed)
         {
-            for (auto const& conflictId : shown.conflicts)
-                view->removeConflict(conflictId);
-            for (auto const& failureId : shown.failures)
-                view->removeFailure(failureId);
+            if (!removed.failureIds.empty())
+                view->removeFailures(removed);
         }
 
         void setOption(Ids::WatchId const& watchId, SharedData::WatchOption option, bool value)
@@ -2207,8 +2232,8 @@ namespace FileTracking
                 return;
             }
             const auto watchId = listed->conflict.watchId;
+            hideConflicts({.conflictIds = {conflictId}});
             resolveConflict(std::move(listed->context), resolution);
-            view->removeConflict(conflictId);
             progressChanged(watchId);
         }
 
@@ -2226,11 +2251,9 @@ namespace FileTracking
                 watchId.value(),
                 Utility::enumToString(resolution)
             );
+            hideConflicts(removedConflictsOf(listed));
             for (auto& conflict : listed)
-            {
                 resolveConflict(std::move(conflict.context), resolution);
-                view->removeConflict(conflict.conflict.conflictId);
-            }
             progressChanged(watchId);
         }
 
@@ -2266,7 +2289,7 @@ namespace FileTracking
                 Log::warn("FileTracking: there is no failure {} to retry", failureId.value());
                 return;
             }
-            view->removeFailure(failureId);
+            hideFailures({.failureIds = {failureId}});
             retryUpload(*retried);
         }
 
@@ -2307,25 +2330,38 @@ namespace FileTracking
                 Log::warn("FileTracking: there is no failure {} to dismiss", failureId.value());
                 return;
             }
-            view->removeFailure(failureId);
+            hideFailures({.failureIds = {failureId}});
         }
 
         void retryAllFailures(Ids::WatchId const& watchId)
         {
-            const auto listed = failures.failuresOf(watchId);
-            if (listed.empty())
+            std::vector<SharedData::UploadFailure> retried;
+            for (auto const& failure : failures.failuresOf(watchId))
+            {
+                if (auto taken = failures.retry(failure.failureId))
+                    retried.push_back(std::move(*taken));
+            }
+            if (retried.empty())
+            {
                 Log::warn("FileTracking: watch {} has no failures to retry", watchId.value());
-            for (auto const& failure : listed)
-                retryFailure(failure.failureId);
+                return;
+            }
+            hideFailures(removedFailuresOf(retried));
+            for (auto const& failure : retried)
+                retryUpload(failure);
         }
 
         void dismissAllFailures(Ids::WatchId const& watchId)
         {
-            const auto listed = failures.failuresOf(watchId);
-            if (listed.empty())
+            std::vector<SharedData::UploadFailure> dismissed;
+            for (auto const& failure : failures.failuresOf(watchId))
+            {
+                if (auto removed = failures.remove(failure.failureId))
+                    dismissed.push_back(std::move(*removed));
+            }
+            if (dismissed.empty())
                 Log::warn("FileTracking: watch {} has no failures to dismiss", watchId.value());
-            for (auto const& failure : listed)
-                dismissFailure(failure.failureId);
+            hideFailures(removedFailuresOf(dismissed));
         }
 
         /**
@@ -2369,7 +2405,7 @@ namespace FileTracking
         void clearFailure(Ids::WatchId const& watchId, Paths::LocalPath const& localPath)
         {
             if (const auto cleared = failures.removePath(watchId, localPath))
-                view->removeFailure(cleared->failureId);
+                hideFailures({.failureIds = {cleared->failureId}});
         }
 
         /**
@@ -2386,8 +2422,7 @@ namespace FileTracking
                 if (remotePath && recordFailure(entry, failed.path, *remotePath, failed.failure))
                     leftOut.insert(failed.path);
             }
-            for (auto const& cleared : failures.removeWithin(entry.watchId, upload.change.path, leftOut))
-                view->removeFailure(cleared.failureId);
+            hideFailures(removedFailuresOf(failures.removeWithin(entry.watchId, upload.change.path, leftOut)));
         }
 
         void removeStopped(Ids::WatchId const& watchId)

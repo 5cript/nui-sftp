@@ -33,9 +33,9 @@ namespace FileTracking
         RpcHelper::callRemoteSafely(*hub_, eventName("onConflict"), conflict);
     }
 
-    void FrontendTrackerView::removeConflict(Ids::ConflictId const& conflictId)
+    void FrontendTrackerView::removeConflicts(SharedData::RemovedConflicts const& removed)
     {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onConflictRemoved"), conflictId.value());
+        RpcHelper::callRemoteSafely(*hub_, eventName("onConflictsRemoved"), removed);
     }
 
     void FrontendTrackerView::showFailure(SharedData::UploadFailure const& failure)
@@ -43,9 +43,9 @@ namespace FileTracking
         RpcHelper::callRemoteSafely(*hub_, eventName("onFailure"), failure);
     }
 
-    void FrontendTrackerView::removeFailure(Ids::FailureId const& failureId)
+    void FrontendTrackerView::removeFailures(SharedData::RemovedFailures const& removed)
     {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onFailureRemoved"), failureId.value());
+        RpcHelper::callRemoteSafely(*hub_, eventName("onFailuresRemoved"), removed);
     }
 
     void FrontendTrackerView::showWatchProgress(SharedData::WatchProgress const& progress)

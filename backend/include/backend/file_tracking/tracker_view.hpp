@@ -3,6 +3,7 @@
 #include <ids/ids.hpp>
 #include <shared_data/file_tracking/ended_watches.hpp>
 #include <shared_data/file_tracking/orphaned_copy.hpp>
+#include <shared_data/file_tracking/removed_problems.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
 #include <shared_data/file_tracking/upload_failure.hpp>
 #include <shared_data/file_tracking/watch_conflict.hpp>
@@ -43,9 +44,9 @@ namespace FileTracking
         virtual void showConflict(SharedData::WatchConflict const& conflict) = 0;
 
         /**
-         * @brief The conflict @p conflictId was answered or dropped with its watch.
+         * @brief The conflicts of @p removed were answered or dropped with their watch, all in one message.
          */
-        virtual void removeConflict(Ids::ConflictId const& conflictId) = 0;
+        virtual void removeConflicts(SharedData::RemovedConflicts const& removed) = 0;
 
         /**
          * @brief Shows @p failure, new or updated.
@@ -53,9 +54,10 @@ namespace FileTracking
         virtual void showFailure(SharedData::UploadFailure const& failure) = 0;
 
         /**
-         * @brief The failure @p failureId was retried, dismissed, went through or was dropped with its watch.
+         * @brief The failures of @p removed were retried, dismissed, went through or were dropped with their watch, all
+         *        in one message.
          */
-        virtual void removeFailure(Ids::FailureId const& failureId) = 0;
+        virtual void removeFailures(SharedData::RemovedFailures const& removed) = 0;
 
         /**
          * @brief Shows how far the watch of @p progress is, at most five times a second per watch.
