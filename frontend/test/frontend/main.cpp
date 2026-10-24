@@ -7,6 +7,7 @@
 #include "test_numbered_saves.hpp"
 #include "test_overwrite_decisions.hpp"
 #include "test_pending_selection.hpp"
+#include "test_problem_list.hpp"
 #include "test_selection_model.hpp"
 #include "test_side_paths.hpp"
 #include "test_tracking_model.hpp"
