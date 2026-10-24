@@ -5,6 +5,7 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <paths/paths.hpp>
 
+#include <system_error>
 #include <vector>
 
 namespace FileTracking
@@ -19,6 +20,11 @@ namespace FileTracking
      * @brief Why a bulk upload left out the entry @p failure tells of.
      */
     UploadFailureInfo failureInfoOf(SharedData::IndexedFailure const& failure);
+
+    /**
+     * @brief Why the upload of a local file failed that could not be looked at or read, the system said @p error.
+     */
+    UploadFailureInfo failureInfoOf(std::error_code const& error);
 
     /**
      * @brief The entries below the directory @p directory that its upload, which ended as @p completed, left out. An

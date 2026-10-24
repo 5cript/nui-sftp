@@ -1,4 +1,6 @@
 #include <backend/file_tracking/failure_reason.hpp>
+#include <backend/sftp/local_file_problem.hpp>
+#include <utility/error_message.hpp>
 
 #include <boost/describe/enum_to_string.hpp>
 #include <libssh/sftp.h>
@@ -157,6 +159,13 @@ namespace FileTracking
         return {
             .reason = UploadFailureReason::Unknown,
             .detail = std::string{boost::describe::enum_to_string(failure.type, "UnknownError")},
+        };
+    }
+
+    UploadFailureInfo failureInfoOf(std::error_code const& error)
+    {
+        return {
+            .reason = localReasonOf(localFileProblemOf(error)), .detail = unlessEmpty(Utility::errorMessage(error))
         };
     }
 

@@ -16,7 +16,8 @@ namespace FileTracking
 {
     /**
      * @brief The failed uploads of the watches, one per watch and local path, in the order their paths first failed.
-     *        They wait for Retry or Dismiss, nothing retries them. Plain bookkeeping, it tells nobody.
+     *        They wait for Retry or Dismiss, nothing retries them. A retried failure leaves the list until its path
+     *        uploads or fails again, see retry(). Plain bookkeeping, it tells nobody.
      */
     class FailureList
     {
@@ -38,9 +39,10 @@ namespace FileTracking
                 stored = failure;
                 return failure;
             }
-            failure.failureId = Ids::generateFailureId();
-            failure.attempts = 1u;
-            const auto arrival = nextArrival_++;
+            const auto retried = takeRetried(failure.watchId, failure.localPath);
+            failure.failureId = retried ? retried->failure.failureId : Ids::generateFailureId();
+            failure.attempts = retried ? retried->failure.attempts + 1u : 1u;
+            const auto arrival = retried ? retried->arrival : nextArrival_++;
             index.byPath.emplace(failure.localPath, failure.failureId);
             index.byArrival.emplace(arrival, failure.failureId);
             failures_.emplace(failure.failureId, Stored{.failure = failure, .arrival = arrival});
@@ -110,12 +112,30 @@ namespace FileTracking
         }
 
         /**
-         * @brief Takes the failure of the watch @p watchId at @p localPath off the list, once that path uploaded.
+         * @brief Takes the failure @p failureId off the list while its path is retried: when it fails again, record()
+         *        lists it again with its id, its place and one attempt more. Once it uploaded, removePath() forgets it.
+         * @return It, nothing when it was not listed.
+         */
+        std::optional<SharedData::UploadFailure> retry(Ids::FailureId const& failureId)
+        {
+            auto node = failures_.extract(failureId);
+            if (node.empty())
+                return std::nullopt;
+            unindex(node.mapped());
+            auto const& failure = node.mapped().failure;
+            retried_[failure.watchId].insert_or_assign(failure.localPath, node.mapped());
+            return failure;
+        }
+
+        /**
+         * @brief Takes the failure of the watch @p watchId at @p localPath off the list, once that path uploaded, and
+         *        forgets a retried one there.
          * @return It, nothing when none was listed there.
          */
         std::optional<SharedData::UploadFailure>
         removePath(Ids::WatchId const& watchId, Paths::LocalPath const& localPath)
         {
+            takeRetried(watchId, localPath);
             const auto* failure = find(watchId, localPath);
             if (!failure)
                 return std::nullopt;
@@ -125,7 +145,8 @@ namespace FileTracking
 
         /**
          * @brief Takes the failures of the watch @p watchId at @p directory and below it off the list, once a
-         *        directory upload went through, but for the paths in @p keep: those it left out.
+         *        directory upload went through, but for the paths in @p keep: those it left out. Retried ones there
+         *        are forgotten alike.
          * @return They, in the order their paths first failed.
          */
         std::vector<SharedData::UploadFailure> removeWithin(
@@ -134,6 +155,18 @@ namespace FileTracking
             std::set<Paths::LocalPath> const& keep = {}
         )
         {
+            if (const auto retried = retried_.find(watchId); retried != retried_.end())
+            {
+                std::erase_if(
+                    retried->second,
+                    [&directory, &keep](auto const& stored)
+                    {
+                        return stored.first.isWithin(directory) && !keep.contains(stored.first);
+                    }
+                );
+                if (retried->second.empty())
+                    retried_.erase(retried);
+            }
             std::vector<Ids::FailureId> within;
             if (const auto* index = indexOf(watchId))
                 for (auto const& failureId : index->byArrival | std::views::values)
@@ -154,6 +187,7 @@ namespace FileTracking
          */
         std::vector<SharedData::UploadFailure> removeWatch(Ids::WatchId const& watchId)
         {
+            retried_.erase(watchId);
             auto node = watches_.extract(watchId);
             std::vector<SharedData::UploadFailure> removed;
             if (node.empty())
@@ -171,6 +205,7 @@ namespace FileTracking
         {
             auto failures = std::exchange(failures_, {});
             watches_.clear();
+            retried_.clear();
             std::map<std::uint64_t, SharedData::UploadFailure> byArrival;
             for (auto& stored : failures | std::views::values)
                 byArrival.emplace(stored.arrival, std::move(stored.failure));
@@ -203,6 +238,19 @@ namespace FileTracking
             return found == watches_.end() ? nullptr : &found->second;
         }
 
+        std::optional<Stored> takeRetried(Ids::WatchId const& watchId, Paths::LocalPath const& localPath)
+        {
+            const auto watch = retried_.find(watchId);
+            if (watch == retried_.end())
+                return std::nullopt;
+            auto node = watch->second.extract(localPath);
+            if (watch->second.empty())
+                retried_.erase(watch);
+            if (node.empty())
+                return std::nullopt;
+            return std::move(node.mapped());
+        }
+
         void unindex(Stored const& stored)
         {
             const auto index = watches_.find(stored.failure.watchId);
@@ -216,6 +264,8 @@ namespace FileTracking
 
         std::map<Ids::FailureId, Stored> failures_{};
         std::map<Ids::WatchId, WatchIndex> watches_{};
+        /** @brief The failures taken off for a retry, see retry(), by watch and local path. */
+        std::map<Ids::WatchId, std::map<Paths::LocalPath, Stored>> retried_{};
         std::uint64_t nextArrival_{0u};
     };
 }

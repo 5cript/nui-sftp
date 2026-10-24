@@ -258,6 +258,76 @@ namespace Test::FailureListCases
         EXPECT_TRUE(failures_.removeAll().empty());
     }
 
+    TEST_F(FailureListTest, ARetriedFailureLeavesTheListAndComesBackWithItsIdAndPlaceWhenItFailsAgain)
+    {
+        const auto first = failures_.record(failureAt(watch_, "/watched/a.txt"));
+        failures_.record(failureAt(watch_, "/watched/a.txt"));
+        failures_.record(failureAt(watch_, "/watched/b.txt"));
+
+        const auto retried = failures_.retry(first.failureId);
+
+        ASSERT_TRUE(retried.has_value());
+        EXPECT_EQ(retried->failureId, first.failureId);
+        EXPECT_EQ(retried->attempts, 2u);
+        EXPECT_EQ(failures_.find(first.failureId), nullptr);
+        EXPECT_EQ(failures_.find(watch_, localPathOf("/watched/a.txt")), nullptr);
+        EXPECT_EQ(failures_.countOf(watch_), 1u);
+        EXPECT_FALSE(failures_.retry(first.failureId).has_value());
+        EXPECT_FALSE(failures_.remove(first.failureId).has_value());
+
+        const auto again =
+            failures_.record(failureAt(watch_, "/watched/a.txt", SharedData::UploadFailureReason::LockedLocally));
+        EXPECT_EQ(again.failureId, first.failureId);
+        EXPECT_EQ(again.attempts, 3u);
+        EXPECT_EQ(again.reason, SharedData::UploadFailureReason::LockedLocally);
+        EXPECT_EQ(
+            pathsOf(failures_.failuresOf(watch_)), (std::vector<std::string>{"/watched/a.txt", "/watched/b.txt"})
+        );
+    }
+
+    TEST_F(FailureListTest, ARetriedPathThatUploadedStartsAfreshWhenItFailsAgain)
+    {
+        const auto first = failures_.record(failureAt(watch_, "/watched/a.txt"));
+        failures_.retry(first.failureId);
+
+        EXPECT_FALSE(failures_.removePath(watch_, localPathOf("/watched/a.txt")).has_value());
+
+        const auto again = failures_.record(failureAt(watch_, "/watched/a.txt"));
+        EXPECT_NE(again.failureId, first.failureId);
+        EXPECT_EQ(again.attempts, 1u);
+    }
+
+    TEST_F(FailureListTest, RetriedFailuresAreForgottenWithinAnUploadedDirectoryAndWithTheirWatch)
+    {
+        const auto below = failures_.record(failureAt(watch_, "/watched/dir/a.txt"));
+        const auto leftOut = failures_.record(failureAt(watch_, "/watched/dir/b.txt"));
+        const auto elsewhere = failures_.record(failureAt(watch_, "/watched/other.txt"));
+        failures_.retry(below.failureId);
+        failures_.retry(leftOut.failureId);
+        failures_.retry(elsewhere.failureId);
+
+        EXPECT_TRUE(failures_
+                .removeWithin(
+                    watch_, localPathOf("/watched/dir"), std::set<Paths::LocalPath>{localPathOf("/watched/dir/b.txt")}
+                )
+                .empty());
+
+        EXPECT_NE(failures_.record(failureAt(watch_, "/watched/dir/a.txt")).failureId, below.failureId);
+        EXPECT_EQ(failures_.record(failureAt(watch_, "/watched/dir/b.txt")).failureId, leftOut.failureId);
+        EXPECT_EQ(failures_.removeWatch(watch_).size(), 2u);
+        EXPECT_NE(failures_.record(failureAt(watch_, "/watched/other.txt")).failureId, elsewhere.failureId);
+    }
+
+    TEST_F(FailureListTest, RemovingAllForgetsTheRetriedFailures)
+    {
+        const auto retried = failures_.record(failureAt(watch_, "/watched/a.txt"));
+        failures_.retry(retried.failureId);
+
+        EXPECT_TRUE(failures_.removeAll().empty());
+
+        EXPECT_NE(failures_.record(failureAt(watch_, "/watched/a.txt")).failureId, retried.failureId);
+    }
+
     TEST_F(FailureListTest, CountsAreKeptPerWatch)
     {
         failures_.record(failureAt(watch_, "/watched/a.txt"));

@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -210,6 +211,26 @@ namespace Test::FailureReason
         const auto unknown = indexed({.type = OperationErrorType::SizeMismatch});
         EXPECT_EQ(unknown.reason, UploadFailureReason::Unknown);
         EXPECT_EQ(unknown.detail, "SizeMismatch");
+    }
+
+    TEST(FailureReasonTests, ALocalFileThatCannotBeLookedAtTellsTheSystemsReasonAndMessage)
+    {
+        const auto denied = failureInfoOf(std::make_error_code(std::errc::permission_denied));
+        EXPECT_EQ(denied.reason, UploadFailureReason::PermissionDeniedLocally);
+        ASSERT_TRUE(denied.detail.has_value());
+        EXPECT_FALSE(denied.detail->empty());
+
+        EXPECT_EQ(
+            failureInfoOf(std::make_error_code(std::errc::device_or_resource_busy)).reason,
+            UploadFailureReason::LockedLocally
+        );
+        EXPECT_EQ(
+            failureInfoOf(std::make_error_code(std::errc::no_such_file_or_directory)).reason,
+            UploadFailureReason::UnreadableLocally
+        );
+        EXPECT_EQ(
+            failureInfoOf(std::make_error_code(std::errc::io_error)).reason, UploadFailureReason::UnreadableLocally
+        );
     }
 
     TEST(FailureReasonTests, AFailedUploadTellsWhyAndOneWithoutAnErrorIsUnknown)
