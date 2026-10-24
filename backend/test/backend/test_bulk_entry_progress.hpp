@@ -216,7 +216,9 @@ namespace Test::BulkEntryProgressTest
     TEST(BulkEntryProgressTests, ASingleTransferTellsItsPositionBetweenItsBounds)
     {
         const auto source = local("/home/user/a.txt");
-        const auto running = FileTracking::uploadProgressOf({.min = 0u, .max = 100u, .current = 40u}, source);
+        const auto running = FileTracking::uploadProgressOf(
+            {.operationId = {}, .min = 0u, .max = 100u, .current = 40u, .bytesPerSecond = 0}, source
+        );
         EXPECT_EQ(running.bytesSent, 40u);
         EXPECT_EQ(running.bytesTotal, 100u);
         EXPECT_EQ(running.filesDone, 0u);
@@ -227,14 +229,18 @@ namespace Test::BulkEntryProgressTest
         EXPECT_EQ(running.inFlight[0].bytes, 40u);
         EXPECT_EQ(running.inFlight[0].totalBytes, 100u);
 
-        const auto sent = FileTracking::uploadProgressOf({.min = 0u, .max = 100u, .current = 100u}, source);
+        const auto sent = FileTracking::uploadProgressOf(
+            {.operationId = {}, .min = 0u, .max = 100u, .current = 100u, .bytesPerSecond = 0}, source
+        );
         EXPECT_TRUE(sent.transferred);
         EXPECT_EQ(sent.bytesSent, 100u);
         EXPECT_EQ(sent.filesDone, 1u);
         EXPECT_TRUE(sent.inFlight.empty());
 
         // A link or a vanished source shows as done without bytes.
-        const auto link = FileTracking::uploadProgressOf({.min = 1u, .max = 1u, .current = 1u}, source);
+        const auto link = FileTracking::uploadProgressOf(
+            {.operationId = {}, .min = 1u, .max = 1u, .current = 1u, .bytesPerSecond = 0}, source
+        );
         EXPECT_TRUE(link.transferred);
         EXPECT_EQ(link.bytesSent, 0u);
         EXPECT_EQ(link.bytesTotal, 0u);
