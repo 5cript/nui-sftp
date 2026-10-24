@@ -13,13 +13,22 @@
 #include <string>
 
 /**
- * @brief Shows the file tracker of a session, which lives in the backend as "FileTracker::<sessionId>": its watches,
- *        its questions and the orphaned download directories. Forwards what the user asks for and decides nothing.
+ * @brief The File Tracking panel of a session: the outliner of its watches and orphaned copies beside the detail of
+ *        the selected one. Shows the file tracker that lives in the backend as "FileTracker::<sessionId>", forwards
+ *        what the user asks for and decides nothing. Also drives the attention of its dock tab.
  */
 class FileTrackingPanel
 {
   public:
-    explicit FileTrackingPanel(ConfirmDialog* confirmDialog);
+    struct Params
+    {
+        /** @brief Asks before deleting orphaned copies and shows errors of opening local items. */
+        ConfirmDialog* confirmDialog = nullptr;
+        /** @brief The session's layout id, naming its dock panel for the tab attention. */
+        std::string sessionLayoutId = {};
+    };
+
+    explicit FileTrackingPanel(Params params);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FileTrackingPanel);
 
     /**
@@ -72,6 +81,17 @@ class FileTrackingPanel
      *        open, with its watch.
      */
     void discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath);
+
+    /**
+     * @brief What Reveal on Server does: shows @p path in the session's remote file explorer side.
+     */
+    void setRevealOnServer(std::function<void(Paths::RemotePath const& path)> revealOnServer);
+
+    /**
+     * @brief The user activated the dock tab: jumps to the newest conflict when conflicts arrived since the last
+     *        jump. Does not sync.
+     */
+    void onTabActivated();
 
     Nui::ElementRenderer operator()();
 

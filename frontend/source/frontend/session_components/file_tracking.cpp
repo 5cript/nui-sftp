@@ -1,280 +1,85 @@
 #include <frontend/session_components/file_tracking.hpp>
-#include <frontend/session_components/row_order.hpp>
+#include <frontend/session_components/file_tracking/dock_tab_attention.hpp>
+#include <frontend/session_components/file_tracking/orphan_detail.hpp>
+#include <frontend/session_components/file_tracking/outliner.hpp>
+#include <frontend/session_components/file_tracking/panel_state.hpp>
+#include <frontend/session_components/file_tracking/tracker_client.hpp>
+#include <frontend/session_components/file_tracking/tracking_actions.hpp>
+#include <frontend/session_components/file_tracking/tracking_store.hpp>
+#include <frontend/session_components/file_tracking/translated_texts.hpp>
+#include <frontend/session_components/file_tracking/watch_detail.hpp>
+#include <frontend/file_explorer/open_local_file.hpp>
 #include <frontend/notifications.hpp>
 
 #include <shared_data/file_tracking/ended_watches.hpp>
-#include <shared_data/file_tracking/server_changed_question.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
-#include <shared_data/file_tracking/tracker_progress.hpp>
-#include <shared_data/file_tracking/watch_options.hpp>
-#include <utility/enum_string_convert.hpp>
 #include <utility/language.hpp>
 #include <utility/lifetime_token.hpp>
-#include <log/log.hpp>
 
-#include <script-nui-components/resizeable_table.hpp>
-#include <script-nui-components/button.hpp>
-#include <script-nui-components/switch.hpp>
 #include <script-nui-components/style_variant.hpp>
 
-#include <nui/frontend/elements.hpp>
+#include <nui/event_system/observed_value_combinator.hpp>
 #include <nui/frontend/attributes.hpp>
-#include <nui/event_system/event_context.hpp>
-#include <nui/rpc.hpp>
+#include <nui/frontend/elements.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
-#include <string_view>
 #include <utility>
-#include <vector>
+#include <variant>
 
 struct FileTrackingPanel::Implementation
 {
-    /**
-     * @brief What the row of one watch shows, shared with its cells.
-     */
-    struct Row
+    explicit Implementation(Params params)
+        : confirmDialog{params.confirmDialog}
+        , store{FileTracking::translatedTexts()}
+        , client{
+              store,
+              [](SharedData::EndedWatches const& ended)
+              {
+                  notifyEnded(ended);
+              }
+          }
+        , attention{std::move(params.sessionLayoutId)}
     {
-        std::shared_ptr<Nui::Observed<std::string>> name{std::make_shared<Nui::Observed<std::string>>()};
-        std::shared_ptr<Nui::Observed<std::string>> remotePath{std::make_shared<Nui::Observed<std::string>>()};
-        std::shared_ptr<Nui::Observed<bool>> uploading{std::make_shared<Nui::Observed<bool>>(false)};
-        std::shared_ptr<Nui::Observed<bool>> autoReupload{std::make_shared<Nui::Observed<bool>>(false)};
-        std::shared_ptr<Nui::Observed<bool>> moveRemote{std::make_shared<Nui::Observed<bool>>(false)};
-        std::shared_ptr<Nui::Observed<bool>> deleteRemote{std::make_shared<Nui::Observed<bool>>(false)};
-        std::shared_ptr<Nui::Observed<bool>> checkRemote{std::make_shared<Nui::Observed<bool>>(false)};
-        std::shared_ptr<Nui::Observed<bool>> downloadedCopy{std::make_shared<Nui::Observed<bool>>(false)};
-
-        void show(SharedData::TrackedEntry const& entry)
-        {
-            *name = entry.name;
-            *remotePath = entry.remotePath.value();
-            *uploading = entry.uploading;
-            *autoReupload = entry.options.autoReupload;
-            *moveRemote = entry.options.moveRemoteOnLocalMove;
-            *deleteRemote = entry.options.deleteRemoteOnLocalDelete;
-            *checkRemote = entry.options.checkRemoteChanges;
-            *downloadedCopy = entry.downloadedCopy;
-        }
-    };
+        store.onAttentionChanged(
+            [this](FileTracking::AttentionCounts const& counts)
+            {
+                attention.show(counts);
+            }
+        );
+        actions = makeActions();
+    }
 
     ConfirmDialog* confirmDialog;
-
-    Ids::SessionId sessionId{};
-    std::map<Ids::WatchId, Row> rows{};
-    FileTracking::RowOrder<Ids::WatchId> rowOrder{};
-    Nui::Observed<std::size_t> entryCount{std::size_t{0}};
-    Nui::Observed<int> orphanedCount{-1};
-    Nui::Observed<bool> cleanupRunning{false};
-    Nui::Observed<SharedData::TrackerProgress> progress{};
-    std::vector<Nui::RpcClient::AutoUnregister> listeners{};
-
-    std::shared_ptr<ScriptNuiComponents::ResizableTable> table{std::make_shared<ScriptNuiComponents::ResizableTable>(
-        ScriptNuiComponents::ResizableTable::HeaderRow{
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnName")},
-                .initialWidth = 0,
-                .resizeable = true,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnRemotePath")},
-                .initialWidth = 0,
-                .resizeable = true,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnAutoReupload")},
-                .initialWidth = 120,
-                .resizeable = false,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnMoveRemote")},
-                .initialWidth = 120,
-                .resizeable = false,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnDeleteRemote")},
-                .initialWidth = 120,
-                .resizeable = false,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnCheckRemote")},
-                .initialWidth = 120,
-                .resizeable = false,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{language->get("fileTracking", "columnStatus")},
-                .initialWidth = 100,
-                .resizeable = false,
-            },
-            ScriptNuiComponents::ResizableTable::HeaderTableCell{
-                .content = std::string{},
-                .initialWidth = 60,
-                .resizeable = false,
-            },
-        },
-        std::nullopt
-    )};
-
+    FileTracking::TrackingStore store;
+    FileTracking::TrackerClient client;
+    FileTracking::DockTabAttention attention;
+    FileTracking::TrackingActions actions{};
+    std::function<void(Paths::RemotePath const& path)> revealOnServer{};
     Utility::LifetimeToken lifetime{};
 
-    explicit Implementation(ConfirmDialog* confirmDialog)
-        : confirmDialog{confirmDialog}
-    {}
-
     /**
-     * @brief Shows what RPC replies and tracker events changed, they arrive outside of DOM event handlers.
-     */
-    static void syncView()
-    {
-        Nui::globalEventContext.executeActiveEventsImmediately();
-    }
-
-    /**
-     * @brief Yes replaces the server's version, No keeps it, no button means another dialog took the question's place.
-     */
-    static SharedData::ServerChangedAnswer answerOf(std::optional<ConfirmDialog::Button> const& button)
-    {
-        if (!button)
-            return SharedData::ServerChangedAnswer::Dismissed;
-        return *button == ConfirmDialog::Button::Yes ? SharedData::ServerChangedAnswer::Replace
-                                                     : SharedData::ServerChangedAnswer::Keep;
-    }
-
-    static bool succeeded(Nui::val const& response)
-    {
-        return response.hasOwnProperty("success") && response["success"].as<bool>();
-    }
-
-    /**
-     * @brief The translated error of a failed reply, nothing when it has none.
-     */
-    static std::optional<std::string> errorOf(Nui::val const& response)
-    {
-        if (!response.hasOwnProperty("error"))
-            return std::nullopt;
-        return language->translate(response["error"].as<std::string>());
-    }
-
-    std::string rpcName(std::string_view function) const
-    {
-        return fmt::format("FileTracker::{}::{}", sessionId.value(), function);
-    }
-
-    /**
-     * @brief Forwards @p function with @p arguments to the tracker, a refusal is only logged.
-     */
-    template <typename... ArgumentsT>
-    void forward(std::string_view function, ArgumentsT&&... arguments)
-    {
-        Nui::RpcClient::callWithBackChannel(
-            rpcName(function),
-            [function = std::string{function}](Nui::val response)
-            {
-                if (!succeeded(response))
-                    Log::error("FileTracker::{} failed: {}", function, errorOf(response).value_or(""));
-            },
-            std::forward<ArgumentsT>(arguments)...
-        );
-    }
-
-    void listen()
-    {
-        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
-            rpcName("onEntry"),
-            lifetime.guarded(
-                [this](SharedData::TrackedEntry const& entry)
-                {
-                    showEntry(entry);
-                    syncView();
-                }
-            )
-        ));
-        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
-            rpcName("onEntryRemoved"),
-            lifetime.guarded(
-                [this](std::string const& watchId)
-                {
-                    removeEntry(Ids::makeWatchId(watchId));
-                    syncView();
-                }
-            )
-        ));
-        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
-            rpcName("onEntriesEnded"),
-            lifetime.guarded(
-                [](SharedData::EndedWatches const& ended)
-                {
-                    notifyEnded(ended);
-                }
-            )
-        ));
-        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
-            rpcName("onQuestion"),
-            lifetime.guarded(
-                [this](SharedData::ServerChangedQuestion const& question)
-                {
-                    ask(question);
-                }
-            )
-        ));
-        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
-            rpcName("onProgress"),
-            lifetime.guarded(
-                [this](SharedData::TrackerProgress const& shown)
-                {
-                    progress = shown;
-                    syncView();
-                }
-            )
-        ));
-        listeners.push_back(Nui::RpcClient::autoRegisterFunction(
-            rpcName("onOrphanedCount"),
-            lifetime.guarded(
-                [this](std::uint64_t count)
-                {
-                    orphanedCount = static_cast<int>(count);
-                    syncView();
-                }
-            )
-        ));
-    }
-
-    void showEntry(SharedData::TrackedEntry const& entry)
-    {
-        auto [row, inserted] = rows.try_emplace(entry.watchId);
-        row->second.show(entry);
-        if (!inserted)
-            return;
-        table->addRow(buildRow(entry.watchId, row->second));
-        rowOrder.add(entry.watchId);
-        entryCount = rows.size();
-    }
-
-    void removeEntry(Ids::WatchId const& watchId)
-    {
-        rows.erase(watchId);
-        if (const auto row = rowOrder.remove(watchId))
-            table->remove(*row);
-        entryCount = rows.size();
-    }
-
-    /**
-     * @brief Tells the user why watches ended that they did not stop, their rows are gone already.
+     * @brief Tells the user why watches ended that they did not stop.
      */
     static void notifyEnded(SharedData::EndedWatches const& ended)
     {
+        if (ended.entries.empty())
+            return;
         const auto text = [&ended]()
         {
             switch (ended.reason)
             {
                 case SharedData::WatchEndReason::CopyGone:
                     return language->get("fileTracking", "watchEndedCopyGone");
+                case SharedData::WatchEndReason::Overlap:
+                    return language->get("fileTracking", "watchEndedOverlap");
                 case SharedData::WatchEndReason::ConnectionLost:
                     break;
             }
@@ -290,337 +95,310 @@ struct FileTrackingPanel::Implementation
         Notifications::warning(fmt::format(fmt::runtime(text), fmt::join(names, ", ")));
     }
 
-    void ask(SharedData::ServerChangedQuestion const& question)
+    /**
+     * @brief Opens the copy @p localPath of @p instanceId with its application, discarding it when the user declines
+     *        to open a risky file, like Open and Watch in the file explorer.
+     */
+    void openCopy(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
     {
-        confirmDialog->open({
-            .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-            .headerText = language->get("fileTracking", "serverChangedHeader"),
-            .text = fmt::format(
-                fmt::runtime(language->get("fileTracking", "serverChangedText")), question.remotePath.value()
+        FileExplorer::openLocalFile(
+            lifetime,
+            *confirmDialog,
+            localPath,
+            false,
+            lifetime.guarded(
+                [this, instanceId, localPath]()
+                {
+                    client.discard(instanceId, localPath);
+                }
+            )
+        );
+    }
+
+    /**
+     * @brief Opens the server file of the stopped copy @p watchId again and watches it, then removes the stopped one.
+     */
+    void openAgain(Ids::WatchId const& watchId)
+    {
+        auto const* const entry = store.model().entryOf(watchId);
+        if (entry == nullptr)
+            return;
+        client.open(
+            entry->remotePath,
+            0u,
+            true,
+            lifetime.guarded(
+                [this, watchId](Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
+                {
+                    client.removeStopped(watchId);
+                    openCopy(instanceId, localPath);
+                }
             ),
+            lifetime.guarded(
+                [](std::string const& reason)
+                {
+                    Notifications::error(reason);
+                }
+            )
+        );
+    }
+
+    void deleteOrphanedCopy(Ids::InstanceId const& instanceId)
+    {
+        auto const* const copy = store.model().orphanOf(instanceId);
+        if (copy == nullptr)
+            return;
+        confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = language->get("fileTracking", "confirmDeleteOrphanHeader"),
+            .text = fmt::format(fmt::runtime(language->get("fileTracking", "confirmDeleteOrphanText")), copy->name),
             .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
             .focusButton = ConfirmDialog::Button::No,
             .onClose = lifetime.guarded(
-                [this, questionId = question.questionId](std::optional<ConfirmDialog::Button> button)
+                [this, instanceId, name = copy->name](std::optional<ConfirmDialog::Button> button)
                 {
-                    forward("answer", questionId.value(), Utility::enumToString(answerOf(button)));
+                    if (button != ConfirmDialog::Button::Yes)
+                        return;
+                    client.removeOrphanedCopy(
+                        instanceId,
+                        lifetime.guarded(
+                            [name](std::string const& error)
+                            {
+                                Notifications::error(fmt::format(
+                                    fmt::runtime(language->get("fileTracking", "deleteOrphanFailed")),
+                                    name,
+                                    language->translate(error)
+                                ));
+                            }
+                        )
+                    );
                 }
             ),
         });
     }
 
-    void refreshOrphanedCount()
+    /**
+     * @brief Asks before deleting every listed orphaned copy; a single one is asked for by its name.
+     */
+    void deleteAllOrphanedCopies()
     {
-        Nui::RpcClient::callWithBackChannel(
-            "FileTracking::countOrphaned",
-            lifetime.guarded(
-                [this](Nui::val response)
+        const auto orphans = store.model().members(FileTracking::OutlinerGroup::Orphaned, "");
+        if (orphans.empty())
+            return;
+        if (orphans.size() == 1u)
+        {
+            if (auto const* const instanceId = std::get_if<Ids::InstanceId>(&orphans.front()); instanceId != nullptr)
+                deleteOrphanedCopy(*instanceId);
+            return;
+        }
+        confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = language->get("fileTracking", "confirmDeleteAllOrphansHeader"),
+            .text = fmt::format(
+                fmt::runtime(language->get("fileTracking", "confirmDeleteAllOrphansText")), orphans.size()
+            ),
+            .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+            .focusButton = ConfirmDialog::Button::No,
+            .onClose = lifetime.guarded(
+                [this](std::optional<ConfirmDialog::Button> button)
                 {
-                    if (!succeeded(response))
-                        return Log::error("FileTracking: countOrphaned failed: {}", errorOf(response).value_or(""));
-                    orphanedCount = response["count"].as<int>();
-                    syncView();
+                    if (button == ConfirmDialog::Button::Yes)
+                        client.removeAllOrphanedCopies();
                 }
-            )
-        );
+            ),
+        });
     }
 
-    void triggerCleanup()
+    FileTracking::TrackingActions makeActions()
     {
-        cleanupRunning = true;
-        Nui::RpcClient::callWithBackChannel(
-            "FileTracking::forceCleanup",
-            lifetime.guarded(
-                [this](Nui::val response)
-                {
-                    cleanupRunning = false;
-                    if (succeeded(response))
-                    {
-                        Log::info(
-                            "FileTracking: forceCleanup removed {} orphaned instance(s)", response["removed"].as<int>()
-                        );
-                        refreshOrphanedCount();
-                    }
-                    else
-                        Log::error("FileTracking: forceCleanup failed: {}", errorOf(response).value_or(""));
-                    syncView();
-                }
-            )
-        );
+        return {
+            .answerConflict =
+                [this](Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
+            {
+                client.answerConflict(conflictId, resolution);
+            },
+            .answerAllConflicts =
+                [this](Ids::WatchId const& watchId, SharedData::ConflictResolution resolution)
+            {
+                client.answerAllConflicts(watchId, resolution);
+            },
+            .retryFailure =
+                [this](Ids::FailureId const& failureId)
+            {
+                client.retryFailure(failureId);
+            },
+            .dismissFailure =
+                [this](Ids::FailureId const& failureId)
+            {
+                client.dismissFailure(failureId);
+            },
+            .retryAllFailures =
+                [this](Ids::WatchId const& watchId)
+            {
+                client.retryAllFailures(watchId);
+            },
+            .dismissAllFailures =
+                [this](Ids::WatchId const& watchId)
+            {
+                client.dismissAllFailures(watchId);
+            },
+            .setOption =
+                [this](Ids::WatchId const& watchId, SharedData::WatchOption option, bool enabled)
+            {
+                client.setOption(watchId, option, enabled);
+            },
+            .stop =
+                [this](Ids::WatchId const& watchId)
+            {
+                client.stop(watchId);
+            },
+            .removeStopped =
+                [this](Ids::WatchId const& watchId)
+            {
+                client.removeStopped(watchId);
+            },
+            .removeAllStopped =
+                [this]()
+            {
+                client.removeAllStopped();
+            },
+            .openAgain =
+                [this](Ids::WatchId const& watchId)
+            {
+                openAgain(watchId);
+            },
+            .showWatch =
+                [this](Ids::WatchId const& otherWatchId)
+            {
+                store.select(otherWatchId);
+            },
+            .deleteOrphanedCopy =
+                [this](Ids::InstanceId const& instanceId)
+            {
+                deleteOrphanedCopy(instanceId);
+            },
+            .deleteAllOrphanedCopies =
+                [this]()
+            {
+                deleteAllOrphanedCopies();
+            },
+            .openLocally =
+                [this](Paths::LocalPath const& path)
+            {
+                FileExplorer::openLocalFile(lifetime, *confirmDialog, path, false);
+            },
+            .revealOnServer =
+                [this](Paths::RemotePath const& path)
+            {
+                if (revealOnServer)
+                    revealOnServer(path);
+            },
+            .select =
+                [this](FileTracking::Selection const& selection)
+            {
+                store.select(selection);
+            },
+            .moveSelection =
+                [this](FileTracking::SelectionMove move)
+            {
+                store.moveSelection(move);
+            },
+            .chooseTab =
+                [this](FileTracking::DetailTab tab)
+            {
+                store.setDetailTab(tab);
+            },
+            .filter =
+                [this](std::string const& filter)
+            {
+                store.setFilter(filter);
+            },
+            .setGroupExpanded =
+                [this](FileTracking::OutlinerGroup group, bool expanded)
+            {
+                store.setGroupExpanded(group, expanded);
+            },
+        };
     }
 
     /**
-     * @brief How far the tracker is with the changes on their way, apart from the operation queue. Stays mounted, so
-     *        the bar moves smoothly, and is hidden while nothing is on its way.
+     * @return Whether the tracker lists nothing at all, whatever the filter hides.
      */
-    Nui::ElementRenderer renderProgress()
+    bool nothingTracked() const
+    {
+        return std::ranges::all_of(
+            FileTracking::outlinerGroupOrder,
+            [this](FileTracking::OutlinerGroup group)
+            {
+                return store.model().members(group, "").empty();
+            }
+        );
+    }
+
+    Nui::ElementRenderer renderPlaceholder()
     {
         using namespace Nui::Elements;
         using namespace Nui::Attributes;
         using Nui::Elements::div;
-        using Nui::Elements::span;
+        using FileTracking::OutlinerGroup;
 
         // clang-format off
         return div{
-            class_ = Nui::observe(progress).generate([this]()
-            {
-                auto const& shown = progress.value();
-                const bool active = shown.pending > 0 || shown.waitingForAnswer > 0;
-                return std::string{active ? "file-tracking-progress" : "file-tracking-progress file-tracking-progress-idle"};
-            }),
+            class_ = "file-tracking-panel-placeholder",
+            "data-ft-detail"_attr = "none",
         }(
-            div{class_ = "file-tracking-progress-track"}(
-                div{
-                    class_ = "file-tracking-progress-fill",
-                    style = Nui::observe(progress).generate([this]()
-                    {
-                        auto const& shown = progress.value();
-                        const auto total = shown.pending + shown.done;
-                        return fmt::format("width: {}%", total == 0 ? 0 : shown.done * 100 / total);
-                    }),
-                }()
-            ),
-            span{class_ = "file-tracking-progress-text"}(
-                Nui::observe(progress).generate([this]() -> Nui::ElementRenderer
-                {
-                    auto const& shown = progress.value();
-                    return Nui::Elements::text{fmt::format(
-                        fmt::runtime(language->get("fileTracking", "progressSyncing")),
-                        shown.done,
-                        shown.pending + shown.done
-                    )}();
-                })
-            ),
-            span{
-                class_ = Nui::observe(progress).generate([this]()
-                {
-                    return std::string{progress.value().waitingForAnswer > 0
-                        ? "file-tracking-progress-waiting"
-                        : "file-tracking-progress-waiting file-tracking-progress-idle"};
-                }),
-            }(
-                Nui::observe(progress).generate([this]() -> Nui::ElementRenderer
-                {
-                    return Nui::Elements::text{fmt::format(
-                        fmt::runtime(language->get("fileTracking", "progressWaitingForAnswer")),
-                        progress.value().waitingForAnswer
-                    )}();
-                })
-            )
-        );
-        // clang-format on
-    }
-
-    Nui::ElementRenderer renderHeader()
-    {
-        using namespace Nui::Elements;
-        using namespace Nui::Attributes;
-        using Nui::Elements::div;
-        using Nui::Elements::span;
-
-        // clang-format off
-        return header{
-            class_ = "file-tracking-header",
-        }(
-            div{class_ = "file-tracking-header-stats"}(
-                span{class_ = "file-tracking-stat"}(
-                    span{class_ = "file-tracking-stat-label"}(
-                        Nui::Elements::text{std::string{language->get("fileTracking", "headerActive")}}()
-                    ),
-                    span{class_ = "file-tracking-stat-value"}(
-                        Nui::observe(entryCount).generate([this]() -> Nui::ElementRenderer
-                        {
-                            return Nui::Elements::text{fmt::format("{}", entryCount.value())}();
-                        })
-                    )
-                ),
-                span{class_ = "file-tracking-stat"}(
-                    span{class_ = "file-tracking-stat-label"}(
-                        Nui::Elements::text{std::string{language->get("fileTracking", "headerOrphaned")}}()
-                    ),
-                    span{class_ = "file-tracking-stat-value file-tracking-stat-orphaned"}(
-                        Nui::observe(orphanedCount).generate([this]() -> Nui::ElementRenderer
-                        {
-                            if (orphanedCount.value() < 0)
-                                return Nui::Elements::text{"-"}();
-                            return Nui::Elements::text{fmt::format("{}", orphanedCount.value())}();
-                        })
-                    )
-                )
-            ),
-            renderProgress(),
-            div{class_ = "file-tracking-header-actions"}(
-                ScriptNuiComponents::button({
-                    .text = Nui::observe(cleanupRunning).generate([](bool running) -> std::string
-                    {
-                        return std::string{language->get("fileTracking", running ? "headerCleanupRunning" : "headerCleanupButton")};
-                    }),
-                    .attributes =
-                        {
-                            Nui::Attributes::onClick = lifetime.guarded(
-                                [this](Nui::val)
-                                {
-                                    if (!cleanupRunning.value())
-                                        triggerCleanup();
-                                }
-                            ),
-                            disabled = Nui::observe(cleanupRunning).generate([](bool running) { return running; }),
-                        },
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                })
-            )
+            Nui::observe(
+                *store.countOf(OutlinerGroup::NeedsYou),
+                *store.countOf(OutlinerGroup::Syncing),
+                *store.countOf(OutlinerGroup::Watching),
+                *store.countOf(OutlinerGroup::Stopped),
+                *store.countOf(OutlinerGroup::Orphaned),
+                store.filter()
+            ).generate([this]() -> Nui::ElementRenderer {
+                return Nui::Elements::text{
+                    language->get("fileTracking", nothingTracked() ? "nothingTracked" : "nothingSelected")
+                }();
+            })
         );
         // clang-format on
     }
 
     /**
-     * @brief A cell with a switch that shows @p shown and forwards its changes as @p option of @p watchId.
-     * @param downloadedCopy Whether the row is a temporary copy, which never moves or deletes the server's file: the
-     *        switch of such an option is disabled then. Nothing for an option that applies to every row.
+     * @brief The detail of what the outliner selects, the placeholder while that is nothing or not known.
      */
-    ScriptNuiComponents::ResizableTable::TableCell switchCell(
-        Ids::WatchId const& watchId,
-        std::shared_ptr<Nui::Observed<bool>> shown,
-        SharedData::WatchOption option,
-        std::shared_ptr<Nui::Observed<bool>> downloadedCopy = nullptr
-    )
+    Nui::ElementRenderer renderDetail()
     {
-        using namespace ScriptNuiComponents;
-        return ResizableTable::TableCell{
-            [this, watchId, shown = std::move(shown), option, downloadedCopy = std::move(downloadedCopy)](
-                std::unique_ptr<ResizableTable::ISelfController>
-            ) -> Nui::ElementRenderer
-            {
-                std::vector<Nui::Attribute> attributes{};
-                if (downloadedCopy)
-                {
-                    attributes.push_back(Nui::Attributes::disabled = Nui::observe(*downloadedCopy).generate(
-                                             [](bool isCopy)
-                                             {
-                                                 return isCopy;
-                                             }
-                                         ));
-                    attributes.push_back(Nui::Attributes::title = Nui::observe(*downloadedCopy).generate(
-                                             [](bool isCopy)
-                                             {
-                                                 return isCopy ? std::string{language->get(
-                                                                     "fileTracking", "downloadedCopyOptionHint"
-                                                                 )}
-                                                               : std::string{};
-                                             }
-                                         ));
-                }
-                return ScriptNuiComponents::switch_({
-                    .isChecked = shown,
-                    .attributes = std::move(attributes),
-                    .onChange = lifetime.guarded(
-                        [this, watchId, option](bool checked, Nui::WebApi::MouseEvent const&)
-                        {
-                            forward("setOption", watchId.value(), Utility::enumToString(option), checked);
-                        }
-                    ),
-                });
-            },
-        };
-    }
-
-    /**
-     * @brief A cell that shows @p text and follows its changes.
-     */
-    static ScriptNuiComponents::ResizableTable::TableCell textCell(std::shared_ptr<Nui::Observed<std::string>> text)
-    {
-        using namespace ScriptNuiComponents;
-        return ResizableTable::TableCell{
-            [text = std::move(text)](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
-            {
-                return Nui::Elements::div{
-                    Nui::Attributes::style = "display:contents",
-                }(Nui::observe(*text).generate(
-                    [](std::string const& value) -> Nui::ElementRenderer
-                    {
-                        return Nui::Elements::text{value}();
-                    }
-                ));
-            },
-        };
-    }
-
-    ScriptNuiComponents::ResizableTable::TableRow buildRow(Ids::WatchId const& watchId, Row const& row)
-    {
-        using namespace ScriptNuiComponents;
-        return ResizableTable::TableRow{
-            textCell(row.name),
-            textCell(row.remotePath),
-            switchCell(watchId, row.autoReupload, SharedData::WatchOption::AutoReupload),
-            switchCell(watchId, row.moveRemote, SharedData::WatchOption::MoveRemoteOnLocalMove, row.downloadedCopy),
-            switchCell(
-                watchId, row.deleteRemote, SharedData::WatchOption::DeleteRemoteOnLocalDelete, row.downloadedCopy
-            ),
-            switchCell(watchId, row.checkRemote, SharedData::WatchOption::CheckRemoteChanges),
-            ResizableTable::TableCell{
-                [uploading = row.uploading](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
-                {
-                    return Nui::Elements::div{
-                        Nui::Attributes::class_ = "file-tracking-status",
-                        Nui::Attributes::style = "display:contents",
-                    }(Nui::observe(*uploading)
-                            .generate(
-                                [](bool isUploading) -> Nui::ElementRenderer
-                                {
-                                    return Nui::Elements::text{std::string{language->get(
-                                        "fileTracking", isUploading ? "statusUploading" : "statusWatching"
-                                    )}}();
-                                }
-                            ));
-                },
-            },
-            ResizableTable::TableCell{
-                [this, watchId](std::unique_ptr<ResizableTable::ISelfController>) -> Nui::ElementRenderer
-                {
-                    return ScriptNuiComponents::button({
-                        .text = std::string{language->get("fileTracking", "stopButton")},
-                        .attributes =
-                            {
-                                Nui::Attributes::onClick = lifetime.guarded(
-                                    [this, watchId](Nui::val)
-                                    {
-                                        forward("stop", watchId.value());
-                                    }
-                                ),
-                            },
-                        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    });
-                },
-            },
-        };
+        auto const& selection = store.selection().value();
+        if (auto const* const watchId = std::get_if<Ids::WatchId>(&selection); watchId != nullptr)
+        {
+            if (const auto item = store.watchItem(*watchId); item)
+                return FileTracking::watchDetail(store, actions, item);
+        }
+        if (auto const* const instanceId = std::get_if<Ids::InstanceId>(&selection); instanceId != nullptr)
+        {
+            if (const auto item = store.orphanItem(*instanceId); item)
+                return FileTracking::orphanDetail(store, actions, item);
+        }
+        return renderPlaceholder();
     }
 };
 
-FileTrackingPanel::FileTrackingPanel(ConfirmDialog* confirmDialog)
-    : impl_(std::make_unique<Implementation>(confirmDialog))
+FileTrackingPanel::FileTrackingPanel(Params params)
+    : impl_(std::make_unique<Implementation>(std::move(params)))
 {}
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL(FileTrackingPanel);
 
 void FileTrackingPanel::activate(Ids::SessionId sessionId)
 {
-    deactivate();
-    impl_->sessionId = std::move(sessionId);
-    impl_->listen();
-    impl_->refreshOrphanedCount();
+    impl_->client.activate(std::move(sessionId));
+    impl_->attention.reset();
 }
 
 void FileTrackingPanel::deactivate()
 {
-    impl_->listeners.clear();
-    impl_->table->clear();
-    impl_->rowOrder.clear();
-    impl_->rows.clear();
-    impl_->entryCount = std::size_t{0};
-    impl_->sessionId = {};
-    impl_->orphanedCount = -1;
-    impl_->cleanupRunning = false;
-    impl_->progress = SharedData::TrackerProgress{};
+    impl_->client.deactivate();
+    impl_->attention.reset();
 }
 
 void FileTrackingPanel::open(
@@ -631,27 +409,7 @@ void FileTrackingPanel::open(
     std::function<void(std::string const& reason)> onRefused
 )
 {
-    Nui::RpcClient::callWithBackChannel(
-        impl_->rpcName("open"),
-        impl_->lifetime.guarded(
-            [remotePath, onOpened = std::move(onOpened), onRefused = std::move(onRefused)](Nui::val response)
-            {
-                if (!Implementation::succeeded(response))
-                {
-                    if (const auto error = Implementation::errorOf(response))
-                        return onRefused(*error);
-                    return Log::warn("FileTracking: '{}' was not downloaded, it is not opened", remotePath.value());
-                }
-                const auto localPath = Paths::LocalPath::fromUtf8(response["localPath"].as<std::string>());
-                if (!localPath)
-                    return onRefused(localPath.error().toString());
-                onOpened(Ids::makeInstanceId(response["instanceId"].as<std::string>()), *localPath);
-            }
-        ),
-        remotePath.value(),
-        static_cast<double>(sizeBytes),
-        watch
-    );
+    impl_->client.open(remotePath, sizeBytes, watch, std::move(onOpened), std::move(onRefused));
 }
 
 void FileTrackingPanel::checkUploadAndWatch(
@@ -661,22 +419,7 @@ void FileTrackingPanel::checkUploadAndWatch(
     std::function<void(std::string const& reason)> onRefused
 )
 {
-    Nui::RpcClient::callWithBackChannel(
-        impl_->rpcName("checkUploadAndWatch"),
-        impl_->lifetime.guarded(
-            [onWatchable = std::move(onWatchable), onRefused = std::move(onRefused)](Nui::val response)
-            {
-                if (!Implementation::succeeded(response))
-                    return onRefused(Implementation::errorOf(response).value_or(""));
-                const auto canonicalItem = Paths::LocalPath::fromUtf8(response["item"].as<std::string>());
-                if (!canonicalItem)
-                    return onRefused(canonicalItem.error().toString());
-                onWatchable(*canonicalItem);
-            }
-        ),
-        item.toUtf8(),
-        directory.value()
-    );
+    impl_->client.checkUploadAndWatch(item, directory, std::move(onWatchable), std::move(onRefused));
 }
 
 void FileTrackingPanel::uploadAndWatch(
@@ -685,23 +428,25 @@ void FileTrackingPanel::uploadAndWatch(
     std::function<void(std::string const& reason)> onRefused
 )
 {
-    Nui::RpcClient::callWithBackChannel(
-        impl_->rpcName("uploadAndWatch"),
-        impl_->lifetime.guarded(
-            [onRefused = std::move(onRefused)](Nui::val response)
-            {
-                if (!Implementation::succeeded(response))
-                    onRefused(Implementation::errorOf(response).value_or(""));
-            }
-        ),
-        item.toUtf8(),
-        remotePath.value()
-    );
+    impl_->client.uploadAndWatch(item, remotePath, std::move(onRefused));
 }
 
 void FileTrackingPanel::discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)
 {
-    impl_->forward("discard", instanceId.value(), localPath.toUtf8());
+    impl_->client.discard(instanceId, localPath);
+}
+
+void FileTrackingPanel::setRevealOnServer(std::function<void(Paths::RemotePath const& path)> revealOnServer)
+{
+    impl_->revealOnServer = std::move(revealOnServer);
+}
+
+void FileTrackingPanel::onTabActivated()
+{
+    if (!impl_->attention.unseen())
+        return;
+    impl_->store.focusNewestConflict();
+    impl_->attention.acknowledge();
 }
 
 Nui::ElementRenderer FileTrackingPanel::operator()()
@@ -710,13 +455,28 @@ Nui::ElementRenderer FileTrackingPanel::operator()()
     using namespace Nui::Attributes;
     using Nui::Elements::div;
 
+    auto* const implementation = impl_.get();
+
     // clang-format off
     return div{
         class_ = "file-tracking-panel",
-        style = "width: 100%; height: 100%;",
     }(
-        impl_->renderHeader(),
-        (*impl_->table)({})
+        div{
+            class_ = "file-tracking-panel-layout",
+        }(
+            div{
+                class_ = "file-tracking-panel-outliner",
+            }(
+                FileTracking::outliner(implementation->store, implementation->actions)
+            ),
+            div{
+                class_ = "file-tracking-panel-detail",
+            }(
+                Nui::observe(implementation->store.selection()).generate([implementation]() -> Nui::ElementRenderer {
+                    return implementation->renderDetail();
+                })
+            )
+        )
     );
     // clang-format on
 }

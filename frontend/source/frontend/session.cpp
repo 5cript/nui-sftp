@@ -162,7 +162,10 @@ struct Session::Implementation
         , operationQueue{this->stateHolder, this->events, this->persistenceName, this->engineOptions.queueOptions.value(), this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
         , frontendSessionManager{}
         , sessionOptions{params.stateHolder, params.events, this->persistenceName, this->sessionLayoutId, params.confirmDialog}
-        , fileTrackingPanel{params.confirmDialog}
+        , fileTrackingPanel{FileTrackingPanel::Params{
+              .confirmDialog = params.confirmDialog,
+              .sessionLayoutId = this->sessionLayoutId,
+          }}
         , commandHistoryPanel{
               params.commandStoreClient,
               params.events,
