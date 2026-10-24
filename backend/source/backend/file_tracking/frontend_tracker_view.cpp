@@ -28,21 +28,6 @@ namespace FileTracking
         RpcHelper::callRemoteSafely(*hub_, eventName("onEntriesEnded"), ended);
     }
 
-    void FrontendTrackerView::ask(SharedData::ServerChangedQuestion const& question)
-    {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onQuestion"), question);
-    }
-
-    void FrontendTrackerView::showOrphanedCount(std::size_t count)
-    {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onOrphanedCount"), count);
-    }
-
-    void FrontendTrackerView::showProgress(SharedData::TrackerProgress const& progress)
-    {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onProgress"), progress);
-    }
-
     void FrontendTrackerView::showConflict(SharedData::WatchConflict const& conflict)
     {
         RpcHelper::callRemoteSafely(*hub_, eventName("onConflict"), conflict);

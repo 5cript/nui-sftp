@@ -3,14 +3,10 @@
 #include <ids/ids.hpp>
 #include <shared_data/file_tracking/ended_watches.hpp>
 #include <shared_data/file_tracking/orphaned_copy.hpp>
-#include <shared_data/file_tracking/server_changed_question.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
-#include <shared_data/file_tracking/tracker_progress.hpp>
 #include <shared_data/file_tracking/upload_failure.hpp>
 #include <shared_data/file_tracking/watch_conflict.hpp>
 #include <shared_data/file_tracking/watch_progress.hpp>
-
-#include <cstddef>
 
 namespace FileTracking
 {
@@ -40,21 +36,6 @@ namespace FileTracking
          *        before, see removeEntry().
          */
         virtual void showEnded(SharedData::EndedWatches const& ended) = 0;
-
-        /**
-         * @brief Asks @p question, the tracker waits for the answer before it asks the next one.
-         */
-        virtual void ask(SharedData::ServerChangedQuestion const& question) = 0;
-
-        /**
-         * @brief Shows how many instance directories no live process holds any more.
-         */
-        virtual void showOrphanedCount(std::size_t count) = 0;
-
-        /**
-         * @brief Shows how far the tracker is with the changes on their way, at most a few times a second.
-         */
-        virtual void showProgress(SharedData::TrackerProgress const& progress) = 0;
 
         /**
          * @brief Shows @p conflict, a local change that waits for the user's answer.

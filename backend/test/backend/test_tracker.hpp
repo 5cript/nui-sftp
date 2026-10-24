@@ -206,21 +206,6 @@ namespace Test
                 events.push_back("ended " + Utility::enumToString(shown.reason));
             }
 
-            void ask(SharedData::ServerChangedQuestion const& question) override
-            {
-                ADD_FAILURE() << "the tracker lists conflicts, it asked about " << question.remotePath.value();
-            }
-
-            void showOrphanedCount(std::size_t count) override
-            {
-                ADD_FAILURE() << "the tracker lists the orphaned copies, it counted " << count;
-            }
-
-            void showProgress(SharedData::TrackerProgress const&) override
-            {
-                ADD_FAILURE() << "the tracker shows the progress per watch";
-            }
-
             void showConflict(SharedData::WatchConflict const& conflict) override
             {
                 conflicts.insert_or_assign(conflict.conflictId.value(), conflict);

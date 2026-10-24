@@ -16,8 +16,7 @@ namespace FileTracking
     /**
      * @brief Shows a Tracker in the file tracking panel of its session, which listens to
      *        @c "FileTracker::<sessionId>::<event>": onEntry (SharedData::TrackedEntry), onEntryRemoved (watch id),
-     *        onEntriesEnded (SharedData::EndedWatches), onQuestion (SharedData::ServerChangedQuestion),
-     *        onOrphanedCount (count), onProgress (SharedData::TrackerProgress), onConflict (SharedData::WatchConflict),
+     *        onEntriesEnded (SharedData::EndedWatches), onConflict (SharedData::WatchConflict),
      *        onConflictRemoved (conflict id), onFailure (SharedData::UploadFailure), onFailureRemoved (failure id),
      *        onWatchProgress (SharedData::WatchProgress) and onOrphanedCopies (SharedData::OrphanedCopies).
      */
@@ -29,9 +28,6 @@ namespace FileTracking
         void showEntry(SharedData::TrackedEntry const& entry) override;
         void removeEntry(Ids::WatchId const& watchId) override;
         void showEnded(SharedData::EndedWatches const& ended) override;
-        void ask(SharedData::ServerChangedQuestion const& question) override;
-        void showOrphanedCount(std::size_t count) override;
-        void showProgress(SharedData::TrackerProgress const& progress) override;
         void showConflict(SharedData::WatchConflict const& conflict) override;
         void removeConflict(Ids::ConflictId const& conflictId) override;
         void showFailure(SharedData::UploadFailure const& failure) override;
