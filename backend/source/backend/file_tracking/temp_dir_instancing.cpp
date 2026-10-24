@@ -152,6 +152,12 @@ namespace FileTracking
         );
     }
 
+    std::expected<void, std::string> TemporaryDirectoryInstance::recordOrigin(Paths::RemotePath const& remotePath)
+    {
+        Log::debug("recordOrigin: not recording '{}' for instance '{}' yet", remotePath.value(), impl_->instanceId);
+        return {};
+    }
+
     void TemporaryDirectoryInstance::cleanupNow()
     {
         if (!impl_)

@@ -2,6 +2,8 @@
 
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <ids/ids.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/strand.hpp>
@@ -150,6 +152,18 @@ namespace FileTracking
          * @return How many were removed.
          */
         int removeOrphaned();
+
+        /**
+         * @brief The instance directories below the root that no live process holds, with what they hold and where
+         *        it came from.
+         */
+        std::vector<SharedData::OrphanedCopy> listOrphaned() const;
+
+        /**
+         * @brief Removes the directory of the orphaned instance @p instanceId with everything in it.
+         * @return An error when it is no orphaned instance below the root or cannot be removed.
+         */
+        std::expected<void, std::string> removeOrphanedInstance(Ids::InstanceId const& instanceId);
 
         /**
          * @brief Look up an instance by ID.

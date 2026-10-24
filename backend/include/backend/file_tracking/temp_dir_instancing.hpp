@@ -5,10 +5,12 @@
 #include <backend/file_tracking/instance_watch.hpp>
 #include <backend/file_tracking/reported_change.hpp>
 #include <persistence/state/sftp_options.hpp>
+#include <paths/paths.hpp>
 
 #include <boost/asio/strand.hpp>
 #include <boost/asio/any_io_executor.hpp>
 
+#include <expected>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -102,6 +104,13 @@ namespace FileTracking
             std::string downloadTempSuffix = std::string{Persistence::defaultTempFileSuffix},
             ChangeSink sink = [](ReportedChange const&) {}
         );
+
+        /**
+         * @brief Records in the metadata that the instance holds a download of @p remotePath, beside the fields older
+         *        builds read.
+         * @return An error when the metadata cannot be written.
+         */
+        std::expected<void, std::string> recordOrigin(Paths::RemotePath const& remotePath);
 
         /**
          * @brief Immediately delete the instance directory and invalidate this

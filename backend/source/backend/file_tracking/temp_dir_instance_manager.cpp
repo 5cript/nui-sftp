@@ -350,6 +350,18 @@ namespace FileTracking
         return forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
     }
 
+    std::vector<SharedData::OrphanedCopy> TempDirInstanceManager::listOrphaned() const
+    {
+        return {};
+    }
+
+    std::expected<void, std::string> TempDirInstanceManager::removeOrphanedInstance(Ids::InstanceId const& instanceId)
+    {
+        return std::unexpected{
+            fmt::format("Removing the orphaned instance '{}' is not implemented", instanceId.value())
+        };
+    }
+
     TemporaryDirectoryInstance*
     TempDirInstanceManager::findInstance(std::string const& instanceId) const
     {
