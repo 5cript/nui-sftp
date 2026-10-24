@@ -3,10 +3,11 @@ import { LocalShellTerminal } from './content_panels/local_shell_terminal';
 import { FileExplorer } from './content_panels/file_explorer';
 import { OperationQueue } from './content_panels/operation_queue';
 import { SessionOptions } from './content_panels/session_options';
-import { FileTracking } from './content_panels/file_tracking';
+import { FileTracking, FileTrackingAttention } from './content_panels/file_tracking';
 import { CommandHistory } from './content_panels/command_history';
 import { CommandSnippets } from './content_panels/command_snippets';
 import { NuiWidget } from './content_panels/nui_widget';
+import { badgeDockRenderer } from './content_panels/badge_tab_renderer';
 import {
     BoxPanel,
     DockPanel,
@@ -36,6 +37,8 @@ export interface PanelFactories {
     sessionOptionsDelete: () => any;
     fileTrackingFactory: () => HTMLElement | undefined;
     fileTrackingDelete: () => any;
+    /** Called when the user activates the File Tracking tab; optional. */
+    fileTrackingActivated?: () => any;
     commandHistoryFactory: () => HTMLElement | undefined;
     commandHistoryDelete: () => any;
     commandSnippetsFactory: () => HTMLElement | undefined;
@@ -63,6 +66,8 @@ export class ContentPanel {
     /// observer pins `this.main` alive and keeps stale Nui::bind references
     /// to the owning Session around after close.
     private resizeObserver: ResizeObserver | undefined;
+    /** The last attention of the File Tracking tab, for File Tracking widgets created later. */
+    private fileTrackingAttention: FileTrackingAttention | undefined;
 
     constructor(
         id: string,
@@ -136,7 +141,7 @@ export class ContentPanel {
             case 'session-options':
                 return new SessionOptions('SessionOptions', this.factories.sessionOptionsFactory, this.factories.sessionOptionsDelete);
             case 'file-tracking':
-                return new FileTracking('File Tracking', this.factories.fileTrackingFactory, this.factories.fileTrackingDelete);
+                return this.makeFileTracking();
             case 'command-history':
                 return new CommandHistory('Command History', this.factories.commandHistoryFactory, this.factories.commandHistoryDelete);
             case 'command-snippets':
@@ -159,6 +164,18 @@ export class ContentPanel {
             }
         }
         return false;
+    }
+
+    /**
+     * Shows the counts on the File Tracking tab and plays its glow when attention.pulse is set. Widgets created later
+     * get the counts without the glow.
+     */
+    setFileTrackingAttention(attention: FileTrackingAttention) {
+        this.fileTrackingAttention = attention;
+        for (const widget of this.dock.widgets()) {
+            if (widget instanceof FileTracking)
+                widget.applyAttention(attention);
+        }
     }
 
     /** Re-applies the translated titles to every tab that has no title of its own. */
@@ -257,6 +274,7 @@ export class ContentPanel {
 
         const dock = new DockPanel({
             addButtonEnabled: true,
+            renderer: badgeDockRenderer,
         });
         dock.addWidget(term);
         dock.addWidget(explorer, { mode: 'split-right', ref: term });
@@ -264,7 +282,7 @@ export class ContentPanel {
         dock.addWidget(snippets, { mode: 'tab-after', ref: history });
         if (this.engineType === 'ssh') {
             const queue = new OperationQueue('OperationQueue', f.operationQueueFactory, f.operationQueueDelete);
-            const fileTracking = new FileTracking('File Tracking', f.fileTrackingFactory, f.fileTrackingDelete);
+            const fileTracking = this.makeFileTracking();
             dock.addWidget(queue, { mode: 'split-bottom', ref: term });
             dock.addWidget(fileTracking, { mode: 'tab-after', ref: queue });
         }
@@ -320,6 +338,7 @@ export class ContentPanel {
 
         const dock = new DockPanel({
             addButtonEnabled: true,
+            renderer: badgeDockRenderer,
         });
         const area = { main: deserializeArea(dehydrated.main) };
         if (area) {
@@ -327,6 +346,18 @@ export class ContentPanel {
             dockLayout.restoreLayout(area as DockPanel.ILayoutConfig);
         }
         return dock;
+    }
+
+    private makeFileTracking(): FileTracking {
+        const fileTracking = new FileTracking(
+            'File Tracking',
+            this.factories.fileTrackingFactory,
+            this.factories.fileTrackingDelete,
+            this.factories.fileTrackingActivated
+        );
+        if (this.fileTrackingAttention !== undefined)
+            fileTracking.applyAttention({ ...this.fileTrackingAttention, pulse: false });
+        return fileTracking;
     }
 
     private applyDefaultSplit(dock: DockPanel) {
