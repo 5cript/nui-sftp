@@ -125,6 +125,12 @@ namespace FileTracking
                         return stop ? Utility::enumToString(stop->reason) : std::string{};
                     }
                 ),
+                "data-ft-stop-text"_attr = Nui::observe(item->stopText).generate(
+                    [item]()
+                    {
+                        return item->stopText.value();
+                    }
+                ),
                 hidden = Nui::observe(item->stop).generate(
                     [item]()
                     {

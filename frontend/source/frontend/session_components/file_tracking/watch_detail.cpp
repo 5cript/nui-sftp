@@ -4,6 +4,7 @@
 #include <frontend/session_components/file_tracking/sync_progress_block.hpp>
 #include <frontend/session_components/file_tracking/watch_header.hpp>
 
+#include <nui/event_system/observed_value_combinator.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 
@@ -24,6 +25,18 @@ namespace FileTracking
             class_ = "file-tracking-detail",
             "data-ft-detail"_attr = "watch",
             "data-ft-watch-id"_attr = item->watchId.value(),
+            "data-ft-copy"_attr = Nui::observe(item->downloadedCopy).generate(
+                [item]()
+                {
+                    return item->downloadedCopy.value();
+                }
+            ),
+            "data-ft-stopped"_attr = Nui::observe(item->stop).generate(
+                [item]()
+                {
+                    return item->stop.value().has_value();
+                }
+            ),
         }(
             watchHeader(store, actions, item),
             stopReasonStrip(store, actions, item),
