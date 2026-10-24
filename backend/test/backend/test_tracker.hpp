@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <ranges>
 #include <set>
 #include <string>
@@ -208,9 +209,9 @@ namespace Test
                 orphanedCounts.push_back(count);
             }
 
-            void showProgress(SharedData::TrackerProgress const& shown) override
+            void showProgress(SharedData::TrackerProgress const&) override
             {
-                progress.push_back(shown);
+                ADD_FAILURE() << "the tracker shows the progress per watch";
             }
 
             void showConflict(SharedData::WatchConflict const& conflict) override
@@ -239,6 +240,7 @@ namespace Test
             void showWatchProgress(SharedData::WatchProgress const& shown) override
             {
                 watchProgress.push_back(shown);
+                watchProgressShownAt.push_back(std::chrono::steady_clock::now());
             }
 
             void showOrphanedCopies(SharedData::OrphanedCopies const& copies) override
@@ -250,7 +252,6 @@ namespace Test
             std::vector<std::string> removed{};
             std::vector<SharedData::EndedWatches> ended{};
             std::vector<std::size_t> orphanedCounts{};
-            std::vector<SharedData::TrackerProgress> progress{};
             /** @brief The conflicts shown and not removed, by id. */
             std::map<std::string, SharedData::WatchConflict> conflicts{};
             /** @brief Every conflict shown, in order. */
@@ -260,7 +261,29 @@ namespace Test
             std::map<std::string, SharedData::UploadFailure> failures{};
             std::vector<std::string> removedFailures{};
             std::vector<SharedData::WatchProgress> watchProgress{};
+            /** @brief When each of watchProgress was shown. */
+            std::vector<std::chrono::steady_clock::time_point> watchProgressShownAt{};
             std::vector<SharedData::OrphanedCopies> orphanedCopies{};
+        };
+
+        /**
+         * @brief The counts of a watch's progress a test compares: its changes, and those of its last sync.
+         */
+        struct ProgressCounts
+        {
+            std::uint64_t pending{0u};
+            std::uint64_t done{0u};
+            std::uint64_t waitingForAnswer{0u};
+            std::optional<std::uint64_t> synced{};
+
+            bool operator==(ProgressCounts const&) const = default;
+
+            friend void PrintTo(ProgressCounts const& counts, std::ostream* stream)
+            {
+                *stream << "{pending " << counts.pending << ", done " << counts.done << ", waitingForAnswer "
+                        << counts.waitingForAnswer << ", synced "
+                        << (counts.synced ? std::to_string(*counts.synced) : std::string{"none"}) << "}";
+            }
         };
 
         using Opened = std::expected<FileTracking::Tracker::OpenedCopy, FileTracking::Tracker::OpenFailure>;
@@ -692,25 +715,120 @@ namespace Test
             );
         }
 
-        /**
-         * @brief The progress the view showed last, nothing on its way before it showed any.
-         */
-        SharedData::TrackerProgress lastProgress() const
+        Ids::WatchId watchIdNamed(std::string const& name) const
         {
-            return view_->progress.empty() ? SharedData::TrackerProgress{} : view_->progress.back();
+            for (auto const& entry : std::views::values(view_->entries))
+                if (entry.name == name)
+                    return entry.watchId;
+            ADD_FAILURE() << "no entry is named " << name;
+            return {};
+        }
+
+        static ProgressCounts countsOf(SharedData::WatchProgress const& progress)
+        {
+            return {
+                .pending = progress.changesPending,
+                .done = progress.changesDone,
+                .waitingForAnswer = progress.waitingForAnswer,
+                .synced = progress.lastSync ? std::optional{progress.lastSync->changes} : std::nullopt,
+            };
         }
 
         /**
-         * @brief Runs the handlers until the view shows @p expected.
+         * @brief The progress the view showed of @p watchId, in order.
          */
-        bool runUntilProgress(SharedData::TrackerProgress const& expected)
+        std::vector<SharedData::WatchProgress> progressOf(Ids::WatchId const& watchId) const
+        {
+            std::vector<SharedData::WatchProgress> shown;
+            for (auto const& progress : view_->watchProgress)
+                if (progress.watchId == watchId)
+                    shown.push_back(progress);
+            return shown;
+        }
+
+        /**
+         * @brief When the view showed the progress of @p watchId, in order.
+         */
+        std::vector<std::chrono::steady_clock::time_point> progressTimesOf(Ids::WatchId const& watchId) const
+        {
+            std::vector<std::chrono::steady_clock::time_point> times;
+            for (std::size_t index = 0; index < view_->watchProgress.size(); ++index)
+                if (view_->watchProgress[index].watchId == watchId)
+                    times.push_back(view_->watchProgressShownAt[index]);
+            return times;
+        }
+
+        std::optional<SharedData::WatchProgress> lastProgressOf(Ids::WatchId const& watchId) const
+        {
+            auto shown = progressOf(watchId);
+            if (shown.empty())
+                return std::nullopt;
+            return std::move(shown.back());
+        }
+
+        /**
+         * @brief Runs the handlers until the progress the view showed last of @p watchId passes @p condition.
+         */
+        bool runUntilProgress(
+            Ids::WatchId const& watchId,
+            std::function<bool(SharedData::WatchProgress const&)> const& condition
+        )
         {
             return runUntil(
-                [this, &expected]()
+                [this, &watchId, &condition]()
                 {
-                    return lastProgress() == expected;
+                    const auto last = lastProgressOf(watchId);
+                    return last && condition(*last);
                 }
             );
+        }
+
+        /**
+         * @brief Runs the handlers until the progress the view showed last of @p watchId has @p expected counts.
+         */
+        bool runUntilProgress(Ids::WatchId const& watchId, ProgressCounts const& expected)
+        {
+            const bool shown = runUntilProgress(
+                watchId,
+                [&expected](SharedData::WatchProgress const& progress)
+                {
+                    return countsOf(progress) == expected;
+                }
+            );
+            if (!shown)
+                EXPECT_EQ(lastProgressOf(watchId).transform(countsOf), std::optional{expected});
+            return shown;
+        }
+
+        /**
+         * @brief The progress of the upload of the single file @p path, @p sent of @p total bytes.
+         */
+        static FileTracking::UploadProgress fileProgress(
+            std::filesystem::path const& path,
+            std::uint64_t sent,
+            std::uint64_t total,
+            bool transferred = false
+        )
+        {
+            std::vector<SharedData::WatchFileProgress> inFlight;
+            if (!transferred)
+                inFlight.push_back({.path = local(path), .bytes = sent, .totalBytes = total});
+            return {
+                .bytesSent = sent,
+                .bytesTotal = total,
+                .inFlight = std::move(inFlight),
+                .filesDone = transferred ? 1u : 0u,
+                .fileCount = 1u,
+                .transferred = transferred,
+            };
+        }
+
+        static std::vector<std::filesystem::path> inFlightPathsOf(SharedData::WatchProgress const& progress)
+        {
+            std::vector<std::filesystem::path> paths;
+            for (auto const& file : progress.inFlight)
+                paths.push_back(file.path.native());
+            return paths;
         }
     };
 
@@ -998,60 +1116,277 @@ namespace Test
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
 
         write(opened->localPath.native(), "changed locally");
 
-        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u}));
         completeUploads();
-        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
-        const auto shown = view_->progress.size();
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
+        const auto shown = view_->watchProgress.size();
         runFor(std::chrono::milliseconds{500});
-        EXPECT_EQ(view_->progress.size(), shown);
+        EXPECT_EQ(view_->watchProgress.size(), shown);
     }
 
     TEST_F(TrackerTest, TheProgressShowsAChangeWaitingForAnAnswer)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
         remote_->server["/srv/notes.txt"].mtime += 100u;
 
         write(opened->localPath.native(), "changed locally");
 
-        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u}));
         completeUploads();
-        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 1u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u, .waitingForAnswer = 1u}));
+        EXPECT_EQ(lastProgressOf(watchId)->changesWaiting, 1u);
         tracker_->answerConflict(onlyConflict().conflictId, SharedData::ConflictResolution::KeepServers);
-        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
     }
 
     TEST_F(TrackerTest, TheProgressCountsADeleteOnTheServerUntilItEnded)
     {
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return !view_->progress.empty() && lastProgress().pending == 0u;
-            }
-        ));
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 3u}));
 
         std::filesystem::remove(root_ / "local" / "project" / "src" / "main.cpp");
 
         ASSERT_TRUE(runUntil(
-            [this]()
+            [this, &watchId]()
             {
-                return !remote_->of("remove").empty() && lastProgress().pending > 0u;
+                return !remote_->of("remove").empty() && lastProgressOf(watchId)->changesPending > 0u;
             }
         ));
         end(*remote_->of("remove").front(), SharedData::OperationCompletionReason::Completed);
         completeUploads();
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.changesPending == 0u;
+            }
+        ));
+        const auto last = lastProgressOf(watchId);
+        EXPECT_EQ(last->changesDone, 0u);
+        ASSERT_TRUE(last->lastSync.has_value());
+        EXPECT_GE(last->lastSync->changes, 1u);
+    }
+
+    TEST_F(TrackerTest, AFileUploadShowsItsBytesRisingToItsTotalAndEndsIdleWithItsLastSync)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
+        const auto copy = opened->localPath.native();
+        // A new entry is shown with its progress.
+        ASSERT_EQ(progressOf(watchId).size(), 1u);
+        EXPECT_EQ(countsOf(progressOf(watchId).front()), ProgressCounts{});
+        EXPECT_EQ(progressOf(watchId).front().bytesTotal, 0u);
+
+        write(copy, std::string(1000u, 'x'));
+
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u}));
+        EXPECT_EQ(lastProgressOf(watchId)->bytesDone, 0u);
+        EXPECT_EQ(lastProgressOf(watchId)->bytesTotal, 1000u);
+        EXPECT_EQ(lastProgressOf(watchId)->changesWaiting, 1u);
+        for (const std::uint64_t sent : {250u, 600u})
+        {
+            lastUploadTo("/srv/notes.txt")->onUploadProgress(fileProgress(copy, sent, 1000u));
+            ASSERT_TRUE(runUntilProgress(
+                watchId,
+                [sent](SharedData::WatchProgress const& progress)
+                {
+                    return progress.bytesDone == sent;
+                }
+            ));
+            const auto shown = *lastProgressOf(watchId);
+            EXPECT_EQ(shown.bytesTotal, 1000u);
+            EXPECT_EQ(countsOf(shown), ProgressCounts{.pending = 1u});
+            EXPECT_EQ(shown.changesWaiting, 0u);
+            ASSERT_EQ(inFlightPathsOf(shown), std::vector{copy});
+            EXPECT_EQ(shown.inFlight.front().bytes, sent);
+            EXPECT_EQ(shown.inFlight.front().totalBytes, 1000u);
+        }
+        lastUploadTo("/srv/notes.txt")->onUploadProgress(fileProgress(copy, 1000u, 1000u, /*transferred=*/true));
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.bytesDone == 1000u;
+            }
+        ));
+        EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.done = 1u});
+        EXPECT_TRUE(lastProgressOf(watchId)->inFlight.empty());
+
+        completeUploads();
+
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
+        const auto idle = *lastProgressOf(watchId);
+        EXPECT_EQ(idle.bytesDone, 0u);
+        EXPECT_EQ(idle.bytesTotal, 0u);
+        EXPECT_TRUE(idle.inFlight.empty());
+        EXPECT_EQ(idle.lastSync->bytes, 1000u);
+        EXPECT_GT(idle.lastSync->endedAt, 0u);
+    }
+
+    TEST_F(TrackerTest, TwoWatchesShowTheirProgressApart)
+    {
+        const auto notes = root_ / "local" / "notes.txt";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        const auto notesId = watchIdNamed("notes.txt");
+        const auto projectId = watchIdNamed("project");
+        ASSERT_TRUE(runUntilProgress(notesId, {.pending = 1u}));
+        ASSERT_TRUE(runUntilProgress(projectId, {.pending = 3u}));
+
+        lastUploadTo("/srv/notes.txt")->onUploadProgress(fileProgress(notes, 2u, 5u));
+
+        ASSERT_TRUE(runUntilProgress(
+            notesId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.bytesDone == 2u;
+            }
+        ));
+        EXPECT_EQ(inFlightPathsOf(*lastProgressOf(notesId)), std::vector{notes});
+        EXPECT_EQ(lastProgressOf(projectId)->bytesDone, 0u);
+        EXPECT_TRUE(lastProgressOf(projectId)->inFlight.empty());
+        completeWith(*lastUploadTo("/srv/notes.txt"), stateOf(notes));
+        ASSERT_TRUE(runUntilProgress(notesId, {.synced = 1u}));
+        EXPECT_EQ(lastProgressOf(notesId)->lastSync->bytes, 5u);
+        EXPECT_EQ(countsOf(*lastProgressOf(projectId)), ProgressCounts{.pending = 3u});
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress(projectId, {.synced = 3u}));
+        EXPECT_EQ(countsOf(*lastProgressOf(notesId)), ProgressCounts{.synced = 1u});
+        for (auto const& shown : progressOf(projectId))
+            EXPECT_TRUE(shown.inFlight.empty());
+    }
+
+    TEST_F(TrackerTest, ADirectoryUploadShowsItsFilesDoneOfAllAndThoseInFlightByLocalPath)
+    {
+        const auto project = root_ / "local" / "project";
+        const auto mainFile = project / "src" / "main.cpp";
+        const auto utilFile = project / "src" / "util.cpp";
+        write(utilFile, "util");
+        write(project / "readme.md", "readme");
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 5u}));
+        EXPECT_EQ(lastProgressOf(watchId)->changesWaiting, 5u);
+
+        // The directory and src are done, both files on their way.
+        lastUploadTo("/srv/project")
+            ->onUploadProgress({
+                .bytesSent = 8u,
+                .bytesTotal = 30u,
+                .inFlight =
+                    {{.path = local(mainFile), .bytes = 6u, .totalBytes = 13u},
+                        {.path = local(utilFile), .bytes = 2u, .totalBytes = 4u}},
+                .filesDone = 2u,
+                .fileCount = 5u,
+                .transferred = false,
+            });
+
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 3u, .done = 2u}));
+        const auto running = *lastProgressOf(watchId);
+        EXPECT_EQ(running.changesWaiting, 1u);
+        EXPECT_EQ(running.bytesDone, 8u);
+        EXPECT_EQ(running.bytesTotal, 30u);
+        EXPECT_EQ(inFlightPathsOf(running), (std::vector{mainFile, utilFile}));
+        EXPECT_EQ(running.inFlight.back().bytes, 2u);
+        EXPECT_EQ(running.inFlight.back().totalBytes, 4u);
+        lastUploadTo("/srv/project")
+            ->onUploadProgress({
+                .bytesSent = 30u,
+                .bytesTotal = 30u,
+                .inFlight = {},
+                .filesDone = 5u,
+                .fileCount = 5u,
+                .transferred = true,
+            });
+        ASSERT_TRUE(runUntilProgress(watchId, {.done = 5u}));
+        EXPECT_EQ(lastProgressOf(watchId)->bytesDone, 30u);
+        EXPECT_TRUE(lastProgressOf(watchId)->inFlight.empty());
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 5u}));
+        EXPECT_EQ(lastProgressOf(watchId)->lastSync->bytes, 30u);
+    }
+
+    TEST_F(TrackerTest, ManyProgressReportsWithinTheIntervalGiveFewSnapshotsAndTheIdleOneStillFollows)
+    {
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
+        const auto copy = opened->localPath.native();
+        write(copy, std::string(1000u, 'x'));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u}));
+        const auto before = progressOf(watchId).size();
+        const auto started = std::chrono::steady_clock::now();
+
+        for (std::uint64_t sent = 20u; sent <= 1000u; sent += 20u)
+        {
+            lastUploadTo("/srv/notes.txt")->onUploadProgress(fileProgress(copy, sent, 1000u, sent == 1000u));
+            ioc_.restart();
+            ioc_.run_for(std::chrono::milliseconds{5});
+        }
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.bytesDone == 1000u;
+            }
+        ));
+        // Within the interval of that snapshot, the idle one waits for it to pass.
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        runFor(std::chrono::milliseconds{300});
+
+        const auto shown = progressOf(watchId);
+        const auto times = progressTimesOf(watchId);
+        EXPECT_LE(shown.size() - before, static_cast<std::size_t>(elapsed / std::chrono::milliseconds{200}) + 2u);
+        EXPECT_EQ(countsOf(shown.back()), ProgressCounts{.synced = 1u});
+        for (std::size_t index = 1u; index < times.size(); ++index)
+            EXPECT_GE(times[index] - times[index - 1u], std::chrono::milliseconds{195}) << "progress " << index;
+    }
+
+    TEST_F(TrackerTest, AStoppedOrDiscardedWatchShowsNoProgressAfterwards)
+    {
+        const auto file = root_ / "local" / "project" / "big.bin";
+        ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        const auto projectId = onlyEntry().watchId;
+        completeEverything();
+        const auto opened = open("/srv/notes.txt", /*watch=*/true);
+        ASSERT_TRUE(opened.has_value());
+        const auto copyId = watchIdNamed("notes.txt");
+        write(file, "large content");
+        write(opened->localPath.native(), "changed copy");
         ASSERT_TRUE(runUntil(
             [this]()
             {
-                return lastProgress().pending == 0u;
+                return uploadsTo("/srv/project/big.bin") == 1u && uploadsTo("/srv/notes.txt") == 1u;
             }
         ));
-        EXPECT_GE(lastProgress().done, 1u);
+        const auto onFileProgress = lastUploadTo("/srv/project/big.bin")->onUploadProgress;
+        const auto onCopyProgress = lastUploadTo("/srv/notes.txt")->onUploadProgress;
+        onFileProgress(fileProgress(file, 3u, 13u));
+        onCopyProgress(fileProgress(opened->localPath.native(), 4u, 12u));
+        const auto shownOfProject = progressOf(projectId).size();
+        const auto shownOfCopy = progressOf(copyId).size();
+
+        tracker_->stop(projectId);
+        ASSERT_TRUE(tracker_->discard(opened->instanceId, opened->localPath).has_value());
+        onFileProgress(fileProgress(file, 13u, 13u, /*transferred=*/true));
+        onCopyProgress(fileProgress(opened->localPath.native(), 12u, 12u, /*transferred=*/true));
+        runFor(std::chrono::milliseconds{500});
+        completeUploads();
+        runFor(std::chrono::milliseconds{300});
+
+        EXPECT_EQ(progressOf(projectId).size(), shownOfProject);
+        EXPECT_EQ(progressOf(copyId).size(), shownOfCopy);
     }
 
     TEST_F(TrackerTest, AnAnswerToAnUnknownConflictChangesNothing)
@@ -1272,12 +1607,39 @@ namespace Test
         ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
         const auto mainConflict = conflictIdAt(main_);
         const auto utilConflict = conflictIdAt(util_);
+        const auto watchId = onlyEntry().watchId;
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.waitingForAnswer == 2u;
+            }
+        ));
+        const auto shown = view_->watchProgress.size();
 
         tracker_->connectionLost();
 
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(view_->removedConflicts, (std::vector<std::string>{mainConflict.value(), utilConflict.value()}));
-        EXPECT_EQ(lastProgress().waitingForAnswer, 0u);
+        // The view drops the progress with the entry.
+        runFor(std::chrono::milliseconds{300});
+        EXPECT_EQ(view_->watchProgress.size(), shown);
+    }
+
+    TEST_F(TrackerConflictsTest, TheProgressCountsTheChangesWaitingForAnAnswerFromTheConflicts)
+    {
+        ASSERT_NO_FATAL_FAILURE(raiseTwoConflicts());
+        const auto watchId = onlyEntry().watchId;
+
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 2u, .waitingForAnswer = 2u, .synced = 4u}));
+        EXPECT_EQ(lastProgressOf(watchId)->changesWaiting, 2u);
+        tracker_->answerConflict(conflictIdAt(main_), SharedData::ConflictResolution::KeepServers);
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u, .done = 1u, .waitingForAnswer = 1u, .synced = 4u}));
+        tracker_->answerConflict(conflictIdAt(util_), SharedData::ConflictResolution::ReplaceOnServer);
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u, .done = 1u, .synced = 4u}));
+        EXPECT_EQ(lastProgressOf(watchId)->changesWaiting, 1u);
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 2u}));
     }
 
     TEST_F(TrackerConflictsTest, AConflictWhosePathWasDeletedLocallyBeforeTheAnswerUploadsNothing)
@@ -1790,7 +2152,8 @@ namespace Test
         ASSERT_TRUE(
             tracker_->uploadAndWatch(local(root_ / "local" / "notes.txt"), remote("/srv/notes.txt")).has_value()
         );
-        ASSERT_TRUE(runUntilProgress({.pending = 1}));
+        ASSERT_TRUE(runUntilProgress(watchIdNamed("notes.txt"), {.pending = 1u}));
+        const auto shown = view_->watchProgress.size();
 
         tracker_->connectionLost();
         write(root_ / "local" / "notes.txt", "changed locally");
@@ -1804,7 +2167,7 @@ namespace Test
         const auto names = view_->ended.front().entries | std::views::transform(&SharedData::TrackedEntry::name) |
             std::ranges::to<std::set>();
         EXPECT_EQ(names, (std::set<std::string>{"copy.txt", "notes.txt"}));
-        EXPECT_EQ(lastProgress(), SharedData::TrackerProgress{});
+        EXPECT_EQ(view_->watchProgress.size(), shown);
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_EQ(uploadsTo("/srv/copy.txt"), 0u);
         EXPECT_EQ(instances_->findInstance(copy->instanceId.value()), nullptr);
@@ -2674,8 +3037,9 @@ namespace Test
     {
         const auto project = root_ / "local" / "project";
         ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
         completeEverything();
-        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 3u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 3u}));
         const auto staging = root_ / "staging";
         std::filesystem::create_directories(staging / "sub");
         write(staging / "one.txt", "one");
@@ -2683,17 +3047,18 @@ namespace Test
 
         std::filesystem::rename(staging, project / "moved");
 
-        ASSERT_TRUE(runUntilProgress({.pending = 4u, .done = 0u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 4u, .synced = 3u}));
         completeUploads();
-        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 4u}));
         runFor(std::chrono::milliseconds{500});
-        EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
+        EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.synced = 4u});
     }
 
     TEST_F(TrackerTest, TheProgressCountsANewDirectoryAndTheLateReportsOfItsContentOnce)
     {
         const auto project = root_ / "local" / "project";
         ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
         completeEverything();
 
         std::filesystem::create_directory(project / "new");
@@ -2708,16 +3073,11 @@ namespace Test
         write(project / "new" / "three.txt", "three");
         runFor(std::chrono::milliseconds{1000});
         completeUploads();
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return lastProgress().pending == 0u;
-            }
-        ));
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 4u}));
         runFor(std::chrono::milliseconds{500});
         completeEverything();
 
-        EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 4u, .waitingForAnswer = 0u}));
+        EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.synced = 4u});
     }
 
     TEST_F(TrackerTest, TheProgressCountsWhatADirectoryUploadLeftNotChangesThatCameToNothing)
@@ -2725,8 +3085,9 @@ namespace Test
         const auto project = root_ / "local" / "project";
         const auto staging = root_ / "staging";
         ASSERT_TRUE(tracker_->uploadAndWatch(local(project), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
         completeEverything();
-        ASSERT_TRUE(runUntilProgress({.pending = 0u, .done = 3u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 3u}));
         std::filesystem::create_directory(staging);
         write(staging / "one.txt", "one");
 
@@ -2748,22 +3109,24 @@ namespace Test
         runFor(std::chrono::milliseconds{500});
         completeEverything();
 
-        EXPECT_TRUE(runUntilProgress({.pending = 0u, .done = 2u, .waitingForAnswer = 0u}));
+        EXPECT_TRUE(runUntilProgress(watchId, {.synced = 2u}));
         EXPECT_TRUE(remote_->of("remove").empty());
     }
 
-    TEST_F(TrackerTest, TheProgressShowsAtOnceThatNothingIsOnItsWayAnyMore)
+    TEST_F(TrackerTest, TheProgressShowsAtOnceThatNothingIsOnItsWayAnyMoreOnceTheIntervalPassed)
     {
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
+        const auto watchId = onlyEntry().watchId;
         write(opened->localPath.native(), "changed locally");
-        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u}));
+        runFor(std::chrono::milliseconds{250});
 
         completeUploads();
         ioc_.restart();
         ioc_.run_for(std::chrono::milliseconds{50});
 
-        EXPECT_EQ(lastProgress(), (SharedData::TrackerProgress{.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
+        EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.synced = 1u});
         EXPECT_FALSE(onlyEntry().uploading);
     }
 
@@ -3047,16 +3410,17 @@ namespace Test
     {
         const auto file = root_ / "local" / "project" / "big.bin";
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
         completeEverything();
         runFor(std::chrono::milliseconds{500});
         write(file, "large content");
-        ASSERT_TRUE(runUntilProgress({.pending = 1u, .done = 0u, .waitingForAnswer = 0u}));
+        ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u, .synced = 3u}));
 
         std::filesystem::remove(file);
         ASSERT_TRUE(runUntilStopped());
         endStoppedUploads();
 
-        EXPECT_TRUE(runUntilProgress({.pending = 0u, .done = 1u, .waitingForAnswer = 0u}));
+        EXPECT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
     }
 
     TEST_F(TrackerTest, StoppingAWatchLeavesItsRunningUploadAlone)
@@ -3823,5 +4187,57 @@ namespace Test
         EXPECT_TRUE(view_->removedFailures.empty());
         tracker_->retryFailure(failureId);
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
+    }
+
+    TEST_F(TrackerFailuresTest, TheUnsentBytesOfAFailedUploadLeaveTheTotalSoTheProgressStillEndsFull)
+    {
+        ASSERT_NO_FATAL_FAILURE(watchProject());
+        const auto watchId = onlyEntry().watchId;
+        save(main_, std::string(100u, 'm'), "/srv/project/src/main.cpp", 1u);
+        save(util_, std::string(50u, 'u'), "/srv/project/src/util.cpp", 1u);
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.changesPending == 2u && progress.bytesTotal == 150u;
+            }
+        ));
+        lastUploadTo("/srv/project/src/main.cpp")->onUploadProgress(fileProgress(main_, 30u, 100u));
+        lastUploadTo("/srv/project/src/util.cpp")->onUploadProgress(fileProgress(util_, 10u, 50u));
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.bytesDone == 40u && progress.bytesTotal == 150u;
+            }
+        ));
+
+        endAs(*lastUploadTo("/srv/project/src/main.cpp"), failedAs(SharedData::UploadFailureReason::ConnectionProblem));
+
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.bytesTotal == 80u;
+            }
+        ));
+        const auto failed = *lastProgressOf(watchId);
+        EXPECT_EQ(failed.bytesDone, 40u);
+        EXPECT_EQ(countsOf(failed), (ProgressCounts{.pending = 1u, .done = 1u, .synced = 4u}));
+        EXPECT_EQ(inFlightPathsOf(failed), std::vector{util_});
+        lastUploadTo("/srv/project/src/util.cpp")
+            ->onUploadProgress(fileProgress(util_, 50u, 50u, /*transferred=*/true));
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.bytesDone == 80u;
+            }
+        ));
+        EXPECT_EQ(lastProgressOf(watchId)->bytesTotal, 80u);
+        completeUploads();
+        ASSERT_TRUE(runUntilProgress(watchId, {.synced = 2u}));
+        EXPECT_EQ(lastProgressOf(watchId)->lastSync->bytes, 80u);
+        EXPECT_EQ(view_->failures.size(), 1u);
     }
 }
