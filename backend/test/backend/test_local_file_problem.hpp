@@ -1,10 +1,10 @@
 #pragma once
 
+#include <backend/sftp/bulk_upload_operation.hpp>
 #include <backend/sftp/local_file_problem.hpp>
 #include <backend/sftp/upload_operation.hpp>
-#include "real_server_tests.hpp"
-
 #include <utility/temporary_directory.hpp>
+#include "real_server_tests.hpp"
 
 #include <gtest/gtest.h>
 
@@ -27,6 +27,7 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace Test
 {
@@ -217,14 +218,11 @@ namespace Test
         /**
          * @brief Works @p operation until it completes or fails.
          */
-        static std::expected<UploadOperation::WorkStatus, Operation::Error>
-        workUntilEnded(UploadOperation& operation, int maxIterations = 500)
+        static std::expected<Operation::WorkStatus, Operation::Error>
+        workUntilEnded(Operation& operation, int maxIterations = 2000)
         {
-            auto status = UploadOperation::WorkStatus::MoreWork;
-            for (
-                int iteration = 0; iteration < maxIterations && status != UploadOperation::WorkStatus::Complete;
-                ++iteration
-            )
+            auto status = Operation::WorkStatus::MoreWork;
+            for (int iteration = 0; iteration < maxIterations && status != Operation::WorkStatus::Complete; ++iteration)
             {
                 const auto worked = operation.work();
                 if (!worked)
@@ -232,6 +230,41 @@ namespace Test
                 status = *worked;
             }
             return status;
+        }
+
+        /** @brief How the upload of a shrinking file ended, and whether it shrank. */
+        struct ShrunkUpload
+        {
+            std::expected<Operation::WorkStatus, Operation::Error> ended;
+            bool shrunk;
+        };
+
+        /**
+         * @brief Uploads a file of @p size bytes that shrinks to nothing at the upload's first progress. A big file
+         *        transfer tells it on the strand right after it started, before it read anything.
+         */
+        ShrunkUpload
+        uploadShrinking(std::weak_ptr<SecureShell::SftpSession> sftp, std::size_t size, bool bigFileOptimized) const
+        {
+            const auto source = sources_.path() / "shrinking.bin";
+            writeSource(source, std::string(size, 's'));
+            bool shrunk = false;
+            UploadOperation operation{
+                std::move(sftp),
+                {
+                    .progressCallback =
+                        [&source, &shrunk](auto, auto, auto, auto)
+                    {
+                        std::error_code errorCode{};
+                        if (!std::exchange(shrunk, true))
+                            std::filesystem::resize_file(source, 0, errorCode);
+                    },
+                    .remotePath = remote("/home/test/shrinking.bin"),
+                    .localPath = toLocal(source),
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+            return ShrunkUpload{.ended = workUntilEnded(operation), .shrunk = shrunk};
         }
 
         Utility::TemporaryDirectory sources_{temporaryRoot, true};
@@ -283,63 +316,100 @@ namespace Test
 
     TEST_F(LocalFileProblemUploadTests, AFileThatShrinksWhileItIsSentInChunksFailsWithALocalProblem)
     {
-        const auto source = sources_.path() / "shrinking.bin";
-        writeSource(source, std::string(1024u * 1024u, 's'));
-        bool shrunk = false;
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [session, sftp] = createSftpSession(serverStartResult->port);
-        UploadOperation operation{
-            sftp,
-            {
-                .progressCallback =
-                    [&source, &shrunk](auto, auto, auto, auto)
-                {
-                    std::error_code errorCode{};
-                    if (!std::exchange(shrunk, true))
-                        std::filesystem::resize_file(source, 0, errorCode);
-                },
-                .remotePath = remote("/home/test/shrinking.bin"),
-                .localPath = toLocal(source),
-            }
-        };
 
-        const auto ended = workUntilEnded(operation);
+        const auto upload = uploadShrinking(sftp, 1024u * 1024u, false);
 
-        EXPECT_TRUE(shrunk);
-        ASSERT_FALSE(ended.has_value());
-        EXPECT_EQ(ended.error().type, SharedData::OperationErrorType::SourceFileNotGood) << ended.error().toString();
-        EXPECT_EQ(ended.error().localProblem, LocalFileProblem::Other);
+        EXPECT_TRUE(upload.shrunk);
+        ASSERT_FALSE(upload.ended.has_value());
+        EXPECT_EQ(upload.ended.error().type, SharedData::OperationErrorType::SourceFileNotGood)
+            << upload.ended.error().toString();
+        EXPECT_EQ(upload.ended.error().localProblem, LocalFileProblem::Other);
     }
 
     TEST_F(LocalFileProblemUploadTests, AFileThatShrinksBeforeABigTransferReadsItFailsWithALocalProblem)
     {
-        const auto source = sources_.path() / "shrinking.bin";
-        writeSource(source, std::string(256u * 1024u, 's'));
-        bool shrunk = false;
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [session, sftp] = createSftpSession(serverStartResult->port);
-        UploadOperation operation{
-            sftp,
-            {
-                // The first progress comes on the strand right after the transfer started, before it read anything.
-                .progressCallback =
-                    [&source, &shrunk](auto, auto, auto, auto)
-                {
-                    std::error_code errorCode{};
-                    if (!std::exchange(shrunk, true))
-                        std::filesystem::resize_file(source, 0, errorCode);
-                },
-                .remotePath = remote("/home/test/shrinking.bin"),
-                .localPath = toLocal(source),
-                .bigFileOptimized = true,
-            }
+
+        const auto upload = uploadShrinking(sftp, 256u * 1024u, true);
+
+        EXPECT_TRUE(upload.shrunk);
+        ASSERT_FALSE(upload.ended.has_value());
+        EXPECT_EQ(upload.ended.error().type, SharedData::OperationErrorType::SourceFileNotGood)
+            << upload.ended.error().toString();
+        EXPECT_EQ(upload.ended.error().localProblem, LocalFileProblem::Other);
+    }
+
+    TEST_F(LocalFileProblemUploadTests, ABulkUploadTellsTheLocalProblemOfAnEntryItCannotOpen)
+    {
+        if (readsAnyFile())
+            GTEST_SKIP() << "root reads any file";
+        writeSource(sources_.path() / "unreadable.txt", "unreadable");
+        writeSource(sources_.path() / "readable.txt", "readable");
+        const UnreadableFile unreadable{sources_.path() / "unreadable.txt"};
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        BulkUploadOperation operation{
+            sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(sources_.path()), .failFast = false}
         };
+        operation.setPrescannedFileList({
+            {
+                .source = toLocal(sources_.path() / "unreadable.txt"),
+                .destination = remote("/home/test/unreadable.txt"),
+                .sizeBytes = 10u,
+            },
+            {
+                .source = toLocal(sources_.path() / "readable.txt"),
+                .destination = remote("/home/test/readable.txt"),
+                .sizeBytes = 8u,
+            },
+        });
 
         const auto ended = workUntilEnded(operation);
 
-        EXPECT_TRUE(shrunk);
-        ASSERT_FALSE(ended.has_value());
-        EXPECT_EQ(ended.error().type, SharedData::OperationErrorType::SourceFileNotGood) << ended.error().toString();
-        EXPECT_EQ(ended.error().localProblem, LocalFileProblem::Other);
+        ASSERT_TRUE(ended.has_value()) << ended.error().toString();
+        EXPECT_EQ(*ended, Operation::WorkStatus::Complete);
+        ASSERT_EQ(operation.indexedFailures().size(), 1u);
+        auto const& failure = operation.indexedFailures().front();
+        EXPECT_EQ(failure.index, 0u);
+        EXPECT_EQ(failure.type, SharedData::OperationErrorType::OpenFailure);
+        EXPECT_EQ(failure.localProblem, unreadableProblem);
+        EXPECT_FALSE(failure.sftpErrorCode.has_value());
+    }
+
+    TEST_F(LocalFileProblemUploadTests, ABulkUploadTellsTheServersCodeForAnEntryTheServerRefused)
+    {
+        writeSource(sources_.path() / "refused.txt", "refused");
+        writeSource(sources_.path() / "accepted.txt", "accepted");
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        BulkUploadOperation operation{
+            sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(sources_.path()), .failFast = false}
+        };
+        operation.setPrescannedFileList({
+            {
+                .source = toLocal(sources_.path() / "refused.txt"),
+                .destination = remote("/home/test/no_such_directory/refused.txt"),
+                .sizeBytes = 7u,
+            },
+            {
+                .source = toLocal(sources_.path() / "accepted.txt"),
+                .destination = remote("/home/test/accepted.txt"),
+                .sizeBytes = 8u,
+            },
+        });
+
+        const auto ended = workUntilEnded(operation);
+
+        ASSERT_TRUE(ended.has_value()) << ended.error().toString();
+        EXPECT_EQ(*ended, Operation::WorkStatus::Complete);
+        ASSERT_EQ(operation.indexedFailures().size(), 1u);
+        auto const& failure = operation.indexedFailures().front();
+        EXPECT_EQ(failure.index, 0u);
+        EXPECT_EQ(failure.type, SharedData::OperationErrorType::SftpError);
+        EXPECT_EQ(failure.sftpErrorCode, SSH_FX_NO_SUCH_FILE);
+        EXPECT_FALSE(failure.localProblem.has_value());
     }
 }

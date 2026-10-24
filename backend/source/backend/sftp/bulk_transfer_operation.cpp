@@ -4,8 +4,32 @@
 
 #include <algorithm>
 #include <iterator>
+#include <optional>
 
 using namespace std::chrono_literals;
+
+namespace
+{
+    /**
+     * @brief The skipped entry at @p index with why @p error says it was skipped: the local problem of a local
+     *        failure, the server's status code of one the server answered with.
+     */
+    SharedData::IndexedFailure indexedFailureOf(std::size_t index, Operation::Error const& error)
+    {
+        const auto serverCode = [&error]() -> std::optional<int>
+        {
+            if (!error.sftpError || error.sftpError->sftpError == SSH_FX_OK)
+                return std::nullopt;
+            return error.sftpError->sftpError;
+        }();
+        return SharedData::IndexedFailure{
+            .index = static_cast<std::uint32_t>(index),
+            .type = error.type,
+            .localProblem = error.localProblem,
+            .sftpErrorCode = serverCode,
+        };
+    }
+}
 
 BulkTransferOperation::BulkTransferOperation(std::weak_ptr<SecureShell::SftpSession> sftp, CommonOptions common)
     : Operation{}
@@ -238,7 +262,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         {
             Log::warn("{}: Skipping '{}': {}", logName(), displayPath(index), paths.error().toString());
             failedEntries_.emplace_back(failureSource(index), paths.error());
-            indexedFailures_.push_back({.index = static_cast<std::uint32_t>(index), .type = paths.error().type});
+            indexedFailures_.push_back(indexedFailureOf(index, paths.error()));
             completedBytes_ += entry.isRegularFile() ? entry.size : 0u;
             ++completedEntries_;
             continue;
@@ -255,7 +279,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
                     return std::unexpected(result.error());
                 Log::warn("{}: Skipping directory '{}': {}", logName(), displayPath(index), result.error().toString());
                 failedEntries_.emplace_back(failureSource(index), result.error());
-                indexedFailures_.push_back({.index = static_cast<std::uint32_t>(index), .type = result.error().type});
+                indexedFailures_.push_back(indexedFailureOf(index, result.error()));
             }
             else
             {
@@ -338,7 +362,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         {
             // Not critical for the bulk as a whole: record the entry for the user and move on.
             failedEntries_.emplace_back(failureSource(slot.paths), error);
-            indexedFailures_.push_back({.index = static_cast<std::uint32_t>(slot.entryIndex), .type = error.type});
+            indexedFailures_.push_back(indexedFailureOf(slot.entryIndex, error));
             finishSlot(slot, false);
             if (common_.failFast)
             {
