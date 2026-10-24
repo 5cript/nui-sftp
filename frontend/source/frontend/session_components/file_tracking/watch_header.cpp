@@ -68,11 +68,24 @@ namespace FileTracking
         }
 
         /**
-         * @brief Open Local Item, Reveal on Server and Stop for a running watch, Open Local Item and Remove for a
-         *        stopped one.
+         * @brief Whether the watched item left its local path when @p stop ended the watch: it moved onto another
+         *        watch's item, or the copy was deleted or renamed away.
          */
-        Nui::ElementRenderer
-        headerButtons(TrackingActions const* actions, std::shared_ptr<WatchItem> const& item, bool stopped)
+        bool localItemLeft(SharedData::WatchStop const& stop)
+        {
+            return stop.reason == SharedData::WatchStopReason::Overlap ||
+                stop.reason == SharedData::WatchStopReason::CopyGone;
+        }
+
+        /**
+         * @brief Open Local Item, Reveal on Server and Stop for a running watch, Open Local Item and Remove for a
+         *        stopped one, only Remove when the item left its local path.
+         */
+        Nui::ElementRenderer headerButtons(
+            TrackingActions const* actions,
+            std::shared_ptr<WatchItem> const& item,
+            std::optional<SharedData::WatchStop> const& stop
+        )
         {
             using namespace Nui::Elements;
             using namespace Nui::Attributes;
@@ -89,11 +102,11 @@ namespace FileTracking
                 }
             );
 
-            if (stopped)
+            if (stop)
             {
                 // clang-format off
                 return div{class_ = "file-tracking-detail-buttons"}(
-                    std::move(openLocal),
+                    localItemLeft(*stop) ? Nui::nil() : std::move(openLocal),
                     actionButton(
                         language->get("fileTracking", "removeButton"),
                         "remove",
@@ -251,7 +264,7 @@ namespace FileTracking
                     Nui::observe(item->stop),
                     [actionsPointer, item]() -> Nui::ElementRenderer
                     {
-                        return headerButtons(actionsPointer, item, item->stop.value().has_value());
+                        return headerButtons(actionsPointer, item, item->stop.value());
                     }
                 )
             ),
