@@ -52,6 +52,7 @@
 #include "test_program_options.hpp"
 #include "test_rpc_helper.hpp"
 #include "test_rpc_path_parameters.hpp"
+#include "test_logger.hpp"
 
 #include <log/log.hpp>
 

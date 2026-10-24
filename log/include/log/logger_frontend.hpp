@@ -2,6 +2,7 @@
 
 #include <log/level.hpp>
 #include <log/def.hpp>
+#include <log/toast.hpp>
 
 #include <fmt/format.h>
 #include <nui/frontend/rpc_client.hpp>
@@ -41,7 +42,7 @@ namespace Log
     };
 
     /**
-     * @brief Installs a hook for every message at or above @p minimumLevel.
+     * @brief Installs a hook for every message at or above @p minimumLevel, except those logged with Toast::Skip.
      *
      * Hooks see messages the log level filters out, so turning the log down does not silence them.
      * A message logged from inside a hook does not reach the hooks again.
@@ -101,10 +102,11 @@ namespace Log
             , logOnConsole_{logOnConsole}
             , autoUnregisterOnLog_{Nui::RpcClient::autoRegisterFunction(
                   "log",
-                  [this](int integralLevel, std::string const& message)
+                  [this](int integralLevel, std::string const& message, bool showToast)
                   {
-                      using namespace std::string_literals;
-                      log(static_cast<Log::Level>(integralLevel), "[MAIN] "s + message);
+                      log(static_cast<Log::Level>(integralLevel),
+                          showToast ? Log::Toast::Show : Log::Toast::Skip,
+                          fmt::format("[MAIN] {}", message));
                   }
               )}
             , autoUnregisterSetLevel_{Nui::RpcClient::autoRegisterFunction(
@@ -133,10 +135,13 @@ namespace Log
             return logLevel_;
         }
 
-        template <typename... Args>
-        void log(Log::Level level, std::string const& message)
+        /**
+         * @brief Logs the formatted @p message, the hooks see it only with Toast::Show.
+         */
+        void log(Log::Level level, Log::Toast toast, std::string const& message)
         {
-            Detail::runHooks(level, message);
+            if (toast == Log::Toast::Show)
+                Detail::runHooks(level, message);
             if (level < logLevel_)
                 return;
 
@@ -171,14 +176,25 @@ namespace Log
         }
 
         template <typename... Args>
-        void log(Log::Level level, std::string_view fmt, Args&&... args)
+        void log(Log::Level level, std::string const& message)
+        {
+            log(level, Log::Toast::Show, message);
+        }
+
+        /**
+         * @brief Formats and logs a message, the hooks see it only with Toast::Show.
+         */
+        template <typename... Args>
+        void log(Log::Level level, Log::Toast toast, std::string_view fmt, Args&&... args)
         {
             const bool logged = level >= logLevel_;
-            if (!logged && !Detail::hooksWant(level))
+            const bool hooked = toast == Log::Toast::Show && Detail::hooksWant(level);
+            if (!logged && !hooked)
                 return;
 
             const auto message = format(fmt, std::forward<Args>(args)...);
-            Detail::runHooks(level, message);
+            if (hooked)
+                Detail::runHooks(level, message);
             if (!logged)
                 return;
 
@@ -213,6 +229,12 @@ namespace Log
                         break;
                 }
             }
+        }
+
+        template <typename... Args>
+        void log(Log::Level level, std::string_view fmt, Args&&... args)
+        {
+            log(level, Log::Toast::Show, fmt, std::forward<Args>(args)...);
         }
 
         template <typename... Args>

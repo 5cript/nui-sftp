@@ -79,8 +79,8 @@ namespace Log
 
                 if (!stash_.empty())
                 {
-                    for (auto& s : stash_)
-                        logImpl(s.first, s.second);
+                    for (auto const& stashed : stash_)
+                        logImpl(stashed.level, stashed.toast, stashed.message);
                     stash_.clear();
                 }
                 rpcHub_->callRemote("setLogLevel", static_cast<int>(levelStashed_));
@@ -127,7 +127,13 @@ namespace Log
         stash_.clear();
     }
 
-    void Logger::logImpl(Log::Level level, std::string const& msg)
+    std::vector<Logger::StashedMessage> Logger::stashed() const
+    {
+        std::scoped_lock lock{guard_};
+        return stash_;
+    }
+
+    void Logger::logImpl(Log::Level level, Log::Toast toast, std::string const& msg)
     {
         decltype(rpcHub_) hub;
         {
@@ -138,7 +144,7 @@ namespace Log
         {
             try
             {
-                hub->callRemote("log", static_cast<int>(level), Paths::sanitizedUtf8(msg));
+                hub->callRemote("log", static_cast<int>(level), Paths::sanitizedUtf8(msg), toast == Log::Toast::Show);
             }
             catch (const std::exception& e)
             {
@@ -154,7 +160,7 @@ namespace Log
             // Do not accumulate logs in tests:
             if (level != Level::Off)
             {
-                stash_.emplace_back(level, msg);
+                stash_.push_back({.level = level, .toast = toast, .message = msg});
             }
         }
 
