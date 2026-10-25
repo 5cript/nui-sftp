@@ -6,6 +6,7 @@
 #include <cassert>
 #include <deque>
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 #include <chrono>
@@ -90,13 +91,16 @@ namespace SecureShell
           protected:
             void push(sftp_aio request, std::uint64_t offset, SignedSizeType length)
             {
-                pending_.push_back(
-                    PendingRequest{
-                        .request = {request, sftp_aio_free},
-                        .offset = offset,
-                        .length = length,
-                    }
-                );
+                pending_.push_back(PendingRequest{.request = {request, sftp_aio_free}, .offset = offset, .length = length});
+                inFlightBytes_ += length;
+            }
+
+            /**
+             * @brief Adds a request whose answer is taken before those of all others.
+             */
+            void pushOldest(sftp_aio request, std::uint64_t offset, SignedSizeType length)
+            {
+                pending_.push_front(PendingRequest{.request = {request, sftp_aio_free}, .offset = offset, .length = length});
                 inFlightBytes_ += length;
             }
 
@@ -151,17 +155,31 @@ namespace SecureShell
             std::expected<void, SftpError>
             fill(SftpSession const& sftp, sftp_file file, SignedSizeType unrequested, SignedSizeType upperBound)
             {
+                if (!nextOffset_)
+                    nextOffset_ = sftp_tell64(file);
                 while (unrequested > 0 && inFlightBytes() < window().windowBytes())
                 {
                     const auto length = std::min(unrequested, window().requestBytes(upperBound));
-                    const auto offset = sftp_tell64(file);
-                    sftp_aio request{nullptr};
-                    const auto sent = sftp_aio_begin_read(file, static_cast<std::size_t>(length), &request);
-                    if (sent < 0)
-                        return std::unexpected(transferError(sftp, "Requesting from the remote file failed"));
-                    push(request, offset, static_cast<SignedSizeType>(sent));
-                    unrequested -= sent;
+                    auto request = begin(sftp, file, *nextOffset_, length);
+                    if (!request)
+                        return std::unexpected(std::move(request).error());
+                    push(request->first, *nextOffset_, request->second);
+                    *nextOffset_ += static_cast<std::uint64_t>(request->second);
+                    unrequested -= request->second;
                 }
+                return {};
+            }
+
+            /**
+             * @brief Asks for the rest of a short answer before the answers of the requests after it.
+             */
+            std::expected<void, SftpError> requestGap(SftpSession const& sftp, sftp_file file, ReceivedRead const& read)
+            {
+                const auto offset = read.offset + static_cast<std::uint64_t>(read.received);
+                auto request = begin(sftp, file, offset, read.requested - read.received);
+                if (!request)
+                    return std::unexpected(std::move(request).error());
+                pushOldest(request->first, offset, request->second);
                 return {};
             }
 
@@ -202,6 +220,28 @@ namespace SecureShell
                     }
                 );
             }
+
+          private:
+            /**
+             * @brief Sends a read request at @p offset, libssh reads at the file position, which its short answers
+             *        move back.
+             *
+             * @return The request and the bytes it asks for.
+             */
+            static std::expected<std::pair<sftp_aio, SignedSizeType>, SftpError>
+            begin(SftpSession const& sftp, sftp_file file, std::uint64_t offset, SignedSizeType length)
+            {
+                sftp_seek64(file, offset);
+                sftp_aio request{nullptr};
+                const auto sent = sftp_aio_begin_read(file, static_cast<std::size_t>(length), &request);
+                if (sent < 0)
+                    return std::unexpected(transferError(sftp, "Requesting from the remote file failed"));
+                return std::pair{request, static_cast<SignedSizeType>(sent)};
+            }
+
+          private:
+            /** @brief Where the next request of the file starts, taken from the file on the first fill. */
+            std::optional<std::uint64_t> nextOffset_{};
         };
 
         /**
@@ -841,10 +881,9 @@ namespace SecureShell
 
                     if (received->received < received->requested)
                     {
-                        // A short answer leaves a gap before the requests after it: ask again from
-                        // where it ended.
-                        discardPipeline();
-                        sftp_seek64(file, received->offset + static_cast<std::uint64_t>(received->received));
+                        // A short answer leaves a gap before the requests after it, which is asked for next.
+                        if (auto requested = pipeline->requestGap(*sftp, file, *received); !requested)
+                            return failWith(std::move(requested).error());
                     }
                     if (auto filled = fillPipeline(); !filled)
                         return failWith(std::move(filled).error());

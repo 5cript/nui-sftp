@@ -726,6 +726,45 @@ namespace SecureShell::Test
         EXPECT_EQ(data, createAlphabetString(totalSize));
     }
 
+    TEST_F(SftpTests, AsyncReadOfAServerAnsweringShortAsksOnlyForWhatIsMissing)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        constexpr std::size_t totalSize = 65536;
+        ASSERT_TRUE(serverStartResult->command("capReads", {{"bytes", 700}}));
+        // A byte asked for twice is served beyond the file's size, which fails the read.
+        ASSERT_TRUE(serverStartResult->command("failReadsAfter", {{"bytes", totalSize}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut =
+            sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        auto file = fut.get().value().lock();
+        ASSERT_TRUE(file);
+
+        using SignedSize = SecureShell::IFileStream::SignedSizeType;
+        std::array<char, 1024> buffer{};
+        std::string data;
+        auto ctxFut = file->readAsync(
+            static_cast<SignedSize>(totalSize),
+            buffer.data(),
+            static_cast<SignedSize>(buffer.size()),
+            [&data, &buffer](SignedSize bytesRead)
+            {
+                data.append(buffer.data(), static_cast<std::size_t>(bytesRead));
+                return true;
+            }
+        );
+        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        auto ctx = ctxFut.get().value();
+
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!ctx->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(10ms);
+
+        EXPECT_EQ(ctx->outcome(), AsyncTransferContext::Outcome::Completed);
+        EXPECT_EQ(data, createAlphabetString(totalSize));
+    }
+
     TEST_F(SftpTests, AsyncReadCanBePaused)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
