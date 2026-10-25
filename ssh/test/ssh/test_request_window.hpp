@@ -39,7 +39,7 @@ namespace SecureShell::Test
                 const auto latencyBound = window.windowBytes() * 1'000'000'000 / roundTrip.count();
                 const auto rate = std::min(bytesPerSecond, latencyBound);
                 now += std::chrono::nanoseconds{request * 1'000'000'000 / rate};
-                window.recordReceived(request, now, target);
+                window.recordCompleted(request, now, target);
             }
             return now;
         }

@@ -11,6 +11,8 @@
 
 #include <array>
 #include <atomic>
+#include <optional>
+#include <string>
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -1043,6 +1045,236 @@ namespace SecureShell::Test
         // Released with the session, nothing reads into the buffer anymore.
         read.file.reset();
         read.context->cancel();
+    }
+
+    namespace
+    {
+        /**
+         * @brief An asynchronous upload of a 64 KiB pattern in pieces of 1 KiB. The local read for the
+         *        fourth piece waits until the test has done what it wants to do while three requests are in
+         *        flight.
+         */
+        struct GatedUpload
+        {
+            static constexpr IFileStream::SignedSizeType fileSize = 65536;
+            static constexpr int gatedRead = 4;
+
+            std::array<char, 1024> buffer{};
+            std::atomic<IFileStream::SignedSizeType> readLocally{0};
+            std::atomic_int reads{0};
+            std::atomic_int failingRead{0};
+            std::promise<void> release{};
+            std::shared_future<void> released{release.get_future().share()};
+            std::shared_ptr<FileStream> file{};
+            std::shared_ptr<AsyncTransferContext> context{};
+
+            static char patternAt(IFileStream::SignedSizeType offset)
+            {
+                return static_cast<char>('a' + offset % 23);
+            }
+
+            static std::string pattern(IFileStream::SignedSizeType size = fileSize)
+            {
+                std::string content(static_cast<std::size_t>(size), '\0');
+                for (IFileStream::SignedSizeType offset = 0; offset < size; ++offset)
+                    content[static_cast<std::size_t>(offset)] = patternAt(offset);
+                return content;
+            }
+
+            ::testing::AssertionResult start(SftpSession& sftp)
+            {
+                auto opened = sftp.openFile(
+                    remote("/home/test/uploaded.bin"),
+                    SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
+                    std::filesystem::perms{0644u}
+                );
+                if (opened.wait_for(2s) != std::future_status::ready)
+                    return ::testing::AssertionFailure() << "open timed out";
+                auto result = opened.get();
+                if (!result.has_value())
+                    return ::testing::AssertionFailure() << "open failed";
+                file = result.value().lock();
+                auto started = file->writeAsync(
+                    fileSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [this](IFileStream::SignedSizeType bytes) -> IFileStream::SignedSizeType
+                    {
+                        const auto call = ++reads;
+                        if (call == gatedRead)
+                            released.wait_for(5s);
+                        if (call == failingRead.load())
+                            return -1;
+                        const auto offset = readLocally.load();
+                        const auto length =
+                            std::min({bytes, static_cast<IFileStream::SignedSizeType>(buffer.size()), fileSize - offset});
+                        for (IFileStream::SignedSizeType index = 0; index < length; ++index)
+                            buffer[static_cast<std::size_t>(index)] = patternAt(offset + index);
+                        readLocally += length;
+                        return length;
+                    }
+                );
+                if (started.wait_for(2s) != std::future_status::ready)
+                    return ::testing::AssertionFailure() << "writeAsync timed out";
+                auto contextResult = started.get();
+                if (!contextResult.has_value())
+                    return ::testing::AssertionFailure() << "writeAsync failed";
+                context = contextResult.value();
+                return ::testing::AssertionSuccess();
+            }
+
+            bool waitForEnd(std::chrono::milliseconds limit = 5s) const
+            {
+                const auto deadline = std::chrono::steady_clock::now() + limit;
+                while (!context->hasEnded() && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(5ms);
+                return context->hasEnded();
+            }
+        };
+
+        std::optional<std::string> remoteContent(SftpSession& sftp, std::string const& path)
+        {
+            auto opened = sftp.openFile(remote(path), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+            if (opened.wait_for(2s) != std::future_status::ready)
+                return std::nullopt;
+            auto result = opened.get();
+            if (!result.has_value())
+                return std::nullopt;
+            auto file = result.value().lock();
+            std::string content{};
+            auto read = file->readAll(
+                [&content](std::string_view data)
+                {
+                    content += data;
+                    return true;
+                }
+            );
+            if (read.wait_for(2s) != std::future_status::ready || !read.get().has_value())
+                return std::nullopt;
+            return content;
+        }
+    }
+
+    TEST_F(SftpTests, PipelinedUploadWritesTheFileInOrder)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        ASSERT_TRUE(upload.start(*sftp));
+        upload.release.set_value();
+        ASSERT_TRUE(upload.waitForEnd());
+
+        EXPECT_EQ(upload.context->outcome(), AsyncTransferContext::Outcome::Completed);
+        EXPECT_EQ(upload.context->bytesTransferred(), GatedUpload::fileSize);
+        EXPECT_EQ(remoteContent(*sftp, "/home/test/uploaded.bin"), GatedUpload::pattern());
+    }
+
+    TEST_F(SftpTests, CancelledUploadWithRequestsInFlightLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        ASSERT_TRUE(upload.start(*sftp));
+
+        upload.context->cancel();
+        upload.release.set_value();
+        ASSERT_TRUE(upload.waitForEnd());
+
+        EXPECT_EQ(upload.context->outcome(), AsyncTransferContext::Outcome::Canceled);
+        // Answers to the abandoned writes must not be taken for the answers of the next calls.
+        EXPECT_TRUE(readsFileOne(*sftp));
+    }
+
+    TEST_F(SftpTests, PausedUploadResumesAfterOtherCallsOnTheSession)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        ASSERT_TRUE(upload.start(*sftp));
+
+        upload.context->pause(true);
+        upload.release.set_value();
+        EXPECT_TRUE(readsFileOne(*sftp));
+        std::this_thread::sleep_for(50ms);
+        EXPECT_FALSE(upload.context->hasEnded());
+
+        upload.context->pause(false);
+        ASSERT_TRUE(upload.waitForEnd());
+        EXPECT_EQ(upload.context->outcome(), AsyncTransferContext::Outcome::Completed);
+        EXPECT_EQ(remoteContent(*sftp, "/home/test/uploaded.bin"), GatedUpload::pattern());
+    }
+
+    TEST_F(SftpTests, RefusedWriteWithRequestsInFlightFailsAndLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("failWritesAfter", {{"bytes", 2048}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        ASSERT_TRUE(upload.start(*sftp));
+        upload.release.set_value();
+        ASSERT_TRUE(upload.waitForEnd());
+
+        EXPECT_EQ(upload.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        EXPECT_EQ(upload.context->bytesTransferred(), 2048);
+        EXPECT_TRUE(readsFileOne(*sftp));
+    }
+
+    TEST_F(SftpTests, LocalReadFailureWithRequestsInFlightFailsAndLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        upload.failingRead = GatedUpload::gatedRead;
+        ASSERT_TRUE(upload.start(*sftp));
+        upload.release.set_value();
+        ASSERT_TRUE(upload.waitForEnd());
+
+        EXPECT_EQ(upload.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        ASSERT_TRUE(upload.context->error().has_value());
+        EXPECT_EQ(upload.context->error()->wrapperError, WrapperErrors::LocalIoFailure);
+        EXPECT_TRUE(readsFileOne(*sftp));
+    }
+
+    TEST_F(SftpTests, ClosingTheSftpSessionWithAPausedUploadReturns)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        ASSERT_TRUE(upload.start(*sftp));
+        upload.context->pause(true);
+        upload.release.set_value();
+
+        auto closed = std::async(
+            std::launch::async,
+            [&sftp]
+            {
+                return sftp->close();
+            }
+        );
+        ASSERT_EQ(closed.wait_for(5s), std::future_status::ready);
+        EXPECT_TRUE(closed.get());
+        upload.context->cancel();
+    }
+
+    TEST_F(SftpTests, DestroyingTheSessionWithAnUploadInFlightReturns)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        GatedUpload upload;
+        ASSERT_TRUE(upload.start(*sftp));
+        upload.release.set_value();
+        sftp.reset();
+
+        auto destroyed = std::async(
+            std::launch::async,
+            [&session]
+            {
+                session.reset();
+            }
+        );
+        ASSERT_EQ(destroyed.wait_for(5s), std::future_status::ready);
+        upload.file.reset();
+        upload.context->cancel();
     }
 
     TEST_F(SftpTests, TransferObserverHearsOfTheEnd)
