@@ -125,8 +125,8 @@ namespace TarArchive
     Compression compressionFromExtension(std::filesystem::path const& path) noexcept;
 
     /**
-     * @brief Writer options for @p codec at its own native @p level, clamped to the codec's range: gzip 1 … 9,
-     * bzip2 block size 1 … 9, zstd 1 … 22, xz preset 0 … 9. None and Auto take no level.
+     * @brief Writer options for @p codec at its own native @p level, clamped to the codec's range from
+     * shared_data/file_operations/compression_level_range.hpp. None and Auto take no level.
      *
      * @param codec The codec the level belongs to.
      * @param level The level in the codec's own range.
