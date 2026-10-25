@@ -20,11 +20,12 @@ using namespace std::string_literals;
 
 namespace SecureShell::Test
 {
+    /** @brief How long a test waits for a single answer of the local server, generous for stalled CI runners. */
+    constexpr std::chrono::seconds replyTimeout{5};
+
     class SftpTests : public CommonFixture
     {
       public:
-        static constexpr std::chrono::seconds connectTimeout{2};
-
         void TearDown() override
         {
             if (std::filesystem::exists(isolateDirectory_.path() / "log.txt"))
@@ -76,7 +77,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(client.has_value());
         (*client)->start();
         auto sftpFuture = (*client)->createSftpSession();
-        ASSERT_TRUE(sftpFuture.wait_for(1s) == std::future_status::ready);
+        ASSERT_TRUE(sftpFuture.wait_for(10s) == std::future_status::ready);
         auto sftp = sftpFuture.get();
         EXPECT_TRUE(sftp.has_value());
     }
@@ -87,7 +88,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
 
         ASSERT_TRUE(result.has_value()) << result.error().toString();
@@ -104,7 +105,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->listDirectory(remote("/home/test/nonexistant"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         EXPECT_FALSE(result.has_value());
     }
@@ -115,12 +116,12 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->createDirectory(remote("/home/test/newdir"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
 
@@ -136,7 +137,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->createDirectory(remote("/home/test"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         EXPECT_FALSE(result.has_value());
     }
@@ -147,12 +148,12 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->createFile(remote("/home/test/newfile.txt"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
 
@@ -168,11 +169,11 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->createFile(remote("/home/test/file1.txt"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         EXPECT_FALSE(fut.get().has_value());
 
         auto statFut = sftp->stat(remote("/home/test/file1.txt"));
-        ASSERT_EQ(statFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(statFut.wait_for(replyTimeout), std::future_status::ready);
         const auto information = statFut.get();
         ASSERT_TRUE(information.has_value());
         EXPECT_EQ(information->size, std::string{"Fake file content"}.size());
@@ -184,7 +185,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->createFile(remote("/home/test/nonexistant/newfile.txt"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         EXPECT_FALSE(result.has_value());
     }
@@ -195,12 +196,12 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->removeFile(remote("/home/test/file1.txt"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
 
@@ -216,7 +217,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->removeFile(remote("/home/test/nonexistant.txt"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         EXPECT_FALSE(result.has_value());
     }
@@ -227,7 +228,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->stat(remote("/home/test/file1.txt"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -240,7 +241,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->homeDirectory();
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
         EXPECT_EQ(result->value(), "/home/test");
@@ -253,13 +254,13 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->homeDirectory();
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
         EXPECT_EQ(result->value(), "/Users/test");
 
         auto listFut = sftp->listDirectory(*result);
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         const auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
         EXPECT_FALSE(listResult->empty());
@@ -273,7 +274,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->homeDirectory();
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
         EXPECT_EQ(result->value(), "/home/test");
@@ -287,7 +288,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->homeDirectory();
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
         EXPECT_EQ(result->value(), "/home/test");
@@ -301,13 +302,13 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->homeDirectory();
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
         EXPECT_EQ(result->value(), "/home/test");
 
         auto listFut = sftp->listDirectory(*result);
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         const auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
         EXPECT_FALSE(listResult->empty());
@@ -321,7 +322,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->homeDirectory();
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
         EXPECT_EQ(result->value(), "/");
@@ -333,7 +334,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->userDirectories(remote("/home/deutsch"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().toString();
 
@@ -359,13 +360,13 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->userDirectories(remote("/home/test"));
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_TRUE(result->empty());
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         EXPECT_TRUE(listFut.get().has_value());
     }
 
@@ -375,12 +376,12 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->rename(remote("/home/test/file1.txt"), remote("/home/test/file1_renamed.txt"));
-        ASSERT_EQ(fut.wait_for(3s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
 
@@ -401,7 +402,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(result.has_value());
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
 
@@ -418,7 +419,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -428,7 +429,7 @@ namespace SecureShell::Test
 
         char byte;
         auto readFut = file->readSome(&byte, 1);
-        ASSERT_EQ(readFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(readFut.wait_for(replyTimeout), std::future_status::ready);
         auto readResult = readFut.get();
         ASSERT_TRUE(readResult.has_value());
 
@@ -442,7 +443,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -453,7 +454,7 @@ namespace SecureShell::Test
         std::vector<char> buffer(1024);
         auto readFut = file->readSome(buffer.data(), buffer.size());
 
-        ASSERT_EQ(readFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(readFut.wait_for(replyTimeout), std::future_status::ready);
         auto readResult = readFut.get();
         ASSERT_TRUE(readResult.has_value());
 
@@ -468,7 +469,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -496,7 +497,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
         auto file = result->lock();
@@ -527,7 +528,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -555,7 +556,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -563,11 +564,11 @@ namespace SecureShell::Test
         auto file = fileWeak.lock();
         ASSERT_TRUE(file);
 
-        ASSERT_EQ(file->seek(2).wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(file->seek(2).wait_for(replyTimeout), std::future_status::ready);
         std::vector<char> buffer(1024);
         auto readFut2 = file->readSome(buffer.data(), buffer.size());
 
-        ASSERT_EQ(readFut2.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(readFut2.wait_for(replyTimeout), std::future_status::ready);
         auto readResult2 = readFut2.get();
         ASSERT_TRUE(readResult2.has_value());
 
@@ -582,7 +583,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -591,11 +592,11 @@ namespace SecureShell::Test
         ASSERT_TRUE(file);
 
         std::vector<char> buffer(1024);
-        ASSERT_EQ(file->seek(2).wait_for(1s), std::future_status::ready);
-        ASSERT_EQ(file->rewind().wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(file->seek(2).wait_for(replyTimeout), std::future_status::ready);
+        ASSERT_EQ(file->rewind().wait_for(replyTimeout), std::future_status::ready);
         auto readFut2 = file->readSome(buffer.data(), buffer.size());
 
-        ASSERT_EQ(readFut2.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(readFut2.wait_for(replyTimeout), std::future_status::ready);
         auto readResult2 = readFut2.get();
         ASSERT_TRUE(readResult2.has_value());
 
@@ -610,7 +611,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -618,10 +619,10 @@ namespace SecureShell::Test
         auto file = fileWeak.lock();
         ASSERT_TRUE(file);
 
-        ASSERT_EQ(file->seek(2).wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(file->seek(2).wait_for(replyTimeout), std::future_status::ready);
         auto tellFut = file->tell();
 
-        ASSERT_EQ(tellFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(tellFut.wait_for(replyTimeout), std::future_status::ready);
         auto tellResult = tellFut.get();
         ASSERT_TRUE(tellResult.has_value());
 
@@ -645,7 +646,7 @@ namespace SecureShell::Test
             auto [_, sftp] = createSftpSession(serverStartResult->port);
             auto fut =
                 sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-            ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+            ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
             auto result = fut.get();
             ASSERT_TRUE(result.has_value());
         }
@@ -667,7 +668,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
 
@@ -676,7 +677,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(file);
 
         auto statFut = file->stat();
-        ASSERT_EQ(statFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(statFut.wait_for(replyTimeout), std::future_status::ready);
         auto statResult = statFut.get();
         ASSERT_TRUE(statResult.has_value());
 
@@ -690,7 +691,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
         auto file = std::move(result).value().lock();
@@ -713,7 +714,7 @@ namespace SecureShell::Test
                 return true;
             }
         );
-        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(ctxFut.wait_for(replyTimeout), std::future_status::ready);
         auto ctxResult = ctxFut.get();
         ASSERT_TRUE(ctxResult.has_value());
         auto ctx = std::move(ctxResult).value();
@@ -738,7 +739,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
 
@@ -755,7 +756,7 @@ namespace SecureShell::Test
                 return true;
             }
         );
-        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(ctxFut.wait_for(replyTimeout), std::future_status::ready);
         auto ctx = ctxFut.get().value();
 
         const auto deadline = std::chrono::steady_clock::now() + 5s;
@@ -766,6 +767,27 @@ namespace SecureShell::Test
         EXPECT_EQ(data, createAlphabetString(totalSize));
     }
 
+    namespace
+    {
+        /**
+         * @brief Waits until the transfer counted every piece the callback saw, it adds a piece after the callback.
+         */
+        bool waitForCountedPieces(
+            AsyncTransferContext const& context,
+            std::atomic<IFileStream::SignedSizeType> const& seenByCallback
+        )
+        {
+            const auto deadline = std::chrono::steady_clock::now() + 5s;
+            while (context.bytesTransferred() != seenByCallback.load())
+            {
+                if (std::chrono::steady_clock::now() > deadline)
+                    return false;
+                std::this_thread::sleep_for(5ms);
+            }
+            return true;
+        }
+    }
+
     TEST_F(SftpTests, AsyncReadCanBePaused)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
@@ -773,7 +795,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
         auto file = std::move(result).value().lock();
@@ -799,17 +821,18 @@ namespace SecureShell::Test
                 return true;
             }
         );
-        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(ctxFut.wait_for(replyTimeout), std::future_status::ready);
         auto ctxResult = ctxFut.get();
         ASSERT_TRUE(ctxResult.has_value());
         auto ctx = std::move(ctxResult).value();
 
         ctx->pause(true);
         testActed.set_value();
-        std::this_thread::sleep_for(200ms);
+        ASSERT_TRUE(waitForCountedPieces(*ctx, readCount));
         const auto snapshot = ctx->bytesTransferred();
         std::this_thread::sleep_for(200ms);
         EXPECT_EQ(ctx->bytesTransferred(), snapshot);
+        EXPECT_EQ(readCount.load(), snapshot);
         EXPECT_FALSE(ctx->hasEnded());
 
         ctx->pause(false);
@@ -829,7 +852,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
         auto file = std::move(result).value().lock();
@@ -855,7 +878,7 @@ namespace SecureShell::Test
                 return true;
             }
         );
-        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(ctxFut.wait_for(replyTimeout), std::future_status::ready);
         auto ctxResult = ctxFut.get();
         ASSERT_TRUE(ctxResult.has_value());
         auto ctx = std::move(ctxResult).value();
@@ -866,7 +889,7 @@ namespace SecureShell::Test
 
         EXPECT_TRUE(ctx->hasEnded());
 
-        std::this_thread::sleep_for(200ms);
+        ASSERT_TRUE(waitForCountedPieces(*ctx, readCount));
         const auto afterCancel = ctx->bytesTransferred();
         std::this_thread::sleep_for(200ms);
         EXPECT_EQ(ctx->bytesTransferred(), afterCancel);
@@ -880,7 +903,7 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto result = fut.get();
         ASSERT_TRUE(result.has_value());
         auto file = std::move(result).value().lock();
@@ -901,12 +924,12 @@ namespace SecureShell::Test
                 return ++callCount < 3;
             }
         );
-        ASSERT_EQ(ctxFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(ctxFut.wait_for(replyTimeout), std::future_status::ready);
         auto ctxResult = ctxFut.get();
         ASSERT_TRUE(ctxResult.has_value());
         auto ctx = std::move(ctxResult).value();
 
-        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        const auto deadline = std::chrono::steady_clock::now() + replyTimeout;
         while (!ctx->hasEnded() && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(10ms);
 
@@ -936,7 +959,7 @@ namespace SecureShell::Test
             {
                 auto opened =
                     sftp.openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-                if (opened.wait_for(2s) != std::future_status::ready)
+                if (opened.wait_for(replyTimeout) != std::future_status::ready)
                     return ::testing::AssertionFailure() << "open timed out";
                 auto result = opened.get();
                 if (!result.has_value())
@@ -953,7 +976,7 @@ namespace SecureShell::Test
                         return true;
                     }
                 );
-                if (started.wait_for(2s) != std::future_status::ready)
+                if (started.wait_for(replyTimeout) != std::future_status::ready)
                     return ::testing::AssertionFailure() << "readAsync timed out";
                 auto contextResult = started.get();
                 if (!contextResult.has_value())
@@ -975,12 +998,12 @@ namespace SecureShell::Test
         {
             auto opened =
                 sftp.openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-            if (opened.wait_for(2s) != std::future_status::ready)
+            if (opened.wait_for(replyTimeout) != std::future_status::ready)
                 return ::testing::AssertionFailure() << "open timed out";
             auto file = opened.get().value().lock();
             std::array<char, 64> buffer{};
             auto read = file->readSome(buffer.data(), buffer.size());
-            if (read.wait_for(2s) != std::future_status::ready)
+            if (read.wait_for(replyTimeout) != std::future_status::ready)
                 return ::testing::AssertionFailure() << "read timed out";
             auto bytes = read.get();
             if (!bytes.has_value())
@@ -1117,14 +1140,13 @@ namespace SecureShell::Test
 
         read.context->cancel();
         // Queued behind the turn the gate holds, the close runs before the transfer sees the cancel.
-        auto closed = std::async(
-            std::launch::async,
+        auto closed = sftp->performPromise(
             [&read]
             {
                 read.file->close();
+                return true;
             }
         );
-        std::this_thread::sleep_for(50ms);
         read.release.set_value();
         ASSERT_EQ(closed.wait_for(5s), std::future_status::ready);
         ASSERT_TRUE(read.waitForEnd());
@@ -1174,7 +1196,7 @@ namespace SecureShell::Test
                     SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
                     std::filesystem::perms{0644u}
                 );
-                if (opened.wait_for(2s) != std::future_status::ready)
+                if (opened.wait_for(replyTimeout) != std::future_status::ready)
                     return ::testing::AssertionFailure() << "open timed out";
                 auto result = opened.get();
                 if (!result.has_value())
@@ -1200,7 +1222,7 @@ namespace SecureShell::Test
                         return length;
                     }
                 );
-                if (started.wait_for(2s) != std::future_status::ready)
+                if (started.wait_for(replyTimeout) != std::future_status::ready)
                     return ::testing::AssertionFailure() << "writeAsync timed out";
                 auto contextResult = started.get();
                 if (!contextResult.has_value())
@@ -1221,7 +1243,7 @@ namespace SecureShell::Test
         std::optional<std::string> remoteContent(SftpSession& sftp, std::string const& path)
         {
             auto opened = sftp.openFile(remote(path), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-            if (opened.wait_for(2s) != std::future_status::ready)
+            if (opened.wait_for(replyTimeout) != std::future_status::ready)
                 return std::nullopt;
             auto result = opened.get();
             if (!result.has_value())
@@ -1235,7 +1257,7 @@ namespace SecureShell::Test
                     return true;
                 }
             );
-            if (read.wait_for(2s) != std::future_status::ready || !read.get().has_value())
+            if (read.wait_for(replyTimeout) != std::future_status::ready || !read.get().has_value())
                 return std::nullopt;
             return content;
         }
@@ -1369,7 +1391,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
         auto opened =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
         auto file = opened.get().value().lock();
         ASSERT_TRUE(file);
 
@@ -1388,7 +1410,7 @@ namespace SecureShell::Test
                 return true;
             }
         );
-        ASSERT_EQ(started.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(started.wait_for(replyTimeout), std::future_status::ready);
         auto context = started.get().value();
 
         const auto deadline = std::chrono::steady_clock::now() + 5s;
@@ -1412,7 +1434,7 @@ namespace SecureShell::Test
             SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
             std::filesystem::perms{0644u}
         );
-        ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
         auto file = opened.get().value().lock();
         ASSERT_TRUE(file);
 
@@ -1433,7 +1455,7 @@ namespace SecureShell::Test
                 return length;
             }
         );
-        ASSERT_EQ(started.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(started.wait_for(replyTimeout), std::future_status::ready);
         auto context = started.get().value();
 
         const auto deadline = std::chrono::steady_clock::now() + 5s;
@@ -1454,7 +1476,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
         auto opened =
             sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
         auto file = opened.get().value().lock();
         ASSERT_TRUE(file);
 
@@ -1490,7 +1512,7 @@ namespace SecureShell::Test
                 return true;
             }
         );
-        ASSERT_EQ(started.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(started.wait_for(replyTimeout), std::future_status::ready);
         ASSERT_TRUE(started.get());
 
         const auto deadline = std::chrono::steady_clock::now() + 5s;
@@ -1513,13 +1535,13 @@ namespace SecureShell::Test
 
         auto fut =
             sftp->openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
 
         std::array<char, 64> buffer{};
         auto readFut = file->readSome(buffer.data(), buffer.size());
-        ASSERT_EQ(readFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(readFut.wait_for(replyTimeout), std::future_status::ready);
         EXPECT_FALSE(readFut.get().has_value());
     }
 
@@ -1530,7 +1552,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto listFut = sftp->listDirectory(remote("/home/test/Documents"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         EXPECT_FALSE(listFut.get().has_value());
     }
 
@@ -1541,7 +1563,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         const auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
         const auto iter = std::find_if(listResult->begin(), listResult->end(), [](auto const& entry) {
@@ -1557,7 +1579,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         const auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
         const auto iter = std::find_if(listResult->begin(), listResult->end(), [](auto const& entry) {
@@ -1593,12 +1615,12 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->rename(remote("/home/test/file1.txt"), remote("/home/test/file2.txt"));
-        ASSERT_EQ(fut.wait_for(3s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         const auto result = fut.get();
         ASSERT_TRUE(result.has_value()) << result.error().message;
 
         auto listFut = sftp->listDirectory(remote("/home/test"));
-        ASSERT_EQ(listFut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(listFut.wait_for(replyTimeout), std::future_status::ready);
         const auto listResult = listFut.get();
         ASSERT_TRUE(listResult.has_value());
         EXPECT_EQ(std::count_if(listResult->begin(), listResult->end(), [](auto const& entry) {
@@ -1612,7 +1634,7 @@ namespace SecureShell::Test
         auto [_, sftp] = createSftpSession(serverStartResult->port);
 
         auto fut = sftp->rename(remote("/home/test/file1.txt"), remote("/home/test/file2.txt"));
-        ASSERT_EQ(fut.wait_for(3s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         EXPECT_FALSE(fut.get().has_value());
     }
 
@@ -1621,7 +1643,7 @@ namespace SecureShell::Test
         std::string readRemote(SftpSession& sftp, std::string_view path)
         {
             auto openFuture = sftp.openFile(remote(path), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-            if (openFuture.wait_for(2s) != std::future_status::ready)
+            if (openFuture.wait_for(replyTimeout) != std::future_status::ready)
                 return "<timeout>";
             auto opened = openFuture.get();
             if (!opened.has_value())
@@ -1634,7 +1656,7 @@ namespace SecureShell::Test
                     return true;
                 }
             );
-            if (readFuture.wait_for(2s) != std::future_status::ready || !readFuture.get().has_value())
+            if (readFuture.wait_for(replyTimeout) != std::future_status::ready || !readFuture.get().has_value())
                 return "<read failed>";
             return data;
         }
@@ -1642,7 +1664,7 @@ namespace SecureShell::Test
         bool remoteExists(SftpSession& sftp, std::string_view path)
         {
             auto future = sftp.lstat(remote(path));
-            return future.wait_for(2s) == std::future_status::ready && future.get().has_value();
+            return future.wait_for(replyTimeout) == std::future_status::ready && future.get().has_value();
         }
     }
 
@@ -1663,7 +1685,7 @@ namespace SecureShell::Test
                     return sftp->renameNoReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/target.txt"));
                 }
             );
-            ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+            ASSERT_EQ(future.wait_for(replyTimeout), std::future_status::ready);
             const auto result = future.get();
             ASSERT_FALSE(result.has_value()) << "hardlink: " << hardlink;
             EXPECT_EQ(result.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
@@ -1688,7 +1710,7 @@ namespace SecureShell::Test
                     return sftp->renameNoReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/moved.txt"));
                 }
             );
-            ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+            ASSERT_EQ(future.wait_for(replyTimeout), std::future_status::ready);
             ASSERT_TRUE(future.get().has_value()) << "hardlink: " << hardlink;
             EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
             EXPECT_EQ(readRemote(*sftp, "/home/test/moved.txt"), "source");
@@ -1712,7 +1734,7 @@ namespace SecureShell::Test
                     return sftp->renameReplaceInStrand(remote("/home/test/source.txt"), remote("/home/test/target.txt"), ".aside");
                 }
             );
-            ASSERT_EQ(future.wait_for(3s), std::future_status::ready);
+            ASSERT_EQ(future.wait_for(replyTimeout), std::future_status::ready);
             ASSERT_TRUE(future.get().has_value()) << "posixRename: " << posixRename;
             EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "source");
             EXPECT_FALSE(remoteExists(*sftp, "/home/test/source.txt"));
@@ -1732,7 +1754,7 @@ namespace SecureShell::Test
                     );
                 }
             );
-            if (future.wait_for(3s) != std::future_status::ready)
+            if (future.wait_for(replyTimeout) != std::future_status::ready)
                 return std::unexpected(SftpError{.message = "timeout"});
             return future.get();
         }
@@ -1749,7 +1771,7 @@ namespace SecureShell::Test
                     return sftp.renameNoReplaceInStrand(remote("/home/test/source.txt"), remote(destination), sourceType);
                 }
             );
-            if (future.wait_for(3s) != std::future_status::ready)
+            if (future.wait_for(replyTimeout) != std::future_status::ready)
                 return std::unexpected(SftpError{.message = "timeout"});
             return future.get();
         }

@@ -61,7 +61,7 @@ namespace SecureShell::Test
     class CommonFixture : public ::testing::Test
     {
       public:
-        static constexpr std::chrono::seconds connectTimeout{2};
+        static constexpr std::chrono::seconds connectTimeout{5};
 
       protected:
         void SetUp() override
