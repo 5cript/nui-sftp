@@ -2,6 +2,7 @@
 
 #include <ssh/async/processing_thread.hpp>
 
+#include <atomic>
 #include <future>
 #include <functional>
 #include <mutex>
@@ -87,15 +88,9 @@ namespace SecureShell
          */
         void pushFinalTask(std::function<void()> task)
         {
-            std::scoped_lock lock(mutex_);
-            if (finalized_)
-                return;
-            finalized_ = true;
-            for (auto const& id : permanentTasks_)
-            {
-                processingThread_->removePermanentTask(id);
-            }
-            processingThread_->pushTask(std::move(task));
+            auto* processingThread = finalize();
+            if (processingThread != nullptr)
+                processingThread->pushTask(std::move(task));
         }
 
         /**
@@ -106,8 +101,8 @@ namespace SecureShell
         template <typename FunctionT>
         auto pushFinalPromiseTask(FunctionT&& func) -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
         {
-            std::scoped_lock lock(mutex_);
-            if (finalized_)
+            auto* processingThread = finalize();
+            if (processingThread == nullptr)
             {
                 std::promise<std::invoke_result_t<std::decay_t<FunctionT>>> promise{};
                 promise.set_exception(
@@ -115,12 +110,7 @@ namespace SecureShell
                 );
                 return promise.get_future();
             }
-            finalized_ = true;
-            for (auto const& id : permanentTasks_)
-            {
-                processingThread_->removePermanentTask(id);
-            }
-            return processingThread_->pushPromiseTask(std::forward<FunctionT>(func));
+            return processingThread->pushPromiseTask(std::forward<FunctionT>(func));
         }
 
         /**
@@ -183,8 +173,28 @@ namespace SecureShell
         }
 
       private:
+        /**
+         * @brief Marks the strand finalized and removes its permanent tasks.
+         *
+         * The final task is pushed after the lock is released: it usually destroys the owner of
+         * this strand, and with it the mutex, while the pushing thread would still unlock it.
+         *
+         * @return The thread to push the final task to, null if the strand was finalized before.
+         */
+        ProcessingThread* finalize()
+        {
+            std::scoped_lock lock(mutex_);
+            if (finalized_)
+                return nullptr;
+            finalized_ = true;
+            for (auto const& id : permanentTasks_)
+                processingThread_->removePermanentTask(id);
+            return processingThread_;
+        }
+
+      private:
         std::recursive_mutex mutex_{};
-        bool finalized_ = false;
+        std::atomic_bool finalized_{false};
         ProcessingThread* processingThread_{};
         std::set<ProcessingThread::PermanentTaskId> permanentTasks_{};
     };
