@@ -213,7 +213,8 @@ namespace Test
 
         // "started" arrives before the exec, so ask until the terminal shows sleep.
         std::optional<nlohmann::json> list;
-        for (int attempt = 0; attempt < 50; ++attempt)
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+        for (int attempt = 0; std::chrono::steady_clock::now() < deadline; ++attempt)
         {
             const auto responseId = fmt::format("sleeper-list-{}", attempt);
             pool_.send({
