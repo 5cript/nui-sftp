@@ -3623,4 +3623,132 @@ namespace Test
         EXPECT_EQ(after, before);
         EXPECT_EQ(remoteNames(*sftp, "/home/test/Documents"), (std::set<std::string>{"doc1.txt", "doc2.txt"}));
     }
+
+    TEST_F(OperationQueueTests, ADirectoryUploadInTheUnsafeFastModeRenamesNothing)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        queue->unsafeFast(true);
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "fast";
+        std::filesystem::create_directories(localPath);
+        for (auto const* name : {"a.txt", "b.txt", "c.txt"})
+            std::ofstream{localPath / name} << name;
+
+        ASSERT_TRUE(serverStartResult->command("resetRequestCounts", {}));
+        const auto added = runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp, Ids::generateOperationId(), toLocal(localPath), remote("/home/test/fast"), false, false, false, false
+                );
+            }
+        );
+        ASSERT_TRUE(added.has_value()) << added.error().toString();
+        workUntilCompletions(1);
+        const auto counts = serverStartResult->query("requestCounts");
+        ASSERT_TRUE(counts.has_value());
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(counts->value("RENAME", 0) + counts->value("EXTENDED", 0), 0) << counts->dump();
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/fast"), (std::set<std::string>{"a.txt", "b.txt", "c.txt"}));
+    }
+
+    TEST_F(OperationQueueTests, AnUploadThatTellsWhatItSentStaysSafeInTheUnsafeFastMode)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        queue->unsafeFast(true);
+        setPaused(false);
+        std::ofstream{localDirectory_.path() / "tracked.txt"} << "tracked";
+
+        ASSERT_TRUE(serverStartResult->command("resetRequestCounts", {}));
+        const auto added = runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(localDirectory_.path() / "tracked.txt"),
+                    remote("/home/test/tracked.txt"),
+                    false,
+                    false,
+                    false,
+                    false,
+                    SharedData::OperationMode::Queued,
+                    false,
+                    std::nullopt,
+                    [](Paths::LocalPath const&, std::optional<UploadOperation::SentSource> const&) {}
+                );
+            }
+        );
+        ASSERT_TRUE(added.has_value()) << added.error().toString();
+        workUntilCompletions(1);
+        const auto counts = serverStartResult->query("requestCounts");
+        ASSERT_TRUE(counts.has_value());
+
+        EXPECT_GE(counts->value("RENAME", 0) + counts->value("EXTENDED", 0), 1) << counts->dump();
+    }
+
+    TEST_F(OperationQueueTests, TheUnsafeFastModeTurnedOnForARunningBulkAppliesToTheFilesItOpensAfterwards)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "switched";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "first.bin"} << std::string(256 * 1024, 'x');
+        std::ofstream{localPath / "second.txt"} << "second";
+        const SharedData::BulkUploadRequest request{
+            .entries = {
+                {.source = toLocal(localPath / "first.bin"),
+                 .destination = remote("/home/test/first.bin"),
+                 .sizeBytes = 256 * 1024},
+                {.source = toLocal(localPath / "second.txt"), .destination = remote("/home/test/second.txt"), .sizeBytes = 6},
+            },
+        };
+
+        ASSERT_TRUE(serverStartResult->command("resetRequestCounts", {}));
+        runOnStrand(
+            [&]()
+            {
+                queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    Ids::generateOperationId()
+                );
+            }
+        );
+        // The first file opens safely.
+        const auto deadline = std::chrono::steady_clock::now() + 10s;
+        while (!remoteNames(*sftp, "/home/test").contains("first.bin.filepart"))
+        {
+            ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+            runOnStrand(
+                [&]()
+                {
+                    return queue->work();
+                }
+            );
+        }
+        queue->unsafeFast(true);
+        workUntilCompletions(1);
+        const auto counts = serverStartResult->query("requestCounts");
+        ASSERT_TRUE(counts.has_value());
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(counts->value("RENAME", 0) + counts->value("EXTENDED", 0), 1) << counts->dump();
+        EXPECT_EQ(remoteNames(*sftp, "/home/test").count("first.bin.filepart"), 0u);
+    }
 }
