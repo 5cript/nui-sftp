@@ -1,6 +1,7 @@
 #include "openssh_client.hpp"
 
 #include <docker/docker.hpp>
+#include <paths/native.hpp>
 
 #include <fmt/format.h>
 
@@ -62,7 +63,7 @@ namespace Benchmark
     std::expected<void, std::string> OpenSshClient::transfer(Transfer const& transfer)
     {
         const auto recursive = transfer.workload->isSingleFile() ? "" : "-r ";
-        const auto local = batchQuoted(transfer.localPath.string());
+        const auto local = batchQuoted(Paths::nativeToUtf8(transfer.localPath));
         const auto remote = batchQuoted(transfer.remotePath);
         if (transfer.direction == Direction::Download)
             return runBatch(fmt::format("get {}{} {}\n", recursive, remote, local));
@@ -79,8 +80,8 @@ namespace Benchmark
         const auto result = Docker::run(fmt::format(
             "sftp -q -F /dev/null -i {} -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes "
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -b {} {}@{}",
-            Docker::quote(options_.key.string()),
-            Docker::quote(batchFile.string()),
+            Docker::quote(Paths::nativeToUtf8(options_.key)),
+            Docker::quote(Paths::nativeToUtf8(batchFile)),
             options_.user,
             options_.host
         ));

@@ -8,6 +8,7 @@
 
 #include <docker/docker.hpp>
 #include <log/log.hpp>
+#include <paths/native.hpp>
 #include <utility/process_temporary_directory.hpp>
 
 #include <fmt/chrono.h>
@@ -136,7 +137,9 @@ namespace
     {
         Source source{.workload = workload};
         const auto fileName = workload.isSingleFile() ? std::string_view{"/file.bin"} : std::string_view{};
-        source.localPath = fmt::format("{}/source/{}{}", workDirectory.string(), workload.name, fileName);
+        source.localPath = Paths::nativeFromUtf8(
+            fmt::format("{}/source/{}{}", Paths::nativeToUtf8(workDirectory), workload.name, fileName)
+        );
         source.remotePath = fmt::format("{}/source/{}{}", OpenSshServer::dataDirectory, workload.name, fileName);
 
         source.localFiles = createLocalSource(workload, source.localPath);
@@ -176,7 +179,7 @@ namespace
             return Transfer{
                 .direction = direction,
                 .workload = &source.workload,
-                .localPath = fmt::format("{}{}", target.string(), fileName),
+                .localPath = Paths::nativeFromUtf8(fmt::format("{}{}", Paths::nativeToUtf8(target), fileName)),
                 .remotePath = source.remotePath,
                 .files = source.remoteFiles,
             };
@@ -361,7 +364,7 @@ namespace
         const auto report = renderReport(context, measurements);
         std::filesystem::create_directories(arguments.output.parent_path());
         std::ofstream{arguments.output, std::ios::trunc} << report;
-        fmt::print("\n{}\nWritten to {}\n", report, arguments.output.string());
+        fmt::print("\n{}\nWritten to {}\n", report, Paths::nativeToUtf8(arguments.output));
         return 0;
     }
 }
