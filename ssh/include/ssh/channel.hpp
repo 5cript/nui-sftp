@@ -4,6 +4,7 @@
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/async/processing_strand.hpp>
 
+#include <atomic>
 #include <memory>
 #include <functional>
 #include <string>
@@ -85,5 +86,7 @@ namespace SecureShell
         std::function<void(std::string const&)> onStdout_{};
         std::function<void(std::string const&)> onStderr_{};
         std::function<void()> onExit_{};
+        /** @brief Set by close on the caller's thread, so the read task no longer reports the exit it expects. */
+        std::atomic_bool closing_{false};
     };
 }
