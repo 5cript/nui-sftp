@@ -4,7 +4,7 @@ if (FETCH_EFSW)
     FetchContent_Declare(
         efsw
         GIT_REPOSITORY https://github.com/5cript/efsw.git
-        GIT_TAG        d71ed846811cc67ee8827614341e2777d200231a
+        GIT_TAG        4b18f1a91a54db1238b31a7b1bdf8380c335fd45
     )
 
     FetchContent_MakeAvailable(efsw)
