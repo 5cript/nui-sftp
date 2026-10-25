@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/unsafe_fast_mode.hpp>
 #include <log/toast.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
@@ -101,6 +102,8 @@ class UploadOperation : public Operation
          *        lists the failures itself, see FileTracking::Tracker.
          */
         Log::Toast failureToast{Log::Toast::Show};
+        /** @brief See UnsafeFastMode, a link is always uploaded safely. */
+        UnsafeFastMode unsafeFastMode{};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -189,6 +192,22 @@ class UploadOperation : public Operation
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
 
     /**
+     * @brief The unsafe fast mode's open: the destination itself, created, or truncated when it may be overwritten.
+     *        Nothing is checked before, an existing destination that may not be overwritten fails the open.
+     */
+    std::expected<void, Error> openDestinationInStrand(SecureShell::SftpSession& sftp);
+
+    /**
+     * @brief Leases the transfer buffer for chunks of at most @p lengthLimit bytes.
+     */
+    std::expected<void, Error> leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit);
+
+    /**
+     * @brief The remote file the upload writes to: the destination in the unsafe fast mode, else the temp file.
+     */
+    Paths::RemotePath const& writtenPath() const;
+
+    /**
      * @brief Moves the temporary file of UploadOperationOptions::adoptPartialOf to tempPath_ when this upload has none
      *        there. A failure leaves the upload to start anew.
      */
@@ -223,7 +242,13 @@ class UploadOperation : public Operation
     std::filesystem::perms determinePerms(std::filesystem::perms localPerms) const;
 
     /**
-     * @brief Gives the remote temp file the modification time of the local file. A failure is only logged.
+     * @brief The mode the remote file is created with, see determinePerms, from the local permissions of the source.
+     */
+    std::filesystem::perms remoteFilePerms() const;
+
+    /**
+     * @brief Gives the remote file it writes to, see writtenPath, the modification time of the local file. A failure
+     *        is only logged.
      */
     void applyModificationTimeInStrand(SecureShell::SftpSession& sftp);
 
@@ -242,10 +267,10 @@ class UploadOperation : public Operation
     void cancelInStrand(bool adoptCancelState);
 
     /**
-     * @brief Queues the removal of the temporary file this upload wrote to on the strand of the transfer, after the
-     *        file was closed on the server. A failure is only logged.
+     * @brief Queues the removal of @p path on the strand of the transfer, after the file was closed on the server. A
+     *        failure is only logged.
      */
-    void removeTemporaryFile();
+    void removeRemoteFile(Paths::RemotePath const& path);
 
   private:
     std::weak_ptr<SecureShell::SftpSession> sftp_;
@@ -268,6 +293,10 @@ class UploadOperation : public Operation
     bool continued_{false};
     /** @brief The upload opened tempPath_ to write to it, created anew or continued. */
     bool openedTemporaryFile_{false};
+    /** @brief The file is written in the unsafe fast mode, decided when it is opened. */
+    bool unsafeFast_{false};
+    /** @brief The unsafe fast mode opened the destination, which holds a partial file until the upload completes. */
+    bool openedDestination_{false};
     PartialFile partialFileOnCancel_{PartialFile::Kept};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
