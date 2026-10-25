@@ -1,5 +1,7 @@
 #pragma once
 
+#include <constants/sftp.hpp>
+
 #include <cstdint>
 #include <functional>
 
@@ -15,15 +17,10 @@
 using UnsafeFastMode = std::function<bool()>;
 
 /**
- * @brief Files of this size and above keep the safe mode: the saved round trips are little against their transfer,
- *        and an interrupted one can be continued.
- */
-constexpr std::uint64_t unsafeFastSizeLimit = 1024u * 1024u;
-
-/**
- * @brief Whether a file of @p size bytes is transferred in the unsafe fast mode that @p mode asks for.
+ * @brief Whether a file of @p size bytes is transferred in the unsafe fast mode that @p mode asks for, see
+ *        Constants::unsafeFastSizeLimit.
  */
 inline bool transfersUnsafeFast(UnsafeFastMode const& mode, std::uint64_t size)
 {
-    return size < unsafeFastSizeLimit && mode && mode();
+    return size < Constants::unsafeFastSizeLimit && mode && mode();
 }
