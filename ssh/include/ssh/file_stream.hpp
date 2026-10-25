@@ -194,6 +194,11 @@ namespace SecureShell
       private:
         std::function<void(sftp_file)> makeFileDeleter();
 
+        /**
+         * @brief A transfer context whose resume wakes this stream's processing thread.
+         */
+        std::shared_ptr<AsyncTransferContext> makeTransferContext();
+
         template <typename FunctionT>
         void perform(FunctionT&& func);
 

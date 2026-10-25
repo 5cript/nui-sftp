@@ -873,6 +873,178 @@ namespace SecureShell::Test
         EXPECT_LT(ctx->bytesTransferred(), static_cast<SignedSize>(totalSize));
     }
 
+    namespace
+    {
+        /**
+         * @brief An asynchronous read of large.txt in pieces of 1 KiB whose first piece waits until the test
+         *        has done what it wants to do while requests are in flight.
+         */
+        struct GatedRead
+        {
+            static constexpr IFileStream::SignedSizeType fileSize = 65536;
+
+            std::array<char, 1024> buffer{};
+            std::atomic<IFileStream::SignedSizeType> received{0};
+            std::promise<void> release{};
+            std::shared_future<void> released{release.get_future().share()};
+            std::shared_ptr<FileStream> file{};
+            std::shared_ptr<AsyncTransferContext> context{};
+
+            ::testing::AssertionResult start(SftpSession& sftp, IFileStream::SignedSizeType expectedSize = fileSize)
+            {
+                auto opened =
+                    sftp.openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+                if (opened.wait_for(2s) != std::future_status::ready)
+                    return ::testing::AssertionFailure() << "open timed out";
+                auto result = opened.get();
+                if (!result.has_value())
+                    return ::testing::AssertionFailure() << "open failed";
+                file = result.value().lock();
+                auto started = file->readAsync(
+                    expectedSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [this](IFileStream::SignedSizeType bytes)
+                    {
+                        if (received.fetch_add(bytes) == 0)
+                            released.wait_for(5s);
+                        return true;
+                    }
+                );
+                if (started.wait_for(2s) != std::future_status::ready)
+                    return ::testing::AssertionFailure() << "readAsync timed out";
+                auto contextResult = started.get();
+                if (!contextResult.has_value())
+                    return ::testing::AssertionFailure() << "readAsync failed";
+                context = contextResult.value();
+                return ::testing::AssertionSuccess();
+            }
+
+            bool waitForEnd(std::chrono::milliseconds limit = 5s) const
+            {
+                const auto deadline = std::chrono::steady_clock::now() + limit;
+                while (!context->hasEnded() && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(5ms);
+                return context->hasEnded();
+            }
+        };
+
+        ::testing::AssertionResult readsFileOne(SftpSession& sftp)
+        {
+            auto opened =
+                sftp.openFile(remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+            if (opened.wait_for(2s) != std::future_status::ready)
+                return ::testing::AssertionFailure() << "open timed out";
+            auto file = opened.get().value().lock();
+            std::array<char, 64> buffer{};
+            auto read = file->readSome(buffer.data(), buffer.size());
+            if (read.wait_for(2s) != std::future_status::ready)
+                return ::testing::AssertionFailure() << "read timed out";
+            auto bytes = read.get();
+            if (!bytes.has_value())
+                return ::testing::AssertionFailure() << "read failed";
+            const std::string content{buffer.data(), *bytes};
+            if (content != "Fake file content")
+                return ::testing::AssertionFailure() << "read '" << content << "'";
+            return ::testing::AssertionSuccess();
+        }
+    }
+
+    TEST_F(SftpTests, CancelledReadWithRequestsInFlightLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedRead read;
+        ASSERT_TRUE(read.start(*sftp));
+
+        read.context->cancel();
+        read.release.set_value();
+        ASSERT_TRUE(read.waitForEnd());
+
+        EXPECT_EQ(read.context->outcome(), AsyncTransferContext::Outcome::Canceled);
+        // Answers to the abandoned requests must not be taken for the answers of the next calls.
+        EXPECT_TRUE(readsFileOne(*sftp));
+    }
+
+    TEST_F(SftpTests, ReadOfAFileShorterThanListedFailsAndLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedRead read;
+        ASSERT_TRUE(read.start(*sftp, GatedRead::fileSize * 4));
+        read.release.set_value();
+        ASSERT_TRUE(read.waitForEnd());
+
+        EXPECT_EQ(read.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        ASSERT_TRUE(read.context->error().has_value());
+        EXPECT_EQ(read.context->error()->wrapperError, WrapperErrors::UnexpectedEndOfFile);
+        EXPECT_EQ(read.received.load(), GatedRead::fileSize);
+        EXPECT_TRUE(readsFileOne(*sftp));
+    }
+
+    TEST_F(SftpTests, PausedReadResumesAfterOtherCallsOnTheSession)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedRead read;
+        ASSERT_TRUE(read.start(*sftp));
+
+        read.context->pause(true);
+        read.release.set_value();
+        // Other calls read past the paused transfer's answers, which must still reach it.
+        EXPECT_TRUE(readsFileOne(*sftp));
+        std::this_thread::sleep_for(50ms);
+        EXPECT_FALSE(read.context->hasEnded());
+
+        read.context->pause(false);
+        ASSERT_TRUE(read.waitForEnd());
+        EXPECT_EQ(read.context->outcome(), AsyncTransferContext::Outcome::Completed);
+        EXPECT_EQ(read.received.load(), GatedRead::fileSize);
+    }
+
+    TEST_F(SftpTests, ClosingTheSftpSessionWithAPausedReadReturns)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        GatedRead read;
+        ASSERT_TRUE(read.start(*sftp));
+        read.context->pause(true);
+        read.release.set_value();
+
+        auto closed = std::async(
+            std::launch::async,
+            [&sftp]
+            {
+                return sftp->close();
+            }
+        );
+        ASSERT_EQ(closed.wait_for(5s), std::future_status::ready);
+        EXPECT_TRUE(closed.get());
+        read.context->cancel();
+    }
+
+    TEST_F(SftpTests, DestroyingTheSessionWithAReadInFlightReturns)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        GatedRead read;
+        ASSERT_TRUE(read.start(*sftp));
+        read.release.set_value();
+        sftp.reset();
+
+        auto destroyed = std::async(
+            std::launch::async,
+            [&session]
+            {
+                session.reset();
+            }
+        );
+        ASSERT_EQ(destroyed.wait_for(5s), std::future_status::ready);
+        // Released with the session, nothing reads into the buffer anymore.
+        read.file.reset();
+        read.context->cancel();
+    }
+
     TEST_F(SftpTests, MockServerCanFailReads)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
