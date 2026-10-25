@@ -9,6 +9,7 @@
 #include <persistence/state/sftp_options.hpp>
 #include <paths/native.hpp>
 #include <utility/localized_message.hpp>
+#include "io_context_runs.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
@@ -237,10 +238,15 @@ namespace Test
         /**
          * @brief Lets the events from before the watch pass and forgets them, FSEvents delivers those too.
          */
-        void settleEarlierEvents()
+        void settleEarlierEvents(FileTracking::LocalItemWatch const& watch)
         {
-            runFor(std::chrono::milliseconds{1000});
+            ASSERT_NO_FATAL_FAILURE(flushWatchOf(watch));
             reported_.clear();
+        }
+
+        void settleEarlierEvents(Ids::WatchId const& watchId)
+        {
+            ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(*manager_->find(watchId)));
         }
 
         /**
@@ -317,15 +323,7 @@ namespace Test
          */
         bool runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{5})
         {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                ioc_.restart();
-                ioc_.run_for(std::chrono::milliseconds{20});
-                if (condition())
-                    return true;
-            }
-            return false;
+            return ::Test::runUntil(ioc_, condition, timeout);
         }
 
         void runFor(std::chrono::milliseconds duration)
@@ -337,6 +335,49 @@ namespace Test
                 },
                 duration
             );
+        }
+
+        /**
+         * @brief Waits until the watches of @p watch delivered everything that happened before and it handled that.
+         */
+        void flushWatchOf(FileTracking::LocalItemWatch const& watch)
+        {
+            ASSERT_NO_FATAL_FAILURE(::Test::flushWatch(ioc_, watch.directory(), false));
+            if (watch.isDirectory() && fs::is_directory(watch.item()))
+                ASSERT_NO_FATAL_FAILURE(::Test::flushWatch(ioc_, watch.item(), true));
+        }
+
+        void flushWatchOf(Ids::WatchId const& watchId)
+        {
+            ASSERT_NO_FATAL_FAILURE(flushWatchOf(*manager_->find(watchId)));
+        }
+
+        /**
+         * @brief Makes @p change and returns once the watch of @p directory delivered @p filename to its subscribers,
+         *        without running their handlers. A change the test hands a watch next comes first, the delivered one
+         *        right after it within the settle time.
+         */
+        static void awaitDelivery(fs::path const& directory, std::string const& filename, std::function<void()> const& change)
+        {
+            const auto seen = std::make_shared<std::atomic_bool>(false);
+            // Subscribed after the watch, so the watch has an event by the time this sink sees it.
+            const auto subscription = FileTracking::DirectoryWatchService::shared()->subscribe(
+                directory,
+                false,
+                [seen, filename](FileTracking::DirectoryEvent const& event)
+                {
+                    if (event.filename == filename)
+                        *seen = true;
+                }
+            );
+            ASSERT_TRUE(subscription.has_value());
+            change();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+            while (!seen->load())
+            {
+                ASSERT_LT(std::chrono::steady_clock::now(), deadline) << filename;
+                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            }
         }
     };
 
@@ -458,13 +499,7 @@ namespace Test
         const auto otherId = (*other)->watchId();
 
         fs::rename(root_ / "notes.txt", root_ / "other.txt");
-        runUntil(
-            []()
-            {
-                return false;
-            },
-            std::chrono::seconds{1}
-        );
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(watchId));
 
         EXPECT_EQ(manager_->find(watchId)->item(), root_ / "notes.txt");
         EXPECT_EQ(manager_->find(otherId)->item(), root_ / "other.txt");
@@ -477,14 +512,9 @@ namespace Test
         const auto watchId = (*watched)->watchId();
 
         fs::rename(root_ / "project", root_ / "._project");
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(watchId));
 
-        EXPECT_FALSE(runUntil(
-            [&]()
-            {
-                return manager_->find(watchId)->item() != root_ / "project";
-            },
-            std::chrono::milliseconds{1000}
-        ));
+        EXPECT_EQ(manager_->find(watchId)->item(), root_ / "project");
     }
 
     TEST_F(LocalWatchManagerTest, AnItemMovedAsideAndWrittenAnewStaysWatched)
@@ -495,14 +525,9 @@ namespace Test
 
         fs::rename(root_ / "notes.txt", root_ / "notes.txt~");
         std::ofstream{root_ / "notes.txt"} << "written anew";
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(watchId));
 
-        EXPECT_FALSE(runUntil(
-            [&]()
-            {
-                return manager_->find(watchId)->item() != root_ / "notes.txt";
-            },
-            std::chrono::milliseconds{1000}
-        ));
+        EXPECT_EQ(manager_->find(watchId)->item(), root_ / "notes.txt");
     }
 
     TEST_F(LocalWatchManagerTest, AnItemMovedAsideAndWrittenAnewAfterTheSettleTimeTakesTheWatchBack)
@@ -514,13 +539,13 @@ namespace Test
         const auto watchId = (*watched)->watchId();
 
         fs::rename(root_ / "notes.txt", root_ / "notes.txt~");
-        runUntil(
+        // The watch follows once the settle time passed.
+        ASSERT_TRUE(runUntil(
             [&]()
             {
                 return manager_->find(watchId)->item() == root_ / "notes.txt~";
             }
-        );
-        runFor(std::chrono::milliseconds{300});
+        ));
         std::ofstream{root_ / "notes.txt"} << "written anew";
         fs::remove(root_ / "notes.txt~");
 
@@ -531,7 +556,7 @@ namespace Test
                     reportedCount(FileTracking::FileAction::Added, root_ / "notes.txt") > 0u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(watchId));
         EXPECT_EQ(manager_->find(watchId)->item(), root_ / "notes.txt");
         EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "notes.txt~"), 1u);
         EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "notes.txt"), 1u);
@@ -555,7 +580,7 @@ namespace Test
         ));
         runFor(FileTracking::renameReturnTime);
         std::ofstream{root_ / "notes.txt"} << "another file";
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(watchId));
 
         EXPECT_EQ(manager_->find(watchId)->item(), root_ / "renamed.txt");
         EXPECT_EQ(reportedCount(FileTracking::FileAction::Added, root_ / "notes.txt"), 0u);
@@ -577,7 +602,7 @@ namespace Test
                 return reportedCount(FileTracking::FileAction::Added, root_ / "notes.txt") > 0u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf((*watched)->watchId()));
         EXPECT_FALSE(reportedRemoval());
     }
 
@@ -602,7 +627,7 @@ namespace Test
     {
         auto watched = openRecording(root_ / "notes.txt");
         ASSERT_TRUE(watched.has_value());
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(*watched));
 
         watched->handleChange(FileTracking::DirectoryChange{
             .action = FileTracking::FileAction::Missed,
@@ -618,7 +643,7 @@ namespace Test
                 return reportedCount(FileTracking::FileAction::Missed, root_ / "notes.txt") == 1u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(*watched));
         EXPECT_FALSE(reportedRemoval());
     }
 
@@ -627,9 +652,16 @@ namespace Test
         const auto item = root_ / "project";
         auto watched = openRecording(item);
         ASSERT_TRUE(watched.has_value());
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(*watched));
 
-        fs::remove_all(item);
+        ASSERT_NO_FATAL_FAILURE(awaitDelivery(
+            root_,
+            "project",
+            [&item]()
+            {
+                fs::remove_all(item);
+            }
+        ));
         watched->handleChange(FileTracking::DirectoryChange{
             .action = FileTracking::FileAction::Missed,
             .directory = item,
@@ -644,7 +676,7 @@ namespace Test
                 return reportedCount(FileTracking::FileAction::Deleted, item) > 0u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(*watched));
         // Windows reports one of its own, the watched directory turned delete-pending.
         EXPECT_GE(reportedCount(FileTracking::FileAction::Missed, item), 1u);
         EXPECT_EQ(reportedCount(FileTracking::FileAction::Deleted, item), 1u);
@@ -656,7 +688,14 @@ namespace Test
         ASSERT_TRUE(watched.has_value());
 
         // Windows reports a case-only rename as the removal of the old name first.
-        fs::rename(root_ / "notes.txt", root_ / "NOTES.txt");
+        ASSERT_NO_FATAL_FAILURE(awaitDelivery(
+            root_,
+            "NOTES.txt",
+            [this]()
+            {
+                fs::rename(root_ / "notes.txt", root_ / "NOTES.txt");
+            }
+        ));
         watched->handleChange(changeOf(FileTracking::FileAction::Deleted, "notes.txt"));
         watched->handleChange(changeOf(FileTracking::FileAction::Moved, "NOTES.txt", "notes.txt"));
 
@@ -666,7 +705,7 @@ namespace Test
                 return watched->item() == root_ / "NOTES.txt";
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(*watched));
         EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "NOTES.txt"), 1u);
         EXPECT_FALSE(reportedRemoval());
     }
@@ -676,7 +715,14 @@ namespace Test
         auto watched = openRecording(root_ / "notes.txt");
         ASSERT_TRUE(watched.has_value());
 
-        fs::rename(root_ / "notes.txt", root_ / "NOTES.txt");
+        ASSERT_NO_FATAL_FAILURE(awaitDelivery(
+            root_,
+            "NOTES.txt",
+            [this]()
+            {
+                fs::rename(root_ / "notes.txt", root_ / "NOTES.txt");
+            }
+        ));
         watched->handleChange(changeOf(FileTracking::FileAction::Moved, "NOTES.txt", "notes.txt"));
         watched->handleChange(changeOf(FileTracking::FileAction::Deleted, "notes.txt"));
 
@@ -686,7 +732,7 @@ namespace Test
                 return watched->item() == root_ / "NOTES.txt";
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatchOf(*watched));
         EXPECT_EQ(reportedCount(FileTracking::FileAction::Moved, root_ / "NOTES.txt"), 1u);
         EXPECT_FALSE(reportedRemoval());
     }
@@ -710,7 +756,7 @@ namespace Test
         const auto item = root_ / "notes.txt";
         const auto watched = watchRecording(item);
         ASSERT_TRUE(watched.has_value()) << watched.error();
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(**watched));
 
         fs::remove(item);
 
@@ -733,7 +779,7 @@ namespace Test
         const auto watched = watchRecording(item);
         ASSERT_TRUE(watched.has_value()) << watched.error();
         ASSERT_EQ((*watched)->item(), item);
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(**watched));
 
         std::ofstream{item, std::ios::app} << " edited";
 
@@ -753,7 +799,7 @@ namespace Test
         const auto watched = watchRecording(directory / "notes.txt");
         ASSERT_TRUE(watched.has_value()) << watched.error();
         const auto watchId = (*watched)->watchId();
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(**watched));
 
         fs::rename(directory / "notes.txt", directory / "renamed.txt");
 
@@ -775,7 +821,7 @@ namespace Test
         std::ofstream{item} << "notes";
         const auto watched = watchRecording(item);
         ASSERT_TRUE(watched.has_value()) << watched.error();
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(**watched));
 
         fs::remove(item);
 
@@ -795,7 +841,7 @@ namespace Test
         ASSERT_TRUE(watched.has_value()) << watched.error();
         ASSERT_EQ((*watched)->item(), item);
         const auto watchId = (*watched)->watchId();
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(**watched));
 
         std::ofstream{item, std::ios::app} << " edited";
         EXPECT_TRUE(runUntil(
@@ -824,7 +870,7 @@ namespace Test
         const auto watched = watchRecording(item);
         ASSERT_TRUE(watched.has_value()) << watched.error();
         ASSERT_TRUE((*watched)->isDirectory());
-        settleEarlierEvents();
+        ASSERT_NO_FATAL_FAILURE(settleEarlierEvents(**watched));
 
         std::ofstream{item / "sub" / "notes.txt", std::ios::app} << " edited";
 
@@ -1215,15 +1261,7 @@ namespace Test
          */
         bool runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{5})
         {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                ioc_.restart();
-                ioc_.run_for(std::chrono::milliseconds{20});
-                if (condition())
-                    return true;
-            }
-            return false;
+            return ::Test::runUntil(ioc_, condition, timeout);
         }
 
         /**
@@ -1262,13 +1300,8 @@ namespace Test
                 return reported("after.txt") && reported("later.txt");
             }
         ));
-        runUntil(
-            []()
-            {
-                return false;
-            },
-            std::chrono::milliseconds{500}
-        );
+        // Replays of earlier changes come before these in their stream.
+        ASSERT_TRUE(::Test::runUntilIdle(ioc_));
         EXPECT_FALSE(reported("fresh"));
         EXPECT_FALSE(reported("before.txt"));
     }
