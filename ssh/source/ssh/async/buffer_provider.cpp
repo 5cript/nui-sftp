@@ -61,10 +61,44 @@ namespace SecureShell
         if (data_ == nullptr)
             return;
         if (auto provider = owner_.lock())
+        {
             provider->release(category_, slotIndex_);
+            provider->notifyReleased();
+        }
         data_ = nullptr;
         size_ = 0;
         capacity_ = 0;
+    }
+
+    std::size_t IBufferProvider::releaseCount() const
+    {
+        std::scoped_lock lock{releaseMutex_};
+        return releaseCount_;
+    }
+
+    void IBufferProvider::notifyOnRelease(std::size_t since, std::function<void()> callback)
+    {
+        {
+            std::scoped_lock lock{releaseMutex_};
+            if (releaseCount_ == since)
+            {
+                releaseCallbacks_.push_back(std::move(callback));
+                return;
+            }
+        }
+        callback();
+    }
+
+    void IBufferProvider::notifyReleased() noexcept
+    {
+        std::vector<std::function<void()>> callbacks{};
+        {
+            std::scoped_lock lock{releaseMutex_};
+            ++releaseCount_;
+            callbacks = std::exchange(releaseCallbacks_, {});
+        }
+        for (auto const& callback : callbacks)
+            callback();
     }
 
     BufferLease IBufferProvider::makeLease(

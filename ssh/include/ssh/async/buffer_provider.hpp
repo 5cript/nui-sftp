@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -196,16 +197,37 @@ namespace SecureShell
          */
         virtual BufferLease leaseForTransfer(std::size_t sizeHint, std::size_t serverLimit) = 0;
 
+        /**
+         * @brief How many leases were returned so far, see notifyOnRelease.
+         */
+        std::size_t releaseCount() const;
+
+        /**
+         * @brief Calls @p callback once a lease is returned, right away if one was since releaseCount returned
+         *        @p since. Callable from any thread, the callback runs on the one returning the lease.
+         */
+        void notifyOnRelease(std::size_t since, std::function<void()> callback);
+
       protected:
         friend class BufferLease;
 
         virtual void release(BufferCategory category, std::size_t slotIndex) noexcept = 0;
 
         /**
+         * @brief Counts a returned lease and calls the callbacks waiting for one.
+         */
+        void notifyReleased() noexcept;
+
+        /**
          * @brief Helper for derived classes to construct leases.
          */
         BufferLease
         makeLease(BufferCategory category, std::size_t slotIndex, char* data, std::size_t size, std::size_t capacity);
+
+      private:
+        mutable std::mutex releaseMutex_{};
+        std::size_t releaseCount_{0};
+        std::vector<std::function<void()>> releaseCallbacks_{};
     };
 
     namespace Detail

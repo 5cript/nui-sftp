@@ -219,6 +219,45 @@ namespace SecureShell::Test
         EXPECT_EQ(again.data(), ptr);
     }
 
+    TEST_F(BufferProviderTests, NotifiesOnceOnTheNextRelease)
+    {
+        auto provider = Provider::create();
+        auto first = provider->lease(0);
+        auto second = provider->lease(0);
+        int calls = 0;
+        provider->notifyOnRelease(
+            provider->releaseCount(),
+            [&calls]()
+            {
+                ++calls;
+            }
+        );
+        EXPECT_EQ(calls, 0);
+
+        first.reset();
+        EXPECT_EQ(calls, 1);
+        second.reset();
+        EXPECT_EQ(calls, 1);
+    }
+
+    TEST_F(BufferProviderTests, NotifiesRightAwayOfAReleaseSinceTheCount)
+    {
+        auto provider = Provider::create();
+        auto lease = provider->lease(0);
+        const auto since = provider->releaseCount();
+        lease.reset();
+
+        int calls = 0;
+        provider->notifyOnRelease(
+            since,
+            [&calls]()
+            {
+                ++calls;
+            }
+        );
+        EXPECT_EQ(calls, 1);
+    }
+
     TEST_F(BufferProviderTests, TinyAndSmallAreInlineInProviderObject)
     {
         // Sanity check that the Tiny and Small buckets occupy real storage inside the provider
