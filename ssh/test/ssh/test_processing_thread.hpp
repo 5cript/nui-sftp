@@ -424,7 +424,9 @@ namespace SecureShell::Test
         );
 
         ASSERT_TRUE(awaiter.waitFor());
-        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        // The second awaited cycle ran every permanent task once more.
+        ASSERT_TRUE(processingThread.awaitCycle());
+        ASSERT_TRUE(processingThread.awaitCycle());
         processingThread.stop();
         EXPECT_EQ(1, counter.load());
     }
@@ -691,8 +693,9 @@ namespace SecureShell::Test
 
         EXPECT_TRUE(processingThread.removePermanentTask(victim.second));
 
-        // Allow several cycles for the buggy replay path to crash the run loop.
-        std::this_thread::sleep_for(std::chrono::milliseconds{300});
+        // Several cycles for the buggy replay path to crash the run loop.
+        for (int cycle = 0; cycle < 3; ++cycle)
+            processingThread.awaitCycle();
 
         Awaiter postRemoval{};
         EXPECT_TRUE(processingThread.pushTask(
