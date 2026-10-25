@@ -3728,15 +3728,40 @@ namespace Test
         if (::geteuid() == 0)
             GTEST_SKIP() << "root can look into any directory";
         const auto source = root_ / "local" / "project" / "src";
+        const auto file = source / "main.cpp";
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
+        const auto watchId = onlyEntry().watchId;
         completeEverything();
+        write(file, "first change");
+        ASSERT_TRUE(runUntil(
+            [this]()
+            {
+                return uploadsTo("/srv/project/src/main.cpp") == 1u;
+            }
+        ));
+        const auto sent = sentFilesOf(file);
+        const auto sentState = stateOf(file);
 
-        write(source / "new.cpp", "new");
+        // Reported while src is open, FSEvents may not tell of a change below a directory no one can look into. It
+        // waits for the upload of the first change, src is closed by then.
+        write(file, "second change");
+        ASSERT_TRUE(runUntilProgress(
+            watchId,
+            [](SharedData::WatchProgress const& progress)
+            {
+                return progress.changesPending == 2u;
+            }
+        ));
         std::filesystem::permissions(source, std::filesystem::perms::none);
         auto restore = Nui::ScopeExit{[&source]() noexcept {
             std::error_code errorCode{};
             std::filesystem::permissions(source, std::filesystem::perms::owner_all, errorCode);
         }};
+        remote_->server["/srv/project/src/main.cpp"] = sentState;
+        endAs(
+            *lastUploadTo("/srv/project/src/main.cpp"),
+            {.reason = SharedData::OperationCompletionReason::Completed, .destinationState = sentState, .sentFiles = sent}
+        );
         ASSERT_TRUE(runUntil(
             [this]()
             {
@@ -3745,12 +3770,12 @@ namespace Test
         ));
         runFor(std::chrono::milliseconds{500});
 
-        EXPECT_EQ(uploadsTo("/srv/project/src/new.cpp"), 0u);
+        EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
         EXPECT_TRUE(remote_->of("remove").empty());
         ASSERT_EQ(view_->failures.size(), 1u);
         const auto failure = view_->failures.begin()->second;
-        EXPECT_EQ(failure.localPath.native(), source / "new.cpp");
-        EXPECT_EQ(failure.remotePath.value(), "/srv/project/src/new.cpp");
+        EXPECT_EQ(failure.localPath.native(), file);
+        EXPECT_EQ(failure.remotePath.value(), "/srv/project/src/main.cpp");
         EXPECT_EQ(failure.reason, SharedData::UploadFailureReason::PermissionDeniedLocally);
         EXPECT_TRUE(failure.detail.has_value());
     }
