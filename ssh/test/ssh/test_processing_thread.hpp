@@ -6,6 +6,12 @@
 
 #include <gtest/gtest.h>
 
+#ifndef _WIN32
+#    include <fcntl.h>
+#    include <sys/socket.h>
+#    include <unistd.h>
+#endif
+
 #include <array>
 #include <atomic>
 #include <functional>
@@ -1171,4 +1177,323 @@ namespace SecureShell::Test
         EXPECT_EQ(turns.load(), asleep + 2);
         processingThread.stop();
     }
+
+#ifndef _WIN32
+    namespace
+    {
+        /**
+         * @brief A connected pair of local sockets; the thread watches the first, the test writes to the second.
+         */
+        struct SocketPair
+        {
+            int ends[2]{-1, -1};
+
+            SocketPair()
+            {
+                EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, ends), 0);
+                EXPECT_EQ(::fcntl(ends[0], F_SETFL, O_NONBLOCK), 0);
+            }
+            ~SocketPair()
+            {
+                for (const auto end : ends)
+                {
+                    if (end >= 0)
+                        ::close(end);
+                }
+            }
+            SocketPair(SocketPair const&) = delete;
+            SocketPair& operator=(SocketPair const&) = delete;
+
+            void send()
+            {
+                const char byte = 'x';
+                EXPECT_EQ(::write(ends[1], &byte, 1), 1);
+            }
+
+            int drain()
+            {
+                char buffer[64];
+                int total = 0;
+                for (auto bytes = ::read(ends[0], buffer, sizeof(buffer)); bytes > 0;
+                     bytes = ::read(ends[0], buffer, sizeof(buffer)))
+                {
+                    total += static_cast<int>(bytes);
+                }
+                return total;
+            }
+        };
+
+        /**
+         * @brief A permanent task that reads what the pair brought and then awaits input, like a channel reader.
+         */
+        std::function<TaskStatus(ProcessingThread::PermanentTaskId)>
+        readingTask(SocketPair& pair, std::atomic_int& turns, std::atomic_int& received)
+        {
+            return [&pair, &turns, &received](auto)
+            {
+                ++turns;
+                received += pair.drain();
+                return TaskStatus::AwaitInput;
+            };
+        }
+
+        SocketWait::Watched watching(int socket, bool writable = false)
+        {
+            return SocketWait::Watched{.socket = socket, .writable = writable};
+        }
+    }
+
+    TEST_F(ProcessingThreadTest, TaskAwaitingInputSleepsUntilTheSocketHasData)
+    {
+        SocketPair pair;
+        std::atomic_int turns = 0;
+        std::atomic_int received = 0;
+        ProcessingThread processingThread;
+        ASSERT_TRUE(processingThread.watchSocket(
+            [&pair]
+            {
+                return watching(pair.ends[0]);
+            }
+        ));
+        processingThread.pushPermanentTask(readingTask(pair, turns, received));
+        processingThread.start(1ms);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+
+        std::this_thread::sleep_for(200ms);
+        const auto asleep = turns.load();
+        // Polling every millisecond would have run about 200 times.
+        EXPECT_LE(asleep, 2);
+
+        pair.send();
+        ASSERT_TRUE(waitUntil(
+            [&received]
+            {
+                return received.load() == 1;
+            }
+        ));
+        std::this_thread::sleep_for(100ms);
+        EXPECT_LE(turns.load(), asleep + 2);
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, PushedTaskInterruptsTheSocketWait)
+    {
+        SocketPair pair;
+        std::atomic_int turns = 0;
+        std::atomic_int received = 0;
+        ProcessingThread processingThread;
+        ASSERT_TRUE(processingThread.watchSocket(
+            [&pair]
+            {
+                return watching(pair.ends[0]);
+            }
+        ));
+        processingThread.pushPermanentTask(readingTask(pair, turns, received));
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+        std::this_thread::sleep_for(50ms);
+
+        const auto start = std::chrono::steady_clock::now();
+        auto done = processingThread.pushPromiseTask(
+            []
+            {
+                return 42;
+            }
+        );
+        ASSERT_EQ(done.wait_for(2s), std::future_status::ready);
+        EXPECT_EQ(done.get(), 42);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, WakeAndNewPermanentTasksInterruptTheSocketWait)
+    {
+        SocketPair pair;
+        std::atomic_int turns = 0;
+        std::atomic_int received = 0;
+        std::atomic_int otherTurns = 0;
+        ProcessingThread processingThread;
+        ASSERT_TRUE(processingThread.watchSocket(
+            [&pair]
+            {
+                return watching(pair.ends[0]);
+            }
+        ));
+        processingThread.pushPermanentTask(readingTask(pair, turns, received));
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+        std::this_thread::sleep_for(50ms);
+
+        const auto beforeWake = turns.load();
+        processingThread.wake();
+        EXPECT_TRUE(waitUntil(
+            [&turns, beforeWake]
+            {
+                return turns.load() > beforeWake;
+            },
+            1s
+        ));
+        std::this_thread::sleep_for(50ms);
+        processingThread.pushPermanentTask(countingTask(otherTurns, TaskStatus::Done));
+        EXPECT_TRUE(waitUntil(
+            [&otherTurns]
+            {
+                return otherTurns.load() == 1;
+            },
+            1s
+        ));
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, StopInterruptsTheSocketWait)
+    {
+        SocketPair pair;
+        std::atomic_int turns = 0;
+        std::atomic_int received = 0;
+        ProcessingThread processingThread;
+        ASSERT_TRUE(processingThread.watchSocket(
+            [&pair]
+            {
+                return watching(pair.ends[0]);
+            }
+        ));
+        processingThread.pushPermanentTask(readingTask(pair, turns, received));
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+        std::this_thread::sleep_for(50ms);
+
+        const auto start = std::chrono::steady_clock::now();
+        processingThread.stop();
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        EXPECT_FALSE(processingThread.isRunning());
+    }
+
+    TEST_F(ProcessingThreadTest, TaskAwaitingInputPollsWhenTheSocketIsGone)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        // Libssh reports no socket once it closed it after a fatal error.
+        ASSERT_TRUE(processingThread.watchSocket(
+            []
+            {
+                return watching(SSH_INVALID_SOCKET);
+            }
+        ));
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::AwaitInput), 5ms);
+        processingThread.start(10s);
+        EXPECT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 5;
+            },
+            2s
+        ));
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, TaskAwaitingInputPollsWithoutAWatchedSocket)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::AwaitInput), 5ms);
+        processingThread.start(10s);
+        EXPECT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 5;
+            },
+            2s
+        ));
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, PendingOutputWakesTheThreadWhenTheSocketTakesIt)
+    {
+        SocketPair pair;
+        std::atomic_int turns = 0;
+        std::atomic_int received = 0;
+        std::atomic_bool outputPending = false;
+        ProcessingThread processingThread;
+        ASSERT_TRUE(processingThread.watchSocket(
+            [&pair, &outputPending]
+            {
+                return watching(pair.ends[0], outputPending.load());
+            }
+        ));
+        processingThread.pushPermanentTask(readingTask(pair, turns, received));
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+
+        // The socket can take data, so while libssh holds output the thread keeps going to flush it.
+        outputPending = true;
+        processingThread.wake();
+        const auto pending = turns.load();
+        EXPECT_TRUE(waitUntil(
+            [&turns, pending]
+            {
+                return turns.load() >= pending + 10;
+            },
+            2s
+        ));
+        outputPending = false;
+        processingThread.wake();
+        std::this_thread::sleep_for(50ms);
+        const auto flushed = turns.load();
+        std::this_thread::sleep_for(100ms);
+        EXPECT_LE(turns.load(), flushed + 1);
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, PollingTaskStillRunsWhileAnotherAwaitsInput)
+    {
+        SocketPair pair;
+        std::atomic_int turns = 0;
+        std::atomic_int received = 0;
+        std::atomic_int pollTurns = 0;
+        ProcessingThread processingThread;
+        ASSERT_TRUE(processingThread.watchSocket(
+            [&pair]
+            {
+                return watching(pair.ends[0]);
+            }
+        ));
+        processingThread.pushPermanentTask(readingTask(pair, turns, received));
+        processingThread.pushPermanentTask(countingTask(pollTurns, TaskStatus::Poll), 10ms);
+        processingThread.start(10s);
+        // The socket wait ends at the polling task's interval.
+        EXPECT_TRUE(waitUntil(
+            [&pollTurns]
+            {
+                return pollTurns.load() >= 5;
+            },
+            2s
+        ));
+        processingThread.stop();
+    }
+#endif
 }

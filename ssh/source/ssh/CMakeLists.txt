@@ -9,6 +9,7 @@ function(add_secure_shell_library name)
         STATIC
             ${SECURE_SHELL_SOURCE_DIRECTORY}/async/buffer_provider.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/async/processing_thread.cpp
+            ${SECURE_SHELL_SOURCE_DIRECTORY}/async/socket_wait.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/async/transfer_context.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/session.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/channel.cpp
@@ -36,6 +37,9 @@ function(add_secure_shell_library name)
             fmt::fmt
             shared-data
     )
+    if (WIN32)
+        target_link_libraries(${name} PUBLIC ws2_32)
+    endif()
 endfunction()
 
 add_secure_shell_library(secure-shell)
