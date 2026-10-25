@@ -598,7 +598,8 @@ namespace FileTracking
         impl_->refreshWatch(entry.watchId, inserted ? everyPart : WatchParts{.entry = true});
         if (inserted && !entry.stop && std::holds_alternative<std::monostate>(impl_->selection.value()))
             impl_->selection = Selection{entry.watchId};
-        if (heldInstance || entry.instanceId)
+        // Only an entry that starts or stops holding an instance changes which copies are orphans.
+        if (heldInstance != entry.instanceId.has_value())
             impl_->refreshOrphans();
         impl_->notifyAttention();
     }
