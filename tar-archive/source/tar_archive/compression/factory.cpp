@@ -3,6 +3,7 @@
 #include <tar_archive/compression.hpp>
 #include <tar_archive/error.hpp>
 #include <paths/native.hpp>
+#include <shared_data/file_operations/compression_level_range.hpp>
 
 #include <algorithm>
 #include <array>
@@ -87,20 +88,24 @@ namespace TarArchive
 
     CompressionOptions compressionOptionsForLevel(Compression codec, int level, bool xzExtreme) noexcept
     {
+        const auto clampTo = [level](SharedData::CompressionLevelRange const& range)
+        {
+            return std::clamp(level, range.minimum, range.maximum);
+        };
         CompressionOptions options{};
         switch (codec)
         {
             case Compression::Gzip:
-                options.gzipLevel = std::clamp(level, 1, 9);
+                options.gzipLevel = clampTo(SharedData::gzipLevelRange);
                 break;
             case Compression::Bzip2:
-                options.bzip2BlockSize = std::clamp(level, 1, 9);
+                options.bzip2BlockSize = clampTo(SharedData::bzip2BlockSizeRange);
                 break;
             case Compression::Zstd:
-                options.zstdLevel = std::clamp(level, 1, 22);
+                options.zstdLevel = clampTo(SharedData::zstdLevelRange);
                 break;
             case Compression::Xz:
-                options.xzPreset = std::clamp(level, 0, 9);
+                options.xzPreset = clampTo(SharedData::xzPresetRange);
                 options.xzExtreme = xzExtreme;
                 break;
             case Compression::None:

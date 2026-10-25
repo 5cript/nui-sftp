@@ -47,8 +47,8 @@ int backendCompressionCode(ArchiveCodec codec);
  *
  * @c fileStem is the user-entered filename without any `.tar[.ext]` suffix; the
  * caller composes the full filename using @c archiveCodecExtension.
- * @c compressionLevel is in the codec's own range: gzip level 1..9, bzip2 block
- * size 1..9, zstd level 1..22, xz preset 0..9, unused for None.
+ * @c compressionLevel is in the codec's own range from
+ * shared_data/file_operations/compression_level_range.hpp, unused for None.
  */
 struct ArchiveTransferResult
 {

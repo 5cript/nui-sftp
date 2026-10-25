@@ -2,6 +2,7 @@
 #include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
+#include <shared_data/file_operations/compression_level_range.hpp>
 #include <utility/language.hpp>
 
 #include <script-nui-components/button.hpp>
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <optional>
 
 std::string archiveCodecExtension(ArchiveCodec codec)
@@ -112,38 +114,23 @@ namespace
     }
 
     /**
-     * @brief The level range a codec's library accepts, the same ranges TarArchive::compressionOptionsForLevel
-     * clamps to.
+     * @brief The level range of @p codec, the same one TarArchive::compressionOptionsForLevel clamps to.
      */
-    struct LevelScale
-    {
-        int minimum;
-        int maximum;
-        int defaultLevel;
-        /** @brief The first zstd ultra level, it needs much more memory to pack and to unpack. */
-        std::optional<int> firstUltraLevel{};
-    };
-
-    LevelScale levelScale(ArchiveCodec codec)
+    SharedData::CompressionLevelRange levelScale(ArchiveCodec codec)
     {
         switch (codec)
         {
             case ArchiveCodec::Bzip2:
-                return {.minimum = 1, .maximum = 9, .defaultLevel = 9};
+                return SharedData::bzip2BlockSizeRange;
             case ArchiveCodec::Zstd:
-                return {.minimum = 1, .maximum = 22, .defaultLevel = 3, .firstUltraLevel = 20};
+                return SharedData::zstdLevelRange;
             case ArchiveCodec::Xz:
-                return {.minimum = 0, .maximum = 9, .defaultLevel = 6};
+                return SharedData::xzPresetRange;
             case ArchiveCodec::None:
             case ArchiveCodec::Gzip:
                 break;
         }
-        return {.minimum = 1, .maximum = 9, .defaultLevel = 6};
-    }
-
-    std::size_t codecIndex(ArchiveCodec codec)
-    {
-        return static_cast<std::size_t>(codec);
+        return SharedData::gzipLevelRange;
     }
 
     bool isUltraLevel(ArchiveCodec codec, int level)
@@ -152,17 +139,26 @@ namespace
         return firstUltraLevel && level >= *firstUltraLevel;
     }
 
+    constexpr double kilobyte = 1000.0;
+    constexpr double kibibyte = 1024.0;
+    constexpr double mebibyte = 1024.0 * kibibyte;
+
     /**
      * @brief Memory in MiB xz needs for each preset, from the xz(1) manual.
      */
-    constexpr std::array<int, 10u> xzPackMemory{3, 9, 17, 32, 48, 94, 94, 186, 370, 674};
-    constexpr std::array<int, 10u> xzUnpackMemory{1, 2, 3, 5, 5, 9, 9, 17, 33, 65};
+    constexpr std::array<double, 10u> xzPackMemory{3, 9, 17, 32, 48, 94, 94, 186, 370, 674};
+    constexpr std::array<double, 10u> xzUnpackMemory{1, 2, 3, 5, 5, 9, 9, 17, 33, 65};
+    static_assert(
+        xzPackMemory.size() ==
+            static_cast<std::size_t>(SharedData::xzPresetRange.maximum - SharedData::xzPresetRange.minimum + 1),
+        "one memory figure per xz preset"
+    );
 
-    std::string kilobytesText(int kilobytes)
+    std::string memoryText(double bytes)
     {
-        if (kilobytes < 1000)
-            return fmt::format("{} kB", kilobytes);
-        return fmt::format("{:.1f} MB", kilobytes / 1000.0);
+        if (bytes < mebibyte)
+            return fmt::format("{:.3g} KiB", bytes / kibibyte);
+        return fmt::format("{:.3g} MiB", bytes / mebibyte);
     }
 
     std::string levelText(ArchiveCodec codec, int level)
@@ -202,15 +198,25 @@ namespace
         switch (codec)
         {
             case ArchiveCodec::Bzip2:
+                // bzip2(1): 400k + 8 x block size to pack, 100k + 4 x block size to unpack, k being 1000 bytes.
                 return fmt::format(
-                    "{} {}", memoryNote(kilobytesText(400 + 800 * level), kilobytesText(100 + 400 * level)), defaultNote
+                    "{} {}",
+                    memoryNote(
+                        memoryText((400.0 + 800.0 * level) * kilobyte), memoryText((100.0 + 400.0 * level) * kilobyte)
+                    ),
+                    defaultNote
                 );
             case ArchiveCodec::Xz:
             {
-                const auto preset = static_cast<std::size_t>(std::clamp(level, 0, 9));
+                const auto preset = static_cast<std::size_t>(
+                    std::clamp(level, SharedData::xzPresetRange.minimum, SharedData::xzPresetRange.maximum) -
+                    SharedData::xzPresetRange.minimum
+                );
                 return fmt::format(
                     "{} {}",
-                    memoryNote(fmt::format("{} MiB", xzPackMemory[preset]), fmt::format("{} MiB", xzUnpackMemory[preset])),
+                    memoryNote(
+                        memoryText(xzPackMemory[preset] * mebibyte), memoryText(xzUnpackMemory[preset] * mebibyte)
+                    ),
                     defaultNote
                 );
             }
@@ -225,7 +231,7 @@ namespace
         return defaultNote;
     }
 
-    double trackFraction(LevelScale const& scale, double level)
+    double trackFraction(SharedData::CompressionLevelRange const& scale, double level)
     {
         return (level - scale.minimum) / (scale.maximum - scale.minimum);
     }
@@ -233,7 +239,7 @@ namespace
     /**
      * @brief Where @p level sits on the slider track, from 0 to 1, for a marker below the track.
      */
-    std::string trackPosition(LevelScale const& scale, double level)
+    std::string trackPosition(SharedData::CompressionLevelRange const& scale, double level)
     {
         return fmt::format("--archive-transfer-dialog-position: {:.4f}", trackFraction(scale, level));
     }
@@ -241,7 +247,7 @@ namespace
     /**
      * @brief How far the track is filled for the current @p level, from 0 to 1.
      */
-    std::string trackValue(LevelScale const& scale, int level)
+    std::string trackValue(SharedData::CompressionLevelRange const& scale, int level)
     {
         return fmt::format("--archive-transfer-dialog-value: {:.4f}", trackFraction(scale, level));
     }
@@ -253,8 +259,8 @@ struct ArchiveTransferDialog::Implementation
     std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
     Nui::Observed<std::string> fileStem{};
     Nui::Observed<std::string> codecLabelValue{};
-    /** @brief One level per codec, indexed by ArchiveCodec, so switching codecs keeps each choice. */
-    std::array<Nui::Observed<int>, 5u> compressionLevels{};
+    /** @brief One level per codec in the dropdown, so switching codecs keeps each choice. */
+    std::map<ArchiveCodec, Nui::Observed<int>> compressionLevels{};
     Nui::Observed<bool> xzExtreme{false};
     std::vector<std::string> codecLabelOptions{};
     std::function<void(std::optional<ArchiveTransferResult> const&)> onConfirm;
@@ -265,7 +271,10 @@ struct ArchiveTransferDialog::Implementation
     {
         codecLabelOptions.reserve(codecOptionsList().size());
         for (auto const& option : codecOptionsList())
+        {
             codecLabelOptions.push_back(option.label);
+            compressionLevels.try_emplace(option.codec);
+        }
     }
 };
 
@@ -342,7 +351,7 @@ Nui::ElementRenderer ArchiveTransferDialog::compressionSection(ArchiveCodec code
     }
 
     const auto scale = levelScale(codec);
-    auto& level = impl_->compressionLevels[codecIndex(codec)];
+    auto& level = impl_->compressionLevels[codec];
     const auto levelId = fmt::format("{}-level", impl_->id);
 
     // clang-format off
@@ -416,8 +425,8 @@ void ArchiveTransferDialog::open(OpenOptions const& options)
     impl_->onConfirm = options.onConfirm;
     impl_->fileStem = options.initialFileStem;
     impl_->codecLabelValue = codecLabel(options.initialCodec);
-    for (auto const& option : codecOptionsList())
-        impl_->compressionLevels[codecIndex(option.codec)] = levelScale(option.codec).defaultLevel;
+    for (auto& [codec, level] : impl_->compressionLevels)
+        level = levelScale(codec).defaultLevel;
     impl_->xzExtreme = false;
     impl_->confirmOnClose = false;
     Nui::globalEventContext.executeActiveEventsImmediately();
@@ -447,8 +456,7 @@ void ArchiveTransferDialog::open(OpenOptions const& options)
             ArchiveTransferResult result{
                 .fileStem = impl_->fileStem.value(),
                 .codec = codec,
-                .compressionLevel =
-                    std::clamp(impl_->compressionLevels[codecIndex(codec)].value(), scale.minimum, scale.maximum),
+                .compressionLevel = std::clamp(impl_->compressionLevels[codec].value(), scale.minimum, scale.maximum),
                 .xzExtreme = codec == ArchiveCodec::Xz && impl_->xzExtreme.value(),
             };
             impl_->onConfirm(result);
