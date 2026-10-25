@@ -9,17 +9,15 @@
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include "error_log_capture.hpp"
+#include "io_context_runs.hpp"
 
-#include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
-#include <fmt/format.h>
 #include <nui/utility/scope_exit.hpp>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -323,7 +321,6 @@ namespace Test
         FakeRemote* remote_{nullptr};
         FakeView* view_{nullptr};
         std::unique_ptr<FileTracking::Tracker> tracker_;
-        int flushes_{0};
 
         void SetUp() override
         {
@@ -404,60 +401,17 @@ namespace Test
         bool
         runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{5})
         {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            ioc_.restart();
-            // Waits for the handlers the watcher threads post instead of spinning while there is none.
-            const auto keepRunning = boost::asio::make_work_guard(ioc_);
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                ioc_.run_one_for(std::chrono::milliseconds{20});
-                ioc_.poll();
-                if (condition())
-                    return true;
-            }
-            return false;
+            return ::Test::runUntil(ioc_, condition, timeout);
         }
 
-        /**
-         * @brief Runs the handlers until none is left. The timers of the tracker are one-shot, so this ends unless
-         *        a watch event is still on its way, see flushWatch.
-         * @return false when handlers were still left after @p timeout.
-         */
-        bool runUntilIdle(std::chrono::milliseconds timeout = std::chrono::seconds{10})
+        bool runUntilIdle()
         {
-            ioc_.restart();
-            ioc_.run_for(timeout);
-            return ioc_.stopped();
+            return ::Test::runUntilIdle(ioc_);
         }
 
-        /**
-         * @brief Waits until the watch of @p directory delivered everything that happened in it before, then until
-         *        the tracker handled it. The marker is named like a download in progress, which the tracker drops.
-         *        Joins a watch the tracker has, with its recursion, so the marker comes after the earlier events.
-         */
         void flushWatch(std::filesystem::path const& directory, bool recursive)
         {
-            const auto seen = std::make_shared<std::atomic_bool>(false);
-            const auto marker =
-                fmt::format("flush{}{}", ++flushes_, std::string{Persistence::defaultTempFileSuffix});
-            const auto sink = [seen, marker](FileTracking::DirectoryEvent const& event)
-            {
-                if (std::filesystem::path{event.filename}.filename() == marker)
-                    *seen = true;
-            };
-            const auto service = FileTracking::DirectoryWatchService::shared();
-            const auto subscription = service->subscribe(directory, recursive, sink);
-            ASSERT_TRUE(subscription.has_value()) << directory;
-            write(directory / marker, "");
-            ASSERT_TRUE(runUntil(
-                [&seen]()
-                {
-                    return seen->load();
-                },
-                std::chrono::seconds{10}
-            )) << directory;
-            std::filesystem::remove(directory / marker);
-            ASSERT_TRUE(runUntilIdle());
+            ::Test::flushWatch(ioc_, directory, recursive);
         }
 
         /**
