@@ -112,8 +112,10 @@ namespace Benchmark
     std::expected<void, std::string> LibsshClient::transferInStrand(Transfer const& transfer)
     {
         sftp_ = *connection_.sftp;
-        auto const* const limits = sftp_limits(sftp_);
-        if (limits == nullptr)
+        const std::unique_ptr<sftp_limits_struct, decltype(&sftp_limits_free)> limits{
+            sftp_limits(sftp_), &sftp_limits_free
+        };
+        if (!limits)
             return std::unexpected<std::string>{"sftp_limits failed"};
         readLength_ = static_cast<std::size_t>(limits->max_read_length);
         writeLength_ = static_cast<std::size_t>(limits->max_write_length);

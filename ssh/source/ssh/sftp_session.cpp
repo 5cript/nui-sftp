@@ -7,6 +7,7 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <memory>
 
 #include <fcntl.h>
 
@@ -876,8 +877,11 @@ namespace SecureShell
     std::expected<sftp_limits_struct, SftpSession::Error> SftpSession::limitsInStrand()
     {
         assert(strand_->withinProcessingThread());
-        auto const* limits = sftp_limits(session_);
-        if (limits == nullptr)
+        // A copy the caller frees.
+        const std::unique_ptr<sftp_limits_struct, decltype(&sftp_limits_free)> limits{
+            sftp_limits(session_), &sftp_limits_free
+        };
+        if (!limits)
             return std::unexpected(lastError());
         return *limits;
     }
@@ -921,9 +925,9 @@ namespace SecureShell
         if (!file)
             return std::unexpected(lastError());
 
-        auto const* limits = sftp_limits(session_);
-        if (limits == nullptr)
-            return std::unexpected(lastError());
+        const auto limits = limitsInStrand();
+        if (!limits)
+            return std::unexpected(limits.error());
 
         auto stream = std::make_shared<FileStream>(shared_from_this(), file.release(), *limits);
         fileStreams_.push_back(stream);
