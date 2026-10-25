@@ -1,8 +1,10 @@
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
+#include <ssh/async/request_window.hpp>
 
 #include <algorithm>
 #include <cassert>
+#include <deque>
 #include <utility>
 #include <chrono>
 
@@ -10,11 +12,11 @@ namespace SecureShell
 {
     namespace
     {
-        /** @brief Bytes one transfer moves per turn at most; several turns make up a cycle. */
+        /** @brief Bytes one upload moves per turn at most, and a download at least; several turns make up a cycle. */
         constexpr IFileStream::SignedSizeType targetBytesPerTurn = 256 * 1024;
 
-        /** @brief Size of a single sftp read or write: the session's preferred chunk, bounded
-         *         by the leased buffer and the server limit. A call cannot be interrupted, so the
+        /** @brief Size of a single sftp write: the session's preferred chunk, bounded by the
+         *         leased buffer and the server limit. A call cannot be interrupted, so the
          *         session sizes it to take about one target call duration; the turn and the cycle
          *         (after which remaining transfers skip, with the thread rotating who goes first)
          *         are bounded by that same duration.
@@ -54,6 +56,134 @@ namespace SecureShell
             error.message = std::string{what};
             return error;
         }
+
+        /**
+         * @brief A read request that was sent but whose data was not taken yet.
+         */
+        struct PendingRead
+        {
+            std::unique_ptr<sftp_aio_struct, decltype(&sftp_aio_free)> request;
+            std::uint64_t offset;
+            IFileStream::SignedSizeType length;
+        };
+
+        /**
+         * @brief What one read request brought.
+         */
+        struct ReceivedRead
+        {
+            std::uint64_t offset;
+            IFileStream::SignedSizeType requested;
+            IFileStream::SignedSizeType received;
+        };
+
+        /**
+         * @brief The read requests one download keeps in flight, oldest first.
+         *
+         * A blocking sftp_read sends one request and waits for its answer, so the link idles for a
+         * round trip and the server's processing per call. Keeping a window of requests in flight
+         * hides both. Answers to requests nobody waits for would stay queued in the sftp session,
+         * so the pipeline is drained before a transfer ends.
+         */
+        class ReadPipeline
+        {
+          public:
+            using SignedSizeType = IFileStream::SignedSizeType;
+
+            bool empty() const noexcept
+            {
+                return pending_.empty();
+            }
+
+            SignedSizeType inFlightBytes() const noexcept
+            {
+                return inFlightBytes_;
+            }
+
+            RequestWindow& window() noexcept
+            {
+                return window_;
+            }
+
+            /**
+             * @brief Sends requests until the window is full or everything is requested.
+             *
+             * @param unrequested Bytes of the file no request asks for yet.
+             * @param upperBound Largest request, the buffer size or the server limit.
+             */
+            std::expected<void, SftpError>
+            fill(SftpSession const& sftp, sftp_file file, SignedSizeType unrequested, SignedSizeType upperBound)
+            {
+                while (unrequested > 0 && inFlightBytes_ < window_.windowBytes())
+                {
+                    const auto length = std::min(unrequested, window_.requestBytes(upperBound));
+                    const auto offset = sftp_tell64(file);
+                    sftp_aio request{nullptr};
+                    const auto sent = sftp_aio_begin_read(file, static_cast<std::size_t>(length), &request);
+                    if (sent < 0)
+                        return std::unexpected(transferError(sftp, "Requesting from the remote file failed"));
+                    pending_.push_back(
+                        PendingRead{
+                            .request = {request, sftp_aio_free},
+                            .offset = offset,
+                            .length = static_cast<SignedSizeType>(sent),
+                        }
+                    );
+                    inFlightBytes_ += sent;
+                    unrequested -= sent;
+                }
+                return {};
+            }
+
+            /**
+             * @brief Waits for the oldest request and copies its data into the buffer.
+             */
+            std::expected<ReceivedRead, SftpError>
+            receiveOldest(SftpSession const& sftp, char* buffer, SignedSizeType bufferSize)
+            {
+                auto oldest = std::move(pending_.front());
+                pending_.pop_front();
+                inFlightBytes_ -= oldest.length;
+
+                auto* request = oldest.request.release();
+                const auto received = sftp_aio_wait_read(&request, buffer, static_cast<std::size_t>(bufferSize));
+                // Frees the request in every case but SSH_AGAIN, which a blocking file does not return.
+                oldest.request.reset(request);
+                if (received < 0)
+                    return std::unexpected(transferError(sftp, "Reading the remote file failed"));
+                return ReceivedRead{
+                    .offset = oldest.offset,
+                    .requested = oldest.length,
+                    .received = static_cast<SignedSizeType>(received),
+                };
+            }
+
+            /**
+             * @brief Waits for every request still in flight and throws its data away.
+             *
+             * @param file The open remote file, null when it was closed already, in which case
+             *        the requests are only freed.
+             */
+            void discard(sftp_file file, char* buffer, SignedSizeType bufferSize) noexcept
+            {
+                if (file != nullptr)
+                {
+                    for (auto& pending : pending_)
+                    {
+                        auto* request = pending.request.release();
+                        std::ignore = sftp_aio_wait_read(&request, buffer, static_cast<std::size_t>(bufferSize));
+                        pending.request.reset(request);
+                    }
+                }
+                pending_.clear();
+                inFlightBytes_ = 0;
+            }
+
+          private:
+            std::deque<PendingRead> pending_{};
+            SignedSizeType inFlightBytes_{0};
+            RequestWindow window_{};
+        };
     }
 
 #define VERIFY_FILE_STREAM() \
@@ -481,14 +611,30 @@ namespace SecureShell
             assert(sftp->strand_->withinProcessingThread());
         auto context = std::make_shared<AsyncTransferContext>();
         const auto [success, id] = strand()->pushPermanentTask(
-            [weakStream = weak_from_this(), buffer, bufferSize, onRead = std::move(onRead), context, totalFileSize]()
+            [weakStream = weak_from_this(),
+             buffer,
+             bufferSize,
+             onRead = std::move(onRead),
+             context,
+             totalFileSize,
+             pipeline = std::make_shared<ReadPipeline>()]()
             {
-                if (context->hasEnded())
-                    return false;
-                if (context->paused())
-                    return true;
-
                 auto stream = weakStream.lock();
+                const auto discardPipeline = [&]()
+                {
+                    pipeline->discard(stream ? stream->file_.get() : nullptr, buffer, bufferSize);
+                };
+
+                if (context->hasEnded())
+                {
+                    discardPipeline();
+                    return false;
+                }
+                if (context->paused() && pipeline->empty())
+                {
+                    pipeline->window().restartSample();
+                    return true;
+                }
                 if (!stream)
                 {
                     context->fail(expiredError("File stream"));
@@ -498,6 +644,7 @@ namespace SecureShell
                 auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
+                    discardPipeline();
                     context->fail(expiredError("SFTP session"));
                     return false;
                 }
@@ -505,54 +652,73 @@ namespace SecureShell
                 if (stream->strand()->cycleElapsed() > target)
                     return true;
 
-                auto remainingRead = totalFileSize - context->bytesTransferred_.load();
-                const auto lengthLimit = static_cast<SignedSizeType>(stream->readLengthLimit());
-                const auto turnStart = std::chrono::steady_clock::now();
-                SignedSizeType turnBytes = 0;
-
-                while (
-                    remainingRead > 0 && turnBytes < targetBytesPerTurn &&
-                    !(turnBytes > 0 && turnExpired(turnStart, target))
-                )
+                const auto failWith = [&](SftpError error)
                 {
-                    const auto chunk = transferChunkBytes(*sftp, bufferSize, lengthLimit);
-                    const auto requested = std::min(remainingRead, chunk);
-                    const auto callStart = std::chrono::steady_clock::now();
-                    const auto result = sftp_read(stream->file_.get(), buffer, requested);
-                    if (result < 0)
-                    {
-                        context->fail(transferError(*sftp, "Reading the remote file failed"));
-                        return false;
-                    }
-                    if (result == 0)
+                    discardPipeline();
+                    context->fail(std::move(error));
+                    return false;
+                };
+
+                auto* const file = stream->file_.get();
+                const auto lengthLimit = static_cast<SignedSizeType>(stream->readLengthLimit());
+                const auto upperBound =
+                    std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
+                const auto fillPipeline = [&]() -> std::expected<void, SftpError>
+                {
+                    if (context->paused())
+                        return {};
+                    const auto unrequested =
+                        totalFileSize - context->bytesTransferred_.load() - pipeline->inFlightBytes();
+                    return pipeline->fill(*sftp, file, unrequested, upperBound);
+                };
+
+                if (auto filled = fillPipeline(); !filled)
+                    return failWith(std::move(filled).error());
+
+                // Requests stay in flight between turns, so a quarter window per turn moves as much as
+                // a whole one and hands the thread to other tasks four times as often.
+                const auto turnStart = std::chrono::steady_clock::now();
+                const auto turnBudget = std::max(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
+                SignedSizeType turnBytes = 0;
+                while (!pipeline->empty() && turnBytes < turnBudget && !(turnBytes > 0 && turnExpired(turnStart, target)))
+                {
+                    const auto received = pipeline->receiveOldest(*sftp, buffer, bufferSize);
+                    if (!received)
+                        return failWith(received.error());
+                    if (received->received == 0)
                     {
                         // The remote file is shorter than listed. Finalizing would replace the
                         // destination with a truncated copy.
                         context->calculateBytesPerSecond();
-                        context->fail(SftpError{
+                        return failWith(SftpError{
                             .message = "The remote file ended before the expected size was read",
                             .wrapperError = WrapperErrors::UnexpectedEndOfFile,
                         });
-                        return false;
                     }
-                    // Report against the unclamped chunk: a file tail asks for less and must not
-                    // size the chunk from a call whose payload portion is noise.
-                    sftp->chunkController().recordDataCall(result, chunk, std::chrono::steady_clock::now() - callStart);
-                    remainingRead -= result;
-                    if (!onRead(result))
+                    pipeline->window().recordReceived(received->received, std::chrono::steady_clock::now(), target);
+                    if (!onRead(received->received))
                     {
-                        context->fail(SftpError{
+                        return failWith(SftpError{
                             .message = "Storing the received data failed",
                             .wrapperError = WrapperErrors::LocalIoFailure,
                         });
-                        return false;
                     }
-                    context->bytesTransferred_ += result;
-                    turnBytes += result;
+                    context->bytesTransferred_ += received->received;
+                    turnBytes += received->received;
+
+                    if (received->received < received->requested)
+                    {
+                        // A short answer leaves a gap before the requests after it: ask again from
+                        // where it ended.
+                        discardPipeline();
+                        sftp_seek64(file, received->offset + static_cast<std::uint64_t>(received->received));
+                    }
+                    if (auto filled = fillPipeline(); !filled)
+                        return failWith(std::move(filled).error());
                 }
 
                 context->calculateBytesPerSecond();
-                if (remainingRead == 0)
+                if (context->bytesTransferred_.load() >= totalFileSize && pipeline->empty())
                 {
                     context->complete();
                     return false;
