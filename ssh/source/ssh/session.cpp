@@ -68,6 +68,9 @@ namespace SecureShell
 
     void Session::createHiddenChannel()
     {
+        using namespace std::chrono_literals;
+        constexpr auto hiddenChannelPollInterval = 50ms;
+
         auto fut = createPtyChannel({
             .environment = std::nullopt,
             .localeEnv = std::nullopt,
@@ -104,7 +107,9 @@ namespace SecureShell
             {
                 if (onConnectionLoss)
                     onConnectionLoss();
-            }
+            },
+            // Only notices a lost connection, so an idle session wakes 20 times a second instead of a thousand.
+            hiddenChannelPollInterval
         );
     }
 
