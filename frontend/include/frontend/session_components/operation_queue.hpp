@@ -20,6 +20,7 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/is_paused.hpp>
+#include <shared_data/unsafe_fast_mode_state.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 
@@ -348,6 +349,12 @@ class OperationQueue
     void askBackendToCancelAll();
     void changeAutoClean(bool doClean);
 
+    /**
+     * @brief Turns the unsafe fast mode of the connection's queue on after the user accepted its warning, or off.
+     */
+    void changeUnsafeFast(bool enable);
+    void setUnsafeFast(bool enable);
+
     void onOperationAdded(SharedData::OperationAdded const& added);
     void onDownloadProgress(SharedData::TransferProgress const& progress);
     void onUploadProgress(SharedData::TransferProgress const& progress);
@@ -360,6 +367,7 @@ class OperationQueue
     void onOperationCompleted(Nui::val val);
     void onOperationCompleted(SharedData::OperationCompleted completed);
     void onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result);
+    void onUnsafeFastMode(SharedData::ErrorOrSuccess<SharedData::UnsafeFastModeState> const& result);
     void onOperationsReordered(SharedData::OperationsReordered const& evt);
     void requestMoveOperation(Ids::OperationId const& opId, std::size_t newIndex);
 

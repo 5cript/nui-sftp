@@ -63,6 +63,8 @@ struct OperationQueue::Implementation
     /** @brief The profile starts the queue of every connection paused, the backend creates it paused. */
     bool startsPaused{true};
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
+    /** @brief Mirrors the backend queue, which starts every connection with it off. */
+    std::shared_ptr<Nui::Observed<bool>> unsafeFast{std::make_shared<Nui::Observed<bool>>(false)};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
 
@@ -465,6 +467,8 @@ void OperationQueue::deactivate()
 {
     impl_->fileEngine.reset();
     impl_->sessionId = {};
+    // The queue of the next connection starts without it.
+    *impl_->unsafeFast = false;
 }
 
 std::shared_ptr<FileEngine> OperationQueue::fileEngine() const
@@ -661,6 +665,16 @@ void OperationQueue::activate(std::shared_ptr<FileEngine> fileEngine, Ids::Sessi
             [this](SharedData::ErrorOrSuccess<SharedData::IsPaused> const& result)
             {
                 onIsPaused(result);
+            }
+        )
+    );
+
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::unsafeFastMode", impl_->sessionId.value()),
+        lifetime_.guarded(
+            [this](SharedData::ErrorOrSuccess<SharedData::UnsafeFastModeState> const& result)
+            {
+                onUnsafeFastMode(result);
             }
         )
     );
@@ -1726,6 +1740,81 @@ void OperationQueue::onIsPaused(SharedData::ErrorOrSuccess<SharedData::IsPaused>
     }
 }
 
+void OperationQueue::onUnsafeFastMode(SharedData::ErrorOrSuccess<SharedData::UnsafeFastModeState> const& result)
+{
+    if (!result)
+    {
+        Log::error("Failed to get the unsafe fast mode of the operation queue: {}", result.error.value());
+        return;
+    }
+    *impl_->unsafeFast = result.enabled;
+    Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::changeUnsafeFast(bool enable)
+{
+    if (!isActive())
+        return;
+    if (!enable)
+        return setUnsafeFast(false);
+
+    const auto lost = [](std::string const& what, std::string const& why)
+    {
+        return ConfirmDialog::OpenOptions::ListElement{.text = fmt::format("{}: {}", what, why)};
+    };
+    impl_->confirmDialog->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = language->get("operationQueue", "unsafeFastHeader"),
+        .text = fmt::format(
+            fmt::runtime(language->get("operationQueue", "unsafeFastText")), Constants::unsafeFastSizeLimit / (1024u * 1024u)
+        ),
+        .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No,
+        .focusButton = ConfirmDialog::Button::No,
+        .listItems =
+            {
+                lost(
+                    language->get("operationQueue", "unsafeFastConcurrentChanges"),
+                    language->get("operationQueue", "unsafeFastConcurrentChangesDescription")
+                ),
+                lost(
+                    language->get("operationQueue", "unsafeFastOverwrites"),
+                    language->get("operationQueue", "unsafeFastOverwritesDescription")
+                ),
+                lost(
+                    language->get("operationQueue", "unsafeFastPartialFiles"),
+                    language->get("operationQueue", "unsafeFastPartialFilesDescription")
+                ),
+            },
+        .onClose = lifetime_.guarded(
+            [this](std::optional<ConfirmDialog::Button> button)
+            {
+                if (button && *button == ConfirmDialog::Button::Yes)
+                    setUnsafeFast(true);
+            }
+        ),
+    });
+}
+
+void OperationQueue::setUnsafeFast(bool enable)
+{
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::setUnsafeFastMode", impl_->sessionId.value()),
+        lifetime_.guarded(
+            [this, enable](SharedData::ErrorOrSuccess<> const& result)
+            {
+                if (!result)
+                {
+                    Log::error("Failed to turn the unsafe fast mode {}: {}", enable ? "on" : "off", result.error.value());
+                    return;
+                }
+                *impl_->unsafeFast = enable;
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        ),
+        enable
+    );
+}
+
 void OperationQueue::togglePause()
 {
     Nui::RpcClient::callWithBackChannel(
@@ -2030,6 +2119,11 @@ Nui::ElementRenderer OperationQueue::operator()()
                 return std::optional<std::string>{"true"};
             return std::nullopt;
         }),
+        "data-unsafe-fast"_attr = observe(*impl_->unsafeFast).generate([this]() -> std::optional<std::string> {
+            if (impl_->unsafeFast->value())
+                return std::optional<std::string>{"true"};
+            return std::nullopt;
+        }),
         tabIndex = 0,
         "keydown"_event = [this](Nui::WebApi::KeyboardEvent event) {
             const auto key = event.key();
@@ -2259,7 +2353,19 @@ Nui::ElementRenderer OperationQueue::operator()()
             }),
             div{
                 style = "font-size: 14px; color: var(--color);"
-            }(language->getObserved("operationQueue", "autoCleanCompleted"))
+            }(language->getObserved("operationQueue", "autoCleanCompleted")),
+            Snc::switch_({
+                .isChecked = impl_->unsafeFast,
+                .colorActive = "var(--script-nui-components-toast-warning, #e0a02e)",
+                .onChange = [this](bool enable, auto const&) {
+                    changeUnsafeFast(enable);
+                },
+                .dontUpdateValue = true,
+            }),
+            div{
+                class_ = "opq-unsafe-fast-label",
+                Nui::Attributes::title = language->get("operationQueue", "unsafeFastTitle"),
+            }(language->getObserved("operationQueue", "unsafeFast"))
         )
     );
     // clang-format on
