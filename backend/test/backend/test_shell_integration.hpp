@@ -347,14 +347,14 @@ namespace Test
 
         void launchInContainer(Launch const& launch, Settings shellSettings)
         {
-            if (auto const& reason = Docker::unavailableReason())
+            if (auto const& reason = DockerShells::unavailableReason())
             {
                 if (std::getenv("NUI_SFTP_SKIP_DOCKER_TESTS") != nullptr)
                     GTEST_SKIP() << "Docker is unavailable and NUI_SFTP_SKIP_DOCKER_TESTS is set: " << *reason;
                 FAIL() << "Docker is required for the shell integration tests: " << *reason;
             }
 
-            containerName_ = Docker::uniqueContainerName();
+            containerName_ = DockerShells::uniqueContainerName();
             std::vector<std::string> arguments{"run", "--rm", "-it", "--network", "none", "--name", containerName_};
             shellSettings.emplace_back("HISTFILE", "/tmp/nui-history");
             for (auto const& [key, value] : shellSettings)
@@ -466,13 +466,13 @@ namespace Test
             {"HostZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), carried(ShellKind::Zsh)},
             {"HostFishLocal", "fish", fishArguments, local(ShellKind::Fish), carried(ShellKind::Fish)},
         };
-        for (auto const image : Docker::bashImages)
+        for (auto const image : DockerShells::bashImages)
         {
             const auto label = imageLabel(image);
             configurations.push_back({label + "Remote", "bash", bashArguments, remote, {}, std::string{image}});
             configurations.push_back({label + "IgnoreBoth", "bash", bashArguments, remote, historySettings, std::string{image}});
         }
-        const std::string shells{Docker::shellsImage};
+        const std::string shells{DockerShells::shellsImage};
         configurations.push_back({"AlpineZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), carried(ShellKind::Zsh), shells});
         configurations.push_back({"AlpineZshRemote", "zsh", zshArguments, remote, {}, shells});
         configurations.push_back({"AlpineFishLocal", "fish", fishArguments, local(ShellKind::Fish), carried(ShellKind::Fish), shells});
@@ -486,7 +486,7 @@ namespace Test
             {"HostPlain", "bash", bashArguments, remote},
             {"HostIgnoreBoth", "bash", bashArguments, remote, historySettings},
         };
-        for (auto const image : Docker::bashImages)
+        for (auto const image : DockerShells::bashImages)
             configurations.push_back({imageLabel(image), "bash", bashArguments, remote, {}, std::string{image}});
         return configurations;
     }
@@ -788,7 +788,7 @@ namespace Test
                  true}
             );
         }
-        for (auto const image : Docker::bashImages)
+        for (auto const image : DockerShells::bashImages)
         {
             for (short const columns : {40, 200})
             {
@@ -805,7 +805,7 @@ namespace Test
                 );
             }
         }
-        const std::string shells{Docker::shellsImage};
+        const std::string shells{DockerShells::shellsImage};
         for (short const columns : {40, 200})
         {
             configurations.push_back(
