@@ -78,9 +78,10 @@ namespace Ids
 #else
     inline Id generateId()
     {
-        std::stringstream sstr;
-        sstr << boost::uuids::random_generator()();
-        return Id{sstr.str()};
+        // Seeding draws on the CPU's random source (rdseed), which retries for a long time when it runs dry, so a
+        // generator is seeded only once per thread. It took about 250 us per transferred file.
+        thread_local boost::uuids::random_generator generator{};
+        return Id{boost::uuids::to_string(generator())};
     }
 #endif
 }
