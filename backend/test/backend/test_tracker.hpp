@@ -10,13 +10,16 @@
 #include <paths/native.hpp>
 #include "error_log_capture.hpp"
 
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
+#include <fmt/format.h>
 #include <nui/utility/scope_exit.hpp>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -320,6 +323,7 @@ namespace Test
         FakeRemote* remote_{nullptr};
         FakeView* view_{nullptr};
         std::unique_ptr<FileTracking::Tracker> tracker_;
+        int flushes_{0};
 
         void SetUp() override
         {
@@ -401,14 +405,89 @@ namespace Test
         runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{5})
         {
             const auto deadline = std::chrono::steady_clock::now() + timeout;
+            ioc_.restart();
+            // Waits for the handlers the watcher threads post instead of spinning while there is none.
+            const auto keepRunning = boost::asio::make_work_guard(ioc_);
             while (std::chrono::steady_clock::now() < deadline)
             {
-                ioc_.restart();
-                ioc_.run_for(std::chrono::milliseconds{20});
+                ioc_.run_one_for(std::chrono::milliseconds{20});
+                ioc_.poll();
                 if (condition())
                     return true;
             }
             return false;
+        }
+
+        /**
+         * @brief Runs the handlers until none is left. The timers of the tracker are one-shot, so this ends unless
+         *        a watch event is still on its way, see flushWatch.
+         * @return false when handlers were still left after @p timeout.
+         */
+        bool runUntilIdle(std::chrono::milliseconds timeout = std::chrono::seconds{10})
+        {
+            ioc_.restart();
+            ioc_.run_for(timeout);
+            return ioc_.stopped();
+        }
+
+        /**
+         * @brief Waits until the watch of @p directory delivered everything that happened in it before, then until
+         *        the tracker handled it. The marker is named like a download in progress, which the tracker drops.
+         *        Joins a watch the tracker has, with its recursion, so the marker comes after the earlier events.
+         */
+        void flushWatch(std::filesystem::path const& directory, bool recursive)
+        {
+            const auto seen = std::make_shared<std::atomic_bool>(false);
+            const auto marker =
+                fmt::format("flush{}{}", ++flushes_, std::string{Persistence::defaultTempFileSuffix});
+            const auto sink = [seen, marker](FileTracking::DirectoryEvent const& event)
+            {
+                if (std::filesystem::path{event.filename}.filename() == marker)
+                    *seen = true;
+            };
+            const auto service = FileTracking::DirectoryWatchService::shared();
+            const auto subscription = service->subscribe(directory, recursive, sink);
+            ASSERT_TRUE(subscription.has_value()) << directory;
+            write(directory / marker, "");
+            ASSERT_TRUE(runUntil(
+                [&seen]()
+                {
+                    return seen->load();
+                },
+                std::chrono::seconds{10}
+            )) << directory;
+            std::filesystem::remove(directory / marker);
+            ASSERT_TRUE(runUntilIdle());
+        }
+
+        /**
+         * @brief flushWatch for every watch of the entries the tracker shows: the directory of the item and a
+         *        directory item itself with what is below it, or the instance of a downloaded copy.
+         */
+        void flushWatches()
+        {
+            std::set<std::pair<std::filesystem::path, bool>> watched;
+            for (auto const& entry : std::views::values(view_->entries))
+            {
+                if (const auto* watch = localWatches_->find(entry.watchId))
+                {
+                    watched.emplace(watch->directory(), false);
+                    if (watch->isDirectory())
+                        watched.emplace(watch->item(), true);
+                }
+                // A downloaded copy is watched with its whole instance.
+                else if (entry.instanceId && !entry.stop)
+                {
+                    if (const auto* instance = instances_->findInstance(entry.instanceId->value()))
+                        watched.emplace(instance->instanceDir(), true);
+                }
+            }
+            for (auto const& [directory, recursive] : watched)
+            {
+                if (std::filesystem::is_directory(directory))
+                    ASSERT_NO_FATAL_FAILURE(flushWatch(directory, recursive));
+            }
+            ASSERT_TRUE(runUntilIdle());
         }
 
         void runFor(std::chrono::milliseconds duration)
@@ -612,7 +691,7 @@ namespace Test
             {
                 completeUploads();
                 completeRemovesAndRenames();
-                runFor(std::chrono::milliseconds{100});
+                flushWatches();
                 if (!onItsWay())
                     return;
             }
@@ -1029,7 +1108,7 @@ namespace Test
         ASSERT_TRUE(expected.has_value());
         EXPECT_EQ(expected->file, kept);
         completeUploads();
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), stateOf(notes));
         EXPECT_EQ(remote_->stats, 0u);
@@ -1066,7 +1145,7 @@ namespace Test
         tracker_->answerConflict(conflict.conflictId, SharedData::ConflictResolution::KeepServers);
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(view_->removedConflicts, std::vector<std::string>{conflict.conflictId.value()});
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_FALSE(onlyEntry().uploading);
         EXPECT_EQ(remote_->server.at("/srv/notes.txt"), changedOnServer);
@@ -1125,7 +1204,7 @@ namespace Test
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
         // FSEvents also delivers the creation of src from just before the watch. Coming after new.cpp, it would
         // upload what the server lacks below src without asking.
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         ASSERT_TRUE(runUntil(
             [this]()
@@ -1141,7 +1220,7 @@ namespace Test
                 return uploadsTo("/srv/project/src/new.cpp") == 1u;
             }
         ));
-        const auto& expected = remote_->of("upload").back()->upload.expectedDestination;
+        const auto& expected = lastUploadTo("/srv/project/src/new.cpp")->upload.expectedDestination;
         ASSERT_TRUE(expected.has_value());
         EXPECT_FALSE(expected->file.has_value());
         remote_->server["/srv/project/src/new.cpp"] = {.mtime = 7u, .size = 9u};
@@ -1167,7 +1246,7 @@ namespace Test
         completeUploads();
         ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
         const auto shown = view_->watchProgress.size();
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(view_->watchProgress.size(), shown);
     }
 
@@ -1386,14 +1465,15 @@ namespace Test
         completeUploads();
         ASSERT_TRUE(runUntilProgress(watchId, {.synced = 1u}));
         const auto elapsed = std::chrono::steady_clock::now() - started;
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         const auto shown = progressOf(watchId);
         const auto times = progressTimesOf(watchId);
         EXPECT_LE(shown.size() - before, static_cast<std::size_t>(elapsed / std::chrono::milliseconds{200}) + 2u);
         EXPECT_EQ(countsOf(shown.back()), ProgressCounts{.synced = 1u});
+        // The view takes its own time just after the tracker's, a stall between the two shortens a gap.
         for (std::size_t index = 1u; index < times.size(); ++index)
-            EXPECT_GE(times[index] - times[index - 1u], std::chrono::milliseconds{195}) << "progress " << index;
+            EXPECT_GE(times[index] - times[index - 1u], std::chrono::milliseconds{150}) << "progress " << index;
     }
 
     TEST_F(TrackerTest, AStoppedOrDiscardedWatchShowsNoProgressAfterwards)
@@ -1427,9 +1507,9 @@ namespace Test
         ASSERT_TRUE(tracker_->discard(opened->instanceId, opened->localPath).has_value());
         onFileProgress(fileProgress(file, 13u, 13u, /*transferred=*/true));
         onCopyProgress(fileProgress(opened->localPath.native(), 12u, 12u, /*transferred=*/true));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(progressOf(projectId).size(), shownOfProject);
         EXPECT_EQ(progressOf(copyId).size(), shownOfCopy);
@@ -1545,7 +1625,7 @@ namespace Test
 
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(view_->removedConflicts.size(), 2u);
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
         EXPECT_EQ(uploadsTo("/srv/project/src/util.cpp"), 1u);
         EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), keptMain);
@@ -1578,7 +1658,7 @@ namespace Test
         tracker_->answerConflict(conflictIdAt(util_), SharedData::ConflictResolution::KeepServers);
         EXPECT_TRUE(view_->conflicts.empty());
         completeUploads();
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(uploadsTo("/srv/project/src/util.cpp"), 1u);
         EXPECT_EQ(remote_->server.at("/srv/project/src/main.cpp"), stateOf(main_));
         EXPECT_EQ(remote_->server.at("/srv/project/src/util.cpp"), keptUtil);
@@ -1646,7 +1726,7 @@ namespace Test
         const auto events = view_->events.size();
         tracker_->answerAllConflicts(watchId, SharedData::ConflictResolution::ReplaceOnServer);
         tracker_->retryFailure(Ids::makeFailureId(failureId));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(view_->events.size(), events);
         EXPECT_EQ(uploadsTo("/srv/project/readme.md"), 1u);
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
@@ -1719,7 +1799,7 @@ namespace Test
         // The stopped watch shows its progress once more, waiting for nothing.
         ASSERT_EQ(view_->watchProgress.size(), shown + 1u);
         EXPECT_EQ(countsOf(view_->watchProgress.back()), ProgressCounts{.synced = 4u});
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(view_->watchProgress.size(), shown + 1u);
     }
 
@@ -1849,7 +1929,7 @@ namespace Test
             }
         ));
         completeRemovesAndRenames();
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         write(notes, "written anew");
         std::filesystem::remove(backup);
 
@@ -1861,7 +1941,7 @@ namespace Test
                 return uploadsTo("/srv/notes.txt") == 2u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(onlyEntry().name, "notes.txt");
@@ -1884,7 +1964,7 @@ namespace Test
         write(decomposed, "v1");
         ASSERT_TRUE(tracker_->uploadAndWatch(local(directory), remote("/srv/uni")).has_value());
         // FSEvents also delivers the creation of the directory from just before the watch, it uploads it again.
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         remote_->server["/srv/uni/cafe\xCC\x81.txt"] = stateOf(decomposed);
         const auto uploadsBefore = remote_->of("upload").size();
@@ -1898,7 +1978,7 @@ namespace Test
                 return remote_->of("upload").size() > uploadsBefore;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(uploadsTo("/srv/uni/cafe\xCC\x81.txt"), decomposedUploadsBefore + 1u);
         EXPECT_EQ(uploadsTo("/srv/uni/caf\xC3\xA9.txt"), 0u);
         completeUploads();
@@ -1910,7 +1990,7 @@ namespace Test
                 return !remote_->of("rename").empty();
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(remote_->of("rename").front()->source, "/srv/uni/cafe\xCC\x81.txt");
         EXPECT_EQ(remote_->of("rename").front()->destination, "/srv/uni/caf\xC3\xA9.txt");
         EXPECT_TRUE(remote_->of("remove").empty());
@@ -1926,7 +2006,7 @@ namespace Test
         std::filesystem::create_directories(directory);
         write(decomposed, "v1");
         ASSERT_TRUE(tracker_->uploadAndWatch(local(directory), remote("/srv/kana")).has_value());
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         remote_->server["/srv/kana/\xE3\x81\x8B\xE3\x82\x99.txt"] = stateOf(decomposed);
         const auto uploadsBefore = remote_->of("upload").size();
@@ -1939,7 +2019,7 @@ namespace Test
                 return remote_->of("upload").size() > uploadsBefore;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(uploadsTo("/srv/kana/\xE3\x81\x8B\xE3\x82\x99.txt"), decomposedUploadsBefore + 1u);
         EXPECT_EQ(uploadsTo("/srv/kana/\xE3\x81\x8C.txt"), 0u);
@@ -1954,7 +2034,7 @@ namespace Test
         write(notes, "v1");
         ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
         // FSEvents also delivers the creation of the file from just before the watch.
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         const auto uploadsBefore = uploadsTo("/srv/notes.txt");
 
@@ -1987,7 +2067,7 @@ namespace Test
         std::filesystem::create_directories(directory);
         write(notes, "v1");
         ASSERT_TRUE(tracker_->uploadAndWatch(local(notes), remote("/srv/notes.txt")).has_value());
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         const auto uploadsBefore = uploadsTo("/srv/notes.txt");
 
@@ -2009,7 +2089,7 @@ namespace Test
         std::filesystem::create_directories(directory);
         write(directory / "notes.txt", "v1");
         ASSERT_TRUE(tracker_->uploadAndWatch(local(directory), remote("/srv/cafe")).has_value());
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         remote_->server["/srv/cafe/notes.txt"] = stateOf(directory / "notes.txt");
         const auto uploadsBefore = uploadsTo("/srv/cafe/notes.txt");
@@ -2046,7 +2126,7 @@ namespace Test
         );
         EXPECT_FALSE(onlyEntry().options.autoReupload);
         write(opened->localPath.native(), "changed locally");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 0u);
     }
@@ -2060,7 +2140,7 @@ namespace Test
         tracker_->setOption(watchId, SharedData::WatchOption::DeleteRemoteOnLocalDelete, true);
         tracker_->setOption(watchId, SharedData::WatchOption::MoveRemoteOnLocalMove, true);
         std::filesystem::remove(opened->localPath.native());
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_TRUE(onlyEntry().downloadedCopy);
@@ -2074,6 +2154,7 @@ namespace Test
         ASSERT_TRUE(opened.has_value());
 
         std::filesystem::remove(opened->localPath.native());
+        // Past the hold of the removal, within the time the copy has to come back: only the clock tells them apart.
         runFor(std::chrono::milliseconds{500});
         write(opened->localPath.native(), "written anew");
 
@@ -2084,7 +2165,7 @@ namespace Test
             }
         ));
         EXPECT_TRUE(remote_->of("remove").empty());
-        runFor(FileTracking::copyReturnTime);
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_TRUE(view_->ended.empty());
         EXPECT_EQ(view_->entries.size(), 1u);
     }
@@ -2096,6 +2177,7 @@ namespace Test
         const auto aside = opened->localPath.native().parent_path() / "notes.backup";
 
         std::filesystem::rename(opened->localPath.native(), aside);
+        // Past the hold of the move, within the time the copy has to come back: only the clock tells them apart.
         runFor(std::chrono::milliseconds{500});
         write(opened->localPath.native(), "saved anew");
         std::filesystem::remove(aside);
@@ -2106,7 +2188,7 @@ namespace Test
                 return uploadsTo("/srv/notes.txt") == 1u;
             }
         ));
-        runFor(FileTracking::copyReturnTime);
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_TRUE(view_->ended.empty());
         EXPECT_EQ(view_->entries.size(), 1u);
         EXPECT_TRUE(remote_->of("rename").empty());
@@ -2118,17 +2200,17 @@ namespace Test
         ASSERT_TRUE(opened.has_value());
         const auto watchId = onlyEntry().watchId;
 
+        const auto removedAt = std::chrono::steady_clock::now();
         std::filesystem::remove(opened->localPath.native());
-        runFor(std::chrono::milliseconds{1000});
-        EXPECT_EQ(view_->entries.size(), 1u);
-
         ASSERT_TRUE(runUntil(
             [this]()
             {
                 return !view_->ended.empty();
             },
-            FileTracking::copyReturnTime + std::chrono::seconds{2}
+            FileTracking::copyReturnTime + std::chrono::seconds{5}
         ));
+        // It waited for the copy to come back.
+        EXPECT_GE(std::chrono::steady_clock::now() - removedAt, FileTracking::copyReturnTime);
         EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::CopyGone);
         ASSERT_EQ(view_->ended.front().entries.size(), 1u);
         EXPECT_EQ(view_->ended.front().entries.front().watchId, watchId);
@@ -2152,7 +2234,7 @@ namespace Test
         EXPECT_EQ(instances_->countOrphaned(), 0u);
         const auto shown = progressOf(watchId).size();
         EXPECT_TRUE(open("/srv/notes.txt", /*watch=*/true).has_value());
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(progressOf(watchId).size(), shown);
         EXPECT_EQ(stopReasonOf(watchId), SharedData::WatchStopReason::CopyGone);
     }
@@ -2169,7 +2251,7 @@ namespace Test
             {
                 return !view_->ended.empty();
             },
-            FileTracking::copyReturnTime + std::chrono::seconds{2}
+            FileTracking::copyReturnTime + std::chrono::seconds{5}
         ));
         const auto watchId = onlyEntry().watchId;
         ASSERT_GE(view_->events.size(), 4u);
@@ -2180,7 +2262,7 @@ namespace Test
             })
         );
         write(renamed, "edited after the rename");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(view_->ended.front().reason, SharedData::WatchEndReason::CopyGone);
         EXPECT_EQ(stopReasonOf(onlyEntry().watchId), SharedData::WatchStopReason::CopyGone);
@@ -2285,7 +2367,7 @@ namespace Test
                 .failure = FileTracking::UploadFailureInfo{.reason = SharedData::UploadFailureReason::Unknown}}
         );
         write(notes, "changed again");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(view_->events.size(), 3u);
         EXPECT_TRUE(view_->failures.empty());
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
@@ -2321,7 +2403,7 @@ namespace Test
         const auto firstId = watchIdNamed("f1.txt");
         const auto secondId = watchIdNamed("g.txt");
         const auto serverBefore = remote_->server;
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         view_->events.clear();
 
         std::filesystem::rename(second, moved);
@@ -2363,7 +2445,7 @@ namespace Test
 
         // Both server copies stay as they are, the moved file's edits go nowhere.
         write(moved, "edited after the move");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_TRUE(remote_->of("rename").empty());
         EXPECT_EQ(uploadsTo("/srv/R5/f1.txt"), 1u);
         EXPECT_EQ(remote_->server, serverBefore);
@@ -2450,12 +2532,12 @@ namespace Test
         completeEverything();
         const auto notesId = watchIdNamed("notes.txt");
         tracker_->stop(notesId);
-        runFor(std::chrono::milliseconds{300});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         view_->events.clear();
 
         tracker_->stopAll();
         write(root_ / "local" / "project" / "src" / "main.cpp", "changed locally");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(view_->events.empty());
         tracker_->removeStopped(notesId);
@@ -2632,7 +2714,7 @@ namespace Test
 
         tracker_->stopAll();
         write(root_ / "local" / "notes.txt", "changed locally");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 1u);
         EXPECT_TRUE(view_->removed.empty());
@@ -2674,7 +2756,7 @@ namespace Test
         tracker_->connectionLost();
         write(root_ / "local" / "notes.txt", "changed locally");
         write(copy->localPath.native(), "changed copy");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         ASSERT_EQ(view_->entries.size(), 2u);
         for (auto const& watchId : {copyId, notesId})
@@ -2772,7 +2854,7 @@ namespace Test
             }
         ));
         write(file, "int main() { return 1; }");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 0u);
@@ -2793,7 +2875,7 @@ namespace Test
                 return !remote_->of("remove").empty();
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/src/main.cpp"});
         completeRemovesAndRenames();
@@ -2830,7 +2912,7 @@ namespace Test
         std::filesystem::create_directories(root_ / "trash");
 
         std::filesystem::rename(project, root_ / "trash" / "project");
-        runFor(std::chrono::milliseconds{1500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_TRUE(remote_->of("remove").empty());
@@ -2934,7 +3016,7 @@ namespace Test
         std::filesystem::create_directories(root_ / "elsewhere");
         std::filesystem::create_hard_link(project / "src" / "main.cpp", root_ / "elsewhere" / "main.cpp");
         write(root_ / "elsewhere" / "main.cpp", "int main() { return 2; }");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         ASSERT_EQ(uploadsTo("/srv/project/src/main.cpp"), 0u);
 
         FileTracking::DirectoryWatchService::shared()->reportMissed(project / "src");
@@ -2945,7 +3027,7 @@ namespace Test
                 return uploadsTo("/srv/project/src/main.cpp") == 1u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(remote_->of("upload").size(), 2u);
         EXPECT_TRUE(remote_->of("remove").empty());
     }
@@ -2955,16 +3037,16 @@ namespace Test
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
         const auto copy = opened->localPath.native();
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         FileTracking::DirectoryWatchService::shared()->reportMissed(copy.parent_path());
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 0u);
 
         std::filesystem::create_directories(root_ / "elsewhere");
         std::filesystem::create_hard_link(copy, root_ / "elsewhere" / "notes.txt");
         write(root_ / "elsewhere" / "notes.txt", "edited in the copy");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         ASSERT_EQ(uploadsTo("/srv/notes.txt"), 0u);
         FileTracking::DirectoryWatchService::shared()->reportMissed(copy.parent_path());
 
@@ -2985,10 +3067,10 @@ namespace Test
         completeEverything();
         // Out of the item the deletion reaches no watch, the server keeps the copy of a directory that left.
         std::filesystem::rename(project / "src", root_ / "src");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         std::filesystem::remove(root_ / "src" / "main.cpp");
         std::filesystem::rename(root_ / "src", project / "src");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
         ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
 
@@ -3001,7 +3083,7 @@ namespace Test
                 return !remote_->server.contains("/srv/project/src/main.cpp");
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
         EXPECT_TRUE(remote_->server.contains("/srv/project/src/util.cpp"));
         EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/src/main.cpp"});
@@ -3015,7 +3097,7 @@ namespace Test
         completeEverything();
         // Like a watched directory deleted on Windows without POSIX semantics, which loses the last deletions.
         std::filesystem::rename(project / "src", root_ / "src");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         std::filesystem::remove_all(root_ / "src");
         ASSERT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
 
@@ -3033,7 +3115,7 @@ namespace Test
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/util.cpp"));
 #else
         // It may have gone to the trash.
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
@@ -3059,7 +3141,7 @@ namespace Test
                 return !remote_->of("rename").empty() || uploadsTo("/srv/project/docs/x") == 1u;
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/x/main.c"));
@@ -3090,7 +3172,7 @@ namespace Test
                 return !remote_->of("rename").empty() || !remote_->of("remove").empty();
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_FALSE(remote_->server.contains("/srv/project/src/main.cpp"));
@@ -3116,7 +3198,7 @@ namespace Test
 
         // Windows and macOS report a move between directories as a removal before the addition.
         std::filesystem::rename(project / "src" / "x", root_ / "local" / "x");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_TRUE(remote_->of("remove").empty());
         std::filesystem::rename(root_ / "local" / "x", project / "docs" / "x");
         ASSERT_TRUE(runUntil(
@@ -3141,7 +3223,7 @@ namespace Test
         completeEverything();
 
         std::filesystem::rename(project / "src" / "x", root_ / "local" / "x");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_TRUE(remote_->of("remove").empty());
@@ -3163,7 +3245,7 @@ namespace Test
                 return !remote_->of("remove").empty() || !view_->conflicts.empty();
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(view_->conflicts.empty());
         EXPECT_EQ(remote_->sourcesOf("remove"), std::vector<std::string>{"/srv/project/src/main.cpp"});
@@ -3187,8 +3269,8 @@ namespace Test
         std::filesystem::remove(kind);
         std::filesystem::create_directory(kind);
         write(kind / "inside.txt", "inside");
-        runFor(std::chrono::milliseconds{1000});
-        completeWith(*remote_->of("upload").back(), FileTracking::ServerState{.mtime = 1, .size = 4});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
+        completeWith(*lastUploadTo("/srv/project/kind"), FileTracking::ServerState{.mtime = 1, .size = 4});
         completeEverything();
 
         std::vector<std::string> atKind;
@@ -3214,11 +3296,11 @@ namespace Test
             }
         ));
         std::filesystem::remove(directory);
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         // git brings it back, its addition is reported after the upload ended. The upload sent it before, empty.
         std::filesystem::create_directory(directory);
         write(directory / "a.txt", "a");
-        auto* first = remote_->of("upload").back();
+        auto* first = lastUploadTo("/srv/project/dir");
         remote_->server["/srv/project/dir"] = FileTracking::ServerState{};
         first->ended = true;
         first->onUploadEnded({.reason = SharedData::OperationCompletionReason::Completed});
@@ -3248,13 +3330,13 @@ namespace Test
                 return uploadsTo("/srv/project/moved-dir") == 1u;
             }
         ));
-        auto* upload = remote_->of("upload").back();
+        auto* upload = lastUploadTo("/srv/project/moved-dir");
         const auto sent = sentFilesOf(directory);
         serve(directory, "/srv/project/moved-dir");
         // Gone before the upload ended, the removals are reported afterwards.
         std::filesystem::remove_all(directory);
         endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed, .sentFiles = sent});
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir/m0.txt"));
@@ -3282,7 +3364,7 @@ namespace Test
                 return uploadsTo("/srv/project/moved-dir") == 1u;
             }
         ));
-        auto* upload = remote_->of("upload").back();
+        auto* upload = lastUploadTo("/srv/project/moved-dir");
         auto sent = sentFilesOf(directory);
         // m0.txt went while it was read, the upload tells it without a state.
         for (auto& file : sent)
@@ -3290,7 +3372,7 @@ namespace Test
                 file.state.reset();
         serve(directory, "/srv/project/moved-dir");
         std::filesystem::remove_all(directory);
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed, .sentFiles = sent});
         completeEverything();
 
@@ -3323,7 +3405,7 @@ namespace Test
         remote_->server["/srv/project/moved-dir"] = FileTracking::ServerState{};
         std::filesystem::remove_all(directory);
         endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed});
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_FALSE(remote_->server.contains("/srv/project/moved-dir"));
@@ -3354,7 +3436,7 @@ namespace Test
         serve(directory, "/srv/project/moved-in");
         // An editor's temporary file, its removal is reported while the upload still runs.
         std::filesystem::remove(directory / "gone.txt");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         endAs(*upload, {.reason = SharedData::OperationCompletionReason::Completed, .sentFiles = sent});
         completeEverything();
 
@@ -3441,7 +3523,7 @@ namespace Test
         const auto opened = open("/srv/notes.txt", /*watch=*/true);
         ASSERT_TRUE(opened.has_value());
 
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 0u);
     }
@@ -3451,7 +3533,7 @@ namespace Test
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
         completeUploads();
 
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(remote_->of("upload").size(), 1u);
     }
@@ -3474,7 +3556,7 @@ namespace Test
         write(project / "new" / "a" / "b" / "c.txt", "x");
         // The directory's upload read the file.
         completeUploads();
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_EQ(remote_->of("upload").size(), uploadsBefore + 1u);
@@ -3500,9 +3582,9 @@ namespace Test
         write(project / "new" / "one.txt", "one");
         write(project / "new" / "sub" / "two.txt", "two");
         // The changes come while the directory's upload runs, which read them all.
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_EQ(remote_->of("upload").size(), uploadsBefore + 1u);
@@ -3552,11 +3634,11 @@ namespace Test
                 return uploadsTo("/srv/project/new") == 1u;
             }
         ));
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         std::filesystem::create_directory(project / "new" / "sub");
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_EQ(remote_->of("upload").size(), uploadsBefore + 1u);
@@ -3580,7 +3662,7 @@ namespace Test
         ASSERT_TRUE(runUntilProgress(watchId, {.pending = 4u, .synced = 3u}));
         completeUploads();
         ASSERT_TRUE(runUntilProgress(watchId, {.synced = 4u}));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.synced = 4u});
     }
 
@@ -3601,10 +3683,10 @@ namespace Test
         write(project / "new" / "one.txt", "one");
         write(project / "new" / "two.txt", "two");
         write(project / "new" / "three.txt", "three");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
         ASSERT_TRUE(runUntilProgress(watchId, {.synced = 4u}));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.synced = 4u});
@@ -3634,9 +3716,9 @@ namespace Test
             write(project / "moved-in" / name, "temporary");
             std::filesystem::remove(project / "moved-in" / name);
         }
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeUploads();
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_TRUE(runUntilProgress(watchId, {.synced = 2u}));
@@ -3650,11 +3732,13 @@ namespace Test
         const auto watchId = onlyEntry().watchId;
         write(opened->localPath.native(), "changed locally");
         ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u}));
+        // The progress interval has to pass, there is nothing to wait for instead.
         runFor(std::chrono::milliseconds{250});
 
         completeUploads();
+        // Only what is due right away, the next snapshot of the interval would come later.
         ioc_.restart();
-        ioc_.run_for(std::chrono::milliseconds{50});
+        ioc_.poll();
 
         EXPECT_EQ(countsOf(*lastProgressOf(watchId)), ProgressCounts{.synced = 1u});
         EXPECT_FALSE(onlyEntry().uploading);
@@ -3717,7 +3801,7 @@ namespace Test
             std::error_code errorCode{};
             std::filesystem::permissions(source, std::filesystem::perms::owner_all, errorCode);
         }};
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(remote_->of("remove").empty());
         EXPECT_TRUE(remote_->server.contains("/srv/project/src/main.cpp"));
@@ -3768,7 +3852,7 @@ namespace Test
                 return !view_->failures.empty();
             }
         ));
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_EQ(uploadsTo("/srv/project/src/main.cpp"), 1u);
         EXPECT_TRUE(remote_->of("remove").empty());
@@ -3876,7 +3960,7 @@ namespace Test
         ASSERT_TRUE(runUntilStopped());
 
         write(file, "written again");
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         endStoppedUploads();
 
         ASSERT_TRUE(runUntil(
@@ -3906,7 +3990,7 @@ namespace Test
         // Both happen before the tracker hears of the deletion, as when Windows holds it back.
         std::filesystem::remove(file);
         write(file, "written again");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(remote_->cancels.empty());
         completeEverything();
@@ -3955,7 +4039,7 @@ namespace Test
         ));
 
         std::filesystem::remove_all(directory);
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         for (auto const& destination : std::views::keys(remote_->cancels))
             ADD_FAILURE() << "stopped the upload to " << destination;
@@ -3967,7 +4051,7 @@ namespace Test
         ASSERT_TRUE(tracker_->uploadAndWatch(local(root_ / "local" / "project"), remote("/srv/project")).has_value());
         const auto watchId = onlyEntry().watchId;
         completeEverything();
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         write(file, "large content");
         ASSERT_TRUE(runUntilProgress(watchId, {.pending = 1u, .synced = 3u}));
 
@@ -3992,7 +4076,7 @@ namespace Test
         ));
 
         tracker_->stop(onlyEntry().watchId);
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
 
         EXPECT_TRUE(remote_->cancels.empty());
         EXPECT_FALSE(lastUploadTo("/srv/project/big.bin")->ended);
@@ -4130,7 +4214,7 @@ namespace Test
         std::filesystem::rename(file, renamed);
         ASSERT_TRUE(runUntilStopped());
         std::filesystem::remove(renamed);
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         endStoppedUploads();
 
         ASSERT_TRUE(runUntil(
@@ -4241,7 +4325,7 @@ namespace Test
         ));
 
         std::filesystem::rename(known, directory / "main.cpp");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         completeEverything();
 
         EXPECT_TRUE(remote_->of("rename").empty());
@@ -4328,7 +4412,7 @@ namespace Test
         std::filesystem::rename(file, renamed);
         ASSERT_TRUE(runUntilStopped());
         write(renamed, "edited in the middle");
-        runFor(std::chrono::milliseconds{1000});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         endStoppedUploads();
 
         ASSERT_TRUE(runUntil(
@@ -4447,7 +4531,7 @@ namespace Test
         EXPECT_EQ(failure.detail, std::optional<std::string>{"Permission denied"});
         EXPECT_EQ(failure.attempts, 1u);
         EXPECT_GT(failure.failedAt, 0u);
-        runFor(std::chrono::milliseconds{500});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(uploadsTo("/srv/notes.txt"), 2u);
         EXPECT_FALSE(onlyEntry().uploading);
     }
@@ -4696,7 +4780,7 @@ namespace Test
         EXPECT_TRUE(view_->failures.empty());
         EXPECT_EQ(view_->removedFailures, (std::vector<std::string>{mainFailure.value(), utilFailure.value()}));
         EXPECT_EQ(view_->failureRemovals.back(), 1u) << "the rest of the watch left in one message";
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_NO_FATAL_FAILURE(flushWatches());
         EXPECT_EQ(remote_->of("upload").size(), uploadsBefore);
     }
 
