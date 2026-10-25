@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -157,9 +158,15 @@ namespace FileTracking
         /**
          * @brief The instance directories below the root that no live process holds, with what they hold and where
          *        it came from, sorted by instance id. The orphan test is the one of countOrphaned(). An instance that
-         *        holds nothing has an empty name and no copy path.
+         *        holds nothing has an empty name and no copy path. Scanned once, then kept up to date with what this
+         *        manager changes, see rescanOrphaned().
          */
         std::vector<SharedData::OrphanedCopy> listOrphaned() const;
+
+        /**
+         * @brief Scans the orphans anew on the next listOrphaned(), for what other processes changed meanwhile.
+         */
+        void rescanOrphaned();
 
         /**
          * @brief Removes the directory of the orphaned instance @p instanceId with everything in it.
@@ -197,9 +204,19 @@ namespace FileTracking
         void manualCleanup();
 
       private:
+        std::vector<SharedData::OrphanedCopy> scanOrphaned() const;
+
+        /**
+         * @brief Adds the instance directory @p directory to the kept orphans when it is one now.
+         */
+        void rememberIfOrphaned(std::filesystem::path const& directory);
+
+      private:
         boost::asio::strand<boost::asio::any_io_executor> strand_;
         std::filesystem::path tempRootDir_;
         std::chrono::hours deadInstanceRetentionHours_;
         std::map<std::string, std::unique_ptr<TemporaryDirectoryInstance>> instances_;
+        /** @brief What listOrphaned() found, nothing until it scans. */
+        mutable std::optional<std::vector<SharedData::OrphanedCopy>> orphaned_{};
     };
 }

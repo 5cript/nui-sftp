@@ -75,30 +75,53 @@ namespace FileTracking
         dirty_ = true;
     }
 
-    void WatchProgressMeter::uploadQueued(Paths::LocalPath const& path, std::optional<std::uint64_t> sizeBytes)
+    std::uint64_t
+    WatchProgressMeter::uploadQueued(Paths::LocalPath const& path, std::optional<std::uint64_t> sizeBytes)
     {
         if (const auto previous = uploads_.find(path); previous != uploads_.end())
             endUpload(previous->second, UploadResult::NotCompleted);
-        uploads_.insert_or_assign(path, ActiveUpload{.sizeBytes = sizeBytes, .progress = std::nullopt});
+        const auto generation = nextGeneration_++;
+        uploads_.insert_or_assign(
+            path, ActiveUpload{.sizeBytes = sizeBytes, .progress = std::nullopt, .generation = generation}
+        );
         dirty_ = true;
+        return generation;
     }
 
-    void WatchProgressMeter::uploadProgressed(Paths::LocalPath const& path, UploadProgress const& progress)
+    void WatchProgressMeter::uploadProgressed(
+        Paths::LocalPath const& path,
+        UploadProgress const& progress,
+        std::optional<std::uint64_t> generation
+    )
     {
-        const auto upload = uploads_.find(path);
+        const auto upload = activeUpload(path, generation);
         if (upload == uploads_.end())
             return;
         upload->second.progress = progress;
         dirty_ = true;
     }
 
-    void WatchProgressMeter::uploadEnded(Paths::LocalPath const& path, UploadResult result)
+    void WatchProgressMeter::uploadEnded(
+        Paths::LocalPath const& path,
+        UploadResult result,
+        std::optional<std::uint64_t> generation
+    )
     {
-        const auto node = uploads_.extract(path);
-        if (node.empty())
+        const auto upload = activeUpload(path, generation);
+        if (upload == uploads_.end())
             return;
-        endUpload(node.mapped(), result);
+        endUpload(upload->second, result);
+        uploads_.erase(upload);
         dirty_ = true;
+    }
+
+    std::map<Paths::LocalPath, WatchProgressMeter::ActiveUpload>::iterator
+    WatchProgressMeter::activeUpload(Paths::LocalPath const& path, std::optional<std::uint64_t> generation)
+    {
+        const auto upload = uploads_.find(path);
+        if (upload == uploads_.end() || (generation && upload->second.generation != *generation))
+            return uploads_.end();
+        return upload;
     }
 
     void WatchProgressMeter::endUpload(ActiveUpload const& upload, UploadResult result)

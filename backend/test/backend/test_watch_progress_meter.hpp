@@ -457,6 +457,24 @@ namespace Test::WatchProgressMeterCases
         EXPECT_EQ(progress.changesWaiting, 1u);
     }
 
+    TEST_F(WatchProgressMeterTest, TheLateEndOfAnUploadQueuedAgainLeavesTheNewOneOnItsWay)
+    {
+        meter_.setChangesPending(1u);
+        const auto first = meter_.uploadQueued(localPathOf("/watched/a.txt"), 100u);
+        const auto second = meter_.uploadQueued(localPathOf("/watched/a.txt"), 200u);
+
+        meter_.uploadEnded(localPathOf("/watched/a.txt"), UploadResult::NotCompleted, first);
+        meter_.uploadProgressed(localPathOf("/watched/a.txt"), fileProgress("/watched/a.txt", 50u, 200u), first);
+        meter_.uploadProgressed(localPathOf("/watched/a.txt"), fileProgress("/watched/a.txt", 80u, 200u), second);
+
+        const auto progress = meter_.snapshot();
+        EXPECT_FALSE(meter_.isIdle());
+        EXPECT_EQ(progress.bytesDone, 80u);
+        EXPECT_EQ(progress.bytesTotal, 200u);
+        ASSERT_EQ(progress.inFlight.size(), 1u);
+        EXPECT_EQ(progress.inFlight.front().bytes, 80u);
+    }
+
     TEST_F(WatchProgressMeterTest, DroppingWhatIsOnItsWayLetsTheBurstFinish)
     {
         meter_.changesEnded(1u);

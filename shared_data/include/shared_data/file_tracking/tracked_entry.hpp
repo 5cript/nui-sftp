@@ -7,6 +7,7 @@
 #include <utility/describe.hpp>
 #include <paths/paths.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -37,10 +38,12 @@ namespace SharedData
         std::optional<WatchStop> stop{};
         /** @brief The instance directory of a downloaded copy. */
         std::optional<Ids::InstanceId> instanceId{};
+        /** @brief The size of the server's file a downloaded copy was downloaded from, as it was then. */
+        std::uint64_t sizeBytes{0};
     };
     BOOST_DESCRIBE_STRUCT(
         TrackedEntry,
         (),
-        (watchId, name, remotePath, options, uploading, downloadedCopy, localPath, isDirectory, stop, instanceId)
+        (watchId, name, remotePath, options, uploading, downloadedCopy, localPath, isDirectory, stop, instanceId, sizeBytes)
     )
 }

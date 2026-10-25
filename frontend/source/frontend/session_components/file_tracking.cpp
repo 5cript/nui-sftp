@@ -125,7 +125,7 @@ struct FileTrackingPanel::Implementation
             return;
         client.open(
             entry->remotePath,
-            0u,
+            entry->sizeBytes,
             true,
             lifetime.guarded(
                 [this, watchId](Ids::InstanceId const& instanceId, Paths::LocalPath const& localPath)

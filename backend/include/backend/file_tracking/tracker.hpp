@@ -202,8 +202,8 @@ namespace FileTracking
         void removeAllStopped();
 
         /**
-         * @brief Shows the orphaned copies again, see TrackerView::showOrphanedCopies(). Those of stopped watches are
-         *        left out.
+         * @brief Shows the orphaned copies again, scanned anew, see TrackerView::showOrphanedCopies(). Those of stopped
+         *        watches are left out.
          */
         void listOrphanedCopies();
 

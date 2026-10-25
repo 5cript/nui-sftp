@@ -509,7 +509,12 @@ namespace FileTracking
 
     void TempDirInstanceManager::destroyInstance(std::string const& instanceId)
     {
-        instances_.erase(instanceId);
+        const auto instance = instances_.find(instanceId);
+        if (instance == instances_.end())
+            return;
+        const auto directory = instance->second->instanceDir();
+        instances_.erase(instance);
+        rememberIfOrphaned(directory);
     }
 
     std::expected<DiscardOutcome, std::string>
@@ -554,10 +559,23 @@ namespace FileTracking
 
     int TempDirInstanceManager::removeOrphaned()
     {
+        orphaned_.reset();
         return forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
     }
 
     std::vector<SharedData::OrphanedCopy> TempDirInstanceManager::listOrphaned() const
+    {
+        if (!orphaned_)
+            orphaned_ = scanOrphaned();
+        return *orphaned_;
+    }
+
+    void TempDirInstanceManager::rescanOrphaned()
+    {
+        orphaned_.reset();
+    }
+
+    std::vector<SharedData::OrphanedCopy> TempDirInstanceManager::scanOrphaned() const
     {
         std::vector<SharedData::OrphanedCopy> copies;
         for (auto const& directory : orphanedInstanceDirs(tempRootDir_, listInstanceIds()))
@@ -574,6 +592,32 @@ namespace FileTracking
             }
         );
         return copies;
+    }
+
+    void TempDirInstanceManager::rememberIfOrphaned(std::filesystem::path const& directory)
+    {
+        if (!orphaned_ || !isOrphanedDir(directory, listInstanceIds()))
+            return;
+        auto copy = orphanedCopyOf(directory);
+        if (!copy)
+            return;
+        std::erase_if(
+            *orphaned_,
+            [&copy](SharedData::OrphanedCopy const& listed)
+            {
+                return listed.instanceId == copy->instanceId;
+            }
+        );
+        const auto place = std::ranges::upper_bound(
+            *orphaned_,
+            copy->instanceId.value(),
+            {},
+            [](SharedData::OrphanedCopy const& listed)
+            {
+                return listed.instanceId.value();
+            }
+        );
+        orphaned_->insert(place, *std::move(copy));
     }
 
     std::expected<void, std::string> TempDirInstanceManager::removeOrphanedInstance(Ids::InstanceId const& instanceId)
@@ -594,13 +638,25 @@ namespace FileTracking
                 }
             )
             .and_then(
-                [&instanceId](std::filesystem::path const& directory) -> std::expected<void, std::string>
+                [this, &instanceId](std::filesystem::path const& directory) -> std::expected<void, std::string>
                 {
                     Log::info("Removing the orphaned instance '{}'", instanceId.value());
                     std::error_code removeError;
                     Utility::removeAllNoFollow(directory, removeError);
                     if (removeError)
+                    {
+                        // Partly removed, the next listing looks again.
+                        orphaned_.reset();
                         return std::unexpected{Utility::errorMessage(removeError)};
+                    }
+                    if (orphaned_)
+                        std::erase_if(
+                            *orphaned_,
+                            [&instanceId](SharedData::OrphanedCopy const& listed)
+                            {
+                                return listed.instanceId == instanceId;
+                            }
+                        );
                     return {};
                 }
             )
@@ -641,6 +697,7 @@ namespace FileTracking
 
     void TempDirInstanceManager::manualCleanup()
     {
+        orphaned_.reset();
         scanAndCleanDeadInstanceDirs(
             tempRootDir_,
             listInstanceIds(),

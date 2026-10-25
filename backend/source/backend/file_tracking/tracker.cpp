@@ -91,6 +91,8 @@ namespace FileTracking
             /** @brief Canonical, like the paths of the changes. */
             std::filesystem::path instanceDirectory;
             InstanceWatch watch;
+            /** @brief The size of the server's file when it was downloaded. */
+            std::uint64_t sizeBytes{0};
             /** @brief Runs while the copy was reported deleted or renamed away, see awaitCopyReturn(). */
             std::unique_ptr<boost::asio::steady_timer> returnWait{};
         };
@@ -122,6 +124,8 @@ namespace FileTracking
             bool shownUploading{false};
             /** @brief How far its changes are, by the local paths its uploads started with. */
             WatchProgressMeter progress;
+            /** @brief The progress holds the current count of pending changes, see progressChanged(). */
+            bool changesPendingCounted{true};
             /** @brief When the view last heard of the progress, it hears of it once per progress interval at most. */
             std::chrono::steady_clock::time_point progressShownAt{};
 
@@ -342,7 +346,10 @@ namespace FileTracking
             return path.filename() ? std::string{path.filename()->view()} : path.toUtf8();
         }
 
-        SharedData::TrackedEntry shownEntryOf(Entry const& entry)
+        /**
+         * @param watch The local watch of an uploaded original, it knows whether the item is a directory.
+         */
+        SharedData::TrackedEntry shownEntryOf(Entry const& entry, LocalItemWatch const* watch)
         {
             return SharedData::TrackedEntry{
                 .watchId = entry.watchId,
@@ -352,9 +359,10 @@ namespace FileTracking
                 .uploading = entry.shownUploading,
                 .downloadedCopy = entry.downloadedCopy() != nullptr,
                 .localPath = entry.localPath,
-                .isDirectory = entry.downloadedCopy() == nullptr && isDirectoryLocally(entry.localPath),
+                .isDirectory = entry.downloadedCopy() == nullptr && watch != nullptr && watch->isDirectory(),
                 .stop = std::nullopt,
                 .instanceId = entry.downloadedCopy() ? std::optional{entry.downloadedCopy()->instanceId} : std::nullopt,
+                .sizeBytes = entry.downloadedCopy() ? entry.downloadedCopy()->sizeBytes : 0u,
             };
         }
 
@@ -645,7 +653,7 @@ namespace FileTracking
 
         void show(Entry const& entry)
         {
-            view->showEntry(shownEntryOf(entry));
+            view->showEntry(shownEntryOf(entry, localWatches->find(entry.watchId)));
         }
 
         void showProgress(Entry& entry, std::chrono::steady_clock::time_point now)
@@ -663,6 +671,8 @@ namespace FileTracking
         std::optional<std::chrono::steady_clock::time_point>
         showChangedProgress(Entry& entry, std::chrono::steady_clock::time_point now)
         {
+            if (!entry.changesPendingCounted)
+                countChangesPending(entry);
             if (entry.progress.isIdle())
                 entry.progress.finishBurst(secondsSinceEpochNow());
             if (!entry.progress.isDirty())
@@ -680,13 +690,23 @@ namespace FileTracking
          */
         void progressChanged(Entry& entry)
         {
-            entry.progress.setChangesPending(entry.pendingUploads.changeCount() + entry.remoteChangesOnTheirWay);
+            // Counting walks every pending upload: during a burst it waits for the next show.
+            if (entry.pendingUploads.empty() || entry.progress.isIdle())
+                countChangesPending(entry);
+            else
+                entry.changesPendingCounted = false;
             entry.progress.setWaitingForAnswer(conflicts.countOf(entry.watchId));
-            if (!entry.progress.isDirty())
+            if (entry.changesPendingCounted && !entry.progress.isDirty())
                 return;
             if (entry.progress.isIdle())
                 return postIdleProgress();
             scheduleProgress(std::chrono::steady_clock::now() + progressInterval);
+        }
+
+        static void countChangesPending(Entry& entry)
+        {
+            entry.progress.setChangesPending(entry.pendingUploads.changeCount() + entry.remoteChangesOnTheirWay);
+            entry.changesPendingCounted = true;
         }
 
         void progressChanged(Ids::WatchId const& watchId)
@@ -769,13 +789,19 @@ namespace FileTracking
 
         /**
          * @brief The upload of @p path in the watch @p watchId, the path it started with, is as far as @p progress.
+         * @param generation Its generation in the progress, see WatchProgressMeter::uploadQueued().
          */
-        void onUploadProgress(Ids::WatchId const& watchId, Paths::LocalPath const& path, UploadProgress const& progress)
+        void onUploadProgress(
+            Ids::WatchId const& watchId,
+            Paths::LocalPath const& path,
+            std::uint64_t generation,
+            UploadProgress const& progress
+        )
         {
             auto* entry = find(watchId);
             if (!entry)
                 return;
-            entry->progress.uploadProgressed(path, progress);
+            entry->progress.uploadProgressed(path, progress, generation);
             progressChanged(*entry);
         }
 
@@ -912,6 +938,7 @@ namespace FileTracking
                             copy = OpenedCopy{.instanceId = instanceId, .localPath = destination},
                             instanceDirectory,
                             remotePath,
+                            sizeBytes,
                             watch,
                             claim,
                             onOpened](SharedData::OperationCompletionReason reason)
@@ -920,7 +947,9 @@ namespace FileTracking
                             if (claim)
                                 claim->release();
                             if (const auto self = weak.lock())
-                                self->onDownloaded(copy, instanceDirectory, remotePath, watch, reason, onOpened);
+                                self->onDownloaded(
+                                    copy, instanceDirectory, remotePath, sizeBytes, watch, reason, onOpened
+                                );
                         }
                     );
                 }
@@ -938,6 +967,7 @@ namespace FileTracking
             OpenedCopy const& copy,
             std::filesystem::path const& instanceDirectory,
             Paths::RemotePath const& remotePath,
+            std::uint64_t sizeBytes,
             bool watch,
             SharedData::OperationCompletionReason reason,
             OnOpened const& onOpened
@@ -983,6 +1013,7 @@ namespace FileTracking
                         .instanceId = copy.instanceId,
                         .instanceDirectory = instanceDirectory,
                         .watch = *std::move(instanceWatch),
+                        .sizeBytes = sizeBytes,
                     },
                 .remotePath = remotePath,
                 .localPath = copy.localPath,
@@ -1111,11 +1142,9 @@ namespace FileTracking
             entry.progress.dropPending();
             entry.progress.finishBurst(endedAt);
             view->showWatchProgress(entry.progress.snapshot());
-            auto shown = shownEntryOf(entry);
-            shown.uploading = false;
             // The item may be gone or elsewhere by now, its watch knows what it was.
-            if (auto const* const watch = localWatches->find(watchId))
-                shown.isDirectory = watch->isDirectory();
+            auto shown = shownEntryOf(entry, localWatches->find(watchId));
+            shown.uploading = false;
             return shown;
         }
 
@@ -2449,6 +2478,8 @@ namespace FileTracking
 
         void listOrphanedCopies()
         {
+            // Other processes may have left orphans since the last scan.
+            instances->rescanOrphaned();
             showOrphanedCopies();
         }
 
@@ -2543,7 +2574,7 @@ namespace FileTracking
             if (upload.change.isDirectory)
                 entry->pendingUploads.carries(upload.change.path, entryCountOf(upload.change.path.native()));
             entry->pendingUploads.sent(upload.change.path, upload.destination, upload.change.isDirectory);
-            entry->progress.uploadQueued(upload.change.path, fileSizeOf(upload.change.path));
+            const auto generation = entry->progress.uploadQueued(upload.change.path, fileSizeOf(upload.change.path));
             progressChanged(*entry);
             const auto queued = remote->upload(
                 UploadRequest{
@@ -2555,17 +2586,18 @@ namespace FileTracking
                     .expectedDestination = expected,
                     .continuesPartialOf = upload.continuesPartialOf,
                 },
-                [weak = weak_from_this(), upload, expected](UploadEnd const& ended)
+                [weak = weak_from_this(), upload, expected, generation](UploadEnd const& ended)
                 {
                     if (const auto self = weak.lock())
-                        self->onUploadEnded(upload, expected, ended);
+                        self->onUploadEnded(upload, expected, generation, ended);
                 },
                 [weak = weak_from_this(),
                     watchId = upload.watchId,
-                    path = upload.change.path](UploadProgress const& progress)
+                    path = upload.change.path,
+                    generation](UploadProgress const& progress)
                 {
                     if (const auto self = weak.lock())
-                        self->onUploadProgress(watchId, path, progress);
+                        self->onUploadProgress(watchId, path, generation, progress);
                 }
             );
             if (queued)
@@ -2574,7 +2606,9 @@ namespace FileTracking
             Log::warn("FileTracking: did not upload '{}': {}", upload.change.path.toUtf8(), queued.error());
             if (auto* stillWatched = find(upload.watchId))
             {
-                stillWatched->progress.uploadEnded(upload.change.path, WatchProgressMeter::UploadResult::NotCompleted);
+                stillWatched->progress.uploadEnded(
+                    upload.change.path, WatchProgressMeter::UploadResult::NotCompleted, generation
+                );
                 recordFailure(
                     *stillWatched,
                     upload.change.path,
@@ -2589,13 +2623,18 @@ namespace FileTracking
          * @brief Once an upload ended, what the server has now is the state the next check compares with. The upload
          *        stays on its way until the remote told that state.
          * @param expected What the upload expected the server to have at its destination.
+         * @param generation Its generation in the progress, see WatchProgressMeter::uploadQueued().
          */
-        void
-        onUploadEnded(Upload const& upload, std::optional<ExpectedDestination> const& expected, UploadEnd const& ended)
+        void onUploadEnded(
+            Upload const& upload,
+            std::optional<ExpectedDestination> const& expected,
+            std::uint64_t generation,
+            UploadEnd const& ended
+        )
         {
             auto* entry = find(upload.watchId);
             if (entry)
-                entry->progress.uploadEnded(upload.change.path, uploadResultOf(ended));
+                entry->progress.uploadEnded(upload.change.path, uploadResultOf(ended), generation);
             // The server's copy changed meanwhile and stayed, the upload asks about it now unless the user stopped
             // checking since.
             if (entry && ended.changedOnServer)

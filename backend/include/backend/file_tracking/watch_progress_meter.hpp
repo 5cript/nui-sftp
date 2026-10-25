@@ -56,20 +56,30 @@ namespace FileTracking
         /**
          * @brief The upload of @p path was handed to the queue, @p sizeBytes is its size when known. An upload of
          *        @p path still on its way counts as ended without completing.
+         * @return Its generation, which tells it apart from the earlier uploads of @p path.
          */
-        void uploadQueued(Paths::LocalPath const& path, std::optional<std::uint64_t> sizeBytes = std::nullopt);
+        std::uint64_t uploadQueued(Paths::LocalPath const& path, std::optional<std::uint64_t> sizeBytes = std::nullopt);
 
         /**
          * @brief The upload of @p path is as far as @p progress, it started on the server. Nothing for an upload
-         *        that is not on its way.
+         *        that is not on its way, or not of @p generation when that is given.
          */
-        void uploadProgressed(Paths::LocalPath const& path, UploadProgress const& progress);
+        void uploadProgressed(
+            Paths::LocalPath const& path,
+            UploadProgress const& progress,
+            std::optional<std::uint64_t> generation = std::nullopt
+        );
 
         /**
          * @brief The upload of @p path ended. End it together with changesEnded() and setChangesPending() for its
-         *        changes, the files it finished count as pending again in between.
+         *        changes, the files it finished count as pending again in between. Nothing for an upload that is not
+         *        on its way, or not of @p generation when that is given.
          */
-        void uploadEnded(Paths::LocalPath const& path, UploadResult result);
+        void uploadEnded(
+            Paths::LocalPath const& path,
+            UploadResult result,
+            std::optional<std::uint64_t> generation = std::nullopt
+        );
 
         /**
          * @brief Forgets what is on its way, for a watch that stops: the uploads count as ended without completing,
@@ -108,9 +118,16 @@ namespace FileTracking
             std::optional<std::uint64_t> sizeBytes{};
             /** @brief The last progress, nothing before the upload started on the server. */
             std::optional<UploadProgress> progress{};
+            std::uint64_t generation{0u};
         };
 
         void endUpload(ActiveUpload const& upload, UploadResult result);
+
+        /**
+         * @brief The upload of @p path on its way, of @p generation when that is given, the end of uploads_ when there is none.
+         */
+        std::map<Paths::LocalPath, ActiveUpload>::iterator
+        activeUpload(Paths::LocalPath const& path, std::optional<std::uint64_t> generation);
 
       private:
         Ids::WatchId watchId_;
@@ -121,6 +138,7 @@ namespace FileTracking
         /** @brief The bytes the ended uploads of the current burst count as, both done and total. */
         std::uint64_t burstBytes_{0u};
         std::map<Paths::LocalPath, ActiveUpload> uploads_{};
+        std::uint64_t nextGeneration_{1u};
         std::optional<SharedData::WatchSync> lastSync_{};
         bool dirty_{false};
     };
