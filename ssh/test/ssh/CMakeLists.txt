@@ -85,6 +85,8 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_secure_shell_library(secure-shell-tsan)
     target_compile_options(secure-shell-tsan PRIVATE ${THREAD_SANITIZER_OPTIONS})
     add_ssh_test(nui-sftp-ssh-tsan-test secure-shell-tsan "${CMAKE_BINARY_DIR}/test/tsan")
+    # The mock server helper hands objects between the test and its asio thread, which TSAN only follows instrumented.
+    target_sources(nui-sftp-ssh-tsan-test PRIVATE "${CMAKE_SOURCE_DIR}/utility/source/utility/node/node.cpp")
     target_compile_options(nui-sftp-ssh-tsan-test PRIVATE ${THREAD_SANITIZER_OPTIONS})
     target_link_options(nui-sftp-ssh-tsan-test PRIVATE -fsanitize=thread)
     gtest_discover_tests(
