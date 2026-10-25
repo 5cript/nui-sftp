@@ -10,7 +10,7 @@ class Awaiter
         : maxCount_(maxCount)
     {}
 
-    bool waitFor(std::chrono::milliseconds const& duration = std::chrono::seconds{1})
+    bool waitFor(std::chrono::milliseconds const& duration = std::chrono::seconds{5})
     {
         return promise_.get_future().wait_for(duration) == std::future_status::ready;
     }

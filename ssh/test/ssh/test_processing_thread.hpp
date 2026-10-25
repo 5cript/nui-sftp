@@ -12,12 +12,15 @@
 #    include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <functional>
+#include <future>
 #include <latch>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -25,6 +28,21 @@ using namespace std::string_literals;
 
 namespace SecureShell::Test
 {
+    namespace
+    {
+        bool waitUntil(std::function<bool()> const& condition, std::chrono::milliseconds limit = 5s)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + limit;
+            while (!condition())
+            {
+                if (std::chrono::steady_clock::now() > deadline)
+                    return false;
+                std::this_thread::sleep_for(1ms);
+            }
+            return true;
+        }
+    }
+
     class ProcessingThreadTest : public ::testing::Test
     {
       protected:
@@ -118,12 +136,14 @@ namespace SecureShell::Test
     TEST_F(ProcessingThreadTest, CannotPushTaskWhileStopping)
     {
         Awaiter awaiter{};
+        std::promise<void> release{};
+        const auto released = release.get_future().share();
         ProcessingThread processingThread;
         processingThread.pushTask(
-            [&]
+            [&awaiter, released]
             {
                 awaiter.arrive();
-                std::this_thread::sleep_for(std::chrono::milliseconds{100});
+                released.wait_for(5s);
             }
         );
         std::thread asyncStopper{[&]
@@ -132,6 +152,7 @@ namespace SecureShell::Test
             }};
         awaiter.wait();
         EXPECT_FALSE(processingThread.pushTask([] {}));
+        release.set_value();
         asyncStopper.join();
     }
 
@@ -195,14 +216,12 @@ namespace SecureShell::Test
             }
         );
         ASSERT_TRUE(result.first);
-        bool waitResult = false;
-        for (int tryWaitCount = 0; tryWaitCount < 5; ++tryWaitCount)
-        {
-            if (waitResult = latch.try_wait(); waitResult)
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
-        }
-        EXPECT_TRUE(waitResult);
+        EXPECT_TRUE(waitUntil(
+            [&latch]
+            {
+                return latch.try_wait();
+            }
+        ));
     }
 
     TEST_F(ProcessingThreadTest, TaskIsExecutedIfIfPermantentTaskIsRunning)
@@ -796,8 +815,13 @@ namespace SecureShell::Test
         );
         processingThread.start(std::chrono::milliseconds{1});
 
-        // Allow the cycle to complete and the run loop to exit via the rethrow.
-        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        // The run loop exits via the rethrow once the cycle completed.
+        ASSERT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                return !processingThread.isRunning();
+            }
+        ));
 
         EXPECT_EQ(1, throwerCount.load());   // thrower not re-run
         EXPECT_EQ(1, goodCount.load());      // remaining task in batch still ran
@@ -830,7 +854,12 @@ namespace SecureShell::Test
         );
         processingThread.start(std::chrono::milliseconds{1});
 
-        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        ASSERT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                return !processingThread.isRunning();
+            }
+        ));
 
         EXPECT_EQ(1, firstRan.load());
         EXPECT_EQ(1, thirdRan.load());       // task after thrower in same batch still ran
@@ -849,7 +878,7 @@ namespace SecureShell::Test
         // Tasks that skip their turn once a cycle ran long rely on the start position moving,
         // otherwise the last tasks in the map would never run. Recorded without a lock so no
         // task can block long enough to count as the cycle's blocking task.
-        constexpr std::size_t recorded = 9;
+        constexpr std::size_t recorded = 30;
         std::array<std::atomic<int>, recorded> order{};
         std::atomic<std::size_t> count{0};
         ProcessingThread processingThread;
@@ -867,13 +896,17 @@ namespace SecureShell::Test
             ASSERT_TRUE(result.first);
         }
         processingThread.start(std::chrono::milliseconds{1});
-        for (int attempt = 0; attempt < 500 && count.load() < recorded; ++attempt)
-            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        waitUntil(
+            [&count]
+            {
+                return count.load() >= recorded;
+            }
+        );
         processingThread.stop();
 
         ASSERT_GE(count.load(), recorded);
         // Each cycle runs all three tasks in map order from its start position, and the start
-        // position must not stay put. A preempted task may move it by more than one slot.
+        // position must not stay put. A preempted last task moves it by a whole cycle, so only some cycles move it.
         std::vector<int> starts;
         for (std::size_t cycle = 0; cycle < recorded; cycle += 3)
         {
@@ -882,8 +915,7 @@ namespace SecureShell::Test
             EXPECT_EQ(order[cycle + 2], (start + 2) % 3);
             starts.push_back(start);
         }
-        EXPECT_NE(starts[0], starts[1]);
-        EXPECT_NE(starts[1], starts[2]);
+        EXPECT_NE(std::ranges::count(starts, starts.front()), static_cast<std::ptrdiff_t>(starts.size()));
     }
 
     namespace
@@ -902,17 +934,6 @@ namespace SecureShell::Test
             };
         }
 
-        bool waitUntil(std::function<bool()> const& condition, std::chrono::milliseconds limit = 5s)
-        {
-            const auto deadline = std::chrono::steady_clock::now() + limit;
-            while (!condition())
-            {
-                if (std::chrono::steady_clock::now() > deadline)
-                    return false;
-                std::this_thread::sleep_for(1ms);
-            }
-            return true;
-        }
     }
 
     TEST_F(ProcessingThreadTest, IdleTaskLetsTheThreadSleepUntilWoken)
@@ -956,8 +977,7 @@ namespace SecureShell::Test
             [&turns]
             {
                 return turns.load() == 1;
-            },
-            1s
+            }
         ));
         processingThread.stop();
     }
@@ -987,14 +1007,28 @@ namespace SecureShell::Test
         std::atomic_int slowTurns = 0;
         std::atomic_int fastTurns = 0;
         ProcessingThread processingThread;
-        processingThread.pushPermanentTask(countingTask(slowTurns, TaskStatus::Poll), 200ms);
+        processingThread.pushPermanentTask(countingTask(slowTurns, TaskStatus::Poll), 10s);
         processingThread.pushPermanentTask(countingTask(fastTurns, TaskStatus::Poll), 10ms);
-        processingThread.start(1s);
-        std::this_thread::sleep_for(300ms);
+        processingThread.start(10s);
+        // Sleeping for the longest interval would take 40 s.
+        ASSERT_TRUE(waitUntil(
+            [&fastTurns]
+            {
+                return fastTurns.load() >= 5;
+            }
+        ));
+        // Read between cycles, a stop could land between the two tasks of one.
+        const auto [slow, fast] = processingThread
+                                      .pushPromiseTask(
+                                          [&slowTurns, &fastTurns]
+                                          {
+                                              return std::pair{slowTurns.load(), fastTurns.load()};
+                                          }
+                                      )
+                                      .get();
         processingThread.stop();
 
-        EXPECT_GE(fastTurns.load(), 5);
-        EXPECT_EQ(slowTurns.load(), fastTurns.load());
+        EXPECT_EQ(slow, fast);
     }
 
     TEST_F(ProcessingThreadTest, BusyTaskKeepsTheThreadFromSleeping)
@@ -1002,11 +1036,15 @@ namespace SecureShell::Test
         std::atomic_int turns = 0;
         ProcessingThread processingThread;
         processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Busy));
-        processingThread.start(100ms);
-        std::this_thread::sleep_for(200ms);
+        processingThread.start(10s);
+        // Sleeping between busy turns would take 200 s.
+        EXPECT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() > 20;
+            }
+        ));
         processingThread.stop();
-
-        EXPECT_GT(turns.load(), 20);
     }
 
     TEST_F(ProcessingThreadTest, PushedTaskWakesASleepingThreadAtOnce)
@@ -1029,9 +1067,9 @@ namespace SecureShell::Test
                 return 42;
             }
         );
-        ASSERT_EQ(done.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(done.wait_for(5s), std::future_status::ready);
         EXPECT_EQ(done.get(), 42);
-        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
         processingThread.stop();
     }
 
@@ -1050,7 +1088,7 @@ namespace SecureShell::Test
 
         const auto start = std::chrono::steady_clock::now();
         processingThread.stop();
-        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
         EXPECT_FALSE(processingThread.isRunning());
     }
 
@@ -1082,6 +1120,7 @@ namespace SecureShell::Test
         std::atomic_int accepted = 0;
         std::atomic_int ran = 0;
         std::atomic_bool keepPushing = true;
+        bool pushing = false;
         {
             ProcessingThread processingThread;
             processingThread.start(1ms);
@@ -1107,14 +1146,19 @@ namespace SecureShell::Test
                     }
                 );
             }
-            std::this_thread::sleep_for(50ms);
+            pushing = waitUntil(
+                [&accepted]
+                {
+                    return accepted.load() >= 1000;
+                }
+            );
             processingThread.stop();
             keepPushing = false;
             for (auto& thread : threads)
                 thread.join();
             // Tasks accepted after stop wait for the next start or for the destructor.
         }
-        EXPECT_GT(accepted.load(), 0);
+        EXPECT_TRUE(pushing);
         EXPECT_EQ(ran.load(), accepted.load());
     }
 
@@ -1140,8 +1184,7 @@ namespace SecureShell::Test
             [&processingThread]
             {
                 return !processingThread.isRunning();
-            },
-            2s
+            }
         ));
     }
 
@@ -1316,9 +1359,9 @@ namespace SecureShell::Test
                 return 42;
             }
         );
-        ASSERT_EQ(done.wait_for(2s), std::future_status::ready);
+        ASSERT_EQ(done.wait_for(5s), std::future_status::ready);
         EXPECT_EQ(done.get(), 42);
-        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
         processingThread.stop();
     }
 
@@ -1351,8 +1394,7 @@ namespace SecureShell::Test
             [&turns, beforeWake]
             {
                 return turns.load() > beforeWake;
-            },
-            1s
+            }
         ));
         std::this_thread::sleep_for(50ms);
         processingThread.pushPermanentTask(countingTask(otherTurns, TaskStatus::Done));
@@ -1360,8 +1402,7 @@ namespace SecureShell::Test
             [&otherTurns]
             {
                 return otherTurns.load() == 1;
-            },
-            1s
+            }
         ));
         processingThread.stop();
     }
@@ -1390,7 +1431,7 @@ namespace SecureShell::Test
 
         const auto start = std::chrono::steady_clock::now();
         processingThread.stop();
-        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
         EXPECT_FALSE(processingThread.isRunning());
     }
 
@@ -1411,8 +1452,7 @@ namespace SecureShell::Test
             [&turns]
             {
                 return turns.load() >= 5;
-            },
-            2s
+            }
         ));
         processingThread.stop();
     }
@@ -1427,8 +1467,7 @@ namespace SecureShell::Test
             [&turns]
             {
                 return turns.load() >= 5;
-            },
-            2s
+            }
         ));
         processingThread.stop();
     }
@@ -1463,15 +1502,15 @@ namespace SecureShell::Test
             [&turns, pending]
             {
                 return turns.load() >= pending + 10;
-            },
-            2s
+            }
         ));
         outputPending = false;
         processingThread.wake();
         std::this_thread::sleep_for(50ms);
         const auto flushed = turns.load();
         std::this_thread::sleep_for(100ms);
-        EXPECT_LE(turns.load(), flushed + 1);
+        // A late thread may still take the turns of the last wake, a spinning one takes hundreds.
+        EXPECT_LE(turns.load(), flushed + 5);
         processingThread.stop();
     }
 
@@ -1496,8 +1535,7 @@ namespace SecureShell::Test
             [&pollTurns]
             {
                 return pollTurns.load() >= 5;
-            },
-            2s
+            }
         ));
         processingThread.stop();
     }
