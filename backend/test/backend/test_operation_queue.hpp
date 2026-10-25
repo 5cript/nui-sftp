@@ -879,7 +879,7 @@ namespace Test
                 {toLocal(localPath)},
                 remote("/home/test/locked.tar"),
                 TarArchive::Compression::None,
-                0,
+                {},
                 false
             );
         }).has_value());
@@ -3030,7 +3030,7 @@ namespace Test
                 }},
                 toLocal(localDirectory_.path() / "documents.tar"),
                 TarArchive::Compression::None,
-                0,
+                {},
                 false
             );
         }).has_value());

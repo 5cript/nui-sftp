@@ -179,7 +179,7 @@ class OperationQueue
      *                           taken at face value (no per-entry lstat).
      * @param localArchivePath   Destination archive path on the local filesystem.
      * @param compression        Compression codec (or Auto to pick from extension).
-     * @param compressionLevel   User-facing 1..9 level (remapped to codec-native ranges).
+     * @param compressionOptions Codec tuning, see TarArchive::compressionOptionsForLevel.
      * @param mayOverwrite       Allow replacing an existing local archive.
      * @param mode               Standard queued / priority placement.
      */
@@ -189,7 +189,7 @@ class OperationQueue
         std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
         TarArchive::Compression compression,
-        int compressionLevel,
+        TarArchive::CompressionOptions const& compressionOptions,
         bool mayOverwrite,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );
@@ -206,7 +206,7 @@ class OperationQueue
         std::vector<Paths::LocalPath> localPaths,
         Paths::RemotePath const& remoteArchivePath,
         TarArchive::Compression compression,
-        int compressionLevel,
+        TarArchive::CompressionOptions const& compressionOptions,
         bool mayOverwrite,
         SharedData::OperationMode mode = SharedData::OperationMode::Queued
     );

@@ -13,6 +13,7 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/sync_execution.hpp>
+#include <tar_archive/compression.hpp>
 
 #include <nui/utility/scope_exit.hpp>
 
@@ -963,6 +964,7 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                 std::string const& localArchivePath,
                 int compressionCodec,
                 int compressionLevel,
+                bool xzExtreme,
                 bool mayOverwrite,
                 int mode
             )
@@ -980,6 +982,9 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                 if (!archivePath)
                     return reply.error(archivePath.error());
 
+                const auto compression = static_cast<TarArchive::Compression>(compressionCodec);
+                const auto compressionOptions =
+                    TarArchive::compressionOptionsForLevel(compression, compressionLevel, xzExtreme);
                 auto description = fmt::format(
                     "the archive download '{}' of {} roots to '{}'",
                     newOperationIdString,
@@ -993,8 +998,8 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                     [operationId = Ids::makeOperationId(newOperationIdString),
                         roots = *std::move(roots),
                         archivePath = *std::move(archivePath),
-                        compressionCodec,
-                        compressionLevel,
+                        compression,
+                        compressionOptions,
                         mayOverwrite,
                         mode](OperationQueue& queue, SecureShell::SftpSession& channel) mutable
                     {
@@ -1003,8 +1008,8 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                             operationId,
                             std::move(roots),
                             archivePath,
-                            static_cast<TarArchive::Compression>(compressionCodec),
-                            compressionLevel,
+                            compression,
+                            compressionOptions,
                             mayOverwrite,
                             static_cast<SharedData::OperationMode>(mode)
                         ));
@@ -1026,6 +1031,7 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                 std::string const& remoteArchivePath,
                 int compressionCodec,
                 int compressionLevel,
+                bool xzExtreme,
                 bool mayOverwrite,
                 int mode
             )
@@ -1041,6 +1047,9 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                 if (!archivePath)
                     return reply.error(archivePath.error());
 
+                const auto compression = static_cast<TarArchive::Compression>(compressionCodec);
+                const auto compressionOptions =
+                    TarArchive::compressionOptionsForLevel(compression, compressionLevel, xzExtreme);
                 auto description = fmt::format(
                     "the archive upload '{}' of {} paths to '{}'",
                     newOperationIdString,
@@ -1054,8 +1063,8 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                     [operationId = Ids::makeOperationId(newOperationIdString),
                         localPaths = *std::move(localPaths),
                         archivePath = *std::move(archivePath),
-                        compressionCodec,
-                        compressionLevel,
+                        compression,
+                        compressionOptions,
                         mayOverwrite,
                         mode](OperationQueue& queue, SecureShell::SftpSession& channel) mutable
                     {
@@ -1064,8 +1073,8 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                             operationId,
                             std::move(localPaths),
                             archivePath,
-                            static_cast<TarArchive::Compression>(compressionCodec),
-                            compressionLevel,
+                            compression,
+                            compressionOptions,
                             mayOverwrite,
                             static_cast<SharedData::OperationMode>(mode)
                         ));
