@@ -195,6 +195,7 @@ are sensible; override them only when needed.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `NUI_SFTP_ENABLE_TESTING` | `OFF` | Build the GoogleTest suites under `*/test/` |
+| `NUI_SFTP_ENABLE_BENCHMARKS` | `OFF` | Build the transfer benchmark (Linux only), see [Transfer benchmark](#transfer-benchmark) |
 | `NUI_SFT_ENABLE_LANGUAGE_TOOLING` | `OFF` | Build the `language-check` CLI tool |
 | `NUI_BUILD_XML_TOOL` | (via Nui) | Build the `xml-to-nui` SVG/XML converter |
 | `OMIT_FRONTEND_BUILD` | `OFF` | Skip the Emscripten frontend |
@@ -272,6 +273,23 @@ ctest --test-dir build/clang_debug --output-on-failure --timeout 120 -j$(nproc)
 Tests must place transient files under the build tree (typically `programDirectory / "temp"`),
 not `/tmp` or `std::filesystem::temp_directory_path()`. This keeps runs isolated
 and reproducible across machines.
+
+### Transfer benchmark
+
+`backend/benchmark/backend` measures how fast transfers are: it starts OpenSSH in a
+docker container and moves a large file, medium files and small files both ways with
+the app's operations, with libssh directly and with the host's `sftp` program for
+comparison. It runs on Linux only and only on demand, ctest and CI never start it.
+Measure with a release build:
+
+```bash
+cmake build/clang_release -DNUI_SFTP_ENABLE_BENCHMARKS=ON
+cmake --build build/clang_release --target run-transfer-benchmark
+```
+
+The summary goes to `build/clang_release/benchmark/transfer-benchmark.md`.
+`nui-sftp-transfer-benchmark --help` lists the options for sizes, file counts, runs
+and the output file.
 
 ## Code style
 
