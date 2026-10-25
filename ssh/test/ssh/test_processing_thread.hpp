@@ -362,9 +362,9 @@ namespace SecureShell::Test
         std::shared_ptr<std::pair<bool, ProcessingThread::PermanentTaskId>> result =
             std::make_shared<std::pair<bool, ProcessingThread::PermanentTaskId>>();
         *result = processingThread.pushPermanentTask(
-            [&processingThread, result, &awaiter](auto)
+            [&processingThread, result, &awaiter](auto id)
             {
-                processingThread.removePermanentTask(result->second);
+                processingThread.removePermanentTask(id);
                 awaiter.arrive();
                 /*
                  * DONT DO ANYTHING HERE WITH CAPTURES, AS THEY ARE DESTROYED
@@ -386,11 +386,11 @@ namespace SecureShell::Test
         std::shared_ptr<std::pair<bool, ProcessingThread::PermanentTaskId>> result =
             std::make_shared<std::pair<bool, ProcessingThread::PermanentTaskId>>();
         *result = processingThread.pushPermanentTask(
-            [&](auto)
+            [&](auto id)
             {
                 awaiter.arrive();
                 ++counter;
-                processingThread.removePermanentTask(result->second);
+                processingThread.removePermanentTask(id);
                 return true;
             }
         );
