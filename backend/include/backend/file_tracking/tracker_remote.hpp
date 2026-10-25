@@ -2,6 +2,8 @@
 
 #include <backend/file_tracking/tracking_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
+#include <shared_data/file_tracking/upload_failure.hpp>
+#include <shared_data/file_tracking/watch_progress.hpp>
 #include <paths/paths.hpp>
 
 #include <cstdint>
@@ -66,6 +68,25 @@ namespace FileTracking
     };
 
     /**
+     * @brief Why an upload or an entry of it failed.
+     */
+    struct UploadFailureInfo
+    {
+        SharedData::UploadFailureReason reason{SharedData::UploadFailureReason::Unknown};
+        /** @brief The server's or the system's message, untranslated. */
+        std::optional<std::string> detail{};
+    };
+
+    /**
+     * @brief An entry below a directory that its upload left out, the upload may still complete.
+     */
+    struct FailedUploadEntry
+    {
+        Paths::LocalPath path;
+        UploadFailureInfo failure{};
+    };
+
+    /**
      * @brief How a queued upload ended.
      */
     struct UploadEnd
@@ -74,14 +95,36 @@ namespace FileTracking
         /** @brief The destination no longer held the request's expectedDestination, nothing replaced it. */
         bool changedOnServer{false};
         /**
-         * @brief What the server has at the destination after a completed upload of anything but a directory, nothing
-         *        when it has nothing there or could not be asked.
+         * @brief What the server has at the destination after a completed upload of anything but a directory, and
+         *        what it has instead of the expected state when changedOnServer. Nothing when it has nothing there or
+         *        could not be asked.
          */
         std::optional<ServerState> destinationState{};
         /**
          * @brief The regular files a completed upload wrote to the server, those below a directory too.
          */
         std::vector<SentFile> sentFiles{};
+        /** @brief Why a failed upload failed, nothing for one that completed, was cancelled or changedOnServer. */
+        std::optional<UploadFailureInfo> failure{};
+        /** @brief The entries a directory upload left out. */
+        std::vector<FailedUploadEntry> failedEntries{};
+    };
+
+    /**
+     * @brief How far a queued upload is.
+     */
+    struct UploadProgress
+    {
+        std::uint64_t bytesSent{0};
+        std::uint64_t bytesTotal{0};
+        /** @brief Its files on their way right now. */
+        std::vector<SharedData::WatchFileProgress> inFlight{};
+        /** @brief Its files that are done, those below a directory too. */
+        std::uint64_t filesDone{0};
+        /** @brief Its files, those below a directory too, as far as they are known. */
+        std::uint64_t fileCount{0};
+        /** @brief Every byte of it went to the server, its end follows once its operation ended. */
+        bool transferred{false};
     };
 
     /**
@@ -100,6 +143,11 @@ namespace FileTracking
          * @brief Called once on the strand when a queued upload ended.
          */
         using OnUploadEnded = std::function<void(UploadEnd const& ended)>;
+
+        /**
+         * @brief Called on the strand while a queued upload is on its way, never after it ended.
+         */
+        using OnUploadProgress = std::function<void(UploadProgress const& progress)>;
 
         TrackerRemote() = default;
         virtual ~TrackerRemote() = default;
@@ -131,9 +179,10 @@ namespace FileTracking
 
         /**
          * @brief Queues the upload, a source that is gone by the time it runs ends it without a transfer: its
-         *        deletion is mirrored apart.
+         *        deletion is mirrored apart. @p onProgress hears how far it is, it may be empty.
          */
-        virtual std::expected<void, std::string> upload(UploadRequest const& request, OnUploadEnded onEnded) = 0;
+        virtual std::expected<void, std::string>
+        upload(UploadRequest const& request, OnUploadEnded onEnded, OnUploadProgress onProgress) = 0;
 
         /**
          * @brief Stops the upload to @p destination that is on its way. It still ends once, never before this call

@@ -181,6 +181,17 @@ namespace NuiFileExplorer
         void path(std::filesystem::path const& path);
 
         /**
+         * @brief Navigates to @p directory and selects the item @p name there once the listing has loaded, as a
+         *        single click on it does: the selection is replaced, the keyboard continues from the item, the item
+         *        is scrolled into view and the side takes the focus. Navigating elsewhere before the listing arrives
+         *        cancels the selection, a listing without the item selects nothing.
+         *
+         * @param directory The directory to show.
+         * @param name The file name of the item in @p directory.
+         */
+        void navigateAndSelect(std::filesystem::path const& directory, std::filesystem::path const& name);
+
+        /**
          * @brief Returns the current path.
          *
          * @return std::filesystem::path
@@ -228,6 +239,12 @@ namespace NuiFileExplorer
          *  @brief Cancel any pending loading-hint timer and clear the loading state.
          */
         void clearNavigationLoading();
+
+        /**
+         *  @brief Selects the item requested by @ref navigateAndSelect when the listing just shown is of its
+         *         directory, and ends the request.
+         */
+        void selectPendingItem();
 
         /**
          *  @brief Commit the search box value as a filter that hides non-matching items.

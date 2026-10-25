@@ -5,7 +5,7 @@
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <ids/ids.hpp>
 #include <paths/paths.hpp>
-#include <shared_data/file_tracking/server_changed_question.hpp>
+#include <shared_data/file_tracking/watch_conflict.hpp>
 #include <shared_data/file_tracking/watch_options.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -144,7 +144,8 @@ namespace FileTracking
         uploadAndWatch(Paths::LocalPath const& item, Paths::RemotePath const& destination);
 
         /**
-         * @brief Ends the watch @p watchId: a downloaded copy's instance ends with it, an uploaded original stays.
+         * @brief Ends the watch @p watchId: a downloaded copy's instance ends with it, an uploaded original stays. The
+         *        view keeps showing it as stopped by the user until removeStopped(), it claims no remote path.
          */
         void stop(Ids::WatchId const& watchId);
 
@@ -159,20 +160,76 @@ namespace FileTracking
         discard(Ids::InstanceId const& instanceId, Paths::LocalPath const& path);
 
         /**
-         * @brief The user's answer to the question @p questionId, see TrackerView::ask().
+         * @brief The user's answer to the conflict @p conflictId, see TrackerView::showConflict(). ReplaceOnServer
+         *        checks the path again and uploads it, KeepServers asks again on the next save. Either removes the
+         *        conflict.
          */
-        void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer);
+        void answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution);
+
+        /**
+         * @brief Answers every conflict of the watch @p watchId with @p resolution, see answerConflict().
+         */
+        void answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution);
+
+        /**
+         * @brief Uploads the path of the failure @p failureId again, see TrackerView::showFailure().
+         */
+        void retryFailure(Ids::FailureId const& failureId);
+
+        /**
+         * @brief Forgets the failure @p failureId, its path waits for its next change.
+         */
+        void dismissFailure(Ids::FailureId const& failureId);
+
+        /**
+         * @brief Retries every failure of the watch @p watchId, see retryFailure().
+         */
+        void retryAllFailures(Ids::WatchId const& watchId);
+
+        /**
+         * @brief Dismisses every failure of the watch @p watchId, see dismissFailure().
+         */
+        void dismissAllFailures(Ids::WatchId const& watchId);
+
+        /**
+         * @brief Removes the stopped watch @p watchId from the view, a stopped copy's instance becomes an orphan.
+         */
+        void removeStopped(Ids::WatchId const& watchId);
+
+        /**
+         * @brief Removes every stopped watch, see removeStopped().
+         */
+        void removeAllStopped();
+
+        /**
+         * @brief Shows the orphaned copies again, scanned anew, see TrackerView::showOrphanedCopies(). Those of stopped
+         *        watches are left out.
+         */
+        void listOrphanedCopies();
+
+        /**
+         * @brief Removes the orphaned copy @p instanceId with its directory, the view shows the orphaned copies again.
+         * @return An error when it is no orphaned copy, is the copy of a stopped watch or cannot be removed.
+         */
+        std::expected<void, std::string> removeOrphanedCopy(Ids::InstanceId const& instanceId);
+
+        /**
+         * @brief Removes every orphaned copy listOrphanedCopies() shows, see removeOrphanedCopy().
+         */
+        void removeAllOrphanedCopies();
 
         /**
          * @brief Ends every watch without telling the view, for a frontend that is gone or a session that closes. The
          *        instances of the copies it downloaded, watched or only opened, end too: they count as orphaned then,
-         *        or go when nothing is left in them. A download on its way is dropped, it opens nothing.
+         *        or go when nothing is left in them. A download on its way is dropped, it opens nothing. No stopped
+         *        watch is kept.
          */
         void stopAll();
 
         /**
-         * @brief The session lost its connection: every watch ends like in stopAll(), either side may change until it
-         *        is back, and the view shows why. The user watches anew.
+         * @brief The session lost its connection: every watch stops like in stop(), the view shows them as stopped
+         *        for that and why, either side may change until it is back. The rest ends like in stopAll(). The user
+         *        watches anew.
          */
         void connectionLost();
 

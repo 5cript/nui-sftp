@@ -34,6 +34,12 @@
 #include "test_tracking_state.hpp"
 #include "test_tracker.hpp"
 #include "test_batching_remote.hpp"
+#include "test_conflict_list.hpp"
+#include "test_failure_list.hpp"
+#include "test_watch_progress_meter.hpp"
+#include "test_bulk_entry_progress.hpp"
+#include "test_failure_reason.hpp"
+#include "test_local_file_problem.hpp"
 #include "test_password_request.hpp"
 #include "test_sync_session.hpp"
 #include "test_dropped_entry.hpp"
@@ -46,6 +52,7 @@
 #include "test_program_options.hpp"
 #include "test_rpc_helper.hpp"
 #include "test_rpc_path_parameters.hpp"
+#include "test_logger.hpp"
 
 #include <log/log.hpp>
 

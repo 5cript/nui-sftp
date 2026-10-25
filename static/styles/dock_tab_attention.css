@@ -1,0 +1,60 @@
+/* Badges and glow of a Lumino dock tab, rendered by BadgeTabRenderer from the title's dataset. */
+
+.lm-TabBar-tabBadges {
+    display: inline-flex;
+    flex: 0 0.01 auto;
+    align-self: center;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin: -4px -4px -4px 2px;
+    padding: 4px;
+    overflow: hidden;
+}
+
+.lm-TabBar-tab[data-attention-pulse] {
+    isolation: isolate;
+}
+
+.lm-TabBar-tab[data-attention-pulse]::before {
+    --dock-tab-attention-color: var(--script-nui-components-toast-warning, #e0a02e);
+
+    content: '';
+    position: absolute;
+    inset: -1px -1px 0;
+    z-index: -1;
+    border: 1px solid var(--dock-tab-attention-color);
+    border-bottom: none;
+    border-radius: inherit;
+    background-color: color-mix(in srgb, var(--dock-tab-attention-color) 38%, var(--brightness-mixin, black) 62%);
+    box-shadow: inset 0 0 10px 1px color-mix(in srgb, var(--dock-tab-attention-color) 60%, transparent);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.lm-TabBar-tab[data-attention-pulse="a"]::before {
+    animation: dock-tab-attention-glow-a 0.83s ease-in-out 3;
+}
+
+.lm-TabBar-tab[data-attention-pulse="b"]::before {
+    animation: dock-tab-attention-glow-b 0.83s ease-in-out 3;
+}
+
+@keyframes dock-tab-attention-glow-a {
+    40% {
+        opacity: 1;
+    }
+}
+
+@keyframes dock-tab-attention-glow-b {
+    40% {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lm-TabBar-tab[data-attention-pulse]::before {
+        animation: none;
+        opacity: 0.6;
+    }
+}

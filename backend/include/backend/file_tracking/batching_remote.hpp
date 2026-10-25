@@ -34,11 +34,21 @@ namespace FileTracking
         using OnUploadEntryEnded = std::function<void(std::size_t index, UploadEnd const& ended)>;
 
         /**
-         * @brief Queues the uploads of @p requests, regular files that may create the directories above their
-         *        destination, as one operation.
+         * @brief Called on the strand while an upload of a bulk is on its way, with the entry's index, never after the
+         *        bulk ended.
          */
-        virtual std::expected<void, std::string>
-        uploadAll(std::vector<UploadRequest> const& requests, OnUploadEntryEnded onEnded) = 0;
+        using OnUploadEntryProgress = std::function<void(std::size_t index, UploadProgress const& progress)>;
+
+        /**
+         * @brief Queues the uploads of @p requests, regular files that may create the directories above their
+         *        destination, as one operation. The index of an entry is that of its request. @p onProgress may be
+         *        empty.
+         */
+        virtual std::expected<void, std::string> uploadAll(
+            std::vector<UploadRequest> const& requests,
+            OnUploadEntryEnded onEnded,
+            OnUploadEntryProgress onProgress
+        ) = 0;
 
         /**
          * @brief Queues the deletes of @p paths as one operation, a directory only when it is empty.
@@ -95,9 +105,10 @@ namespace FileTracking
         /**
          * @brief Gathers @p request into the next batch. It goes on its own when it creates no missing directories,
          *        refreshes the listing, is no regular file, is a large one, continues a partial file or is alone in
-         *        its batch.
+         *        its batch. @p onProgress hears what the inner remote tells of it.
          */
-        std::expected<void, std::string> upload(UploadRequest const& request, OnUploadEnded onEnded) override;
+        std::expected<void, std::string>
+        upload(UploadRequest const& request, OnUploadEnded onEnded, OnUploadProgress onProgress) override;
 
         /**
          * @brief An upload still gathered ends as cancelled without being sent, one on its way is stopped by the inner

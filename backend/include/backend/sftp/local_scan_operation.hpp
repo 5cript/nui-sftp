@@ -3,6 +3,7 @@
 #include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/scan_walkers.hpp>
+#include <log/toast.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <shared_data/ignore_rules.hpp>
 #include <shared_data/sync/scan_node.hpp>
@@ -36,6 +37,11 @@ class LocalScanOperation : public Operation
         bool buildTree{false};
         /** @brief Tree mode only: names ending in one of these, the temp files of transfers, stay excluded. */
         std::vector<std::string> excludedSuffixes{};
+        /**
+         * @brief Whether the errors the scan logs when it fails are shown as toasts, see
+         *        UploadOperation::UploadOperationOptions::failureToast.
+         */
+        Log::Toast failureToast{Log::Toast::Show};
     };
 
     LocalScanOperation(ScanOperationOptions options);
@@ -197,6 +203,7 @@ class LocalScanOperation : public Operation
     bool ignoreHidden_;
     bool buildTree_;
     std::vector<std::string> excludedSuffixes_;
+    Log::Toast failureToast_;
     bool rootScanned_{false};
     SharedData::IgnoreMatcher ignoreMatcher_;
     std::unique_ptr<Utility::BaseDirectoryWalker> walker_;

@@ -6,6 +6,8 @@
 #include <backend/file_tracking/temp_dir_instancing.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <paths/native.hpp>
+#include <paths/paths.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -15,12 +17,19 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 using namespace FileTracking;
 using namespace std::chrono_literals;
@@ -66,6 +75,40 @@ namespace Test
     {
         std::ifstream input{path};
         return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    }
+
+    /**
+     * @brief @p path as a remote path, it must be a valid one.
+     */
+    inline Paths::RemotePath remotePathOf(std::string_view path)
+    {
+        return Paths::RemotePath::make(path).value();
+    }
+
+    /**
+     * @brief Writes @p size bytes into @p path.
+     */
+    inline void writeFileOfSize(fs::path const& path, std::size_t size)
+    {
+        std::ofstream{path, std::ios::binary} << std::string(size, 'x');
+    }
+
+    /**
+     * @brief The copy of the instance @p instanceId in @p copies, nothing when it is not listed.
+     */
+    inline std::optional<SharedData::OrphanedCopy>
+    listedCopyOf(std::vector<SharedData::OrphanedCopy> const& copies, std::string const& instanceId)
+    {
+        const auto found = std::ranges::find_if(
+            copies,
+            [&instanceId](SharedData::OrphanedCopy const& copy)
+            {
+                return copy.instanceId.value() == instanceId;
+            }
+        );
+        if (found == copies.end())
+            return std::nullopt;
+        return *found;
     }
 
     /**
@@ -560,6 +603,67 @@ namespace Test
         InstanceWatch moved{std::move(*watch)};
         EXPECT_FALSE(watch->isValid());
         EXPECT_TRUE(moved.isValid());
+    }
+
+    // ---- recordOrigin behaviour ----
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordedOriginKeepsTheLegacyFields)
+    {
+        auto inst = makeInstance();
+        const auto metaPath = bookkeepingPaths(inst->instanceDir()).metadata;
+        const auto before = readJson(metaPath);
+
+        const auto recorded = inst->recordOrigin(remotePathOf("/srv/data/report.txt"));
+
+        ASSERT_TRUE(recorded.has_value()) << recorded.error();
+        const auto after = readJson(metaPath);
+        EXPECT_EQ(after.at("instanceId"), inst->instanceId());
+        EXPECT_EQ(after.at("createdAt"), before.at("createdAt"));
+        ASSERT_TRUE(after.contains("deadAt"));
+        EXPECT_TRUE(after.at("deadAt").is_null());
+        EXPECT_EQ(after.at("remotePath"), "/srv/data/report.txt");
+        const auto read = readMetadata(inst->instanceDir());
+        ASSERT_TRUE(read.has_value()) << read.error();
+        ASSERT_TRUE(read->has_value());
+        EXPECT_EQ(**read, after);
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordedOriginSurvivesTheDeathTimestamp)
+    {
+        fs::path metaPath;
+        nlohmann::json before;
+        {
+            auto inst = makeInstance();
+            metaPath = bookkeepingPaths(inst->instanceDir()).metadata;
+            ASSERT_TRUE(inst->recordOrigin(remotePathOf("/srv/data/report.txt")).has_value());
+            before = readJson(metaPath);
+        }
+        const auto after = readJson(metaPath);
+        EXPECT_EQ(after.at("instanceId"), before.at("instanceId"));
+        EXPECT_EQ(after.at("createdAt"), before.at("createdAt"));
+        EXPECT_TRUE(after.at("deadAt").is_number_integer());
+        EXPECT_EQ(after.at("remotePath"), "/srv/data/report.txt");
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordingTheOriginAgainReplacesIt)
+    {
+        auto inst = makeInstance();
+        ASSERT_TRUE(inst->recordOrigin(remotePathOf("/srv/first.txt")).has_value());
+        ASSERT_TRUE(inst->recordOrigin(remotePathOf("/srv/second.txt")).has_value());
+        EXPECT_EQ(readJson(bookkeepingPaths(inst->instanceDir()).metadata)["remotePath"], "/srv/second.txt");
+    }
+
+    TEST_F(TemporaryDirectoryInstanceTest, RecordingTheOriginAfterCleanupNowFails)
+    {
+        auto inst = makeInstance();
+        const auto dir = inst->instanceDir();
+        inst->cleanupNow();
+
+        const auto recorded = inst->recordOrigin(remotePathOf("/srv/data/report.txt"));
+
+        ASSERT_FALSE(recorded.has_value());
+        EXPECT_NE(recorded.error().find(inst->instanceId()), std::string::npos) << recorded.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(dir)));
     }
 
     // =========================================================================
@@ -1061,6 +1165,365 @@ namespace Test
 
         // Second call must not throw even though the dir is already gone
         EXPECT_NO_THROW(mgr->manualCleanup());
+    }
+
+    // ---- listOrphaned behaviour ----
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansDescribesAnEndedCopy)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        const auto id = instance->instanceId();
+        writeFileOfSize(directory / "notes.txt", 5u);
+        ASSERT_TRUE(instance->recordOrigin(remotePathOf("/srv/notes.txt")).has_value());
+        mgr->destroyInstance(id);
+        const auto meta = readJson(bookkeepingPaths(directory).metadata);
+
+        const auto copies = mgr->listOrphaned();
+
+        ASSERT_EQ(copies.size(), 1u);
+        auto const& copy = copies.front();
+        EXPECT_EQ(copy.instanceId.value(), id);
+        EXPECT_EQ(copy.name, "notes.txt");
+        EXPECT_EQ(copy.directory.native(), fs::weakly_canonical(directory));
+        ASSERT_TRUE(copy.copyPath.has_value());
+        EXPECT_EQ(copy.copyPath->native(), fs::weakly_canonical(directory) / "notes.txt");
+        ASSERT_TRUE(copy.remotePath.has_value());
+        EXPECT_EQ(copy.remotePath->value(), "/srv/notes.txt");
+        EXPECT_EQ(copy.sizeBytes, 5u);
+        ASSERT_TRUE(copy.downloadedAt.has_value());
+        EXPECT_EQ(*copy.downloadedAt, meta.at("createdAt").get<std::uint64_t>());
+        ASSERT_TRUE(copy.endedAt.has_value());
+        EXPECT_EQ(*copy.endedAt, meta.at("deadAt").get<std::uint64_t>());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansLeavesOutLiveLockedAndForeignDirectories)
+    {
+        auto mgr = makeManager();
+        auto* live = mgr->createInstance();
+        ASSERT_NE(live, nullptr);
+        writeFileOfSize(live->instanceDir() / "live.txt", 3u);
+        auto otherRun = makeManager();
+        auto* otherRunInstance = otherRun->createInstance();
+        ASSERT_NE(otherRunInstance, nullptr);
+        makeDeadBookkeepingInstanceDir(root_, "held-elsewhere", std::chrono::system_clock::now() - 1h);
+        InstanceLock heldLock{bookkeepingPaths(root_ / "held-elsewhere").lock};
+        fs::create_directories(root_ / "no-lock-dir");
+        makeDeadBookkeepingInstanceDir(root_, "orphan-b", std::chrono::system_clock::now() - 1h);
+        makeDeadBookkeepingInstanceDir(root_, "orphan-a", std::chrono::system_clock::now() - 2h);
+
+        const auto copies = mgr->listOrphaned();
+
+        ASSERT_EQ(copies.size(), 2u);
+        EXPECT_EQ(copies[0].instanceId.value(), "orphan-a");
+        EXPECT_EQ(copies[1].instanceId.value(), "orphan-b");
+        EXPECT_EQ(mgr->countOrphaned(), copies.size());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansSumsTheSizesBelowADirectory)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "tree-copy", std::chrono::system_clock::now() - 1h);
+        const auto tree = root_ / "tree-copy" / "project";
+        fs::create_directories(tree / "below");
+        writeFileOfSize(tree / "first.bin", 100u);
+        writeFileOfSize(tree / "below" / "second.bin", 23u);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "tree-copy");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(copy->name, "project");
+        ASSERT_TRUE(copy->copyPath.has_value());
+        EXPECT_EQ(copy->copyPath->native(), fs::weakly_canonical(tree));
+        EXPECT_EQ(copy->sizeBytes, 123u);
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansNamesTheFirstOfSeveralEntries)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "several", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "several" / "zeta.txt", 1u);
+        writeFileOfSize(root_ / "several" / "alpha.txt", 2u);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "several");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(copy->name, "alpha.txt");
+        EXPECT_EQ(copy->sizeBytes, 3u);
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansIncludesAnInstanceWithoutRecordedOrigin)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "older-build", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "older-build" / "old.txt", 4u);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "older-build");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(copy->name, "old.txt");
+        EXPECT_FALSE(copy->remotePath.has_value());
+        EXPECT_EQ(copy->sizeBytes, 4u);
+        EXPECT_TRUE(copy->downloadedAt.has_value());
+        EXPECT_TRUE(copy->endedAt.has_value());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansIncludesALegacyLayoutInstance)
+    {
+        auto mgr = makeManager();
+        const auto deadAt = std::chrono::system_clock::now() - 1h;
+        makeDeadInstanceDir(root_, "legacy-layout", deadAt);
+        writeFileOfSize(root_ / "legacy-layout" / "report.txt", 7u);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "legacy-layout");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(copy->name, "report.txt");
+        EXPECT_EQ(copy->sizeBytes, 7u);
+        EXPECT_FALSE(copy->remotePath.has_value());
+        ASSERT_TRUE(copy->endedAt.has_value());
+        EXPECT_EQ(*copy->endedAt, static_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(deadAt)));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansCountsContentNamedLikeLegacyBookkeeping)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "named-alike", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "named-alike" / "metadata.json", 6u);
+        writeFileOfSize(root_ / "named-alike" / "named-alike.lock", 2u);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "named-alike");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(copy->name, "metadata.json");
+        EXPECT_EQ(copy->sizeBytes, 8u);
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansIncludesAnEmptyInstance)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "empty-instance");
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "empty-instance");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_TRUE(copy->name.empty());
+        EXPECT_EQ(copy->directory.native(), fs::weakly_canonical(root_ / "empty-instance"));
+        EXPECT_FALSE(copy->copyPath.has_value());
+        EXPECT_EQ(copy->sizeBytes, 0u);
+        EXPECT_TRUE(copy->downloadedAt.has_value());
+        EXPECT_FALSE(copy->endedAt.has_value());
+        EXPECT_TRUE(readJson(bookkeepingPaths(root_ / "empty-instance").metadata)["deadAt"].is_null());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansIgnoresAnInvalidRecordedOrigin)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "bad-origin", std::chrono::system_clock::now() - 1h);
+        const auto metaPath = bookkeepingPaths(root_ / "bad-origin").metadata;
+        auto meta = readJson(metaPath);
+        meta["remotePath"] = "relative/path.txt";
+        std::ofstream{metaPath} << meta.dump(4);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "bad-origin");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_FALSE(copy->remotePath.has_value());
+        EXPECT_TRUE(copy->endedAt.has_value());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, ListingOrphansIncludesAnInstanceWithUnreadableMetadata)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "broken-metadata");
+        std::ofstream{bookkeepingPaths(root_ / "broken-metadata").metadata} << "no json";
+        writeFileOfSize(root_ / "broken-metadata" / "kept.txt", 9u);
+
+        const auto copy = listedCopyOf(mgr->listOrphaned(), "broken-metadata");
+
+        ASSERT_TRUE(copy.has_value());
+        EXPECT_EQ(copy->name, "kept.txt");
+        EXPECT_EQ(copy->sizeBytes, 9u);
+        EXPECT_FALSE(copy->remotePath.has_value());
+        EXPECT_FALSE(copy->downloadedAt.has_value());
+        EXPECT_FALSE(copy->endedAt.has_value());
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RecordedOriginKeepsTheInstanceReadableForTheCleanup)
+    {
+        auto mgr = makeManager(0h);
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        ASSERT_TRUE(instance->recordOrigin(remotePathOf("/srv/notes.txt")).has_value());
+        mgr->destroyInstance(instance->instanceId());
+        ASSERT_EQ(mgr->countOrphaned(), 1u);
+
+        mgr->manualCleanup();
+
+        EXPECT_FALSE(fs::exists(fs::symlink_status(directory)));
+    }
+
+    // ---- removeOrphanedInstance behaviour ----
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanDeletesOnlyIt)
+    {
+        auto mgr = makeManager();
+        auto* instance = mgr->createInstance();
+        ASSERT_NE(instance, nullptr);
+        const auto directory = instance->instanceDir();
+        const auto id = instance->instanceId();
+        fs::create_directories(directory / "tree");
+        writeFileOfSize(directory / "tree" / "file.txt", 10u);
+        mgr->destroyInstance(id);
+        makeDeadBookkeepingInstanceDir(root_, "other-orphan", std::chrono::system_clock::now() - 1h);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(id));
+
+        ASSERT_TRUE(removed.has_value()) << removed.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(directory)));
+        EXPECT_TRUE(fs::exists(root_ / "other-orphan"));
+        const auto copies = mgr->listOrphaned();
+        ASSERT_EQ(copies.size(), 1u);
+        EXPECT_EQ(copies.front().instanceId.value(), "other-orphan");
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingALegacyLayoutOrphanDeletesIt)
+    {
+        auto mgr = makeManager();
+        makeDeadInstanceDir(root_, "legacy-orphan", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "legacy-orphan" / "doc.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("legacy-orphan"));
+
+        ASSERT_TRUE(removed.has_value()) << removed.error();
+        EXPECT_FALSE(fs::exists(fs::symlink_status(root_ / "legacy-orphan")));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesALiveInstance)
+    {
+        auto mgr = makeManager();
+        auto* live = mgr->createInstance();
+        ASSERT_NE(live, nullptr);
+        writeFileOfSize(live->instanceDir() / "live.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(live->instanceId()));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find(live->instanceId()), std::string::npos) << removed.error();
+        EXPECT_TRUE(fs::exists(live->instanceDir() / "live.txt"));
+        EXPECT_EQ(mgr->findInstance(live->instanceId()), live);
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesAnInstanceOfAnotherRun)
+    {
+        auto mgr = makeManager();
+        auto otherRun = makeManager();
+        auto* foreign = otherRun->createInstance();
+        ASSERT_NE(foreign, nullptr);
+        writeFileOfSize(foreign->instanceDir() / "foreign.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(foreign->instanceId()));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_TRUE(fs::exists(foreign->instanceDir() / "foreign.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesALockedInstance)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "held-elsewhere", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "held-elsewhere" / "content.txt", 3u);
+        InstanceLock heldLock{bookkeepingPaths(root_ / "held-elsewhere").lock};
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("held-elsewhere"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find("held-elsewhere"), std::string::npos) << removed.error();
+        EXPECT_TRUE(fs::exists(root_ / "held-elsewhere" / "content.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesIdsThatAreNoPlainName)
+    {
+        const auto instancesRoot = root_ / "instances";
+        fs::create_directories(instancesRoot);
+        TempDirInstanceManager mgr{boost::asio::make_strand(ioc_.get_executor()), instancesRoot, 24h};
+        makeDeadBookkeepingInstanceDir(root_, "outside", std::chrono::system_clock::now() - 1h);
+        makeDeadBookkeepingInstanceDir(instancesRoot / "nested", "inner", std::chrono::system_clock::now() - 1h);
+        const std::vector<std::string> ids{
+            "../outside",
+            "nested/inner",
+            "nested\\inner",
+            ".",
+            "..",
+            Paths::nativeToUtf8(root_ / "outside"),
+        };
+
+        for (auto const& id : ids)
+        {
+            const auto removed = mgr.removeOrphanedInstance(Ids::makeInstanceId(id));
+            ASSERT_FALSE(removed.has_value()) << id;
+            EXPECT_NE(removed.error().find("plain"), std::string::npos) << removed.error();
+        }
+
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(root_ / "outside").lock));
+        EXPECT_TRUE(fs::exists(bookkeepingPaths(instancesRoot / "nested" / "inner").lock));
+        EXPECT_TRUE(fs::exists(instancesRoot));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesAnEmptyId)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "orphan", std::chrono::system_clock::now() - 1h);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId(""));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find("empty"), std::string::npos) << removed.error();
+        EXPECT_TRUE(fs::exists(root_ / "orphan"));
+        EXPECT_TRUE(fs::exists(root_));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesAMissingInstance)
+    {
+        auto mgr = makeManager();
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("does-not-exist"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_NE(removed.error().find("does-not-exist"), std::string::npos) << removed.error();
+        EXPECT_NE(removed.error().find("does not exist"), std::string::npos) << removed.error();
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesADirectoryWithoutLock)
+    {
+        auto mgr = makeManager();
+        fs::create_directories(root_ / "no-lock-dir");
+        writeFileOfSize(root_ / "no-lock-dir" / "content.txt", 3u);
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("no-lock-dir"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_TRUE(fs::exists(root_ / "no-lock-dir" / "content.txt"));
+    }
+
+    TEST_F(TempDirInstanceManagerTest, RemovingAnOrphanRefusesALinkToAnOrphan)
+    {
+        auto mgr = makeManager();
+        makeDeadBookkeepingInstanceDir(root_, "real-orphan", std::chrono::system_clock::now() - 1h);
+        writeFileOfSize(root_ / "real-orphan" / "content.txt", 3u);
+        std::error_code linkError;
+        fs::create_directory_symlink(root_ / "real-orphan", root_ / "linked-orphan", linkError);
+        if (linkError)
+            GTEST_SKIP() << "Cannot create symlinks here: " << linkError.message();
+
+        const auto removed = mgr->removeOrphanedInstance(Ids::makeInstanceId("linked-orphan"));
+
+        ASSERT_FALSE(removed.has_value());
+        EXPECT_TRUE(fs::exists(fs::symlink_status(root_ / "linked-orphan")));
+        EXPECT_TRUE(fs::exists(root_ / "real-orphan" / "content.txt"));
     }
 
 } // namespace Test

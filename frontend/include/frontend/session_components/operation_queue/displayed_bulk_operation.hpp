@@ -4,6 +4,7 @@
 #include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 #include <frontend/components/svg/arrow_right.hpp>
 
+#include <script-nui-components/progress_bar.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <utility/format_bytes.hpp>
 
@@ -42,10 +43,9 @@ struct DisplayedBulkOperation
         , remotePath_{std::move(remotePath)}
         , totalProgressBar_({
               .height = std::string{progressHeight},
-              .min = 0,
-              .max = 1,
-              .showMinMax = true,
-              .byteMode = true,
+              .minimum = 0,
+              .maximum = 1,
+              .texts = {.percent = "{:.0f}%"},
           })
     {}
 
@@ -86,7 +86,7 @@ struct DisplayedBulkOperation
                 row = claimFreeRow(file.entryIndex);
             if (row->name.value() != file.file)
                 row->name = file.file;
-            row->bar.max(static_cast<long long>(file.totalBytes));
+            row->bar.setMaximum(static_cast<long long>(file.totalBytes));
             row->bar.setProgress(static_cast<long long>(file.bytes));
         }
         trimFreeTailRows();
@@ -95,15 +95,15 @@ struct DisplayedBulkOperation
         // forever; fall back to counting entries so the bar still moves.
         if (progress.bytesTotal > 0)
         {
-            totalProgressBar_.byteMode(true);
+            totalProgressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
             totalProgressBar_.setProgress(static_cast<long long>(progress.bytesCurrent));
-            totalProgressBar_.max(static_cast<long long>(progress.bytesTotal));
+            totalProgressBar_.setMaximum(static_cast<long long>(progress.bytesTotal));
         }
         else
         {
-            totalProgressBar_.byteMode(false);
+            totalProgressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Counts);
             totalProgressBar_.setProgress(static_cast<long long>(progress.fileCurrentIndex));
-            totalProgressBar_.max(static_cast<long long>(progress.fileCount));
+            totalProgressBar_.setMaximum(static_cast<long long>(progress.fileCount));
         }
 
         bytesPerSecond = progress.bytesPerSecond;
@@ -212,8 +212,10 @@ struct DisplayedBulkOperation
                 newState == SharedData::OperationState::PartialSuccess)
             {
                 bytesPerSecond = 0;
-                totalProgressBar_.setProgress(totalProgressBar_.max());
+                totalProgressBar_.setProgress(totalProgressBar_.maximum());
             }
+            if (totalProgressBar_.textMode() == ScriptNuiComponents::ProgressBarTextMode::Percent)
+                totalProgressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
             totalProgressBar_.setZeroAsComplete();
             resizeInFlightRows(0);
         }
@@ -231,11 +233,11 @@ struct DisplayedBulkOperation
     {
         std::optional<std::uint64_t> entryIndex{};
         Nui::Observed<std::string> name{""};
-        Components::ProgressBar bar{{
+        ScriptNuiComponents::ProgressBar bar{{
             .height = std::string{progressHeight},
-            .min = 0,
-            .max = 1,
-            .showMinMax = true,
+            .minimum = 0,
+            .maximum = 1,
+            .showMinimumAndMaximum = true,
             .byteMode = true,
         }};
 
@@ -342,7 +344,8 @@ struct DisplayedBulkOperation
     Nui::Observed<std::uint64_t> fileCount{0ull};
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond{0};
 
-    Components::ProgressBar totalProgressBar_;
+    /** @brief Shows "0%" until the first progress or the end, then bytes, or counts without a byte total. */
+    ScriptNuiComponents::ProgressBar totalProgressBar_;
     // Mutable because Nui::range only binds to a non-const Observed and body() is const.
     mutable Nui::Observed<std::vector<std::shared_ptr<InFlightRow>>> inFlightRows_{};
 };

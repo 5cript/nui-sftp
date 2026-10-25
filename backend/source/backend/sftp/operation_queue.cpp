@@ -28,6 +28,8 @@
 #include <iterator>
 #include <optional>
 #include <span>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -66,6 +68,77 @@ namespace
         std::ranges::transform(files, std::back_inserter(paths), member);
         auto parent = Paths::commonParentOf(std::span<PathT const>{paths});
         return parent ? *std::move(parent) : PathT{};
+    }
+
+    using ProgressObservers = std::unordered_map<Ids::OperationId, OperationQueue::ProgressObserver, Ids::IdHash>;
+
+    /**
+     * @brief Holds back the progress the operations of a queue report while a batch of them works on this thread, so
+     *        the queue hands it on before the completions of that batch instead of after them.
+     */
+    class HeldProgress
+    {
+      public:
+        using Delivery = std::function<void()>;
+
+        /**
+         * @brief Holds back the progress of the operations of @p queue in @p deliveries until destroyed.
+         */
+        HeldProgress(OperationQueue const& queue, std::vector<Delivery>& deliveries)
+            : queue_{&queue}
+            , deliveries_{&deliveries}
+            , outer_{std::exchange(current_, this)}
+        {}
+        ~HeldProgress()
+        {
+            current_ = outer_;
+        }
+        HeldProgress(HeldProgress const&) = delete;
+        HeldProgress& operator=(HeldProgress const&) = delete;
+        HeldProgress(HeldProgress&&) = delete;
+        HeldProgress& operator=(HeldProgress&&) = delete;
+
+        /**
+         * @brief Holds @p delivery back when a batch of @p queue works on this thread.
+         * @return False when none does, @p delivery is left as it was then.
+         */
+        static bool holdBack(OperationQueue const& queue, Delivery& delivery)
+        {
+            if (current_ == nullptr || current_->queue_ != &queue)
+                return false;
+            current_->deliveries_->push_back(std::move(delivery));
+            return true;
+        }
+
+      private:
+        inline static thread_local HeldProgress* current_{nullptr};
+        OperationQueue const* queue_;
+        std::vector<Delivery>* deliveries_;
+        HeldProgress* outer_;
+    };
+
+    /**
+     * @brief Runs @p delivery of progress on the strand of @p queue: after the batch it was reported in when that works
+     *        on this thread, else as soon as the strand is free.
+     */
+    void deliverProgress(OperationQueue const& queue, HeldProgress::Delivery delivery)
+    {
+        if (!HeldProgress::holdBack(queue, delivery))
+            queue.within_strand_do(std::move(delivery));
+    }
+
+    /**
+     * @brief Tells the observer of the operation of @p progress in @p observers, if it has one. It runs as a copy, so
+     *        it may end its operation, which drops it from @p observers.
+     */
+    template <typename ProgressT>
+    void tellObserver(ProgressObservers const& observers, ProgressT const& progress)
+    {
+        const auto found = observers.find(progress.operationId);
+        if (found == observers.end())
+            return;
+        const auto observer = found->second;
+        observer(OperationQueue::OperationProgress{progress});
     }
 
     bool changedSinceCompare(SharedData::OperationError const& error)
@@ -215,13 +288,14 @@ namespace
 
     /**
      * @brief Why the upload of @p localPath is refused, its status (@p status, @p statusError) unreadable. A source
-     *        that may vanish and is gone is nothing that failed.
+     *        that may vanish and is gone is nothing that failed. The error is logged with @p failureToast.
      */
     Operation::Error refusedSource(
         Paths::LocalPath const& localPath,
         std::filesystem::file_status status,
         std::error_code const& statusError,
-        bool sourceMayVanish
+        bool sourceMayVanish,
+        Log::Toast failureToast
     )
     {
         if (sourceMayVanish && status.type() == std::filesystem::file_type::not_found)
@@ -229,7 +303,9 @@ namespace
             Log::debug("Not uploading '{}', it is gone.", localPath.toUtf8());
             return Operation::Error{.type = Operation::ErrorType::FileNotFound};
         }
-        Log::error("Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(statusError));
+        Log::error(
+            failureToast, "Failed to stat local file '{}': {}", localPath.toUtf8(), Utility::errorMessage(statusError)
+        );
         return Operation::Error{.type = Operation::ErrorType::FileStatFailed};
     }
 }
@@ -270,8 +346,9 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
         if (!self)
             return;
         // May be invoked from the SFTP processing strand (batched umbrella), so the RPC call goes back onto the asio
-        // strand that owns the hub.
-        self->within_strand_do(
+        // strand that owns the hub, in order with the transfer progress of the same batch.
+        deliverProgress(
+            *self,
             [weak, name, operationId, totalBytes, currentIndex, totalScanned]()
             {
                 auto self = weak.lock();
@@ -326,13 +403,15 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
         // Invoked from the SFTP processing strand, marshal the RPC call back onto the asio
         // strand that owns the hub.
         progress.operationId = operationId;
-        self->within_strand_do(
+        deliverProgress(
+            *self,
             [weak, name, progress = std::move(progress)]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
                 RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                tellObserver(self->progressObservers_, progress);
             }
         );
     };
@@ -371,6 +450,8 @@ void OperationQueue::dropAll()
 
             self->operations_.clear();
             self->priorityOperations_.clear();
+            // Progress they reported may still be on its way to the strand.
+            self->progressObservers_.clear();
             auto waiting = std::exchange(self->syncScanCallbacks_, {});
             for (auto& [id, callback] : waiting)
                 callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
@@ -569,9 +650,13 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
 
             if (self->changedDestinationsLeftToOwner_.erase(operationCompleted.operationId) > 0)
                 leaveChangesToOwner(operationCompleted);
+            const auto failureToast = self->failuresWithoutToast_.erase(operationCompleted.operationId) > 0
+                ? Log::Toast::Skip
+                : Log::Toast::Show;
             if (operationCompleted.error)
                 Log::log(
                     Operation::failureLevelOf(*operationCompleted.error),
+                    failureToast,
                     "Operation failed: {}",
                     operationCompleted.error->toString()
                 );
@@ -580,6 +665,7 @@ void OperationQueue::completeOperation(SharedData::OperationCompleted&& operatio
             // completion (success, failure, or cancel) and no longer needs
             // a backup for reconnect adoption.
             self->bulkResumeStash_.erase(operationCompleted.operationId);
+            self->progressObservers_.erase(operationCompleted.operationId);
 
             if (self->completionObserver_)
                 self->completionObserver_(operationCompleted);
@@ -603,6 +689,11 @@ void OperationQueue::whenCompleted(
     completionCallbacks_.insert_or_assign(operationId, std::move(callback));
 }
 
+void OperationQueue::whenProgressing(Ids::OperationId const& operationId, ProgressObserver observer)
+{
+    progressObservers_.insert_or_assign(operationId, std::move(observer));
+}
+
 void OperationQueue::discardResumeBackup(Ids::OperationId const& operationId)
 {
     bulkResumeStash_.erase(operationId);
@@ -611,6 +702,12 @@ void OperationQueue::discardResumeBackup(Ids::OperationId const& operationId)
 void OperationQueue::leaveChangedDestinationsToOwner(Ids::OperationId const& operationId)
 {
     changedDestinationsLeftToOwner_.insert(operationId);
+}
+
+void OperationQueue::rememberFailureToast(Ids::OperationId const& operationId, Log::Toast failureToast)
+{
+    if (failureToast == Log::Toast::Skip)
+        failuresWithoutToast_.insert(operationId);
 }
 
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
@@ -785,8 +882,17 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         return !item.result.has_value() || item.result.value() == Operation::WorkStatus::Complete;
     };
 
-    auto runBatch = [&queue, &eligible, &isTerminal](std::optional<bool> onlyUsesStrand)
+    // Posted, the progress of the batch would reach the strand only after the completions handed on below.
+    std::vector<HeldProgress::Delivery> heldProgress;
+    const auto deliverHeldProgress = [&heldProgress]()
     {
+        for (auto const& delivery : std::exchange(heldProgress, {}))
+            delivery();
+    };
+
+    auto runBatch = [this, &queue, &eligible, &isTerminal, &heldProgress](std::optional<bool> onlyUsesStrand)
+    {
+        const HeldProgress holding{*this, heldProgress};
         std::vector<ItemResult> out;
         out.reserve(eligible.size());
         for (const auto& item : eligible)
@@ -827,7 +933,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         results = runBatch(std::nullopt);
     }
 
-    // Out of the queue before its owner hears of it, who may cancel or queue operations then.
+    // Out of the queue before its owner hears of its progress or end, who may cancel or queue operations then.
     const auto takeFinished = [&queue](std::size_t index)
     {
         auto finished = std::move(queue[index]);
@@ -841,6 +947,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         if (!item.result.has_value())
         {
             const auto [id, operation] = takeFinished(item.queueIndex);
+            deliverHeldProgress();
             failSyncScan(
                 id,
                 Utility::localizedMessage(
@@ -859,6 +966,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         if (workStatus == Operation::WorkStatus::Complete)
         {
             const auto [id, operation] = takeFinished(item.queueIndex);
+            deliverHeldProgress();
             deliverSyncScan(id, *operation);
             // An upload whose source may vanish and was gone ends cancelled, nothing went.
             const auto reason = operation->state() == SharedData::OperationState::Canceled
@@ -873,6 +981,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
             continue;
         }
     }
+    deliverHeldProgress();
     return moreWork;
 }
 
@@ -1070,23 +1179,22 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             if (!self)
                 return;
             // Invoked from the SFTP processing strand via workInStrand, marshal back.
-            self->within_strand_do(
+            deliverProgress(
+                *self,
                 [weak, name, operationId, min, max, current, bytesPerSecond]()
                 {
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    RpcHelper::callRemoteSafely(
-                        *self->hub_,
-                        name,
-                        SharedData::TransferProgress{
-                            .operationId = operationId,
-                            .min = min,
-                            .max = max,
-                            .current = current,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
+                    const SharedData::TransferProgress progress{
+                        .operationId = operationId,
+                        .min = min,
+                        .max = max,
+                        .current = current,
+                        .bytesPerSecond = bytesPerSecond,
+                    };
+                    RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                    tellObserver(self->progressObservers_, progress);
                 }
             );
         };
@@ -1284,23 +1392,22 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         auto self = weak.lock();
         if (!self)
             return;
-        self->within_strand_do(
+        deliverProgress(
+            *self,
             [weak, name, operationId, min, max, current, bytesPerSecond]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::TransferProgress{
-                        .operationId = operationId,
-                        .min = min,
-                        .max = max,
-                        .current = current,
-                        .bytesPerSecond = bytesPerSecond,
-                    }
-                );
+                const SharedData::TransferProgress progress{
+                    .operationId = operationId,
+                    .min = min,
+                    .max = max,
+                    .current = current,
+                    .bytesPerSecond = bytesPerSecond,
+                };
+                RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                tellObserver(self->progressObservers_, progress);
             }
         );
     };
@@ -1413,23 +1520,22 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         auto self = weak.lock();
         if (!self)
             return;
-        self->within_strand_do(
+        deliverProgress(
+            *self,
             [weak, name, operationId, min, max, current, bytesPerSecond]()
             {
                 auto self = weak.lock();
                 if (!self)
                     return;
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    name,
-                    SharedData::TransferProgress{
-                        .operationId = operationId,
-                        .min = min,
-                        .max = max,
-                        .current = current,
-                        .bytesPerSecond = bytesPerSecond,
-                    }
-                );
+                const SharedData::TransferProgress progress{
+                    .operationId = operationId,
+                    .min = min,
+                    .max = max,
+                    .current = current,
+                    .bytesPerSecond = bytesPerSecond,
+                };
+                RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                tellObserver(self->progressObservers_, progress);
             }
         );
     };
@@ -1583,7 +1689,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     bool sourceMayVanish,
     std::optional<SharedData::ComparedState> comparedDestination,
     UploadOperation::OnSent onSent,
-    std::optional<Paths::RemotePath> adoptPartialOf
+    std::optional<Paths::RemotePath> adoptPartialOf,
+    Log::Toast failureToast
 )
 {
     // Assumed in strand
@@ -1596,7 +1703,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     const auto symStat = std::filesystem::symlink_status(localNativePath, ec);
 
     if (ec)
-        return std::unexpected(refusedSource(localPath, symStat, ec, sourceMayVanish));
+        return std::unexpected(refusedSource(localPath, symStat, ec, sourceMayVanish, failureToast));
 
     const bool isSymlink = std::filesystem::is_symlink(symStat);
     std::filesystem::file_status stat = symStat;
@@ -1604,7 +1711,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     {
         stat = std::filesystem::status(localNativePath, ec);
         if (ec)
-            return std::unexpected(refusedSource(localPath, stat, ec, sourceMayVanish));
+            return std::unexpected(refusedSource(localPath, stat, ec, sourceMayVanish, failureToast));
     }
 
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
@@ -1627,6 +1734,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.comparedDestination = std::move(comparedDestination);
         opts.onSent = std::move(onSent);
         opts.adoptPartialOf = std::move(adoptPartialOf);
+        opts.failureToast = failureToast;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -1634,23 +1742,22 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             auto self = weak.lock();
             if (!self)
                 return;
-            self->within_strand_do(
+            deliverProgress(
+                *self,
                 [weak, name, operationId, min, max, current, bytesPerSecond]()
                 {
                     auto self = weak.lock();
                     if (!self)
                         return;
-                    RpcHelper::callRemoteSafely(
-                        *self->hub_,
-                        name,
-                        SharedData::TransferProgress{
-                            .operationId = operationId,
-                            .min = min,
-                            .max = max,
-                            .current = current,
-                            .bytesPerSecond = bytesPerSecond,
-                        }
-                    );
+                    const SharedData::TransferProgress progress{
+                        .operationId = operationId,
+                        .min = min,
+                        .max = max,
+                        .current = current,
+                        .bytesPerSecond = bytesPerSecond,
+                    };
+                    RpcHelper::callRemoteSafely(*self->hub_, name, progress);
+                    tellObserver(self->progressObservers_, progress);
                 }
             );
         };
@@ -1659,6 +1766,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         targetQueue.emplace_back(
             operationId, std::make_unique<UploadOperation>(sftp.weak_from_this(), std::move(opts))
         );
+        rememberFailureToast(operationId, failureToast);
 
         RpcHelper::callRemoteSafely(
             *hub_,
@@ -1681,6 +1789,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         auto individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
         individualOptions.sourceMayVanish = sourceMayVanish;
         individualOptions.onSent = std::move(onSent);
+        individualOptions.failureToast = failureToast;
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp.weak_from_this(),
             BulkUploadOperation::BulkUploadOperationOptions{
@@ -1697,11 +1806,13 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
             std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
                 .progressCallback = makeScanProgressCallback("onLocalScanProgress", operationId),
                 .localPath = localPath,
+                .failureToast = failureToast,
             })
         );
 
         auto& targetQueue = queueFor(mode);
         targetQueue.emplace_back(operationId, std::move(bulk));
+        rememberFailureToast(operationId, failureToast);
 
         RpcHelper::callRemoteSafely(
             *hub_,
@@ -1730,7 +1841,9 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     }
     else
     {
-        Log::error("Local path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(stat.type()));
+        Log::error(
+            failureToast, "Local path is neither a file nor a directory: {}.", static_cast<std::uint8_t>(stat.type())
+        );
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::OperationNotPossibleOnFileType});
     }
 }
@@ -1741,7 +1854,8 @@ std::size_t OperationQueue::addBulkUploadOperation(
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
     Ids::OperationId const& bulkCardId,
     bool sourceMayVanish,
-    UploadOperation::OnSent const& onSent
+    UploadOperation::OnSent const& onSent,
+    Log::Toast failureToast
 )
 {
     // Assumed in strand.
@@ -1768,11 +1882,14 @@ std::size_t OperationQueue::addBulkUploadOperation(
                 unit.mode,
                 sourceMayVanish,
                 std::nullopt,
-                onSent
+                onSent,
+                std::nullopt,
+                failureToast
             );
             if (!result)
             {
                 Log::error(
+                    failureToast,
                     "Bulk upload: directory entry '{}' failed to queue: {}",
                     entry.source.toUtf8(),
                     result.error().toString()
@@ -1809,6 +1926,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             uploadOptions.createMissingDirectories = true;
             uploadOptions.sourceMayVanish = sourceMayVanish;
             uploadOptions.onSent = onSent;
+            uploadOptions.failureToast = failureToast;
             auto bulk = std::make_unique<BulkUploadOperation>(
                 sftp.weak_from_this(),
                 BulkUploadOperation::BulkUploadOperationOptions{
@@ -1822,6 +1940,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             );
             bulk->setPrescannedFileList(std::move(files));
             queueFor(unit.mode).emplace_back(bulkCardId, std::move(bulk));
+            rememberFailureToast(bulkCardId, failureToast);
             RpcHelper::callRemoteSafely(
                 *hub_,
                 rpcName("onOperationAdded"),

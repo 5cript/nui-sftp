@@ -1,23 +1,31 @@
 #include <backend/file_tracking/tracker.hpp>
+#include <backend/file_tracking/conflict_list.hpp>
 #include <backend/file_tracking/disk_place.hpp>
+#include <backend/file_tracking/failure_list.hpp>
+#include <backend/file_tracking/failure_reason.hpp>
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/file_tracking/tracking_state.hpp>
+#include <backend/file_tracking/watch_progress_meter.hpp>
 #include <utility/checked_symlink_status.hpp>
 #include <utility/enum_string_convert.hpp>
 #include <utility/error_message.hpp>
 #include <utility/localized_message.hpp>
 #include <paths/native.hpp>
 #include <log/log.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
+#include <shared_data/file_tracking/removed_problems.hpp>
+#include <shared_data/file_tracking/watch_stop.hpp>
 
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <chrono>
-#include <deque>
 #include <expected>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -83,6 +91,8 @@ namespace FileTracking
             /** @brief Canonical, like the paths of the changes. */
             std::filesystem::path instanceDirectory;
             InstanceWatch watch;
+            /** @brief The size of the server's file when it was downloaded. */
+            std::uint64_t sizeBytes{0};
             /** @brief Runs while the copy was reported deleted or renamed away, see awaitCopyReturn(). */
             std::unique_ptr<boost::asio::steady_timer> returnWait{};
         };
@@ -112,6 +122,12 @@ namespace FileTracking
             std::size_t remoteChangesOnTheirWay{0};
             /** @brief What the view shows, so it hears only of changes. */
             bool shownUploading{false};
+            /** @brief How far its changes are, by the local paths its uploads started with. */
+            WatchProgressMeter progress;
+            /** @brief The progress holds the current count of pending changes, see progressChanged(). */
+            bool changesPendingCounted{true};
+            /** @brief When the view last heard of the progress, it hears of it once per progress interval at most. */
+            std::chrono::steady_clock::time_point progressShownAt{};
 
             DownloadedCopy const* downloadedCopy() const
             {
@@ -199,17 +215,114 @@ namespace FileTracking
             return status && *status && std::filesystem::is_directory(**status);
         }
 
+        std::uint64_t secondsSinceEpochOf(std::filesystem::file_time_type time)
+        {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::file_clock::to_sys(time).time_since_epoch()
+            );
+            return static_cast<std::uint64_t>(seconds.count());
+        }
+
+        std::uint64_t secondsSinceEpochNow()
+        {
+            const auto seconds =
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+            return static_cast<std::uint64_t>(seconds.count());
+        }
+
+        SharedData::WatchStop watchStopOf(SharedData::WatchStopReason reason)
+        {
+            return {.reason = reason, .stoppedAt = secondsSinceEpochNow()};
+        }
+
         /**
          * @brief What the server has of a file an upload sent in @p sent: uploads carry the modification time along,
          *        in seconds.
          */
         ServerState serverStateOf(SourceState const& sent)
         {
-            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::file_clock::to_sys(sent.modified).time_since_epoch()
-            );
-            return ServerState{.mtime = static_cast<std::uint64_t>(seconds.count()), .size = sent.size};
+            return ServerState{.mtime = secondsSinceEpochOf(sent.modified), .size = sent.size};
         }
+
+        /**
+         * @brief The size of the regular file at @p path, nothing for anything else.
+         */
+        std::optional<std::uint64_t> fileSizeOf(Paths::LocalPath const& path)
+        {
+            return sourceStateOf(path.native())
+                .transform(
+                    [](SourceState const& state)
+                    {
+                        return state.size;
+                    }
+                );
+        }
+
+        /**
+         * @brief How the upload that ended as @p ended counts for the progress: one that found the server's copy
+         *        changed did not complete.
+         */
+        WatchProgressMeter::UploadResult uploadResultOf(UploadEnd const& ended)
+        {
+            const bool completed =
+                ended.reason == SharedData::OperationCompletionReason::Completed && !ended.changedOnServer;
+            return completed ? WatchProgressMeter::UploadResult::Completed
+                             : WatchProgressMeter::UploadResult::NotCompleted;
+        }
+
+        /**
+         * @brief What the server has at the destination of an upload instead of what the tracker left there.
+         */
+        struct ServerChange
+        {
+            SharedData::ConflictKind kind{SharedData::ConflictKind::ChangedOnServer};
+            /** @brief What it has there now, nothing when it has nothing there or could not be asked. */
+            std::optional<ServerState> current{};
+        };
+
+        /**
+         * @brief How the server changed where the tracker knew of something there (@p knownThere) or of nothing, and
+         *        it has @p current now. Changed when that cannot be told.
+         */
+        ServerChange serverChangeOf(bool knownThere, std::optional<ServerState> const& current)
+        {
+            if (!knownThere && current)
+                return {.kind = SharedData::ConflictKind::CreatedOnServer, .current = current};
+            if (knownThere && !current)
+                return {.kind = SharedData::ConflictKind::DeletedOnServer, .current = std::nullopt};
+            return {.kind = SharedData::ConflictKind::ChangedOnServer, .current = current};
+        }
+
+        /**
+         * @brief The conflict @p upload raised, the server changed its destination as @p change tells. Its id is set
+         *        when it is listed.
+         */
+        SharedData::WatchConflict conflictOf(Upload const& upload, ServerChange const& change)
+        {
+            const auto localState = sourceStateOf(upload.change.path.native());
+            return {
+                .conflictId = {},
+                .watchId = upload.watchId,
+                .kind = change.kind,
+                .localPath = upload.change.path,
+                .remotePath = upload.destination,
+                .serverModifiedAt = change.current ? std::optional{change.current->mtime} : std::nullopt,
+                .localModifiedAt = localState ? std::optional{secondsSinceEpochOf(localState->modified)} : std::nullopt,
+                .raisedAt = secondsSinceEpochNow(),
+            };
+        }
+
+        /**
+         * @brief The remote path of another watch, or of one that starts, that a remote path overlaps.
+         */
+        struct RemoteOverlap
+        {
+            Paths::RemotePath remotePath;
+            /** @brief Nothing for a watch that starts, see Implementation::claimRemote(). */
+            std::optional<Ids::WatchId> watchId{};
+            /** @brief The name of its item, nothing for a watch that starts. */
+            std::optional<std::string> watchName{};
+        };
 
         /**
          * @brief Whether @p option may be on for a downloaded copy: removing or renaming a temporary copy never touches
@@ -233,7 +346,10 @@ namespace FileTracking
             return path.filename() ? std::string{path.filename()->view()} : path.toUtf8();
         }
 
-        SharedData::TrackedEntry shownEntryOf(Entry const& entry)
+        /**
+         * @param watch The local watch of an uploaded original, it knows whether the item is a directory.
+         */
+        SharedData::TrackedEntry shownEntryOf(Entry const& entry, LocalItemWatch const* watch)
         {
             return SharedData::TrackedEntry{
                 .watchId = entry.watchId,
@@ -242,6 +358,11 @@ namespace FileTracking
                 .options = entry.options,
                 .uploading = entry.shownUploading,
                 .downloadedCopy = entry.downloadedCopy() != nullptr,
+                .localPath = entry.localPath,
+                .isDirectory = entry.downloadedCopy() == nullptr && watch != nullptr && watch->isDirectory(),
+                .stop = std::nullopt,
+                .instanceId = entry.downloadedCopy() ? std::optional{entry.downloadedCopy()->instanceId} : std::nullopt,
+                .sizeBytes = entry.downloadedCopy() ? entry.downloadedCopy()->sizeBytes : 0u,
             };
         }
 
@@ -328,11 +449,43 @@ namespace FileTracking
                     }
                 );
         }
+
+        /**
+         * @brief The conflicts of @p listed, as the view takes them off in one message.
+         */
+        template <typename ListedT>
+        SharedData::RemovedConflicts removedConflictsOf(std::vector<ListedT> const& listed)
+        {
+            SharedData::RemovedConflicts removed;
+            removed.conflictIds.reserve(listed.size());
+            std::ranges::transform(
+                listed,
+                std::back_inserter(removed.conflictIds),
+                [](ListedT const& conflict)
+                {
+                    return conflict.conflict.conflictId;
+                }
+            );
+            return removed;
+        }
+
+        /**
+         * @brief @p failures, as the view takes them off in one message.
+         */
+        SharedData::RemovedFailures removedFailuresOf(std::vector<SharedData::UploadFailure> const& failures)
+        {
+            SharedData::RemovedFailures removed;
+            removed.failureIds.reserve(failures.size());
+            std::ranges::transform(
+                failures, std::back_inserter(removed.failureIds), &SharedData::UploadFailure::failureId
+            );
+            return removed;
+        }
     }
 
     struct Tracker::Implementation : public std::enable_shared_from_this<Tracker::Implementation>
     {
-        /** @brief How often the view hears of the progress at most, a burst of changes costs a few events. */
+        /** @brief How often the view hears of the progress of a watch at most. */
         constexpr static std::chrono::milliseconds progressInterval{200};
 
         /**
@@ -365,15 +518,6 @@ namespace FileTracking
             std::uint64_t claimId_;
         };
 
-        /**
-         * @brief A question the view asks, see TrackerView::ask().
-         */
-        struct OpenQuestion
-        {
-            Ids::QuestionId questionId;
-            Upload upload;
-        };
-
         using OnOpened = std::function<void(std::expected<OpenedCopy, OpenFailure> const&)>;
 
         boost::asio::strand<boost::asio::any_io_executor> strand;
@@ -385,6 +529,8 @@ namespace FileTracking
         std::function<SharedData::WatchOptions()> defaultOptions;
 
         std::map<Ids::WatchId, Entry> entries{};
+        /** @brief The watches that stopped, as the view shows them until they are removed, see retire(). */
+        std::map<Ids::WatchId, SharedData::TrackedEntry> stopped{};
         /** @brief The instances of downloads on their way, see open(). */
         std::set<Ids::InstanceId> downloading{};
         /** @brief The instances of copies opened without a watch, they end with the tracker, see stopAll(). */
@@ -392,15 +538,14 @@ namespace FileTracking
         /** @brief The remote paths of watches that are starting, by claim. */
         std::map<std::uint64_t, Paths::RemotePath> claims{};
         std::uint64_t nextClaimId{0};
-        /** @brief Questions waiting for the one the view asks, so no question replaces another. */
-        std::deque<Upload> waitingQuestions{};
-        std::optional<OpenQuestion> openQuestion{};
-        /** @brief Changes that ended since nothing was on its way any more, see showProgress(). */
-        std::uint64_t changesDone{0};
-        SharedData::TrackerProgress shownProgress{};
+        /** @brief The conflicts waiting for the user's answer, each with the upload that waits for it. */
+        ConflictList<Upload> conflicts{};
+        /** @brief The failed uploads waiting for Retry or Dismiss. */
+        FailureList failures{};
+        /** @brief Shows the progress that changed, see showDueProgress(). */
         boost::asio::steady_timer progressTimer;
         bool progressScheduled{false};
-        /** @brief The view hears of the progress once the current handler ended, see progressChanged(). */
+        /** @brief The idle entries are shown once the current handler ended, see showIdleProgress(). */
         bool idleProgressPosted{false};
         ServerOperationOrder serverOrder{};
         /** @brief Start the operations that wait in serverOrder, by ticket. */
@@ -508,94 +653,156 @@ namespace FileTracking
 
         void show(Entry const& entry)
         {
-            view->showEntry(shownEntryOf(entry));
+            view->showEntry(shownEntryOf(entry, localWatches->find(entry.watchId)));
         }
 
-        SharedData::TrackerProgress currentProgress() const
+        void showProgress(Entry& entry, std::chrono::steady_clock::time_point now)
         {
-            std::uint64_t pending = 0;
-            for (auto const& entry : std::views::values(entries))
-                pending += entry.pendingUploads.changeCount() + entry.remoteChangesOnTheirWay;
-            return {
-                .pending = pending,
-                .done = changesDone,
-                .waitingForAnswer = waitingQuestions.size() + (openQuestion ? 1u : 0u),
-            };
+            entry.progress.takeDirty();
+            entry.progressShownAt = now;
+            view->showWatchProgress(entry.progress.snapshot());
         }
 
         /**
-         * @brief Whether no change is on its way any more, nor waits for an answer.
+         * @brief Shows the progress of @p entry when it changed, at most once per progress interval. An entry with
+         *        nothing on its way ends its burst first.
+         * @return When it may be shown, nothing when it was shown or did not change.
          */
-        bool nothingOnItsWay() const
+        std::optional<std::chrono::steady_clock::time_point>
+        showChangedProgress(Entry& entry, std::chrono::steady_clock::time_point now)
         {
-            return !openQuestion && waitingQuestions.empty() &&
-                std::ranges::all_of(
-                    std::views::values(entries),
-                    [](Entry const& entry)
-                    {
-                        return entry.pendingUploads.empty() && entry.remoteChangesOnTheirWay == 0;
-                    }
-                );
+            if (!entry.changesPendingCounted)
+                countChangesPending(entry);
+            if (entry.progress.isIdle())
+                entry.progress.finishBurst(secondsSinceEpochNow());
+            if (!entry.progress.isDirty())
+                return std::nullopt;
+            if (const auto due = entry.progressShownAt + progressInterval; now < due)
+                return due;
+            showProgress(entry, now);
+            return std::nullopt;
         }
 
         /**
-         * @brief The view hears of the progress once the progress interval passed, or right after the change that
-         *        left nothing on its way, together with the rows that stopped uploading.
+         * @brief The counts of @p entry may have changed or its uploads went on: the view hears of it once the
+         *        progress interval passed, or right after the change that left nothing on its way, see
+         *        showIdleProgress().
          */
-        void progressChanged()
+        void progressChanged(Entry& entry)
         {
-            if (nothingOnItsWay() && !idleProgressPosted)
+            // Counting walks every pending upload: during a burst it waits for the next show.
+            if (entry.pendingUploads.empty() || entry.progress.isIdle())
+                countChangesPending(entry);
+            else
+                entry.changesPendingCounted = false;
+            entry.progress.setWaitingForAnswer(conflicts.countOf(entry.watchId));
+            if (entry.changesPendingCounted && !entry.progress.isDirty())
+                return;
+            if (entry.progress.isIdle())
+                return postIdleProgress();
+            scheduleProgress(std::chrono::steady_clock::now() + progressInterval);
+        }
+
+        static void countChangesPending(Entry& entry)
+        {
+            entry.progress.setChangesPending(entry.pendingUploads.changeCount() + entry.remoteChangesOnTheirWay);
+            entry.changesPendingCounted = true;
+        }
+
+        void progressChanged(Ids::WatchId const& watchId)
+        {
+            if (auto* entry = find(watchId))
+                progressChanged(*entry);
+        }
+
+        void postIdleProgress()
+        {
+            if (std::exchange(idleProgressPosted, true))
+                return;
+            // Posted, so the changes the end of an upload starts are on their way by then.
+            boost::asio::post(
+                strand,
+                [weak = weak_from_this()]()
+                {
+                    if (const auto self = weak.lock())
+                        self->showIdleProgress();
+                }
+            );
+        }
+
+        /**
+         * @brief The entries with nothing on their way end their burst. The view hears of them at once, or once the
+         *        progress interval since it last did passed.
+         */
+        void showIdleProgress()
+        {
+            idleProgressPosted = false;
+            const auto now = std::chrono::steady_clock::now();
+            for (auto& entry : std::views::values(entries))
             {
-                idleProgressPosted = true;
-                // Posted, so the changes the end of an upload starts are on their way by then.
-                boost::asio::post(
-                    strand,
-                    [weak = weak_from_this()]()
-                    {
-                        const auto self = weak.lock();
-                        if (!self)
-                            return;
-                        self->idleProgressPosted = false;
-                        if (!self->nothingOnItsWay())
-                            return;
-                        self->progressTimer.cancel();
-                        self->showProgress();
-                    }
-                );
+                if (!entry.progress.isIdle())
+                    continue;
+                if (const auto due = showChangedProgress(entry, now))
+                    scheduleProgress(*due);
             }
+        }
+
+        void scheduleProgress(std::chrono::steady_clock::time_point at)
+        {
             if (std::exchange(progressScheduled, true))
                 return;
-            progressTimer.expires_after(progressInterval);
+            progressTimer.expires_at(at);
             progressTimer.async_wait(
                 [weak = weak_from_this()](boost::system::error_code const& error)
                 {
                     if (error)
                         return;
                     if (const auto self = weak.lock())
-                        self->showProgress();
+                        self->showDueProgress();
                 }
             );
         }
 
-        void showProgress()
+        /**
+         * @brief Shows the progress that changed, the timer runs again for that of entries shown too recently.
+         */
+        void showDueProgress()
         {
             progressScheduled = false;
-            const auto progress = currentProgress();
-            if (progress != shownProgress)
-                view->showProgress(progress);
-            shownProgress = progress;
-            // The next burst counts from zero.
-            if (progress.pending == 0)
-                changesDone = 0;
+            const auto now = std::chrono::steady_clock::now();
+            std::optional<std::chrono::steady_clock::time_point> next;
+            for (auto& entry : std::views::values(entries))
+                if (const auto due = showChangedProgress(entry, now); due && (!next || *due < *next))
+                    next = due;
+            if (next)
+                scheduleProgress(*next);
         }
 
         /**
          * @param count The changes it counted as, see PendingUploads::changeCount().
          */
-        void changeEnded(std::size_t count = 1)
+        void changeEnded(Entry& entry, std::size_t count = 1)
         {
-            changesDone += count;
-            progressChanged();
+            entry.progress.changesEnded(count);
+            progressChanged(entry);
+        }
+
+        /**
+         * @brief The upload of @p path in the watch @p watchId, the path it started with, is as far as @p progress.
+         * @param generation Its generation in the progress, see WatchProgressMeter::uploadQueued().
+         */
+        void onUploadProgress(
+            Ids::WatchId const& watchId,
+            Paths::LocalPath const& path,
+            std::uint64_t generation,
+            UploadProgress const& progress
+        )
+        {
+            auto* entry = find(watchId);
+            if (!entry)
+                return;
+            entry->progress.uploadProgressed(path, progress, generation);
+            progressChanged(*entry);
         }
 
         /**
@@ -604,15 +811,18 @@ namespace FileTracking
         TrackerRemote::OnEnded remoteChangeOf(Entry& entry)
         {
             ++entry.remoteChangesOnTheirWay;
-            progressChanged();
+            progressChanged(entry);
             return [weak = weak_from_this(), watchId = entry.watchId](SharedData::OperationCompletionReason)
             {
                 const auto self = weak.lock();
                 if (!self)
                     return;
-                if (auto* ended = self->find(watchId); ended && ended->remoteChangesOnTheirWay > 0)
+                auto* ended = self->find(watchId);
+                if (!ended)
+                    return;
+                if (ended->remoteChangesOnTheirWay > 0)
                     --ended->remoteChangesOnTheirWay;
-                self->changeEnded();
+                self->changeEnded(*ended);
             };
         }
 
@@ -634,22 +844,37 @@ namespace FileTracking
             std::optional<Ids::WatchId> const& ignoredWatchId = std::nullopt
         ) const
         {
-            auto taken = claims | std::views::values | std::ranges::to<std::vector>();
-            for (auto const& entry : std::views::values(entries))
-                if (entry.watchId != ignoredWatchId)
-                    taken.push_back(entry.remotePath);
-            const auto overlapping = std::ranges::find_if(
-                taken,
-                [&remotePath](Paths::RemotePath const& other)
-                {
-                    return remotePath.isWithin(other) || other.isWithin(remotePath);
-                }
-            );
-            if (overlapping == taken.end())
+            const auto overlap = remoteOverlapOf(remotePath, ignoredWatchId);
+            if (!overlap)
                 return {};
             return std::unexpected{Utility::localizedMessage(
-                "backend.fileTracking.remoteOverlaps", remotePath.value(), overlapping->value()
+                "backend.fileTracking.remoteOverlaps", remotePath.value(), overlap->remotePath.value()
             )};
+        }
+
+        /**
+         * @brief What @p remotePath overlaps, see refuseRemoteOverlap(). Stopped watches claim nothing.
+         */
+        std::optional<RemoteOverlap> remoteOverlapOf(
+            Paths::RemotePath const& remotePath,
+            std::optional<Ids::WatchId> const& ignoredWatchId = std::nullopt
+        ) const
+        {
+            const auto overlaps = [&remotePath](Paths::RemotePath const& other)
+            {
+                return remotePath.isWithin(other) || other.isWithin(remotePath);
+            };
+            for (auto const& entry : std::views::values(entries))
+                if (entry.watchId != ignoredWatchId && overlaps(entry.remotePath))
+                    return RemoteOverlap{
+                        .remotePath = entry.remotePath,
+                        .watchId = entry.watchId,
+                        .watchName = shownNameOf(entry.localPath),
+                    };
+            for (auto const& claimed : std::views::values(claims))
+                if (overlaps(claimed))
+                    return RemoteOverlap{.remotePath = claimed};
+            return std::nullopt;
         }
 
         std::expected<std::shared_ptr<Claim>, std::string> claimRemote(Paths::RemotePath const& remotePath)
@@ -666,13 +891,14 @@ namespace FileTracking
         }
 
         /**
-         * @brief Shows @p entry and mirrors its changes from now on.
+         * @brief Shows @p entry with its progress and mirrors its changes from now on.
          */
         Entry& track(Entry entry)
         {
             const auto watchId = entry.watchId;
             auto& tracked = entries.insert_or_assign(watchId, std::move(entry)).first->second;
             show(tracked);
+            showProgress(tracked, std::chrono::steady_clock::now());
             return tracked;
         }
 
@@ -692,6 +918,9 @@ namespace FileTracking
                     OpenFailure{Utility::localizedMessage("backend.fileTracking.instanceCreationFailed")}
                 });
             const auto instanceId = Ids::makeInstanceId(instance->instanceId());
+            // Only the orphan list shows it, the copy opens without it.
+            if (const auto recorded = instance->recordOrigin(remotePath); !recorded)
+                Log::warn("FileTracking: {}", recorded.error());
             downloading.insert(instanceId);
             // Canonical like the paths of the changes, which the copy's path is compared with.
             std::error_code canonicalError;
@@ -709,6 +938,7 @@ namespace FileTracking
                             copy = OpenedCopy{.instanceId = instanceId, .localPath = destination},
                             instanceDirectory,
                             remotePath,
+                            sizeBytes,
                             watch,
                             claim,
                             onOpened](SharedData::OperationCompletionReason reason)
@@ -717,7 +947,9 @@ namespace FileTracking
                             if (claim)
                                 claim->release();
                             if (const auto self = weak.lock())
-                                self->onDownloaded(copy, instanceDirectory, remotePath, watch, reason, onOpened);
+                                self->onDownloaded(
+                                    copy, instanceDirectory, remotePath, sizeBytes, watch, reason, onOpened
+                                );
                         }
                     );
                 }
@@ -735,6 +967,7 @@ namespace FileTracking
             OpenedCopy const& copy,
             std::filesystem::path const& instanceDirectory,
             Paths::RemotePath const& remotePath,
+            std::uint64_t sizeBytes,
             bool watch,
             SharedData::OperationCompletionReason reason,
             OnOpened const& onOpened
@@ -780,10 +1013,12 @@ namespace FileTracking
                         .instanceId = copy.instanceId,
                         .instanceDirectory = instanceDirectory,
                         .watch = *std::move(instanceWatch),
+                        .sizeBytes = sizeBytes,
                     },
                 .remotePath = remotePath,
                 .localPath = copy.localPath,
                 .options = downloadedCopyOptions(defaultOptions()),
+                .progress = WatchProgressMeter{watchId},
             });
             // The downloaded files carry the server's modification time, so they tell what the server had.
             rememberStates(entry, std::nullopt);
@@ -854,6 +1089,7 @@ namespace FileTracking
                             .remotePath = destination,
                             .localPath = *watchedItem,
                             .options = defaultOptions(),
+                            .progress = WatchProgressMeter{watchId},
                         });
                         // Goes like a change, so what changes while it uploads goes once more afterwards.
                         queueUpload(Upload{
@@ -870,11 +1106,46 @@ namespace FileTracking
 
         void stop(Ids::WatchId const& watchId)
         {
-            const auto instanceId = forget(watchId);
-            if (!instanceId)
-                return;
-            releaseInstance(*instanceId);
-            view->showOrphanedCount(instances->countOrphaned());
+            if (retire(watchId, watchStopOf(SharedData::WatchStopReason::StoppedByUser)))
+                showOrphanedCopies();
+        }
+
+        /**
+         * @brief Ends the watch @p watchId like forget(), but the view keeps showing it as stopped by @p stop until
+         *        removeStopped(). A downloaded copy's instance ends, and the watch claims no remote path any more.
+         * @return The stopped entry as the view shows it, nothing when there is no such watch.
+         */
+        std::optional<SharedData::TrackedEntry> retire(Ids::WatchId watchId, SharedData::WatchStop stop)
+        {
+            if (!entries.contains(watchId))
+                return std::nullopt;
+            Log::info("FileTracking: stopping watch {}: {}", watchId.value(), Utility::enumToString(stop.reason));
+            auto shown = endWatch(watchId, stop.stoppedAt);
+            shown.stop = std::move(stop);
+            if (shown.instanceId)
+                releaseInstance(*shown.instanceId);
+            view->showEntry(shown);
+            stopped.insert_or_assign(watchId, shown);
+            return shown;
+        }
+
+        /**
+         * @brief Ends the watch @p watchId, which exists: its conflicts and failures leave the view, which hears of its
+         *        last progress, its burst ends at @p endedAt. What is on its way goes on unshown.
+         * @return The entry as the view shows it once it ended.
+         */
+        SharedData::TrackedEntry endWatch(Ids::WatchId const& watchId, std::uint64_t endedAt)
+        {
+            auto node = entries.extract(watchId);
+            auto& entry = node.mapped();
+            dropProblems(watchId);
+            entry.progress.dropPending();
+            entry.progress.finishBurst(endedAt);
+            view->showWatchProgress(entry.progress.snapshot());
+            // The item may be gone or elsewhere by now, its watch knows what it was.
+            auto shown = shownEntryOf(entry, localWatches->find(watchId));
+            shown.uploading = false;
+            return shown;
         }
 
         /**
@@ -893,32 +1164,47 @@ namespace FileTracking
         }
 
         /**
-         * @brief Ends the watch @p watchId and takes its entry off the view.
-         * @return The instance of a downloaded copy, nothing for an uploaded original or no such watch.
+         * @brief Ends the watch @p watchId and takes its entry off the view. The instance of a downloaded copy stays.
          */
-        std::optional<Ids::InstanceId> forget(Ids::WatchId const& watchId)
+        void forget(Ids::WatchId const& watchId)
         {
             auto node = entries.extract(watchId);
             if (node.empty())
-                return std::nullopt;
-            Log::info("FileTracking: stopping watch {}", watchId.value());
-            std::vector<Upload> dropped;
-            std::erase_if(
-                waitingQuestions,
-                [&watchId, &dropped](Upload const& upload)
-                {
-                    if (upload.watchId != watchId)
-                        return false;
-                    dropped.push_back(upload);
-                    return true;
-                }
-            );
+                return;
+            Log::info("FileTracking: forgetting watch {}", watchId.value());
+            dropProblems(watchId);
             view->removeEntry(watchId);
-            progressChanged();
-            for (auto const& upload : dropped)
-                leaveOrder(upload);
-            const auto* copy = node.mapped().downloadedCopy();
-            return copy ? std::optional{copy->instanceId} : std::nullopt;
+        }
+
+        /**
+         * @brief Drops the conflicts and failures of the watch @p watchId and takes them off the view, conflicts
+         *        first. The uploads that waited for an answer leave the server order.
+         */
+        void dropProblems(Ids::WatchId const& watchId)
+        {
+            const auto dropped = conflicts.removeWatch(watchId);
+            hideConflicts(removedConflictsOf(dropped));
+            hideFailures(removedFailuresOf(failures.removeWatch(watchId)));
+            for (auto const& listed : dropped)
+                leaveOrder(listed.context);
+        }
+
+        /**
+         * @brief Takes the conflicts of @p removed off the view in one message, none for an empty list.
+         */
+        void hideConflicts(SharedData::RemovedConflicts const& removed)
+        {
+            if (!removed.conflictIds.empty())
+                view->removeConflicts(removed);
+        }
+
+        /**
+         * @brief Takes the failures of @p removed off the view in one message, none for an empty list.
+         */
+        void hideFailures(SharedData::RemovedFailures const& removed)
+        {
+            if (!removed.failureIds.empty())
+                view->removeFailures(removed);
         }
 
         void setOption(Ids::WatchId const& watchId, SharedData::WatchOption option, bool value)
@@ -960,6 +1246,16 @@ namespace FileTracking
 
         void stopAll()
         {
+            endEverything();
+            stopped.clear();
+        }
+
+        /**
+         * @brief Ends every watch, opened copy and download without telling the view, see Tracker::stopAll(). The
+         *        stopped watches stay.
+         */
+        void endEverything()
+        {
             auto copies = std::exchange(openedCopies, {});
             copies.merge(std::exchange(downloading, {}));
             for (auto const& entry : std::views::values(entries))
@@ -969,38 +1265,33 @@ namespace FileTracking
             for (auto const& instanceId : copies)
                 releaseInstance(instanceId);
             claims.clear();
-            auto dropped = std::exchange(waitingQuestions, {});
-            if (openQuestion)
-                dropped.push_back(std::move(openQuestion->upload));
-            openQuestion.reset();
+            const auto dropped = conflicts.removeAll();
+            failures.removeAll();
             const auto waiting = std::exchange(waitingOperations, {});
-            for (auto const& upload : dropped)
-                leaveOrder(upload);
+            for (auto const& listed : dropped)
+                leaveOrder(listed.context);
             for (auto const& ticket : std::views::keys(waiting))
                 leaveOrder(ticket);
             progressTimer.cancel();
             progressScheduled = false;
-            changesDone = 0;
-            // A frontend that comes next starts with nothing on its way, the idle progress has nothing to tell it.
-            shownProgress = {};
         }
 
         void connectionLost()
         {
+            Log::info("FileTracking: the connection was lost, ending {} watch(es)", entries.size());
+            // Nothing that waits in the server order starts any more.
+            const auto waiting = std::exchange(waitingOperations, {});
+            const auto stop = watchStopOf(SharedData::WatchStopReason::ConnectionLost);
             auto ended = SharedData::EndedWatches{.reason = SharedData::WatchEndReason::ConnectionLost, .entries = {}};
-            for (auto const& entry : std::views::values(entries))
-                ended.entries.push_back(shownEntryOf(entry));
-            Log::info("FileTracking: the connection was lost, ending {} watch(es)", ended.entries.size());
-            // stopAll() forgets the progress shown, this view still shows it.
-            const bool progressShown = shownProgress != SharedData::TrackerProgress{};
-            stopAll();
-            for (auto const& shown : ended.entries)
-                view->removeEntry(shown.watchId);
+            for (auto const& watchId : std::views::keys(entries) | std::ranges::to<std::vector>())
+                if (auto retired = retire(watchId, stop))
+                    ended.entries.push_back(*std::move(retired));
+            endEverything();
+            for (auto const& ticket : std::views::keys(waiting))
+                leaveOrder(ticket);
             if (!ended.entries.empty())
                 view->showEnded(ended);
-            if (progressShown)
-                view->showProgress(shownProgress);
-            view->showOrphanedCount(instances->countOrphaned());
+            showOrphanedCopies();
         }
 
         /**
@@ -1032,6 +1323,33 @@ namespace FileTracking
                 else
                     entry.serverContent.rememberFile(*path, ServerState{.mtime = state.mtime, .size = state.size});
                 ++recorded;
+            }
+            return recorded;
+        }
+
+        /**
+         * @brief Records what the server has after the upload of @p directory, see rememberStates(), but for the
+         *        entries it left out (@p failedEntries), which keep what the server was known to have of them.
+         * @return How many entries it recorded.
+         */
+        std::size_t rememberUploadedStates(
+            Entry& entry,
+            Paths::LocalPath const& directory,
+            std::vector<FailedUploadEntry> const& failedEntries
+        )
+        {
+            std::vector<std::pair<Paths::LocalPath, std::optional<ServerState>>> known;
+            for (auto const& failed : failedEntries)
+                if (failed.path != directory && failed.path.isWithin(directory) &&
+                    !entry.serverContent.hasDirectory(failed.path))
+                    known.emplace_back(failed.path, entry.serverContent.fileState(failed.path));
+            const auto recorded = rememberStates(entry, directory);
+            for (auto const& [path, state] : known)
+            {
+                if (state)
+                    entry.serverContent.rememberFile(path, *state);
+                else
+                    entry.serverContent.forget(path);
             }
             return recorded;
         }
@@ -1154,7 +1472,7 @@ namespace FileTracking
                 if (entry.pendingUploads.covers(path))
                 {
                     entry.pendingUploads.start({.path = path});
-                    return progressChanged();
+                    return progressChanged(entry);
                 }
                 Log::debug("FileTracking: '{}' is not on the server, nothing to delete there.", path.toUtf8());
                 return;
@@ -1358,11 +1676,11 @@ namespace FileTracking
                 entry->localPath.toUtf8(),
                 watchId.value()
             );
-            const auto ended = SharedData::EndedWatches{
-                .reason = SharedData::WatchEndReason::CopyGone, .entries = {shownEntryOf(*entry)}
-            };
-            stop(watchId);
-            view->showEnded(ended);
+            auto retired = retire(watchId, watchStopOf(SharedData::WatchStopReason::CopyGone));
+            if (!retired)
+                return;
+            view->showEnded({.reason = SharedData::WatchEndReason::CopyGone, .entries = {*std::move(retired)}});
+            showOrphanedCopies();
         }
 
         /**
@@ -1382,16 +1700,8 @@ namespace FileTracking
                 return;
             }
             // The server copy may not follow onto the path of another watch, which writes there.
-            if (const auto free = refuseRemoteOverlap(*newRemotePath, entry.watchId); !free)
-            {
-                Log::warn(
-                    "FileTracking: stopping watch {}, its move overlaps another watch: {}",
-                    entry.watchId.value(),
-                    free.error()
-                );
-                const auto watchId = entry.watchId;
-                return stop(watchId);
-            }
+            if (const auto overlap = remoteOverlapOf(*newRemotePath, entry.watchId))
+                return stopOverlapping(entry.watchId, newPath, *newRemotePath, *overlap);
             Log::info(
                 "FileTracking: watch {} moved from '{}' to '{}'",
                 entry.watchId.value(),
@@ -1413,6 +1723,37 @@ namespace FileTracking
             entry.localPath = newPath;
             entry.remotePath = *newRemotePath;
             show(entry);
+        }
+
+        /**
+         * @brief The item of the watch @p watchId moved to @p movedTo, its server copy would follow to @p wouldGoTo,
+         *        which @p overlap holds or lies below: the watch stops, its server copy stays where it is.
+         */
+        void stopOverlapping(
+            Ids::WatchId watchId,
+            Paths::LocalPath const& movedTo,
+            Paths::RemotePath const& wouldGoTo,
+            RemoteOverlap const& overlap
+        )
+        {
+            Log::warn(
+                "FileTracking: stopping watch {}, its item moved to '{}' and its server copy would go to '{}', which "
+                "overlaps '{}' of another watch",
+                watchId.value(),
+                movedTo.toUtf8(),
+                wouldGoTo.value(),
+                overlap.remotePath.value()
+            );
+            auto stop = watchStopOf(SharedData::WatchStopReason::Overlap);
+            stop.otherWatchId = overlap.watchId;
+            stop.otherWatchName = overlap.watchName;
+            stop.movedTo = movedTo;
+            stop.wouldGoTo = wouldGoTo;
+            auto retired = retire(watchId, std::move(stop));
+            if (!retired)
+                return;
+            view->showEnded({.reason = SharedData::WatchEndReason::Overlap, .entries = {*std::move(retired)}});
+            showOrphanedCopies();
         }
 
         void onMoved(Entry& entry, Paths::LocalPath const& oldPath, LocalChange const& change)
@@ -1704,7 +2045,7 @@ namespace FileTracking
                 entry->serverContent.hasDirectory(upload.change.path))
                 return uploadWhatTheServerLacks(*entry, upload);
             const bool starts = entry->pendingUploads.start(upload.change);
-            progressChanged();
+            progressChanged(*entry);
             if (!starts)
                 return discardPartial(upload.continuesPartialOf);
             showUploading(*entry);
@@ -1798,16 +2139,16 @@ namespace FileTracking
                 auto expected = ExpectedDestination{.file = entry->serverContent.fileState(upload.change.path)};
                 return enqueueUpload(std::move(upload), std::move(expected));
             }
-            if (serverChangedMeanwhile(*entry, upload))
-                return askServerChanged(std::move(upload));
+            if (const auto change = serverChangeAt(*entry, upload))
+                return askServerChanged(std::move(upload), *change);
             enqueueUpload(std::move(upload));
         }
 
         /**
-         * @brief Whether the server's copy at the destination of @p upload, a directory or a symbolic link, is not
-         *        what this tracker left there. A symbolic link is compared as itself.
+         * @brief How the server's copy at the destination of @p upload, a directory or a symbolic link, is not what
+         *        this tracker left there, nothing when it is. A symbolic link is compared as itself.
          */
-        bool serverChangedMeanwhile(Entry const& entry, Upload const& upload)
+        std::optional<ServerChange> serverChangeAt(Entry const& entry, Upload const& upload)
         {
             const auto current =
                 isSymlink(upload.change.path) ? remote->linkStat(upload.destination) : remote->stat(upload.destination);
@@ -1817,11 +2158,18 @@ namespace FileTracking
                     "FileTracking: cannot check '{}' on the server: {}", upload.destination.value(), current.error()
                 );
                 // An unanswered check counts as changed.
-                return true;
+                return ServerChange{};
             }
             if (upload.change.isDirectory)
-                return current->has_value() && !entry.serverContent.has(upload.change.path);
-            return serverChanged(entry.serverContent.fileState(upload.change.path), *current);
+            {
+                if (!current->has_value() || entry.serverContent.has(upload.change.path))
+                    return std::nullopt;
+                return serverChangeOf(/*knownThere=*/false, *current);
+            }
+            const auto known = entry.serverContent.fileState(upload.change.path);
+            if (!serverChanged(known, *current))
+                return std::nullopt;
+            return serverChangeOf(known.has_value(), *current);
         }
 
         /**
@@ -1845,84 +2193,365 @@ namespace FileTracking
         void onUncheckable(Upload const& upload, std::error_code const& error)
         {
             Log::error(
+                Log::Toast::Skip,
                 "FileTracking: not uploading '{}', it cannot be checked: {}",
                 upload.change.path.toUtf8(),
                 Utility::errorMessage(error)
             );
+            if (const auto* entry = find(upload.watchId))
+                recordFailure(*entry, upload.change.path, upload.destination, failureInfoOf(error));
             finishUpload(upload, UploadOutcome::NotUploaded);
         }
 
-        void askServerChanged(Upload upload)
-        {
-            waitingQuestions.push_back(std::move(upload));
-            askNextServerChanged();
-        }
-
-        void askNextServerChanged()
-        {
-            while (!openQuestion && !waitingQuestions.empty())
-            {
-                auto upload = std::move(waitingQuestions.front());
-                waitingQuestions.pop_front();
-                const auto* entry = find(upload.watchId);
-                if (!entry)
-                    continue;
-                // Nothing to ask about a path that moved meanwhile, it goes again at the new one.
-                if (entry->pendingUploads.movedAway(upload.change.path))
-                {
-                    enqueueUpload(std::move(upload));
-                    continue;
-                }
-                if (isGoneLocally(upload.change.path))
-                {
-                    onGoneLocally(*entry, upload);
-                    continue;
-                }
-                openQuestion = OpenQuestion{.questionId = Ids::generateQuestionId(), .upload = std::move(upload)};
-                view->ask({.questionId = openQuestion->questionId, .remotePath = openQuestion->upload.destination});
-            }
-            progressChanged();
-        }
-
-        void answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer)
-        {
-            if (!openQuestion || openQuestion->questionId != questionId)
-                return;
-            auto upload = std::move(openQuestion->upload);
-            openQuestion.reset();
-            progressChanged();
-            switch (answer)
-            {
-                case SharedData::ServerChangedAnswer::Replace:
-                    enqueueUpload(std::move(upload));
-                    break;
-                case SharedData::ServerChangedAnswer::Keep:
-                    Log::info("FileTracking: kept the server's version of '{}'.", upload.destination.value());
-                    declineUpload(upload);
-                    break;
-                case SharedData::ServerChangedAnswer::Dismissed:
-                    return abandonServerChangedQuestions(upload);
-            }
-            askNextServerChanged();
-        }
-
         /**
-         * @brief Another dialog replaced the question for @p upload: it and the waiting questions are asked again on
-         *        the next save, nothing opens now over the dialog that replaced it.
+         * @brief Lists the conflict @p upload raised, the server changed its destination as @p change tells, unless
+         *        it no longer stands, see conflictStands(). The upload waits for the answer, see answerConflict().
          */
-        void abandonServerChangedQuestions(Upload const& upload)
+        void askServerChanged(Upload upload, ServerChange const& change)
         {
-            Log::info(
-                "FileTracking: the question about '{}' was replaced by another dialog.", upload.destination.value()
-            );
-            declineUpload(upload);
-            for (auto const& waiting : std::exchange(waitingQuestions, {}))
-                declineUpload(waiting);
+            const auto watchId = upload.watchId;
+            if (conflictStands(upload))
+            {
+                auto added = conflicts.add(conflictOf(upload, change), std::move(upload));
+                // PendingUploads lets one upload of a path wait at most, this is never expected.
+                if (added.replaced)
+                {
+                    Log::warn(
+                        "FileTracking: the conflict about '{}' replaced another one", added.conflict.localPath.toUtf8()
+                    );
+                    leaveOrder(*added.replaced);
+                }
+                Log::info(
+                    "FileTracking: '{}' changed on the server, waiting for an answer about it",
+                    added.conflict.remotePath.value()
+                );
+                view->showConflict(added.conflict);
+            }
+            progressChanged(watchId);
         }
 
         /**
-         * @brief The change is not uploaded, and the changes that arrived while it was asked about wait for the next
-         *        save.
+         * @brief Whether the conflict about @p upload still stands, checked when it is raised and once it is answered:
+         *        a path that moved away meanwhile goes again at the new one, one that is gone locally has its deletion
+         *        mirrored, and nothing is asked about a path that no longer is the watch's. Either ends @p upload.
+         */
+        bool conflictStands(Upload const& upload)
+        {
+            const auto* entry = find(upload.watchId);
+            if (!entry || entry->pendingUploads.movedAway(upload.change.path) ||
+                !upload.change.path.isWithin(entry->localPath))
+            {
+                finishUpload(upload, UploadOutcome::NotUploaded);
+                return false;
+            }
+            if (isGoneLocally(upload.change.path))
+            {
+                onGoneLocally(*entry, upload);
+                return false;
+            }
+            return true;
+        }
+
+        void answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
+        {
+            auto listed = conflicts.remove(conflictId);
+            if (!listed)
+            {
+                Log::warn("FileTracking: there is no conflict {} to answer", conflictId.value());
+                return;
+            }
+            const auto watchId = listed->conflict.watchId;
+            hideConflicts({.conflictIds = {conflictId}});
+            resolveConflict(std::move(listed->context), resolution);
+            progressChanged(watchId);
+        }
+
+        void answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution)
+        {
+            auto listed = conflicts.removeWatch(watchId);
+            if (listed.empty())
+            {
+                Log::warn("FileTracking: watch {} has no conflicts to answer", watchId.value());
+                return;
+            }
+            Log::info(
+                "FileTracking: answering {} conflict(s) of watch {} with {}",
+                listed.size(),
+                watchId.value(),
+                Utility::enumToString(resolution)
+            );
+            hideConflicts(removedConflictsOf(listed));
+            for (auto& conflict : listed)
+                resolveConflict(std::move(conflict.context), resolution);
+            progressChanged(watchId);
+        }
+
+        void resolveConflict(Upload upload, SharedData::ConflictResolution resolution)
+        {
+            switch (resolution)
+            {
+                case SharedData::ConflictResolution::ReplaceOnServer:
+                    Log::info("FileTracking: replacing the server's version of '{}'.", upload.destination.value());
+                    return replaceOnServer(std::move(upload));
+                case SharedData::ConflictResolution::KeepServers:
+                    Log::info("FileTracking: kept the server's version of '{}'.", upload.destination.value());
+                    return declineUpload(upload);
+            }
+        }
+
+        /**
+         * @brief Uploads @p upload over whatever the server has, once the path is checked again.
+         */
+        void replaceOnServer(Upload upload)
+        {
+            if (!conflictStands(upload))
+                return;
+            upload.checkServer = false;
+            checkServerThenUpload(std::move(upload));
+        }
+
+        void retryFailure(Ids::FailureId const& failureId)
+        {
+            const auto retried = failures.retry(failureId);
+            if (!retried)
+            {
+                Log::warn("FileTracking: there is no failure {} to retry", failureId.value());
+                return;
+            }
+            hideFailures({.failureIds = {failureId}});
+            retryUpload(*retried);
+        }
+
+        /**
+         * @brief Uploads the path of @p failure again like a change of it, compared with the server first, also when
+         *        its watch does not upload changes on its own.
+         */
+        void retryUpload(SharedData::UploadFailure const& failure)
+        {
+            const auto* entry = find(failure.watchId);
+            if (!entry)
+                return;
+            const auto destination = remotePathOf(*entry, failure.localPath);
+            if (!destination)
+            {
+                Log::warn(
+                    "FileTracking: not retrying '{}' in watch {}: {}",
+                    failure.localPath.toUtf8(),
+                    failure.watchId.value(),
+                    destination.error().toString()
+                );
+                return;
+            }
+            Log::info("FileTracking: retrying the upload of '{}'", failure.localPath.toUtf8());
+            queueUpload(
+                Upload{
+                    .watchId = failure.watchId,
+                    .change = {.path = failure.localPath, .isDirectory = isDirectoryLocally(failure.localPath)},
+                    .destination = *destination,
+                }
+            );
+        }
+
+        void dismissFailure(Ids::FailureId const& failureId)
+        {
+            if (!failures.remove(failureId))
+            {
+                Log::warn("FileTracking: there is no failure {} to dismiss", failureId.value());
+                return;
+            }
+            hideFailures({.failureIds = {failureId}});
+        }
+
+        void retryAllFailures(Ids::WatchId const& watchId)
+        {
+            std::vector<SharedData::UploadFailure> retried;
+            for (auto const& failure : failures.failuresOf(watchId))
+            {
+                if (auto taken = failures.retry(failure.failureId))
+                    retried.push_back(std::move(*taken));
+            }
+            if (retried.empty())
+            {
+                Log::warn("FileTracking: watch {} has no failures to retry", watchId.value());
+                return;
+            }
+            hideFailures(removedFailuresOf(retried));
+            for (auto const& failure : retried)
+                retryUpload(failure);
+        }
+
+        void dismissAllFailures(Ids::WatchId const& watchId)
+        {
+            std::vector<SharedData::UploadFailure> dismissed;
+            for (auto const& failure : failures.failuresOf(watchId))
+            {
+                if (auto removed = failures.remove(failure.failureId))
+                    dismissed.push_back(std::move(*removed));
+            }
+            if (dismissed.empty())
+                Log::warn("FileTracking: watch {} has no failures to dismiss", watchId.value());
+            hideFailures(removedFailuresOf(dismissed));
+        }
+
+        /**
+         * @brief Lists that the upload of @p localPath to @p remotePath failed as @p failure, or counts one attempt
+         *        more of it. Not for a path that is gone or moved away, its deletion or move follows.
+         * @return Whether it was listed.
+         */
+        bool recordFailure(
+            Entry const& entry,
+            Paths::LocalPath const& localPath,
+            Paths::RemotePath const& remotePath,
+            UploadFailureInfo const& failure
+        )
+        {
+            if (entry.pendingUploads.movedAway(localPath) || isGoneLocally(localPath))
+                return false;
+            const auto listed = failures.record({
+                .failureId = {},
+                .watchId = entry.watchId,
+                .localPath = localPath,
+                .remotePath = remotePath,
+                .reason = failure.reason,
+                .detail = failure.detail,
+                .failedAt = secondsSinceEpochNow(),
+                .attempts = 1u,
+            });
+            Log::warn(
+                "FileTracking: uploading '{}' failed ({}, attempt {}): {}",
+                localPath.toUtf8(),
+                Utility::enumToString(listed.reason),
+                listed.attempts,
+                listed.detail.value_or("")
+            );
+            view->showFailure(listed);
+            return true;
+        }
+
+        /**
+         * @brief @p localPath of the watch @p watchId uploaded, its failure is over.
+         */
+        void clearFailure(Ids::WatchId const& watchId, Paths::LocalPath const& localPath)
+        {
+            if (const auto cleared = failures.removePath(watchId, localPath))
+                hideFailures({.failureIds = {cleared->failureId}});
+        }
+
+        /**
+         * @brief The directory upload @p upload completed but left out @p failedEntries: they are listed, the failures
+         *        at and below the directory that it did not leave out are over.
+         */
+        void
+        recordLeftOut(Entry const& entry, Upload const& upload, std::vector<FailedUploadEntry> const& failedEntries)
+        {
+            std::set<Paths::LocalPath> leftOut;
+            for (auto const& failed : failedEntries)
+            {
+                const auto remotePath = remotePathOfChange(failed.path, upload.change.path, upload.destination);
+                if (remotePath && recordFailure(entry, failed.path, *remotePath, failed.failure))
+                    leftOut.insert(failed.path);
+            }
+            hideFailures(removedFailuresOf(failures.removeWithin(entry.watchId, upload.change.path, leftOut)));
+        }
+
+        void removeStopped(Ids::WatchId const& watchId)
+        {
+            if (stopped.erase(watchId) == 0)
+            {
+                Log::warn("FileTracking: there is no stopped watch {} to remove", watchId.value());
+                return;
+            }
+            Log::info("FileTracking: removing the stopped watch {}", watchId.value());
+            view->removeEntry(watchId);
+            // A stopped copy is an orphan from now on.
+            showOrphanedCopies();
+        }
+
+        void removeAllStopped()
+        {
+            const auto removed = std::exchange(stopped, {});
+            Log::info("FileTracking: removing {} stopped watch(es)", removed.size());
+            for (auto const& watchId : std::views::keys(removed))
+                view->removeEntry(watchId);
+            showOrphanedCopies();
+        }
+
+        void listOrphanedCopies()
+        {
+            // Other processes may have left orphans since the last scan.
+            instances->rescanOrphaned();
+            showOrphanedCopies();
+        }
+
+        std::expected<void, std::string> removeOrphanedCopy(Ids::InstanceId const& instanceId)
+        {
+            const auto removed = refuseStoppedCopy(instanceId).and_then(
+                [this, &instanceId]()
+                {
+                    return instances->removeOrphanedInstance(instanceId);
+                }
+            );
+            if (!removed)
+                Log::warn("FileTracking: {}", removed.error());
+            showOrphanedCopies();
+            return removed;
+        }
+
+        void removeAllOrphanedCopies()
+        {
+            const auto listed = orphanedCopies();
+            Log::info("FileTracking: removing {} orphaned copies", listed.copies.size());
+            for (auto const& copy : listed.copies)
+                if (const auto removed = instances->removeOrphanedInstance(copy.instanceId); !removed)
+                    Log::warn("FileTracking: {}", removed.error());
+            showOrphanedCopies();
+        }
+
+        /**
+         * @brief The orphaned copies as the view lists them: those of stopped watches are left out, the view shows
+         *        them as stopped until they are removed.
+         */
+        SharedData::OrphanedCopies orphanedCopies() const
+        {
+            auto copies = instances->listOrphaned();
+            std::erase_if(
+                copies,
+                [this](SharedData::OrphanedCopy const& copy)
+                {
+                    return isStoppedCopy(copy.instanceId);
+                }
+            );
+            return {.copies = std::move(copies)};
+        }
+
+        void showOrphanedCopies()
+        {
+            view->showOrphanedCopies(orphanedCopies());
+        }
+
+        bool isStoppedCopy(Ids::InstanceId const& instanceId) const
+        {
+            return std::ranges::any_of(
+                std::views::values(stopped),
+                [&instanceId](SharedData::TrackedEntry const& entry)
+                {
+                    return entry.instanceId == instanceId;
+                }
+            );
+        }
+
+        std::expected<void, std::string> refuseStoppedCopy(Ids::InstanceId const& instanceId) const
+        {
+            if (!isStoppedCopy(instanceId))
+                return {};
+            return std::unexpected{fmt::format(
+                "Cannot remove the orphaned instance '{}': it is the copy of a stopped watch", instanceId.value()
+            )};
+        }
+
+        /**
+         * @brief The change is not uploaded, and the changes that arrived while its conflict waited wait for the next
+         *        save, which raises it again.
          */
         void declineUpload(Upload const& upload)
         {
@@ -1945,6 +2574,8 @@ namespace FileTracking
             if (upload.change.isDirectory)
                 entry->pendingUploads.carries(upload.change.path, entryCountOf(upload.change.path.native()));
             entry->pendingUploads.sent(upload.change.path, upload.destination, upload.change.isDirectory);
+            const auto generation = entry->progress.uploadQueued(upload.change.path, fileSizeOf(upload.change.path));
+            progressChanged(*entry);
             const auto queued = remote->upload(
                 UploadRequest{
                     .source = upload.change.path,
@@ -1952,35 +2583,66 @@ namespace FileTracking
                     .refreshListing = upload.refreshListing,
                     // Below the item a directory renamed without mirroring has no server counterpart yet.
                     .createMissingDirectories = upload.change.path != entry->localPath,
-                    .expectedDestination = std::move(expected),
+                    .expectedDestination = expected,
                     .continuesPartialOf = upload.continuesPartialOf,
                 },
-                [weak = weak_from_this(), upload](UploadEnd const& ended)
+                [weak = weak_from_this(), upload, expected, generation](UploadEnd const& ended)
                 {
                     if (const auto self = weak.lock())
-                        self->onUploadEnded(upload, ended);
+                        self->onUploadEnded(upload, expected, generation, ended);
+                },
+                [weak = weak_from_this(),
+                    watchId = upload.watchId,
+                    path = upload.change.path,
+                    generation](UploadProgress const& progress)
+                {
+                    if (const auto self = weak.lock())
+                        self->onUploadProgress(watchId, path, generation, progress);
                 }
             );
             if (queued)
                 return;
             // A temporary file an editor already renamed or removed ends up here.
             Log::warn("FileTracking: did not upload '{}': {}", upload.change.path.toUtf8(), queued.error());
+            if (auto* stillWatched = find(upload.watchId))
+            {
+                stillWatched->progress.uploadEnded(
+                    upload.change.path, WatchProgressMeter::UploadResult::NotCompleted, generation
+                );
+                recordFailure(
+                    *stillWatched,
+                    upload.change.path,
+                    upload.destination,
+                    {.reason = SharedData::UploadFailureReason::NotQueued, .detail = queued.error()}
+                );
+            }
             finishUpload(upload, UploadOutcome::NotUploaded);
         }
 
         /**
          * @brief Once an upload ended, what the server has now is the state the next check compares with. The upload
          *        stays on its way until the remote told that state.
+         * @param expected What the upload expected the server to have at its destination.
+         * @param generation Its generation in the progress, see WatchProgressMeter::uploadQueued().
          */
-        void onUploadEnded(Upload const& upload, UploadEnd const& ended)
+        void onUploadEnded(
+            Upload const& upload,
+            std::optional<ExpectedDestination> const& expected,
+            std::uint64_t generation,
+            UploadEnd const& ended
+        )
         {
             auto* entry = find(upload.watchId);
+            if (entry)
+                entry->progress.uploadEnded(upload.change.path, uploadResultOf(ended), generation);
             // The server's copy changed meanwhile and stayed, the upload asks about it now unless the user stopped
             // checking since.
             if (entry && ended.changedOnServer)
             {
                 if (entry->options.checkRemoteChanges)
-                    return askServerChanged(upload);
+                    return askServerChanged(
+                        upload, serverChangeOf(expected && expected->file.has_value(), ended.destinationState)
+                    );
                 return enqueueUpload(upload);
             }
             if (ended.reason != SharedData::OperationCompletionReason::Completed || !entry)
@@ -1988,6 +2650,10 @@ namespace FileTracking
                 // Nobody continues the partial file of a watch that ended meanwhile.
                 if (!entry && !upload.change.isDirectory)
                     discardPartial(upload.destination);
+                if (entry && ended.reason == SharedData::OperationCompletionReason::Failed)
+                    recordFailure(
+                        *entry, upload.change.path, upload.destination, ended.failure.value_or(UploadFailureInfo{})
+                    );
                 return finishUpload(upload, UploadOutcome::NotUploaded);
             }
             // Uploads carry the local modification time, so the local states are what the server has now. A link
@@ -1995,12 +2661,17 @@ namespace FileTracking
             std::optional<std::size_t> carried{};
             if (upload.change.isDirectory && !isSymlink(upload.change.path))
             {
-                carried = rememberStates(*entry, upload.change.path);
+                carried = rememberUploadedStates(*entry, upload.change.path, ended.failedEntries);
                 rememberSentButGone(*entry, upload, ended.sentFiles);
                 removeMovedAway(*entry, upload.change.path);
+                recordLeftOut(*entry, upload, ended.failedEntries);
             }
-            else if (ended.destinationState)
-                entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
+            else
+            {
+                if (ended.destinationState)
+                    entry->serverContent.rememberFile(upload.change.path, *ended.destinationState);
+                clearFailure(entry->watchId, upload.change.path);
+            }
             for (auto const& sent : ended.sentFiles)
                 if (sent.state && sent.path.isWithin(upload.change.path))
                     entry->serverContent.rememberSent(sent.path, *sent.state);
@@ -2071,7 +2742,7 @@ namespace FileTracking
         {
             auto finished = entry.pendingUploads.finish(upload.change.path);
             showUploading(entry);
-            changeEnded(carried.value_or(finished.counted));
+            changeEnded(entry, carried.value_or(finished.counted));
             // A directory above that moved took the server copy along.
             const auto serverPath = finished.serverCopyAt.value_or(upload.change.path);
             const auto serverDestination = finished.serverCopyAt
@@ -2274,9 +2945,59 @@ namespace FileTracking
         return impl_->discard(instanceId, path);
     }
 
-    void Tracker::answer(Ids::QuestionId const& questionId, SharedData::ServerChangedAnswer answer)
+    void Tracker::answerConflict(Ids::ConflictId const& conflictId, SharedData::ConflictResolution resolution)
     {
-        impl_->answer(questionId, answer);
+        impl_->answerConflict(conflictId, resolution);
+    }
+
+    void Tracker::answerAllConflicts(Ids::WatchId const& watchId, SharedData::ConflictResolution resolution)
+    {
+        impl_->answerAllConflicts(watchId, resolution);
+    }
+
+    void Tracker::retryFailure(Ids::FailureId const& failureId)
+    {
+        impl_->retryFailure(failureId);
+    }
+
+    void Tracker::dismissFailure(Ids::FailureId const& failureId)
+    {
+        impl_->dismissFailure(failureId);
+    }
+
+    void Tracker::retryAllFailures(Ids::WatchId const& watchId)
+    {
+        impl_->retryAllFailures(watchId);
+    }
+
+    void Tracker::dismissAllFailures(Ids::WatchId const& watchId)
+    {
+        impl_->dismissAllFailures(watchId);
+    }
+
+    void Tracker::removeStopped(Ids::WatchId const& watchId)
+    {
+        impl_->removeStopped(watchId);
+    }
+
+    void Tracker::removeAllStopped()
+    {
+        impl_->removeAllStopped();
+    }
+
+    void Tracker::listOrphanedCopies()
+    {
+        impl_->listOrphanedCopies();
+    }
+
+    std::expected<void, std::string> Tracker::removeOrphanedCopy(Ids::InstanceId const& instanceId)
+    {
+        return impl_->removeOrphanedCopy(instanceId);
+    }
+
+    void Tracker::removeAllOrphanedCopies()
+    {
+        impl_->removeAllOrphanedCopies();
     }
 
     void Tracker::stopAll()

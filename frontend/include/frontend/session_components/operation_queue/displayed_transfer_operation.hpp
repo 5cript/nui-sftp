@@ -5,6 +5,7 @@
 #include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 #include <frontend/components/svg/arrow_right.hpp>
 
+#include <script-nui-components/progress_bar.hpp>
 #include <utility/format_bytes.hpp>
 
 class DisplayedTransferOperation
@@ -35,10 +36,9 @@ class DisplayedTransferOperation
         , ScanningCard{scanning}
         , progressBar_{{
               .height = std::string{progressHeight},
-              .min = 0,
-              .max = max,
-              .showMinMax = true,
-              .byteMode = true,
+              .minimum = 0,
+              .maximum = max,
+              .texts = {.percent = "{:.0f}%"},
           }}
         , localPath_{std::move(localPath)}
         , remotePath_{std::move(remotePath)}
@@ -110,21 +110,26 @@ class DisplayedTransferOperation
     void setProgress(SharedData::TransferProgress progress)
     {
         scanPhase_.end();
-        progressBar_.max(progress.max);
+        progressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
+        progressBar_.setMaximum(progress.max);
         progressBar_.setProgress(progress.current - progress.min);
         bytesPerSecond_ = progress.bytesPerSecond;
+        Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
     bool warrantsCancelConfirm() const override
     {
-        return !isCompletedState() && progressBar_.max() > 10'000'000; // 10 MB
+        return !isCompletedState() && progressBar_.maximum() > 10'000'000; // 10 MB
     }
 
     void state(SharedData::OperationState newState) override
     {
         OperationCard::state(newState);
         if (isCompletedState())
+        {
+            progressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
             progressBar_.setZeroAsComplete();
+        }
     }
 
     /**
@@ -150,7 +155,8 @@ class DisplayedTransferOperation
     }
 
   private:
-    Components::ProgressBar progressBar_;
+    /** @brief Shows "0%" until the first progress or the end, then bytes. */
+    ScriptNuiComponents::ProgressBar progressBar_;
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond_{0};
     /** @brief Empty for an archive upload. */
     Paths::LocalPath localPath_;

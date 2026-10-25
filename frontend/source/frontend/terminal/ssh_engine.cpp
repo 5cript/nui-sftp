@@ -47,7 +47,7 @@ SshTerminalEngine::~SshTerminalEngine()
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(SshTerminalEngine);
 
-void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen)
+void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast)
 {
     if (impl_->blockedByDestruction)
     {
@@ -57,14 +57,15 @@ void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
 
     Nui::val obj = Nui::val::object();
     obj.set("engineOptions", asVal(std::get<Persistence::SshSessionOptions>(impl_->settings.sessionOptions.engine)));
+    obj.set("showFailureToast", failureToast == Log::Toast::Show);
 
     Nui::RpcClient::callWithBackChannel(
         "SessionManager::connect",
-        [this, onOpen = std::move(onOpen)](Nui::val val)
+        [this, onOpen = std::move(onOpen), failureToast](Nui::val val)
         {
             if (!val.hasOwnProperty("id"))
             {
-                Log::error("SessionManager::connect callback did not return an id");
+                Log::error(failureToast, "SessionManager::connect callback did not return an id");
                 std::string error = "";
                 if (val.hasOwnProperty("error"))
                     error = val["error"].as<std::string>();

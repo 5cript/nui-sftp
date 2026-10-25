@@ -766,6 +766,17 @@ void SessionLayoutInitializer::initialize()
             std::placeholders::_1
         )
     );
+    addPanelArgument.set(
+        "fileTrackingActivated",
+        Nui::bind(
+            [this]() -> Nui::val
+            {
+                impl_->fileTrackingPanel->onTabActivated();
+                Nui::globalEventContext.executeActiveEventsImmediately();
+                return Nui::val::undefined();
+            }
+        )
+    );
 
     Log::info("Adding panel to content panel manager with layout id '{}'", impl_->sessionLayoutId);
     const auto addPanelResult = Nui::val::global("contentPanelManager").call<bool>("addPanel", addPanelArgument);

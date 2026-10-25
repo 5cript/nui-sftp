@@ -139,6 +139,26 @@ target_sources(
         session_components/command_history_panel.cpp
         session_components/command_snippets_panel.cpp
         session_components/file_tracking.cpp
+        session_components/file_tracking/conflicts_tab.cpp
+        session_components/file_tracking/detail_tabs.cpp
+        session_components/file_tracking/dock_tab_attention.cpp
+        session_components/file_tracking/failures_tab.cpp
+        session_components/file_tracking/file_tracking_texts.cpp
+        session_components/file_tracking/item_list_box.cpp
+        session_components/file_tracking/options_tab.cpp
+        session_components/file_tracking/orphan_detail.cpp
+        session_components/file_tracking/orphan_row.cpp
+        session_components/file_tracking/outliner.cpp
+        session_components/file_tracking/status_glyph.cpp
+        session_components/file_tracking/stop_reason_strip.cpp
+        session_components/file_tracking/sync_progress_block.cpp
+        session_components/file_tracking/tracker_client.cpp
+        session_components/file_tracking/tracking_model.cpp
+        session_components/file_tracking/tracking_store.cpp
+        session_components/file_tracking/translated_texts.cpp
+        session_components/file_tracking/watch_detail.cpp
+        session_components/file_tracking/watch_header.cpp
+        session_components/file_tracking/watch_row.cpp
         session_components/session_options.cpp
         session_components/operation_queue.cpp
         session_components/local_operation_router.cpp
@@ -157,7 +177,6 @@ target_sources(
         terminal/file_engine.cpp
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
-        components/progress_bar.cpp
         components/code_editor.cpp
         onboarding/onboarding.cpp
         file_explorer/side_model.cpp
@@ -281,6 +300,10 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/local_shell_tab.css"
         "${CMAKE_SOURCE_DIR}/static/styles/terminal_toolbar.css"
         "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_panel.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_outliner.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_detail.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/file_tracking_tabs.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/dock_tab_attention.css"
         "${CMAKE_SOURCE_DIR}/static/styles/command_history_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/command_snippets_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/code_editor.css"
@@ -330,8 +353,16 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tag_box.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/collapsible_section.css"
         "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/checkbox.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/progress_bar.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/progress_ring.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/badge.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/tab_strip.css"
+        "${CMAKE_SOURCE_DIR}/dependencies/5cript-nui-components/styles/list_row.css"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_history.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/command_snippets.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panels/file_tracking.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panels/badge_tab_renderer.ts"
+        "${CMAKE_SOURCE_DIR}/static/source/content_panel.ts"
         "${CMAKE_SOURCE_DIR}/static/source/code_editor.ts"
 )
 

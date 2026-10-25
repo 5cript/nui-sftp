@@ -5,6 +5,7 @@
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/remote_delete_guard.hpp>
 #include <backend/sync/sync_session.hpp>
+#include <log/toast.hpp>
 #include <persistence/state/state.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/rpc.hpp>
@@ -15,7 +16,9 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
+#include <shared_data/file_operations/transfer_progress.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/sync/diff.hpp>
@@ -35,6 +38,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <atomic>
 
 class OperationQueue
@@ -47,6 +51,9 @@ class OperationQueue
     using Error = SharedData::OperationErrorType;
     using OperationCompleted = SharedData::OperationCompleted;
     using CompletionReason = SharedData::OperationCompletionReason;
+    /** @brief What the frontend hears of a running transfer: a single file's, or a bulk's or directory's. */
+    using OperationProgress = std::variant<SharedData::TransferProgress, SharedData::BulkProgress>;
+    using ProgressObserver = std::function<void(OperationProgress const&)>;
 
   public:
     OperationQueue(
@@ -141,6 +148,8 @@ class OperationQueue
      * @param adoptPartialOf The destination of a cancelled upload of the file under its old name, whose temporary
      *        file this one continues, see UploadOperation::UploadOperationOptions::adoptPartialOf. A directory
      *        ignores it.
+     * @param failureToast Whether the errors logged when the upload is refused or fails are shown as toasts, see
+     *        UploadOperation::UploadOperationOptions::failureToast.
      */
     std::expected<void, Operation::Error> addUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -155,7 +164,8 @@ class OperationQueue
         bool sourceMayVanish = false,
         std::optional<SharedData::ComparedState> comparedDestination = std::nullopt,
         UploadOperation::OnSent onSent = {},
-        std::optional<Paths::RemotePath> adoptPartialOf = std::nullopt
+        std::optional<Paths::RemotePath> adoptPartialOf = std::nullopt,
+        Log::Toast failureToast = Log::Toast::Show
     );
 
     /**
@@ -254,6 +264,8 @@ class OperationQueue
      * @brief Upload analogue of @ref addBulkDownloadOperation.
      * @param sourceMayVanish Each entry may be gone by the time it is uploaded, see addUploadOperation.
      * @param onSent Hears of each regular file sent unchanged, see addUploadOperation.
+     * @param failureToast Whether the errors logged when an entry is refused or fails are shown as toasts, see
+     *        addUploadOperation.
      */
     std::size_t addBulkUploadOperation(
         SecureShell::SftpSession& sftp,
@@ -261,7 +273,8 @@ class OperationQueue
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
         Ids::OperationId const& bulkCardId,
         bool sourceMayVanish = false,
-        UploadOperation::OnSent const& onSent = {}
+        UploadOperation::OnSent const& onSent = {},
+        Log::Toast failureToast = Log::Toast::Show
     );
 
     /**
@@ -374,6 +387,12 @@ class OperationQueue
     void whenCompleted(Ids::OperationId const& operationId, std::function<void(OperationCompleted const&)> callback);
 
     /**
+     * @brief Calls @p observer on the strand with each progress of the operation @p operationId the frontend hears of,
+     *        until it completed. Must be called from the strand, before the operation starts.
+     */
+    void whenProgressing(Ids::OperationId const& operationId, ProgressObserver observer);
+
+    /**
      * @brief Keeps no resume backup of the operation @p operationId, a reconnect does not queue it again. For an owner
      *        that decides anew what goes to the server. Must be called from the strand.
      */
@@ -418,6 +437,11 @@ class OperationQueue
         -> std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>;
 
     auto makeBulkProgressCallback(std::string_view eventName, Ids::OperationId operationId) -> BulkProgressCallback;
+
+    /**
+     * @brief Remembers whether the failure of the queued operation @p operationId is logged with a toast.
+     */
+    void rememberFailureToast(Ids::OperationId const& operationId, Log::Toast failureToast);
 
     /**
      * @brief Sends the delete progress of @p operationId (current item, items handled, items in all) to the frontend.
@@ -508,8 +532,12 @@ class OperationQueue
     std::function<void(OperationCompleted const&)> completionObserver_{};
     std::unordered_map<Ids::OperationId, std::function<void(OperationCompleted const&)>, Ids::IdHash>
         completionCallbacks_{};
+    /** @brief See whenProgressing(). */
+    std::unordered_map<Ids::OperationId, ProgressObserver, Ids::IdHash> progressObservers_{};
     /** @brief See leaveChangedDestinationsToOwner(). */
     std::unordered_set<Ids::OperationId, Ids::IdHash> changedDestinationsLeftToOwner_{};
+    /** @brief The operations whose failure is logged without a toast, see rememberFailureToast(). */
+    std::unordered_set<Ids::OperationId, Ids::IdHash> failuresWithoutToast_{};
     // Transfer slots handed out per queue tick.
     int parallelism_{1};
     // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.

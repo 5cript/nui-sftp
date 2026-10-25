@@ -6,6 +6,7 @@ import {
 } from '@lumino/widgets';
 import { ChannelId } from './ids.ts';
 import { PanelTitleKey, panelTitles } from './content_panels/panel_titles';
+import { FileTrackingAttention } from './content_panels/file_tracking';
 
 interface addPanelArguments {
     host: HTMLElement;
@@ -24,6 +25,8 @@ interface addPanelArguments {
     sessionOptionsDelete: () => any;
     fileTrackingFactory: () => HTMLElement;
     fileTrackingDelete: () => any;
+    /** Called when the user activates the File Tracking tab; optional. */
+    fileTrackingActivated?: () => any;
     commandHistoryFactory: () => HTMLElement;
     commandHistoryDelete: () => any;
     commandSnippetsFactory: () => HTMLElement;
@@ -45,6 +48,8 @@ interface addPanelArguments {
 class ContentPanelManager {
     private panels: Map<string, ContentPanel> = new Map();
     private lastAddRequest: { panelId: string; widget: TabBar<Widget> } | undefined;
+    /** File Tracking attention sent before its panel was added, applied by addPanel. */
+    private pendingFileTrackingAttention: Map<string, FileTrackingAttention> = new Map();
 
     addPanel(args: addPanelArguments): boolean {
         if (!args) {
@@ -85,6 +90,7 @@ class ContentPanelManager {
             sessionOptionsDelete: args.sessionOptionsDelete,
             fileTrackingFactory: args.fileTrackingFactory,
             fileTrackingDelete: args.fileTrackingDelete,
+            fileTrackingActivated: args.fileTrackingActivated,
             commandHistoryFactory: args.commandHistoryFactory,
             commandHistoryDelete: args.commandHistoryDelete,
             commandSnippetsFactory: args.commandSnippetsFactory,
@@ -130,10 +136,16 @@ class ContentPanelManager {
         }
 
         this.panels.set(panelId, panel);
+        const pendingAttention = this.pendingFileTrackingAttention.get(panelId);
+        if (pendingAttention !== undefined) {
+            this.pendingFileTrackingAttention.delete(panelId);
+            panel.setFileTrackingAttention({ ...pendingAttention, pulse: false });
+        }
         return true;
     }
 
     removePanel = (id: string) => {
+        this.pendingFileTrackingAttention.delete(id);
         const panel = this.panels.get(id);
         if (!panel) return;
         try {
@@ -197,6 +209,25 @@ class ContentPanelManager {
         for (const panel of this.panels.values())
             panel.relabel();
     }
+
+    /**
+     * Shows the File Tracking counts on a panel's dock tab and plays the glow when attention.pulse is set. Called by
+     * DockTabAttention. Attention sent before the panel exists is kept for addPanel, without the glow.
+     */
+    setFileTrackingAttention = (panelId: string, attention: FileTrackingAttention) => {
+        const panel = this.panels.get(panelId);
+        if (panel) {
+            panel.setFileTrackingAttention(attention);
+            return;
+        }
+        if (Number(attention.conflicts) > 0 || Number(attention.failed) > 0)
+            this.pendingFileTrackingAttention.set(panelId, attention);
+        else
+            this.pendingFileTrackingAttention.delete(panelId);
+    }
+
+    /** Brings the File Explorer tab of a panel to the front, for Reveal on Server. */
+    activateFileExplorer = (panelId: string): boolean => this.panels.get(panelId)?.activateFileExplorer() ?? false;
 
     renameTerminalById = (panelId: string, channelId: ChannelId, title: string) => {
         const panel = this.panels.get(panelId);

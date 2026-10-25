@@ -2,6 +2,8 @@
 
 #include <backend/file_tracking/file_states.hpp>
 #include <backend/file_tracking/temp_dir_instancing.hpp>
+#include <ids/ids.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/strand.hpp>
@@ -11,6 +13,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -65,7 +68,8 @@ namespace FileTracking
      * @brief Owns and tracks the TemporaryDirectoryInstance objects of every session.
      *
      * The manager also owns the dead-instance cleanup policy: the retention scan runs once at start (see
-     * scheduleStartupCleanup), the user's Clean Up removes every orphaned directory at once (removeOrphaned).
+     * scheduleStartupCleanup), the user removes orphaned directories all at once (removeOrphaned) or one at a time
+     * (removeOrphanedInstance).
      * Lives on its strand: every member must be called from it.
      */
     class TempDirInstanceManager
@@ -152,6 +156,26 @@ namespace FileTracking
         int removeOrphaned();
 
         /**
+         * @brief The instance directories below the root that no live process holds, with what they hold and where
+         *        it came from, sorted by instance id. The orphan test is the one of countOrphaned(). An instance that
+         *        holds nothing has an empty name and no copy path. Scanned once, then kept up to date with what this
+         *        manager changes, see rescanOrphaned().
+         */
+        std::vector<SharedData::OrphanedCopy> listOrphaned() const;
+
+        /**
+         * @brief Scans the orphans anew on the next listOrphaned(), for what other processes changed meanwhile.
+         */
+        void rescanOrphaned();
+
+        /**
+         * @brief Removes the directory of the orphaned instance @p instanceId with everything in it.
+         * @return An error when @p instanceId is no plain directory name, names no directory below the root, the
+         *         directory is no orphan (see listOrphaned()) or it cannot be removed.
+         */
+        std::expected<void, std::string> removeOrphanedInstance(Ids::InstanceId const& instanceId);
+
+        /**
          * @brief Look up an instance by ID.
          *
          * @param instanceId ID to search for.
@@ -180,9 +204,19 @@ namespace FileTracking
         void manualCleanup();
 
       private:
+        std::vector<SharedData::OrphanedCopy> scanOrphaned() const;
+
+        /**
+         * @brief Adds the instance directory @p directory to the kept orphans when it is one now.
+         */
+        void rememberIfOrphaned(std::filesystem::path const& directory);
+
+      private:
         boost::asio::strand<boost::asio::any_io_executor> strand_;
         std::filesystem::path tempRootDir_;
         std::chrono::hours deadInstanceRetentionHours_;
         std::map<std::string, std::unique_ptr<TemporaryDirectoryInstance>> instances_;
+        /** @brief What listOrphaned() found, nothing until it scans. */
+        mutable std::optional<std::vector<SharedData::OrphanedCopy>> orphaned_{};
     };
 }

@@ -540,7 +540,8 @@ namespace Test
              result.value() != LocalScanOperation::WorkStatus::Complete;
              ++iteration)
             result = operation.work();
-        EXPECT_FALSE(result.has_value());
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().localProblem, SharedData::LocalFileProblem::PermissionDenied);
     }
 
     TEST_F(LocalScanOperationTests, BuildTreeKeepsFifoAsExcludedPlaceholder)

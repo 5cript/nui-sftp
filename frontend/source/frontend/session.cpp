@@ -162,7 +162,10 @@ struct Session::Implementation
         , operationQueue{this->stateHolder, this->events, this->persistenceName, this->engineOptions.queueOptions.value(), this->confirmDialog, &fileExplorerPanel.localSideModel(), fileExplorerPanel.remoteSideModel()}
         , frontendSessionManager{}
         , sessionOptions{params.stateHolder, params.events, this->persistenceName, this->sessionLayoutId, params.confirmDialog}
-        , fileTrackingPanel{params.confirmDialog}
+        , fileTrackingPanel{FileTrackingPanel::Params{
+              .confirmDialog = params.confirmDialog,
+              .sessionLayoutId = this->sessionLayoutId,
+          }}
         , commandHistoryPanel{
               params.commandStoreClient,
               params.events,
@@ -207,6 +210,21 @@ struct Session::Implementation
         );
 
         fileExplorerPanel.dropLayoutMetadata(sessionLayoutId);
+
+        fileTrackingPanel.setRevealOnServer(
+            [this](Paths::RemotePath const& path)
+            {
+                auto* const side = fileExplorerPanel.remoteFileGridSide();
+                if (side == nullptr)
+                    return;
+                Nui::val::global("contentPanelManager").call<bool>("activateFileExplorer", sessionLayoutId);
+                const auto parent = path.parent();
+                const auto name = path.filename();
+                if (!parent || !name)
+                    return side->path(path.value());
+                side->navigateAndSelect(parent->value(), name->value());
+            }
+        );
     }
 
     /**

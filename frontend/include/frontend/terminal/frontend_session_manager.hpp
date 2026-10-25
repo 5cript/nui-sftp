@@ -68,8 +68,9 @@ class FrontendSessionManager
      * disposing itself and calls @p onOpen(false, reason).
      *
      * @param onOpen  Completion callback — (success, info).
+     * @param failureToast Whether the errors logged when it fails are shown as toasts, see TerminalEngine::open.
      */
-    void open(std::function<void(bool, std::string const&)> onOpen);
+    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast = Log::Toast::Show);
 
     /**
      * @brief Creates a new primary-engine channel and binds an xterm.js terminal to it.

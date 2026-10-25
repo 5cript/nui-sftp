@@ -2,6 +2,7 @@
 
 #include <log/level.hpp>
 #include <log/def.hpp>
+#include <log/toast.hpp>
 
 #ifdef __EMSCRIPTEN__
 #    include <log/logger_frontend.hpp>
@@ -32,11 +33,12 @@ namespace Log
      *
      * @tparam Args Format template arguments.
      * @param level Log level.
+     * @param toast Whether the frontend's log hooks see it, which show errors as toasts.
      * @param fmt Format string.
      * @param args Format string arguments.
      */
     template <typename... Args>
-    void log(Log::Level level, std::string_view fmt, Args&&... args)
+    void log(Log::Level level, Log::Toast toast, std::string_view fmt, Args&&... args)
     {
 #ifdef __EMSCRIPTEN__
         const auto callable = Nui::RpcClient::getRemoteCallable("log");
@@ -44,10 +46,24 @@ namespace Log
             callable(static_cast<int>(level), Logger::format(fmt, std::forward<Args>(args)...));
 
         if (Detail::logger)
-            Detail::logger->log(level, fmt, std::forward<Args>(args)...);
+            Detail::logger->log(level, toast, fmt, std::forward<Args>(args)...);
 #else
-        Detail::logger.log(level, fmt, std::forward<Args>(args)...);
+        Detail::logger.log(level, toast, fmt, std::forward<Args>(args)...);
 #endif
+    }
+
+    /**
+     * @brief Log a message, shown as a toast when it is an error.
+     *
+     * @tparam Args Format template arguments.
+     * @param level Log level.
+     * @param fmt Format string.
+     * @param args Format string arguments.
+     */
+    template <typename... Args>
+    void log(Log::Level level, std::string_view fmt, Args&&... args)
+    {
+        log(level, Log::Toast::Show, fmt, std::forward<Args>(args)...);
     }
 
 #ifndef __EMSCRIPTEN__
@@ -131,6 +147,15 @@ namespace Log
     }
 
     /**
+     * @brief Convenience function to log at warn level, @p toast decides whether the log hooks see it.
+     */
+    template <typename... Args>
+    inline void warn(Log::Toast toast, std::string_view fmt, Args&&... args)
+    {
+        return log(Log::Level::Warning, toast, std::move(fmt), std::forward<Args>(args)...);
+    }
+
+    /**
      * @brief Convenience function to log at error level.
      */
     template <typename... Args>
@@ -140,11 +165,29 @@ namespace Log
     }
 
     /**
+     * @brief Convenience function to log at error level, @p toast decides whether the log hooks see it.
+     */
+    template <typename... Args>
+    inline void error(Log::Toast toast, std::string_view fmt, Args&&... args)
+    {
+        return log(Log::Level::Error, toast, std::move(fmt), std::forward<Args>(args)...);
+    }
+
+    /**
      * @brief Convenience function to log at critical level.
      */
     template <typename... Args>
     inline void critical(std::string_view fmt, Args&&... args)
     {
         return log(Log::Level::Critical, std::move(fmt), std::forward<Args>(args)...);
+    }
+
+    /**
+     * @brief Convenience function to log at critical level, @p toast decides whether the log hooks see it.
+     */
+    template <typename... Args>
+    inline void critical(Log::Toast toast, std::string_view fmt, Args&&... args)
+    {
+        return log(Log::Level::Critical, toast, std::move(fmt), std::forward<Args>(args)...);
     }
 }

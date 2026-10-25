@@ -1,4 +1,5 @@
 #include <backend/sftp/compared_state_check.hpp>
+#include <backend/sftp/local_file_problem.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
@@ -37,6 +38,7 @@ LocalScanOperation::LocalScanOperation(ScanOperationOptions options)
     , ignoreHidden_{options.ignoreHidden}
     , buildTree_{options.buildTree}
     , excludedSuffixes_{std::move(options.excludedSuffixes)}
+    , failureToast_{options.failureToast}
 {}
 
 LocalScanOperation::~LocalScanOperation() = default;
@@ -91,12 +93,17 @@ LocalScanOperation::scanner(Paths::RelativePath const& relative)
         const auto failed = [this, &entry](std::error_code const& error)
         {
             Log::error(
+                failureToast_,
                 "LocalScanOperation: Cannot inspect '{}': {}",
                 Paths::nativeToUtf8(entry.path()),
                 Utility::errorMessage(error)
             );
             return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-                {.type = ErrorType::FilesystemError, .extraInfo = Utility::errorMessage(error)}
+                {
+                    .type = ErrorType::FilesystemError,
+                    .extraInfo = Utility::errorMessage(error),
+                    .localProblem = localFileProblemOf(error),
+                }
             );
         };
         std::error_code statusError{};
@@ -233,10 +240,17 @@ LocalScanOperation::listingFailed(
         );
     }
     Log::error(
-        "LocalScanOperation: Failed to list '{}': {}", Paths::nativeToUtf8(path), Utility::errorMessage(errorCode)
+        failureToast_,
+        "LocalScanOperation: Failed to list '{}': {}",
+        Paths::nativeToUtf8(path),
+        Utility::errorMessage(errorCode)
     );
     return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-        {.type = ErrorType::FilesystemError, .extraInfo = Utility::errorMessage(errorCode)}
+        {
+            .type = ErrorType::FilesystemError,
+            .extraInfo = Utility::errorMessage(errorCode),
+            .localProblem = localFileProblemOf(errorCode),
+        }
     );
 }
 
@@ -269,7 +283,7 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
         {
             if (localPath_.empty())
             {
-                Log::error("LocalScanOperation: No root to scan.");
+                Log::error(failureToast_, "LocalScanOperation: No root to scan.");
                 return enterErrorState<WorkStatus>(
                     {.type = ErrorType::ImplementationError, .extraInfo = "The scan has no root."}
                 );
@@ -294,7 +308,9 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
                 auto result = walker.walk();
                 if (!result.has_value())
                 {
-                    Log::error("LocalScanOperation: Failed to scan directory: {}", result.error().toString());
+                    Log::error(
+                        failureToast_, "LocalScanOperation: Failed to scan directory: {}", result.error().toString()
+                    );
                     return enterErrorState<WorkStatus>(result.error());
                 }
                 // -1, because the walker includes the base/root dir of the search:
@@ -308,7 +324,7 @@ std::expected<LocalScanOperation::WorkStatus, LocalScanOperation::Error> LocalSc
         case (Prepared):
         case (Preparing):
         case (Finalizing):
-            Log::error("LocalScanOperation: Invalid state: {}", static_cast<int>(state_));
+            Log::error(failureToast_, "LocalScanOperation: Invalid state: {}", static_cast<int>(state_));
             return enterErrorState<WorkStatus>({.type = ErrorType::InvalidOperationState});
         case (Completed):
         {

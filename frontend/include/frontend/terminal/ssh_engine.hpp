@@ -24,7 +24,11 @@ class SshTerminalEngine : public TerminalEngine
     SshTerminalEngine(Settings settings);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(SshTerminalEngine);
 
-    void open(std::function<void(bool, std::string const&)> onOpen) override;
+    /**
+     * @brief Connects to the server, see TerminalEngine::open. The backend logs its connect errors with
+     *        @p failureToast too.
+     */
+    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) override;
 
     /**
      * @brief Spawns an SSH shell channel. @p options is unused — SSH reads

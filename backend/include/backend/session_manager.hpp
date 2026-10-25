@@ -7,6 +7,7 @@
 #include <backend/password/password_provider.hpp>
 #include <backend/password/password_request.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <log/toast.hpp>
 #include <persistence/state/file_tracking_options.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state_holder.hpp>
@@ -64,8 +65,13 @@ class SessionManager
 
     void addPasswordProvider(int priority, PasswordProvider* provider);
     void joinSessionAdder();
+    /**
+     * @brief Connects a new session with @p sessionOptions, @p onComplete hears its id or why it failed.
+     * @param failureToast Whether the error logged when it fails is shown as a toast.
+     */
     void addSession(
         Persistence::SshSessionOptions const& sessionOptions,
+        Log::Toast failureToast,
         std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)>
             onComplete
     );

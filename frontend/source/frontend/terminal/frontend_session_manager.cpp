@@ -123,7 +123,7 @@ FrontendSessionManager::FrontendSessionManager(
         impl_->auxLocalShellEngine = std::make_unique<ExecutingTerminalEngine>(
             ExecutingTerminalEngine::Settings{.onProcessChange = {}}
         );
-        impl_->auxLocalShellEngine->open([](bool, std::string const&) {});
+        impl_->auxLocalShellEngine->open([](bool, std::string const&) {}, Log::Toast::Show);
     }
 }
 
@@ -378,7 +378,7 @@ void FrontendSessionManager::createLocalShellChannel(
         impl_->auxLocalShellEngine = std::make_unique<ExecutingTerminalEngine>(
             ExecutingTerminalEngine::Settings{.onProcessChange = onProcessChange}
         );
-        impl_->auxLocalShellEngine->open([](bool, std::string const&) {});
+        impl_->auxLocalShellEngine->open([](bool, std::string const&) {}, Log::Toast::Show);
     }
     else
     {
@@ -670,18 +670,18 @@ bool FrontendSessionManager::sendToLastInteracted(std::string const& data, bool 
     return true;
 }
 
-void FrontendSessionManager::open(std::function<void(bool, std::string const&)> onOpen)
+void FrontendSessionManager::open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast)
 {
     if (guardDisposal())
         return;
 
     Log::info("Opening session");
     impl_->primaryEngine->open(
-        [this, onOpen = std::move(onOpen)](bool success, std::string const& info)
+        [this, onOpen = std::move(onOpen), failureToast](bool success, std::string const& info)
         {
             if (!success)
             {
-                Log::error("Failed to open session: '{}'", info);
+                Log::error(failureToast, "Failed to open session: '{}'", info);
                 dispose(
                     [onOpen, info]()
                     {
@@ -691,7 +691,8 @@ void FrontendSessionManager::open(std::function<void(bool, std::string const&)> 
                 return;
             }
             onOpen(true, info);
-        }
+        },
+        failureToast
     );
 }
 

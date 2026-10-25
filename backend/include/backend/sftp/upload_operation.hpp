@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <log/toast.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
@@ -95,6 +96,11 @@ class UploadOperation : public Operation
          *        becomes this upload's before it is continued, see tryContinue. Unless this upload has one already.
          */
         std::optional<Paths::RemotePath> adoptPartialOf{};
+        /**
+         * @brief Whether the errors this upload logs when it fails are shown as toasts. Skipped for an owner that
+         *        lists the failures itself, see FileTracking::Tracker.
+         */
+        Log::Toast failureToast{Log::Toast::Show};
     };
 
     SecureShell::ProcessingStrand* strand() const override;
@@ -254,6 +260,8 @@ class UploadOperation : public Operation
     /** @brief Lets others rename or delete the file while it uploads, which a std::ifstream refuses on Windows. */
     Utility::SharedInputFileStream localFile_;
     bool isSymlink_{false};
+    /** @brief Why the transfer could not read the local file, the error its next work step fails with. */
+    std::optional<Error> readFailure_{};
     /** @brief The state of the source right before it was opened, nothing when it could not be read. */
     std::optional<SentSource> sourceBeforeOpening_{};
     /** @brief The upload continued a temp file an earlier one left, whose content is not known to be the source's. */

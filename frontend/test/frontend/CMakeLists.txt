@@ -3,6 +3,8 @@ include(GoogleTest)
 add_executable(
     nui-sftp-frontend-test
     main.cpp
+    "${CMAKE_SOURCE_DIR}/frontend/source/frontend/session_components/file_tracking/file_tracking_texts.cpp"
+    "${CMAKE_SOURCE_DIR}/frontend/source/frontend/session_components/file_tracking/tracking_model.cpp"
 )
 
 target_include_directories(

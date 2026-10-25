@@ -3,6 +3,7 @@
 #include <ids/ids.hpp>
 #include <frontend/terminal/channel_interface.hpp>
 #include <frontend/terminal/channel_creation_options.hpp>
+#include <log/toast.hpp>
 
 #include <string>
 #include <functional>
@@ -10,7 +11,11 @@
 class TerminalEngine
 {
   public:
-    virtual void open(std::function<void(bool, std::string const&)> onOpen) = 0;
+    /**
+     * @brief Opens the engine, @p onOpen hears whether it succeeded.
+     * @param failureToast Whether the errors logged when it fails are shown as toasts.
+     */
+    virtual void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) = 0;
     virtual std::string engineName() const = 0;
     virtual void dispose(std::function<void()> onDisposeComplete) = 0;
 

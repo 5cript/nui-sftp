@@ -51,7 +51,7 @@ class ExecutingTerminalEngine : public TerminalEngine
     ROAR_PIMPL_SPECIAL_FUNCTIONS(ExecutingTerminalEngine);
 
     /** @brief Signals success immediately — local processes need no prior connection. */
-    void open(std::function<void(bool, std::string const&)> onOpen) override;
+    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) override;
     void dispose(std::function<void()> onDisposeComplete) override;
 
     /** @brief Returns the engine-level identifier (not a process UUID). */

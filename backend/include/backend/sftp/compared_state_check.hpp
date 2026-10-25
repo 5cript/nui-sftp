@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <log/toast.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
 #include <ssh/sftp_session.hpp>
@@ -67,6 +68,7 @@ namespace ComparedStateCheck
     /**
      * @brief SftpSession::moveIntoPlaceInStrand of a finished remote transfer, once
      *        @ref requireUnchangedRemoteInStrand passed for @p to.
+     * @param failureToast Whether the error logged when the move fails is shown as a toast.
      */
     std::expected<void, Operation::Error> moveRemoteIntoPlaceInStrand(
         SecureShell::SftpSession& sftp,
@@ -75,6 +77,7 @@ namespace ComparedStateCheck
         bool replace,
         std::string const& asideSuffix,
         SharedData::FileType sourceType,
-        std::optional<SharedData::ComparedState> const& compared
+        std::optional<SharedData::ComparedState> const& compared,
+        Log::Toast failureToast
     );
 }

@@ -8,6 +8,7 @@
 #include "nui_env.hpp"
 #include "real_server_tests.hpp"
 
+#include <log/log.hpp>
 #include <nui/utility/scope_exit.hpp>
 #include <paths/native.hpp>
 #include <utility/permissions.hpp>
@@ -18,14 +19,21 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <future>
+#include <iterator>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 #ifndef _WIN32
@@ -336,6 +344,133 @@ namespace Test
             );
         }
 
+        /**
+         * @brief What the observer of the progress of one operation heard, on the strand.
+         */
+        struct HeardProgress
+        {
+            std::vector<OperationQueue::OperationProgress> progress{};
+            bool completed{false};
+            std::size_t afterCompletion{0};
+        };
+
+        /**
+         * @brief Observes the progress and the end of @p operationId. Call on the strand, before it starts.
+         * @param onProgress Also hears each progress, after it was recorded.
+         */
+        std::shared_ptr<HeardProgress> observeProgress(
+            Ids::OperationId const& operationId,
+            std::function<void(OperationQueue::OperationProgress const&)> onProgress = {}
+        )
+        {
+            auto heard = std::make_shared<HeardProgress>();
+            queue_->whenProgressing(
+                operationId,
+                [heard, onProgress = std::move(onProgress)](OperationQueue::OperationProgress const& progress)
+                {
+                    if (heard->completed)
+                        ++heard->afterCompletion;
+                    heard->progress.push_back(progress);
+                    if (onProgress)
+                        onProgress(progress);
+                }
+            );
+            queue_->whenCompleted(
+                operationId,
+                [heard](SharedData::OperationCompleted const&)
+                {
+                    heard->completed = true;
+                }
+            );
+            return heard;
+        }
+
+        /**
+         * @brief A copy of @p heard taken on the strand, after a few more cycles of the queue that let progress still
+         *        on its way arrive.
+         */
+        HeardProgress heardAfterSettling(std::shared_ptr<HeardProgress> const& heard)
+        {
+            for (auto cycle = 0u; cycle < 5u; ++cycle)
+            {
+                runOnStrand(
+                    [this]()
+                    {
+                        return queue_->work();
+                    }
+                );
+                runOnStrand([]() {});
+            }
+            return runOnStrand(
+                [&heard]()
+                {
+                    return *heard;
+                }
+            );
+        }
+
+        /**
+         * @brief The progress in @p heard of the kind @p ProgressT, failing for any of another kind.
+         */
+        template <typename ProgressT>
+        static std::vector<ProgressT> heardAs(HeardProgress const& heard)
+        {
+            std::vector<ProgressT> progress;
+            for (auto const& each : heard.progress)
+            {
+                auto const* typed = std::get_if<ProgressT>(&each);
+                EXPECT_NE(typed, nullptr) << "progress of another kind";
+                if (typed)
+                    progress.push_back(*typed);
+            }
+            return progress;
+        }
+
+        /**
+         * @brief Expects @p progress of one file to rise from below @p totalBytes to it, reported for @p operationId.
+         */
+        static void expectRisingTo(
+            std::vector<SharedData::TransferProgress> const& progress,
+            Ids::OperationId const& operationId,
+            std::uint64_t totalBytes
+        )
+        {
+            ASSERT_GE(progress.size(), 2u);
+            EXPECT_TRUE(std::ranges::is_sorted(progress, {}, &SharedData::TransferProgress::current));
+            EXPECT_LT(progress.front().current, totalBytes);
+            EXPECT_EQ(progress.back().current, totalBytes);
+            for (auto const& each : progress)
+            {
+                EXPECT_EQ(each.operationId, operationId);
+                EXPECT_EQ(each.max, totalBytes);
+            }
+        }
+
+        /**
+         * @brief Expects @p progress of a bulk to rise to @p entryCount entries of @p totalBytes, reported for
+         *        @p operationId.
+         */
+        static void expectRisingTo(
+            std::vector<SharedData::BulkProgress> const& progress,
+            Ids::OperationId const& operationId,
+            std::uint64_t entryCount,
+            std::uint64_t totalBytes
+        )
+        {
+            ASSERT_GE(progress.size(), 2u);
+            EXPECT_TRUE(std::ranges::is_sorted(progress, {}, &SharedData::BulkProgress::bytesCurrent));
+            EXPECT_TRUE(std::ranges::is_sorted(progress, {}, &SharedData::BulkProgress::fileCurrentIndex));
+            EXPECT_LT(progress.front().bytesCurrent, totalBytes);
+            EXPECT_EQ(progress.back().bytesCurrent, totalBytes);
+            EXPECT_EQ(progress.back().fileCurrentIndex, entryCount);
+            for (auto const& each : progress)
+            {
+                EXPECT_EQ(each.operationId, operationId);
+                EXPECT_EQ(each.bytesTotal, totalBytes);
+                EXPECT_EQ(each.fileCount, entryCount);
+            }
+        }
+
       protected:
         boost::asio::thread_pool queuePool_{2};
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand_{
@@ -555,6 +690,132 @@ namespace Test
     }
 
 #ifndef _WIN32
+    /**
+     * @brief The messages at error level or above logged since the logger kept @p stashedBefore messages for the
+     *        frontend.
+     */
+    inline std::vector<Log::Logger::StashedMessage> errorsStashedSince(std::size_t stashedBefore)
+    {
+        const auto stashed = Log::Detail::logger.stashed();
+        std::vector<Log::Logger::StashedMessage> errors;
+        std::ranges::copy_if(
+            stashed | std::views::drop(stashedBefore),
+            std::back_inserter(errors),
+            [](Log::Logger::StashedMessage const& message)
+            {
+                return message.level >= Log::Level::Error;
+            }
+        );
+        return errors;
+    }
+
+    TEST_F(OperationQueueTests, AnUploadWhoseOwnerListsItsFailuresLogsThemWithoutAToast)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can read any file";
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto file = localDirectory_.path() / "unreadable.txt";
+        std::ofstream{file} << "unreadable";
+        std::filesystem::permissions(file, std::filesystem::perms::none);
+        const auto stashedBefore = Log::Detail::logger.stashed().size();
+        const auto added = runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp,
+                    Ids::generateOperationId(),
+                    toLocal(file),
+                    remote("/home/test/unreadable.txt"),
+                    true,
+                    false,
+                    false,
+                    false,
+                    SharedData::OperationMode::Queued,
+                    false,
+                    std::nullopt,
+                    {},
+                    std::nullopt,
+                    Log::Toast::Skip
+                );
+            }
+        );
+        ASSERT_TRUE(added.has_value()) << added.error().toString();
+        setPaused(false);
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Failed);
+        // Still logged, only without the toast.
+        EXPECT_GT(errors.mentioning("unreadable.txt"), 0u);
+        const auto logged = errorsStashedSince(stashedBefore);
+        EXPECT_FALSE(logged.empty());
+        for (auto const& message : logged)
+            EXPECT_EQ(message.toast, Log::Toast::Skip) << message.message;
+    }
+
+    TEST_F(OperationQueueTests, ABulkUploadWhoseOwnerListsItsFailuresLogsThemWithoutAToast)
+    {
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "root can read any file";
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const ErrorLogCapture errors;
+
+        const auto localPath = localDirectory_.path() / "partlyUnreadable";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "kept.txt"} << "kept";
+        std::ofstream{localPath / "unreadable.txt"} << "unreadable";
+        std::filesystem::permissions(localPath / "unreadable.txt", std::filesystem::perms::none);
+        const SharedData::BulkUploadRequest request{
+            .entries =
+                {
+                    {.source = toLocal(localPath / "kept.txt"),
+                        .destination = remote("/home/test/partlyUnreadable/kept.txt"),
+                        .sizeBytes = 4},
+                    {.source = toLocal(localPath / "unreadable.txt"),
+                        .destination = remote("/home/test/partlyUnreadable/unreadable.txt"),
+                        .sizeBytes = 10},
+                },
+            .allowOverwrite = true,
+        };
+        const auto stashedBefore = Log::Detail::logger.stashed().size();
+        runOnStrand(
+            [&]()
+            {
+                return queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    Ids::generateOperationId(),
+                    /*sourceMayVanish=*/true,
+                    {},
+                    Log::Toast::Skip
+                );
+            }
+        );
+        setPaused(false);
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().failedEntries.size(), 1u);
+        EXPECT_EQ(remoteNames(*sftp, "/home/test/partlyUnreadable"), std::set<std::string>{"kept.txt"});
+        EXPECT_GT(errors.mentioning("unreadable.txt"), 0u);
+        const auto logged = errorsStashedSince(stashedBefore);
+        EXPECT_FALSE(logged.empty());
+        for (auto const& message : logged)
+            EXPECT_EQ(message.toast, Log::Toast::Skip) << message.message;
+    }
+
     TEST_F(OperationQueueTests, DirectoryUploadReportsAnUnreadableSubdirectory)
     {
         if (::geteuid() == 0)
@@ -1269,6 +1530,258 @@ namespace Test
         ASSERT_EQ(called.size(), 1u);
         EXPECT_EQ(called.front().operationId, blocked);
         EXPECT_EQ(called.front().reason, SharedData::OperationCompletionReason::Failed);
+    }
+
+    TEST_F(OperationQueueTests, ASingleUploadTellsItsObserverHowFarItGotUntilItsEnd)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        // Above the big-file cutoff, so it reports before its last byte went too.
+        const auto localFile = localDirectory_.path() / "observed.bin";
+        const auto size = 64u * 1024u;
+        std::ofstream{localFile, std::ios::binary} << std::string(size, 'x');
+        const auto upload = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp, upload, toLocal(localFile), remote("/home/test/observed.bin"), false, false, false, false
+                );
+            }
+        ).has_value());
+        const auto observed = runOnStrand(
+            [&]()
+            {
+                return observeProgress(upload);
+            }
+        );
+
+        workUntilCompletions(1);
+        const auto heard = heardAfterSettling(observed);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(heard.completed);
+        EXPECT_EQ(heard.afterCompletion, 0u);
+        expectRisingTo(heardAs<SharedData::TransferProgress>(heard), upload, size);
+    }
+
+    TEST_F(OperationQueueTests, ASingleDownloadTellsItsObserverHowFarItGotUntilItsEnd)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        // The fixture above the big-file cutoff.
+        const auto size = 65536u;
+        const auto download = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addDownloadOperation(
+                    *sftp,
+                    download,
+                    toLocal(localDirectory_.path() / "large.txt"),
+                    remote("/home/test/large.txt"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        ).has_value());
+        const auto observed = runOnStrand(
+            [&]()
+            {
+                return observeProgress(download);
+            }
+        );
+
+        workUntilCompletions(1);
+        const auto heard = heardAfterSettling(observed);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(heard.afterCompletion, 0u);
+        expectRisingTo(heardAs<SharedData::TransferProgress>(heard), download, size);
+    }
+
+    TEST_F(OperationQueueTests, ADirectoryUploadTellsItsObserverHowFarItGotUntilItsEnd)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "observedDirectory";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "a.txt"} << "a";
+        std::ofstream{localPath / "b.txt"} << "bb";
+        const auto upload = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp,
+                    upload,
+                    toLocal(localPath),
+                    remote("/home/test/observedDirectory"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        ).has_value());
+        const auto observed = runOnStrand(
+            [&]()
+            {
+                return observeProgress(upload);
+            }
+        );
+
+        workUntilCompletions(1);
+        const auto heard = heardAfterSettling(observed);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(heard.completed);
+        EXPECT_EQ(heard.afterCompletion, 0u);
+        expectRisingTo(heardAs<SharedData::BulkProgress>(heard), upload, 2u, 3u);
+    }
+
+    TEST_F(OperationQueueTests, ABulkUploadTellsTheObserverOfItsCardHowFarItGotUntilItsEnd)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "observedBulk";
+        std::filesystem::create_directories(localPath);
+        std::ofstream{localPath / "a.txt"} << "a";
+        std::ofstream{localPath / "b.txt"} << "bb";
+        const SharedData::BulkUploadRequest request{
+            .entries = {
+                {.source = toLocal(localPath / "a.txt"), .destination = remote("/home/test/bulkA.txt"), .sizeBytes = 1},
+                {.source = toLocal(localPath / "b.txt"), .destination = remote("/home/test/bulkB.txt"), .sizeBytes = 2},
+            },
+        };
+        const auto card = Ids::generateOperationId();
+        const auto observed = runOnStrand(
+            [&]()
+            {
+                queue->addBulkUploadOperation(
+                    *sftp,
+                    request,
+                    [](std::size_t)
+                    {
+                        return Ids::generateOperationId();
+                    },
+                    card
+                );
+                return observeProgress(card);
+            }
+        );
+
+        workUntilCompletions(1);
+        const auto heard = heardAfterSettling(observed);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(completions().front().failedEntries.empty());
+        EXPECT_TRUE(heard.completed);
+        EXPECT_EQ(heard.afterCompletion, 0u);
+        expectRisingTo(heardAs<SharedData::BulkProgress>(heard), card, 2u, 3u);
+    }
+
+    TEST_F(OperationQueueTests, AnObserverStoppingItsUploadHearsNothingAfterTheEnd)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localFile = localDirectory_.path() / "stopped.bin";
+        std::ofstream{localFile, std::ios::binary} << std::string(64u * 1024u, 'x');
+        const auto upload = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand(
+            [&]()
+            {
+                return queue->addUploadOperation(
+                    *sftp, upload, toLocal(localFile), remote("/home/test/stopped.bin"), false, false, false, false
+                );
+            }
+        ).has_value());
+        // Its end is handed on while the observer runs, which drops the observer from the queue.
+        const auto observed = runOnStrand(
+            [&]()
+            {
+                return observeProgress(
+                    upload,
+                    [weak = std::weak_ptr{queue}, upload](OperationQueue::OperationProgress const&)
+                    {
+                        if (const auto owner = weak.lock())
+                            owner->cancel(upload);
+                    }
+                );
+            }
+        );
+
+        workUntilCompletions(1);
+        const auto heard = heardAfterSettling(observed);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_TRUE(heard.completed);
+        EXPECT_EQ(heard.progress.size(), 1u);
+        EXPECT_EQ(heard.afterCompletion, 0u);
+    }
+
+    TEST_F(OperationQueueTests, AnObserverHearsTheProgressOfItsOwnOperationOnly)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        // The queue has two slots, so both run in the same batches.
+        const auto size = 64u * 1024u;
+        const std::vector<std::string> names{"first.bin", "second.bin"};
+        std::vector<Ids::OperationId> uploads;
+        for (auto const& name : names)
+        {
+            std::ofstream{localDirectory_.path() / name, std::ios::binary} << std::string(size, 'x');
+            uploads.push_back(Ids::generateOperationId());
+            ASSERT_TRUE(runOnStrand(
+                [&]()
+                {
+                    return queue->addUploadOperation(
+                        *sftp,
+                        uploads.back(),
+                        toLocal(localDirectory_.path() / name),
+                        remote(fmt::format("/home/test/{}", name)),
+                        false,
+                        false,
+                        false,
+                        false
+                    );
+                }
+            ).has_value());
+        }
+        const auto stranger = Ids::generateOperationId();
+        const auto [first, second, unrelated] = runOnStrand(
+            [&]()
+            {
+                return std::tuple{observeProgress(uploads[0]), observeProgress(uploads[1]), observeProgress(stranger)};
+            }
+        );
+
+        workUntilCompletions(2);
+        expectRisingTo(heardAs<SharedData::TransferProgress>(heardAfterSettling(first)), uploads[0], size);
+        expectRisingTo(heardAs<SharedData::TransferProgress>(heardAfterSettling(second)), uploads[1], size);
+        const auto heardByStranger = heardAfterSettling(unrelated);
+        EXPECT_TRUE(heardByStranger.progress.empty());
+        EXPECT_FALSE(heardByStranger.completed);
     }
 
     TEST_F(OperationQueueTests, AdoptedDirectoryDownloadKeepsItsCardId)

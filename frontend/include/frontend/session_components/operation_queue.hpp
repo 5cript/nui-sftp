@@ -23,7 +23,6 @@
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/sync/diff_snapshot.hpp>
 
-#include <frontend/components/progress_bar.hpp>
 #include <frontend/components/svg/play.hpp>
 #include <frontend/components/svg/pause.hpp>
 #include <frontend/components/svg/download.hpp>

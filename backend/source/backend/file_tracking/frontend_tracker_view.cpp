@@ -28,19 +28,34 @@ namespace FileTracking
         RpcHelper::callRemoteSafely(*hub_, eventName("onEntriesEnded"), ended);
     }
 
-    void FrontendTrackerView::ask(SharedData::ServerChangedQuestion const& question)
+    void FrontendTrackerView::showConflict(SharedData::WatchConflict const& conflict)
     {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onQuestion"), question);
+        RpcHelper::callRemoteSafely(*hub_, eventName("onConflict"), conflict);
     }
 
-    void FrontendTrackerView::showOrphanedCount(std::size_t count)
+    void FrontendTrackerView::removeConflicts(SharedData::RemovedConflicts const& removed)
     {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onOrphanedCount"), count);
+        RpcHelper::callRemoteSafely(*hub_, eventName("onConflictsRemoved"), removed);
     }
 
-    void FrontendTrackerView::showProgress(SharedData::TrackerProgress const& progress)
+    void FrontendTrackerView::showFailure(SharedData::UploadFailure const& failure)
     {
-        RpcHelper::callRemoteSafely(*hub_, eventName("onProgress"), progress);
+        RpcHelper::callRemoteSafely(*hub_, eventName("onFailure"), failure);
+    }
+
+    void FrontendTrackerView::removeFailures(SharedData::RemovedFailures const& removed)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onFailuresRemoved"), removed);
+    }
+
+    void FrontendTrackerView::showWatchProgress(SharedData::WatchProgress const& progress)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onWatchProgress"), progress);
+    }
+
+    void FrontendTrackerView::showOrphanedCopies(SharedData::OrphanedCopies const& copies)
+    {
+        RpcHelper::callRemoteSafely(*hub_, eventName("onOrphanedCopies"), copies);
     }
 
     std::string FrontendTrackerView::eventName(std::string_view event) const

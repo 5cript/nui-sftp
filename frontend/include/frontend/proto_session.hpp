@@ -2,6 +2,7 @@
 
 #include <frontend/session_snapshot.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
+#include <log/toast.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/ui_options.hpp>
 
@@ -52,6 +53,11 @@ class ProtoSession
         /// can be destroyed freely; its FSM has already begun disposal per
         /// FrontendSessionManager::open's contract.
         std::function<void(ProtoSession*, std::string const&)> onFailed{};
+        /**
+         * @brief Whether the errors logged when the probe fails are shown as toasts. A reconnect attempt that is
+         *        retried skips them, the lost-connection overlay shows the attempts.
+         */
+        Log::Toast failureToast{Log::Toast::Show};
     };
 
     explicit ProtoSession(Params params);

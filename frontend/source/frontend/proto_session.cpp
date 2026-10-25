@@ -14,6 +14,7 @@ struct ProtoSession::Implementation
     std::optional<SessionSnapshot> resumeFromSnapshot;
     std::function<void(ProtoSession*)> onReady;
     std::function<void(ProtoSession*, std::string const&)> onFailed;
+    Log::Toast failureToast;
 
     std::unique_ptr<FrontendSessionManager> frontendSessionManager;
     std::string engineNameCache;
@@ -25,6 +26,7 @@ struct ProtoSession::Implementation
         , resumeFromSnapshot{std::move(params.resumeFromSnapshot)}
         , onReady{std::move(params.onReady)}
         , onFailed{std::move(params.onFailed)}
+        , failureToast{params.failureToast}
     {}
 };
 
@@ -88,7 +90,8 @@ void ProtoSession::start()
             Log::warn("ProtoSession: transport open failed: {}", info);
             if (impl_->onFailed)
                 impl_->onFailed(this, info);
-        }
+        },
+        impl_->failureToast
     );
 }
 

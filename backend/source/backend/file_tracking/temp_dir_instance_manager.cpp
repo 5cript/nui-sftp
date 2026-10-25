@@ -13,10 +13,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace FileTracking
@@ -41,18 +44,33 @@ namespace FileTracking
         }
 
         /**
-         * @brief Whether @p dirPath is the directory of an instance that no live process holds: it is not one of
-         *        @p skipIds and has a lock file (in the bookkeeping directory or the legacy one) nobody holds.
+         * @brief Why @p dirPath is not the directory of an instance that no live process holds, nothing when it is
+         *        one: it is not one of @p skipIds and has a lock file (in the bookkeeping directory or the legacy
+         *        one) nobody holds.
          *
          * @param dirPath  Path to the candidate subdirectory.
          * @param skipIds  IDs of live instances that must not be touched.
          */
-        bool isOrphanedDir(std::filesystem::path const& dirPath, std::vector<std::string> const& skipIds)
+        std::optional<std::string_view>
+        notOrphanedBecause(std::filesystem::path const& dirPath, std::vector<std::string> const& skipIds)
         {
             if (std::ranges::contains(skipIds, Paths::nativeToUtf8(dirPath.filename())))
-                return false;
+                return "this run still uses it";
             const auto lock = existingLockFile(dirPath);
-            return lock && !InstanceLock::isLockedByAnother(*lock);
+            if (!lock)
+                return "it is no instance directory";
+            if (InstanceLock::isLockedByAnother(*lock))
+                return "a running instance holds it";
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Whether @p dirPath is the directory of an instance that no live process holds, see
+         *        notOrphanedBecause.
+         */
+        bool isOrphanedDir(std::filesystem::path const& dirPath, std::vector<std::string> const& skipIds)
+        {
+            return !notOrphanedBecause(dirPath, skipIds);
         }
 
         /**
@@ -170,6 +188,195 @@ namespace FileTracking
                 if (rmErr)
                     Log::warn("Failed to remove dead instance '{}': {}", dirName, Utility::errorMessage(rmErr));
             }
+        }
+
+        /**
+         * @brief @p name as a directory directly below a root: not empty, no separator, no root, not "." or "..".
+         */
+        std::expected<std::filesystem::path, std::string> plainChildName(std::string const& name)
+        {
+            if (name.empty())
+                return std::unexpected{std::string{"the instance id is empty"}};
+            const auto refused = std::unexpected{std::string{"the instance id is no plain directory name"}};
+            if (name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos ||
+                name.find('\0') != std::string::npos)
+                return refused;
+            const auto path = Paths::nativeFromUtf8(name);
+            if (path.has_root_path() || path != path.filename())
+                return refused;
+            return path;
+        }
+
+        /**
+         * @brief @p directory when it is a directory, not a link to one.
+         */
+        std::expected<std::filesystem::path, std::string> existingDirectory(std::filesystem::path const& directory)
+        {
+            std::error_code kindError;
+            const auto kind = Utility::noFollowKindOf(directory, kindError);
+            if (kindError)
+                return std::unexpected{Utility::errorMessage(kindError)};
+            if (kind == Utility::NoFollowKind::Missing)
+                return std::unexpected{std::string{"it does not exist"}};
+            if (kind != Utility::NoFollowKind::Directory)
+                return std::unexpected{std::string{"it is no directory"}};
+            return directory;
+        }
+
+        /**
+         * @brief The names directly in @p instanceDirectory that are its bookkeeping, not its content: the
+         *        bookkeeping directory, and the lock and metadata files of a legacy instance.
+         */
+        std::vector<std::filesystem::path> bookkeepingNamesOf(std::filesystem::path const& instanceDirectory)
+        {
+            std::vector<std::filesystem::path> names{std::filesystem::path{bookkeepingDirectoryName}};
+            const auto legacy = legacyBookkeepingPaths(instanceDirectory);
+            if (existingLockFile(instanceDirectory) == legacy.lock)
+            {
+                names.push_back(legacy.lock.filename());
+                names.push_back(legacy.metadata.filename());
+            }
+            return names;
+        }
+
+        /**
+         * @brief The entries directly in @p instanceDirectory that are content, sorted by name.
+         */
+        std::vector<std::filesystem::path> contentEntriesOf(
+            std::filesystem::path const& instanceDirectory,
+            std::vector<std::filesystem::path> const& bookkeepingNames
+        )
+        {
+            std::vector<std::filesystem::path> entries;
+            std::error_code walkError;
+            for (
+                std::filesystem::directory_iterator iter{instanceDirectory, walkError}, end; !walkError && iter != end;
+                iter.increment(walkError)
+            )
+            {
+                if (!std::ranges::contains(bookkeepingNames, iter->path().filename()))
+                    entries.push_back(iter->path());
+            }
+            std::ranges::sort(entries);
+            return entries;
+        }
+
+        /**
+         * @brief The bytes of the regular files below @p instanceDirectory, a canonical path, its bookkeeping left
+         *        out.
+         */
+        std::uint64_t contentSizeOf(
+            std::filesystem::path const& instanceDirectory,
+            std::vector<std::filesystem::path> const& bookkeepingNames
+        )
+        {
+            std::uint64_t size = 0u;
+            for (auto const& state : InstanceManagerDetail::fileStatesOf(instanceDirectory))
+            {
+                if (state.path.parent_path() != instanceDirectory ||
+                    !std::ranges::contains(bookkeepingNames, state.path.filename()))
+                    size += state.size;
+            }
+            return size;
+        }
+
+        /**
+         * @brief The metadata of @p instanceDirectory, nothing when it has none or it cannot be read.
+         */
+        std::optional<nlohmann::json> metadataOf(std::filesystem::path const& instanceDirectory)
+        {
+            auto meta = readMetadata(instanceDirectory);
+            if (!meta)
+            {
+                Log::warn(
+                    "listOrphaned: cannot read the metadata of '{}': {}",
+                    Paths::nativeToUtf8(instanceDirectory.filename()),
+                    meta.error()
+                );
+                return std::nullopt;
+            }
+            if (*meta && !(*meta)->is_object())
+                return std::nullopt;
+            return *std::move(meta);
+        }
+
+        /**
+         * @brief The seconds in the field @p key of @p meta, nothing when it holds none.
+         */
+        std::optional<std::uint64_t> secondsOf(std::optional<nlohmann::json> const& meta, std::string_view key)
+        {
+            if (!meta)
+                return std::nullopt;
+            const auto field = meta->find(key);
+            if (field == meta->end() || !field->is_number_integer() || field->get<std::int64_t>() < 0)
+                return std::nullopt;
+            return static_cast<std::uint64_t>(field->get<std::int64_t>());
+        }
+
+        /**
+         * @brief Where the copy in an instance came from, see TemporaryDirectoryInstance::recordOrigin. Nothing when
+         *        @p meta does not hold it.
+         */
+        std::optional<Paths::RemotePath> remotePathOf(std::optional<nlohmann::json> const& meta)
+        {
+            if (!meta)
+                return std::nullopt;
+            const auto field = meta->find("remotePath");
+            if (field == meta->end() || !field->is_string())
+                return std::nullopt;
+            auto remotePath = Paths::RemotePath::make(field->get<std::string>());
+            if (!remotePath)
+            {
+                Log::warn("listOrphaned: ignoring the recorded origin: {}", remotePath.error().toString());
+                return std::nullopt;
+            }
+            return *std::move(remotePath);
+        }
+
+        /**
+         * @brief @p path as a local path, nothing when there is none or it is no valid one.
+         */
+        std::optional<Paths::LocalPath> localPathOf(std::optional<std::filesystem::path> const& path)
+        {
+            if (!path)
+                return std::nullopt;
+            auto localPath = Paths::LocalPath::make(*path);
+            if (!localPath)
+            {
+                Log::warn("listOrphaned: leaving out a path: {}", localPath.error().toString());
+                return std::nullopt;
+            }
+            return *std::move(localPath);
+        }
+
+        /**
+         * @brief What the orphaned instance directory @p directory holds and where it came from, nothing when its
+         *        path is no valid local path.
+         */
+        std::optional<SharedData::OrphanedCopy> orphanedCopyOf(std::filesystem::path const& directory)
+        {
+            // Canonical like the paths of the copies the tracker shows.
+            std::error_code canonicalError;
+            const auto canonicalDirectory = std::filesystem::weakly_canonical(directory, canonicalError);
+            const auto instanceDirectory = canonicalError ? directory : canonicalDirectory;
+            auto localDirectory = localPathOf(instanceDirectory);
+            if (!localDirectory)
+                return std::nullopt;
+            const auto bookkeepingNames = bookkeepingNamesOf(instanceDirectory);
+            const auto content = contentEntriesOf(instanceDirectory, bookkeepingNames);
+            const auto firstEntry =
+                content.empty() ? std::optional<std::filesystem::path>{} : std::optional{content.front()};
+            const auto meta = metadataOf(instanceDirectory);
+            return SharedData::OrphanedCopy{
+                .instanceId = Ids::makeInstanceId(Paths::nativeToUtf8(instanceDirectory.filename())),
+                .name = firstEntry ? Paths::nativeToUtf8(firstEntry->filename()) : std::string{},
+                .directory = *std::move(localDirectory),
+                .copyPath = localPathOf(firstEntry),
+                .remotePath = remotePathOf(meta),
+                .sizeBytes = contentSizeOf(instanceDirectory, bookkeepingNames),
+                .downloadedAt = secondsOf(meta, "createdAt"),
+                .endedAt = secondsOf(meta, "deadAt"),
+            };
         }
     } // namespace
 
@@ -302,7 +509,12 @@ namespace FileTracking
 
     void TempDirInstanceManager::destroyInstance(std::string const& instanceId)
     {
-        instances_.erase(instanceId);
+        const auto instance = instances_.find(instanceId);
+        if (instance == instances_.end())
+            return;
+        const auto directory = instance->second->instanceDir();
+        instances_.erase(instance);
+        rememberIfOrphaned(directory);
     }
 
     std::expected<DiscardOutcome, std::string>
@@ -347,7 +559,113 @@ namespace FileTracking
 
     int TempDirInstanceManager::removeOrphaned()
     {
+        orphaned_.reset();
         return forceCleanOrphanedInstanceDirs(tempRootDir_, listInstanceIds());
+    }
+
+    std::vector<SharedData::OrphanedCopy> TempDirInstanceManager::listOrphaned() const
+    {
+        if (!orphaned_)
+            orphaned_ = scanOrphaned();
+        return *orphaned_;
+    }
+
+    void TempDirInstanceManager::rescanOrphaned()
+    {
+        orphaned_.reset();
+    }
+
+    std::vector<SharedData::OrphanedCopy> TempDirInstanceManager::scanOrphaned() const
+    {
+        std::vector<SharedData::OrphanedCopy> copies;
+        for (auto const& directory : orphanedInstanceDirs(tempRootDir_, listInstanceIds()))
+        {
+            if (auto copy = orphanedCopyOf(directory))
+                copies.push_back(*std::move(copy));
+        }
+        std::ranges::sort(
+            copies,
+            {},
+            [](SharedData::OrphanedCopy const& copy)
+            {
+                return copy.instanceId.value();
+            }
+        );
+        return copies;
+    }
+
+    void TempDirInstanceManager::rememberIfOrphaned(std::filesystem::path const& directory)
+    {
+        if (!orphaned_ || !isOrphanedDir(directory, listInstanceIds()))
+            return;
+        auto copy = orphanedCopyOf(directory);
+        if (!copy)
+            return;
+        std::erase_if(
+            *orphaned_,
+            [&copy](SharedData::OrphanedCopy const& listed)
+            {
+                return listed.instanceId == copy->instanceId;
+            }
+        );
+        const auto place = std::ranges::upper_bound(
+            *orphaned_,
+            copy->instanceId.value(),
+            {},
+            [](SharedData::OrphanedCopy const& listed)
+            {
+                return listed.instanceId.value();
+            }
+        );
+        orphaned_->insert(place, *std::move(copy));
+    }
+
+    std::expected<void, std::string> TempDirInstanceManager::removeOrphanedInstance(Ids::InstanceId const& instanceId)
+    {
+        return plainChildName(instanceId.value())
+            .and_then(
+                [this](std::filesystem::path const& name)
+                {
+                    return existingDirectory(tempRootDir_ / name);
+                }
+            )
+            .and_then(
+                [this](std::filesystem::path const& directory) -> std::expected<std::filesystem::path, std::string>
+                {
+                    if (const auto reason = notOrphanedBecause(directory, listInstanceIds()))
+                        return std::unexpected{std::string{*reason}};
+                    return directory;
+                }
+            )
+            .and_then(
+                [this, &instanceId](std::filesystem::path const& directory) -> std::expected<void, std::string>
+                {
+                    Log::info("Removing the orphaned instance '{}'", instanceId.value());
+                    std::error_code removeError;
+                    Utility::removeAllNoFollow(directory, removeError);
+                    if (removeError)
+                    {
+                        // Partly removed, the next listing looks again.
+                        orphaned_.reset();
+                        return std::unexpected{Utility::errorMessage(removeError)};
+                    }
+                    if (orphaned_)
+                        std::erase_if(
+                            *orphaned_,
+                            [&instanceId](SharedData::OrphanedCopy const& listed)
+                            {
+                                return listed.instanceId == instanceId;
+                            }
+                        );
+                    return {};
+                }
+            )
+            .transform_error(
+                [&instanceId](std::string const& reason)
+                {
+                    return fmt::format("Cannot remove the orphaned instance '{}': {}", instanceId.value(), reason);
+                }
+            );
     }
 
     TemporaryDirectoryInstance*
@@ -379,6 +697,7 @@ namespace FileTracking
 
     void TempDirInstanceManager::manualCleanup()
     {
+        orphaned_.reset();
         scanAndCleanDeadInstanceDirs(
             tempRootDir_,
             listInstanceIds(),

@@ -194,13 +194,13 @@ header.opq-controls {
         flex-shrink: 0;
     }
 
-    .progress-bar {
+    .script-nui-progress-bar {
+        --script-nui-components-progress-bar-text-color: rgba(255, 255, 255, 0.9);
+        --script-nui-components-progress-bar-text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
         font-size: 10px;
     }
 
-    .progress-bar>div:nth-child(2) {
-        color: rgba(255, 255, 255, 0.9);
-        text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+    .script-nui-progress-bar-text {
         -webkit-font-smoothing: antialiased;
         transform: translateZ(0);
     }
@@ -456,7 +456,7 @@ header.opq-controls {
     }
 
     /* total bar spans the full card width */
-    &>.opq-bulk-total>.progress-bar {
+    &>.opq-bulk-total>.script-nui-progress-bar {
         width: 100%;
         border-radius: 8px;
         font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
@@ -480,7 +480,7 @@ header.opq-controls {
     min-width: 0;
     font-size: 0.85em;
 
-    &>.progress-bar {
+    &>.script-nui-progress-bar {
         width: 100%;
         border-radius: 6px;
         font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;
@@ -491,7 +491,7 @@ header.opq-controls {
 .opq-progress-grow {
     flex-grow: 1;
 
-    &>.progress-bar {
+    &>.script-nui-progress-bar {
         width: 100%;
         border-radius: 0;
         font-family: Inconsolata, Hack, JetBrains Mono, Terminus, Fixed, monospace;

@@ -22,12 +22,14 @@ add_library(
         process/process_store.cpp
         process/environment.cpp
         file_tracking/batching_remote.cpp
+        file_tracking/bulk_entry_progress.cpp
         file_tracking/change_filter.cpp
         file_tracking/change_reporter.cpp
         file_tracking/directory_watch_service.cpp
         file_tracking/directory_watcher.cpp
         file_tracking/disk_place.cpp
         file_tracking/event_spelling.cpp
+        file_tracking/failure_reason.cpp
         file_tracking/file_states.cpp
         file_tracking/local_item_watch.cpp
         file_tracking/local_watch_manager.cpp
@@ -39,6 +41,7 @@ add_library(
         file_tracking/temp_dir_instance_manager.cpp
         file_tracking/frontend_tracker_view.cpp
         file_tracking/tracker.cpp
+        file_tracking/watch_progress_meter.cpp
         sftp/operation_queue.cpp
         sftp/download_operation.cpp
         sftp/upload_operation.cpp
@@ -51,6 +54,7 @@ add_library(
         sftp/bulk_resume_registry.cpp
         sftp/compared_state_check.cpp
         sftp/delete_operation.cpp
+        sftp/local_file_problem.cpp
         sftp/local_delete_operation.cpp
         sftp/remote_delete_guard.cpp
         sftp/rename_operation.cpp

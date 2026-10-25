@@ -2,17 +2,18 @@
 
 #include <ids/ids.hpp>
 #include <shared_data/file_tracking/ended_watches.hpp>
-#include <shared_data/file_tracking/server_changed_question.hpp>
+#include <shared_data/file_tracking/orphaned_copy.hpp>
+#include <shared_data/file_tracking/removed_problems.hpp>
 #include <shared_data/file_tracking/tracked_entry.hpp>
-#include <shared_data/file_tracking/tracker_progress.hpp>
-
-#include <cstddef>
+#include <shared_data/file_tracking/upload_failure.hpp>
+#include <shared_data/file_tracking/watch_conflict.hpp>
+#include <shared_data/file_tracking/watch_progress.hpp>
 
 namespace FileTracking
 {
     /**
-     * @brief What the user sees of a Tracker: its entries, its questions, its progress and the orphaned instances. Called on the
-     *        strand of the tracker.
+     * @brief What the user sees of a Tracker: its entries, their conflicts, failures and progress, and the orphaned
+     *        copies. Called on the strand of the tracker.
      */
     class TrackerView
     {
@@ -25,7 +26,7 @@ namespace FileTracking
         TrackerView& operator=(TrackerView&&) = delete;
 
         /**
-         * @brief Shows @p entry, new or changed.
+         * @brief Shows @p entry, new or changed, a stopped one too.
          */
         virtual void showEntry(SharedData::TrackedEntry const& entry) = 0;
 
@@ -38,18 +39,34 @@ namespace FileTracking
         virtual void showEnded(SharedData::EndedWatches const& ended) = 0;
 
         /**
-         * @brief Asks @p question, the tracker waits for the answer before it asks the next one.
+         * @brief Shows @p conflict, a local change that waits for the user's answer.
          */
-        virtual void ask(SharedData::ServerChangedQuestion const& question) = 0;
+        virtual void showConflict(SharedData::WatchConflict const& conflict) = 0;
 
         /**
-         * @brief Shows how many instance directories no live process holds any more.
+         * @brief The conflicts of @p removed were answered or dropped with their watch, all in one message.
          */
-        virtual void showOrphanedCount(std::size_t count) = 0;
+        virtual void removeConflicts(SharedData::RemovedConflicts const& removed) = 0;
 
         /**
-         * @brief Shows how far the tracker is with the changes on their way, at most a few times a second.
+         * @brief Shows @p failure, new or updated.
          */
-        virtual void showProgress(SharedData::TrackerProgress const& progress) = 0;
+        virtual void showFailure(SharedData::UploadFailure const& failure) = 0;
+
+        /**
+         * @brief The failures of @p removed were retried, dismissed, went through or were dropped with their watch, all
+         *        in one message.
+         */
+        virtual void removeFailures(SharedData::RemovedFailures const& removed) = 0;
+
+        /**
+         * @brief Shows how far the watch of @p progress is, at most five times a second per watch.
+         */
+        virtual void showWatchProgress(SharedData::WatchProgress const& progress) = 0;
+
+        /**
+         * @brief Shows the orphaned copies, all of them, replacing what was shown before.
+         */
+        virtual void showOrphanedCopies(SharedData::OrphanedCopies const& copies) = 0;
     };
 }
