@@ -1283,48 +1283,13 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     }
 }
 
-namespace
-{
-    /**
-     * @brief Map a user-facing 1..9 level to codec-native CompressionOptions.
-     *
-     * Keeps the frontend ignorant of codec specifics: the slider just says
-     * "1 = fastest, 9 = smallest" and this picks a sensible setting per codec.
-     */
-    TarArchive::CompressionOptions compressionOptionsFromLevel(TarArchive::Compression codec, int userLevel)
-    {
-        const int clampedLevel = std::clamp(userLevel, 1, 9);
-        TarArchive::CompressionOptions options{};
-        switch (codec)
-        {
-            case TarArchive::Compression::Gzip:
-                options.gzipLevel = clampedLevel;
-                break;
-            case TarArchive::Compression::Bzip2:
-                options.bzip2BlockSize = clampedLevel;
-                break;
-            case TarArchive::Compression::Zstd:
-                // Linear map 1..9 → 1..22 (rounded).
-                options.zstdLevel = 1 + static_cast<int>((clampedLevel - 1) * 21.0 / 8.0 + 0.5);
-                break;
-            case TarArchive::Compression::Xz:
-                options.xzPreset = std::clamp(clampedLevel - 1, 0, 9);
-                break;
-            case TarArchive::Compression::None:
-            case TarArchive::Compression::Auto:
-                break;
-        }
-        return options;
-    }
-}
-
 std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperation(
     SecureShell::SftpSession& sftp,
     Ids::OperationId operationId,
     std::vector<SharedData::ArchiveDownloadRoot> roots,
     Paths::LocalPath const& localArchivePath,
     TarArchive::Compression compression,
-    int compressionLevel,
+    TarArchive::CompressionOptions const& compressionOptions,
     bool mayOverwrite,
     SharedData::OperationMode mode
 )
@@ -1378,7 +1343,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
         sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).tempFileSuffix
     );
     opts.compression = compression;
-    opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
+    opts.compressionOptions = compressionOptions;
     opts.mayOverwrite = mayOverwrite;
     opts.markAsDownloaded = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{}).markAsDownloaded.value_or(
         Persistence::defaultMarkAsDownloaded
@@ -1462,7 +1427,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     std::vector<Paths::LocalPath> localPaths,
     Paths::RemotePath const& remoteArchivePath,
     TarArchive::Compression compression,
-    int compressionLevel,
+    TarArchive::CompressionOptions const& compressionOptions,
     bool mayOverwrite,
     SharedData::OperationMode mode
 )
@@ -1510,7 +1475,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
         sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
     );
     opts.compression = compression;
-    opts.compressionOptions = compressionOptionsFromLevel(compression, compressionLevel);
+    opts.compressionOptions = compressionOptions;
     opts.mayOverwrite = mayOverwrite;
     opts.futureTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
     opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onArchiveUploadProgress")](
