@@ -173,6 +173,16 @@ header.opq-controls {
     z-index: 1;
 }
 
+.opq-unsafe-fast-label {
+    font-size: 14px;
+    color: var(--color);
+}
+
+.operation-queue[data-unsafe-fast] .opq-unsafe-fast-label {
+    color: var(--script-nui-components-toast-warning, #e0a02e);
+    font-weight: 600;
+}
+
 .opq-card {
     --opq-base-bg: transparent;
     --opq-state-color: transparent;
