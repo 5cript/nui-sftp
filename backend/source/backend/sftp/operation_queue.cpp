@@ -875,7 +875,8 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     {
         auto* operation = queue[item.index].second.get();
         operation->setParallelBudget(item.slots);
-        operation->setWake(wake_);
+        if (!operation->hasWake())
+            operation->setWake(wake_);
         if (operation->usesStrand() && !strand)
             strand = operation->strand();
     }

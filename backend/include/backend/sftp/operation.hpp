@@ -112,9 +112,14 @@ class Operation
     /**
      * @brief Sets what the operation calls when it has work again after answering Waiting. Callable from any thread.
      */
-    virtual void setWake(std::function<void()> wake)
+    void setWake(std::function<void()> wake)
     {
         wake_ = std::move(wake);
+    }
+
+    bool hasWake() const noexcept
+    {
+        return static_cast<bool>(wake_);
     }
 
     /**
