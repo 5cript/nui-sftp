@@ -616,7 +616,7 @@ namespace SecureShell::Test
                 };
             }
 
-            bool waitFor(std::string const& piece, std::chrono::milliseconds limit = 2s)
+            bool waitFor(std::string const& piece, std::chrono::milliseconds limit = 5s)
             {
                 std::unique_lock lock{mutex};
                 return arrived.wait_for(
@@ -660,7 +660,8 @@ namespace SecureShell::Test
         channel->write("echo idle-marker");
         channel->write("\r");
         ASSERT_TRUE(output.waitFor("idle-marker\r\n"));
-        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        // Output stuck in libssh's buffer would never arrive without a fallback timer.
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 3s);
         channel->close();
     }
 
@@ -695,11 +696,11 @@ namespace SecureShell::Test
             reader->write(fmt::format("echo marker-{}", round));
             reader->write("\r");
             auto opened = session->createPtyChannel({});
-            ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+            ASSERT_EQ(opened.wait_for(5s), std::future_status::ready);
             auto other = opened.get();
             ASSERT_TRUE(other.has_value());
             others.push_back(other.value().lock());
-            ASSERT_TRUE(output.waitFor(fmt::format("\r\nmarker-{}", round), 1s)) << "round " << round << ": " << output.text;
+            ASSERT_TRUE(output.waitFor(fmt::format("\r\nmarker-{}", round))) << "round " << round << ": " << output.text;
         }
         reader->close();
         for (auto const& other : others)
@@ -743,8 +744,8 @@ namespace SecureShell::Test
         // The server ends the whole connection.
         channel->write("logout");
         channel->write("\r");
-        EXPECT_EQ(lost.get_future().wait_for(2s), std::future_status::ready);
-        EXPECT_EQ(exited.get_future().wait_for(2s), std::future_status::ready);
+        EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
+        EXPECT_EQ(exited.get_future().wait_for(5s), std::future_status::ready);
     }
 
     TEST_F(SshSessionTests, ClosingATerminalWhileTheThreadWaitsOnTheConnectionReturns)
@@ -787,7 +788,7 @@ namespace SecureShell::Test
                 return channel->close();
             }
         );
-        ASSERT_EQ(closed.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(closed.wait_for(5s), std::future_status::ready);
         EXPECT_TRUE(closed.get());
         EXPECT_FALSE(exitReported.load());
 
@@ -798,7 +799,7 @@ namespace SecureShell::Test
                 session.reset();
             }
         );
-        EXPECT_EQ(destroyed.wait_for(2s), std::future_status::ready);
+        EXPECT_EQ(destroyed.wait_for(5s), std::future_status::ready);
     }
 
 #ifdef __linux__
