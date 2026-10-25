@@ -967,13 +967,19 @@ namespace SecureShell::Test
         std::atomic_int turns = 0;
         ProcessingThread processingThread;
         processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Poll), 20ms);
+        const auto start = std::chrono::steady_clock::now();
         processingThread.start(1ms);
-        std::this_thread::sleep_for(500ms);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 10;
+            }
+        ));
+        const auto elapsed = std::chrono::steady_clock::now() - start;
         processingThread.stop();
 
-        // 25 turns at 20 ms; a thread polling at its own 1 ms would have run hundreds.
-        EXPECT_GE(turns.load(), 5);
-        EXPECT_LE(turns.load(), 40);
+        // The thread never wakes early, a slow machine only adds. Polling at its own 1 ms would take about 10 ms.
+        EXPECT_GE(elapsed, 9 * 20ms);
     }
 
     TEST_F(ProcessingThreadTest, ShortestPollIntervalDecidesTheSleep)
