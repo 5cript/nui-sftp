@@ -145,6 +145,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     );
                 }
                 asyncTransferContext_ = contextResult.value();
+                observeTransfer(*asyncTransferContext_);
             }
             [[fallthrough]];
         }
@@ -190,7 +191,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                         resumeOffset_ + static_cast<std::uint64_t>(asyncTransferContext_->bytesTransferred()),
                         asyncTransferContext_->bytesPerSecond()
                     );
-                    return WorkStatus::MoreWork;
+                    return WorkStatus::Waiting;
                 }
             }
         }

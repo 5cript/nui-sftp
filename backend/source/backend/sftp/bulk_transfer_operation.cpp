@@ -197,6 +197,7 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
     }
 
     const auto slotsBefore = slots_.size();
+    const auto completedBefore = completedEntries_;
     if (const auto filled = fillSlots(sftp); !filled.has_value())
         return enterErrorState<WorkStatus>(filled.error());
     // Report newly started files before stepping them: small files finish within this very
@@ -204,8 +205,11 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
     if (slots_.size() > slotsBefore)
         emitProgress(true);
 
-    if (const auto stepped = stepSlots(); !stepped.has_value())
+    const auto stepped = stepSlots();
+    if (!stepped.has_value())
         return enterErrorState<WorkStatus>(stepped.error());
+    // Waiting only while every file waits for its transfer, which wakes the queue when it moves on.
+    const bool progressed = *stepped || slots_.size() > slotsBefore || completedEntries_ != completedBefore;
 
     std::erase_if(
         slots_,
@@ -226,7 +230,7 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
     }
 
     emitProgress(false);
-    return WorkStatus::MoreWork;
+    return progressed ? WorkStatus::MoreWork : WorkStatus::Waiting;
 }
 
 std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlots(SecureShell::SftpSession& sftp)
@@ -303,6 +307,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
                     }
                 }
             );
+            child->setWake(wake_);
             slots_.push_back(
                 Slot{.entryIndex = index, .paths = *paths, .child = std::move(child), .totalBytes = entry.size}
             );
@@ -315,11 +320,14 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
     return {};
 }
 
-std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlots()
+std::expected<bool, BulkTransferOperation::Error> BulkTransferOperation::stepSlots()
 {
+    bool progressed = false;
     for (auto& slot : slots_)
     {
         auto result = slot.child->workInStrand();
+        if (result.has_value() && result.value() != WorkStatus::Waiting)
+            progressed = true;
         if (result.has_value())
         {
             if (result.value() != WorkStatus::Complete)
@@ -334,6 +342,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             continue;
         }
 
+        progressed = true;
         const auto error = result.error();
         if (isBufferShortage(error) && slot.bytes == 0)
         {
@@ -378,7 +387,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         }
         return std::unexpected(error);
     }
-    return {};
+    return progressed;
 }
 
 void BulkTransferOperation::finishSlot(Slot& slot, bool transferred)

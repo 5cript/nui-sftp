@@ -476,7 +476,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         endUploads(session, completed, sources, destinations, sent->take(), onEnded);
                     }
                 );
-                session.resetQueueThrottle();
+                session.wakeOperationQueue();
                 return {};
             }
         );
@@ -517,7 +517,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         );
                     }
                 );
-                session.resetQueueThrottle();
+                session.wakeOperationQueue();
                 return {};
             }
         );
@@ -706,7 +706,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 session.operationQueue_->discardResumeBackup(operationId);
                 if (onCompleted)
                     session.operationQueue_->whenCompleted(operationId, std::move(onCompleted));
-                session.resetQueueThrottle();
+                session.wakeOperationQueue();
                 return {};
             }
         );

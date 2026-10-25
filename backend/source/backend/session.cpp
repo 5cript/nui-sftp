@@ -158,7 +158,14 @@ void Session::start()
             Log::info("Session '{}' connected", self->id_.value());
 
             self->running_ = true;
-            self->doOperationQueueWork();
+            self->operationQueue_->setWake(
+                [weak = self->weak_from_this()]()
+                {
+                    if (auto session = weak.lock(); session)
+                        session->wakeOperationQueue();
+                }
+            );
+            self->scheduleOperationQueueWork();
         }
     );
 }
@@ -294,63 +301,38 @@ std::shared_ptr<SecureShell::SftpSession> Session::anySftpChannel() const
 
 void Session::doOperationQueueWork()
 {
-    within_strand_do_no_recurse(
-        [weak = weak_from_this()]()
-        {
-            auto self = weak.lock();
-            if (!self)
-                return;
+    operationQueueWorkScheduled_ = false;
+    if (!running_ || !operationQueue_)
+        return;
 
-            if (!self->running_)
-                return;
-
-            if (self->operationQueue_ &&
-                (!self->operationQueue_->paused() || self->operationQueue_->hasPriorityWork()) &&
-                self->operationQueue_->work())
-            {
-                ++self->unthrottledLimitCounter_;
-                if (self->unthrottledLimitCounter_ < 10)
-                {
-                    self->doOperationQueueWork();
-                    self->operationThrottle_ = queueStartThrottle;
-                    return;
-                }
-                self->unthrottledLimitCounter_ = 0;
-            }
-
-            if (self->operationThrottle_ < queueMaxThrottle)
-                self->operationThrottle_ *= 2;
-            else
-                self->operationThrottle_ = queueMaxThrottle;
-
-            self->queueThrottleTimerIsRunning_ = true;
-            self->within_strand_do_delayed(
-                [weak = self->weak_from_this()]()
-                {
-                    if (auto self = weak.lock(); self)
-                    {
-                        self->queueThrottleTimerIsRunning_ = false;
-                        self->doOperationQueueWork();
-                    }
-                },
-                self->operationThrottle_
-            );
-        }
-    );
+    // Posted, not looped: requests on the strand get their turn between steps. An operation that waits for its
+    // transfer, a paused or an empty queue wake the queue once there is work again.
+    if ((!operationQueue_->paused() || operationQueue_->hasPriorityWork()) && operationQueue_->work())
+        scheduleOperationQueueWork();
 }
 
-void Session::resetQueueThrottle()
+void Session::wakeOperationQueue()
 {
     within_strand_do(
         [weak = weak_from_this()]()
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
+            if (auto self = weak.lock(); self)
+                self->scheduleOperationQueueWork();
+        }
+    );
+}
 
-            self->operationThrottle_ = queueStartThrottle;
-            if (self->queueThrottleTimerIsRunning_)
-                self->timer_.cancel();
+void Session::scheduleOperationQueueWork()
+{
+    if (operationQueueWorkScheduled_)
+        return;
+    operationQueueWorkScheduled_ = true;
+    boost::asio::post(
+        *strand_,
+        [weak = weak_from_this()]()
+        {
+            if (auto self = weak.lock(); self)
+                self->doOperationQueueWork();
         }
     );
 }
@@ -1306,7 +1288,7 @@ void Session::registerOperationQueuePauseUnpause()
 
                 self->operationQueue_->paused(pause);
                 self->localOperationQueue_->hold(self->id_, pause);
-                self->resetQueueThrottle();
+                self->wakeOperationQueue();
                 return reply(SharedData::success());
             }
         );
@@ -1370,7 +1352,7 @@ void Session::registerRpcSftpOpenSyncSession()
                             ignoreHidden
                         );
 
-                        self.resetQueueThrottle();
+                        self.wakeOperationQueue();
                         reply({{"success", true}});
                     },
                     std::move(reply)
@@ -1537,7 +1519,7 @@ void Session::registerRpcSftpExecuteSyncSelection()
                                 auto result = self.operationQueue_->executeSyncPlan(
                                     *channel, *session, std::move(plan), request, *self.localOperationQueue_
                                 );
-                                self.resetQueueThrottle();
+                                self.wakeOperationQueue();
                                 nlohmann::json json;
                                 SharedData::to_json(json, result);
                                 reply(std::move(json));

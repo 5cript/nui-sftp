@@ -45,14 +45,13 @@ namespace Benchmark
         }
     }
 
-    ApplicationClient::ApplicationClient(Connection& connection, Pacing pacing)
+    ApplicationClient::ApplicationClient(Connection& connection)
         : connection_{connection}
-        , pacing_{pacing}
     {}
 
     std::string ApplicationClient::name() const
     {
-        return fmt::format("nui-sftp, {}", toString(pacing_));
+        return "nui-sftp";
     }
 
     std::expected<void, std::string> ApplicationClient::transfer(Transfer const& transfer)
@@ -88,7 +87,7 @@ namespace Benchmark
                     .entry = *information,
                 }
             };
-            return runToCompletion(operation, pacing_, transferTimeout);
+            return runToCompletion(operation, transferTimeout);
         }
 
         BulkDownloadOperation operation{
@@ -102,7 +101,7 @@ namespace Benchmark
         operation.scanFirst(std::make_unique<ScanOperation>(
             connection_.sftp, ScanOperation::ScanOperationOptions{.remotePath = *remote}
         ));
-        return runToCompletion(operation, pacing_, transferTimeout);
+        return runToCompletion(operation, transferTimeout);
     }
 
     std::expected<void, std::string> ApplicationClient::upload(Transfer const& transfer)
@@ -124,7 +123,7 @@ namespace Benchmark
                     .bigFileOptimized = transfer.workload->fileSize >= Constants::bigFileCutOff,
                 }
             };
-            return runToCompletion(operation, pacing_, transferTimeout);
+            return runToCompletion(operation, transferTimeout);
         }
 
         BulkUploadOperation operation{
@@ -138,6 +137,6 @@ namespace Benchmark
         operation.scanFirst(std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
             .localPath = *local,
         }));
-        return runToCompletion(operation, pacing_, transferTimeout);
+        return runToCompletion(operation, transferTimeout);
     }
 }

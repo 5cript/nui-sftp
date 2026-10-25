@@ -194,6 +194,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                     );
                 }
                 asyncTransferContext_ = contextResult.value();
+                observeTransfer(*asyncTransferContext_);
             }
             [[fallthrough]];
         }
@@ -242,7 +243,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                             static_cast<std::size_t>(asyncTransferContext_->bytesTransferred()),
                         asyncTransferContext_->bytesPerSecond()
                     );
-                    return WorkStatus::MoreWork;
+                    return WorkStatus::Waiting;
                 }
             }
         }

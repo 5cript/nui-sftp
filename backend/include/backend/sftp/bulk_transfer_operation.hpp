@@ -348,7 +348,13 @@ class BulkTransferOperation : public Operation
     std::expected<WorkStatus, Error> start(SecureShell::SftpSession& sftp);
     std::expected<WorkStatus, Error> step(SecureShell::SftpSession& sftp);
     std::expected<void, Error> fillSlots(SecureShell::SftpSession& sftp);
-    std::expected<void, Error> stepSlots();
+
+    /**
+     * @brief Works every slot once.
+     *
+     * @return Whether any child did more than wait for its transfer.
+     */
+    std::expected<bool, Error> stepSlots();
     /**
      * @brief Counts the entry of @p slot as done, as @p transferred or as a failure recorded for the user.
      */
