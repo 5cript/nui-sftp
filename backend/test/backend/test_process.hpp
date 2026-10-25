@@ -43,6 +43,22 @@ namespace Test
             );
         }
 
+        /**
+         * @brief Waits until @p process ended by itself, at most 10 seconds. exitSync on a running child asks it to
+         *        end with SIGTERM, so a child about to exit on its own would report that signal instead of its code.
+         */
+        static bool waitForExit(Process const& process)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+            while (process.running())
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                    return false;
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+            return true;
+        }
+
         bool append(std::string& target, std::string_view data)
         {
             {
@@ -90,6 +106,7 @@ namespace Test
                 return output_.find("got hello\n") != std::string::npos && errors_.find("oops\n") != std::string::npos;
             }
         )) << "stdout: '" << output_ << "', stderr: '" << errors_ << "'";
+        ASSERT_TRUE(waitForExit(*process));
         EXPECT_EQ(process->exitSync(std::chrono::seconds{5}), 0);
     }
 #endif
