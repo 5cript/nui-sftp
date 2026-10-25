@@ -139,7 +139,8 @@ namespace SecureShell
     void Channel::startReading(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
-        std::function<void()> onExit
+        std::function<void()> onExit,
+        std::optional<std::chrono::milliseconds> pollInterval
     )
     {
         onStdout_ = std::move(onStdout);
@@ -150,7 +151,8 @@ namespace SecureShell
             [this]()
             {
                 return readTask();
-            }
+            },
+            pollInterval
         );
         if (!success)
         {

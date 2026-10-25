@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <functional>
 #include <string>
 #include <chrono>
@@ -69,11 +70,13 @@ namespace SecureShell
          * @param onStdout
          * @param onStderr
          * @param onExit
+         * @param pollInterval How often the channel is looked at, the processing thread's poll interval if unset.
          */
         void startReading(
             std::function<void(std::string const&)> onStdout,
             std::function<void(std::string const&)> onStderr,
-            std::function<void()> onExit
+            std::function<void()> onExit,
+            std::optional<std::chrono::milliseconds> pollInterval = std::nullopt
         );
 
       private:
