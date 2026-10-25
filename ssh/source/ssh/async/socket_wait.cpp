@@ -132,6 +132,13 @@ namespace SecureShell
     {
         auto impl = std::make_unique<Implementation>();
         int ends[2]{-1, -1};
+#    ifdef __linux__
+        // Atomically close-on-exec, a process spawned by another thread meanwhile would inherit the ends.
+        if (::pipe2(ends, O_CLOEXEC | O_NONBLOCK) != 0)
+            return std::unexpected(fmt::format("Creating the wake pipe failed: {}", std::strerror(errno)));
+        impl->readEnd = ends[0];
+        impl->writeEnd = ends[1];
+#    else
         if (::pipe(ends) != 0)
             return std::unexpected(fmt::format("Creating the wake pipe failed: {}", std::strerror(errno)));
         impl->readEnd = ends[0];
@@ -144,6 +151,7 @@ namespace SecureShell
                 return std::unexpected(fmt::format("Configuring the wake pipe failed: {}", std::strerror(errno)));
             }
         }
+#    endif
         return std::unique_ptr<SocketWait>{new SocketWait{std::move(impl)}};
     }
 
