@@ -182,7 +182,7 @@ namespace SecureShell
                     nextOffset_ = sftp_tell64(file);
                 while (unrequested > 0 && inFlightBytes() < window().windowBytes())
                 {
-                    const auto length = std::min(unrequested, window().requestBytes(upperBound));
+                    const auto length = std::min<SignedSizeType>(unrequested, window().requestBytes(upperBound));
                     auto request = begin(sftp, file, *nextOffset_, length);
                     if (!request)
                         return std::unexpected(std::move(request).error());
@@ -292,7 +292,7 @@ namespace SecureShell
             {
                 while (unsent > 0 && inFlightBytes() < window().windowBytes())
                 {
-                    const auto amountRead = doRead(std::min(unsent, window().requestBytes(upperBound)));
+                    const auto amountRead = doRead(std::min<SignedSizeType>(unsent, window().requestBytes(upperBound)));
                     if (fileClosed())
                         return std::unexpected(closedError());
                     if (amountRead <= 0)
@@ -878,7 +878,7 @@ namespace SecureShell
                 // Requests stay in flight between turns, so a quarter window per turn moves as much as
                 // a whole one and hands the thread to other tasks four times as often.
                 const auto turnStart = std::chrono::steady_clock::now();
-                const auto turnBudget = std::max(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
+                const auto turnBudget = std::max<SignedSizeType>(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
                 SignedSizeType turnBytes = 0;
                 while (
                     !pipeline->empty() && !context->paused() && !context->hasEnded() && turnBytes < turnBudget &&
@@ -1035,7 +1035,7 @@ namespace SecureShell
                     return failWith(std::move(filled).error());
 
                 const auto turnStart = std::chrono::steady_clock::now();
-                const auto turnBudget = std::max(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
+                const auto turnBudget = std::max<SignedSizeType>(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
                 SignedSizeType turnBytes = 0;
                 while (
                     !pipeline->empty() && !context->paused() && !context->hasEnded() && turnBytes < turnBudget &&
