@@ -164,6 +164,8 @@ let realpathDotMode = 'conforming';
 // Fault injection and server behaviour switches, configured over the command line interface.
 const faults = {
     failReadsAfter: null,
+    // Largest answer to a READ, null for what was asked. Emulates servers that answer reads short.
+    capReads: null,
     failWritesAfter: null,
     dropAfterBytes: null,
     failRenames: false,
@@ -478,7 +480,8 @@ const server = new Server({
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
 
-                    const data = result.content.slice(offset, Math.min(offset + length, size));
+                    const answered = faults.capReads === null ? length : Math.min(length, faults.capReads);
+                    const data = result.content.slice(offset, Math.min(offset + answered, size));
                     faults.bytesRead += data.length;
                     logMessage(`Read ${data.length} bytes from offset ${offset}`);
 
@@ -948,6 +951,9 @@ const nullableBytes = (command) => (command.bytes === undefined || command.bytes
 cli.on('failReadsAfter', (command) => {
     faults.failReadsAfter = nullableBytes(command);
     faults.bytesRead = 0;
+});
+cli.on('capReads', (command) => {
+    faults.capReads = nullableBytes(command);
 });
 cli.on('failWritesAfter', (command) => {
     faults.failWritesAfter = nullableBytes(command);
