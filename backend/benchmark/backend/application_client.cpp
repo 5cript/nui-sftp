@@ -46,13 +46,22 @@ namespace Benchmark
         }
     }
 
-    ApplicationClient::ApplicationClient(Connection& connection)
+    ApplicationClient::ApplicationClient(Connection& connection, bool unsafeFast)
         : connection_{connection}
+        , unsafeFast_{unsafeFast}
     {}
 
     std::string ApplicationClient::name() const
     {
-        return "nui-sftp";
+        return unsafeFast_ ? "nui-sftp unsafe fast" : "nui-sftp";
+    }
+
+    UnsafeFastMode ApplicationClient::unsafeFastMode() const
+    {
+        return [unsafeFast = unsafeFast_]()
+        {
+            return unsafeFast;
+        };
     }
 
     std::expected<void, std::string> ApplicationClient::transfer(Transfer const& transfer)
@@ -86,6 +95,7 @@ namespace Benchmark
                     .localPath = *local,
                     .bigFileOptimized = information->size >= Constants::bigFileCutOff,
                     .entry = *information,
+                    .unsafeFastMode = unsafeFastMode(),
                 }
             };
             return runToCompletion(operation, transferTimeout);
@@ -96,6 +106,7 @@ namespace Benchmark
             {
                 .remotePath = *remote,
                 .localPath = *local,
+                .individualOptions = {.unsafeFastMode = unsafeFastMode()},
                 .concurrency = bulkConcurrency(),
             }
         };
@@ -122,6 +133,7 @@ namespace Benchmark
                     .remotePath = *remote,
                     .localPath = *local,
                     .bigFileOptimized = transfer.workload->fileSize >= Constants::bigFileCutOff,
+                    .unsafeFastMode = unsafeFastMode(),
                 }
             };
             return runToCompletion(operation, transferTimeout);
@@ -132,6 +144,7 @@ namespace Benchmark
             {
                 .remotePath = *remote,
                 .localPath = *local,
+                .individualOptions = {.unsafeFastMode = unsafeFastMode()},
                 .concurrency = bulkConcurrency(),
             }
         };
