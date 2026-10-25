@@ -1155,7 +1155,6 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
         .headerText = language->get("fileExplorer", "contextMenu", "uploadAsArchive"),
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
-        .initialCompressionLevel = 5,
         .onConfirm = lifetime_.guarded(
             [this, paths = std::move(localPaths)](std::optional<ArchiveTransferResult> const& result) mutable
             {
@@ -1188,6 +1187,7 @@ void LocalSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> cons
                     remotePath,
                     backendCompressionCode(result->codec),
                     result->compressionLevel,
+                    result->xzExtreme,
                     /*mayOverwrite=*/false,
                     SharedData::OperationMode::Queued,
                     lifetime_.guarded(

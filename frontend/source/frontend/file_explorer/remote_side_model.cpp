@@ -720,7 +720,6 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
         .headerText = language->get("fileExplorer", "contextMenu", "downloadAsArchive"),
         .initialFileStem = defaultStem,
         .initialCodec = ArchiveCodec::Gzip,
-        .initialCompressionLevel = 5,
         .onConfirm = lifetime_.guarded(
             [this, roots = std::move(roots)](std::optional<ArchiveTransferResult> const& result) mutable
             {
@@ -755,6 +754,7 @@ void RemoteSideModel::onTransferAsArchive(std::vector<NuiFileExplorer::Item> con
                     localPath,
                     backendCompressionCode(result->codec),
                     result->compressionLevel,
+                    result->xzExtreme,
                     /*mayOverwrite=*/false,
                     SharedData::OperationMode::Queued,
                     lifetime_.guarded(

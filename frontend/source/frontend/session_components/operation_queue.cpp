@@ -2330,6 +2330,7 @@ void OperationQueue::enqueueArchiveDownload(
     Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
+    bool xzExtreme,
     bool mayOverwrite,
     SharedData::OperationMode mode,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
@@ -2343,17 +2344,19 @@ void OperationQueue::enqueueArchiveDownload(
     }
 
     Log::info(
-        "Frontend Operation Queue archive download: {} roots → {} (codec={}, level={})",
+        "Frontend Operation Queue archive download: {} roots → {} (codec={}, level={}, extreme={})",
         roots.size(),
         localArchivePath.toUtf8(),
         compressionCodec,
-        compressionLevel
+        compressionLevel,
+        xzExtreme
     );
     impl_->fileEngine->addArchiveDownload(
         std::move(roots),
         localArchivePath,
         compressionCodec,
         compressionLevel,
+        xzExtreme,
         mayOverwrite,
         mode,
         [onOperationCreated =
@@ -2369,6 +2372,7 @@ void OperationQueue::enqueueArchiveUpload(
     Paths::RemotePath const& remoteArchivePath,
     int compressionCodec,
     int compressionLevel,
+    bool xzExtreme,
     bool mayOverwrite,
     SharedData::OperationMode mode,
     std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
@@ -2382,17 +2386,19 @@ void OperationQueue::enqueueArchiveUpload(
     }
 
     Log::info(
-        "Frontend Operation Queue archive upload: {} paths → {} (codec={}, level={})",
+        "Frontend Operation Queue archive upload: {} paths → {} (codec={}, level={}, extreme={})",
         localPaths.size(),
         remoteArchivePath.value(),
         compressionCodec,
-        compressionLevel
+        compressionLevel,
+        xzExtreme
     );
     impl_->fileEngine->addArchiveUpload(
         std::move(localPaths),
         remoteArchivePath,
         compressionCodec,
         compressionLevel,
+        xzExtreme,
         mayOverwrite,
         mode,
         [onOperationCreated =
