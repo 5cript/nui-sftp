@@ -594,12 +594,13 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openDestination
         return created;
     if (const auto opened = openEmptyWrittenFile(); !opened)
         return opened;
+    // Created or emptied, even when the stream did not open.
+    openedDestination_ = true;
     if (!localFile_.is_open())
     {
         Log::error("DownloadOperation: Failed to open file: {}", options_.localPath.toUtf8());
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
-    openedDestination_ = true;
     return {};
 }
 
