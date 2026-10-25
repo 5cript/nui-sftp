@@ -26,13 +26,13 @@ namespace SecureShell
         static constexpr std::int64_t requestsPerWindow = 8;
 
         /**
-         * @brief Feeds bytes that arrived, sampling the rate every half target duration.
+         * @brief Feeds bytes a completed request moved, sampling the rate every half target duration.
          *
          * @param bytes Bytes one completed request moved.
          * @param now When the request completed.
          * @param target The session's target call duration.
          */
-        void recordReceived(
+        void recordCompleted(
             std::int64_t bytes,
             std::chrono::steady_clock::time_point now,
             std::chrono::steady_clock::duration target
