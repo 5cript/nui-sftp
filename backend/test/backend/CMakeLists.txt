@@ -22,6 +22,8 @@ target_link_libraries(
 
 if (WIN32)
     target_link_libraries(nui-sftp-backend-test PUBLIC ws2_32)
+else()
+    target_link_libraries(nui-sftp-backend-test PUBLIC docker-control)
 endif()
 
 # For sftp_server.mjs bundled
