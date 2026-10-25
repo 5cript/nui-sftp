@@ -125,6 +125,16 @@ namespace TarArchive
     Compression compressionFromExtension(std::filesystem::path const& path) noexcept;
 
     /**
+     * @brief Writer options for @p codec at its own native @p level, clamped to the codec's range: gzip 1 … 9,
+     * bzip2 block size 1 … 9, zstd 1 … 22, xz preset 0 … 9. None and Auto take no level.
+     *
+     * @param codec The codec the level belongs to.
+     * @param level The level in the codec's own range.
+     * @param xzExtreme OR LZMA_PRESET_EXTREME into the xz preset, ignored by every other codec.
+     */
+    CompressionOptions compressionOptionsForLevel(Compression codec, int level, bool xzExtreme = false) noexcept;
+
+    /**
      * @brief Open a sink that writes to the given path, optionally compressed. Creates or
      * truncates the file. @p options is consulted only for the matching codec; all unused
      * fields are ignored.

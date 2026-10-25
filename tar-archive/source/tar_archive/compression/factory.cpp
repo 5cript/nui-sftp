@@ -85,6 +85,31 @@ namespace TarArchive
         return Compression::None;
     }
 
+    CompressionOptions compressionOptionsForLevel(Compression codec, int level, bool xzExtreme) noexcept
+    {
+        CompressionOptions options{};
+        switch (codec)
+        {
+            case Compression::Gzip:
+                options.gzipLevel = std::clamp(level, 1, 9);
+                break;
+            case Compression::Bzip2:
+                options.bzip2BlockSize = std::clamp(level, 1, 9);
+                break;
+            case Compression::Zstd:
+                options.zstdLevel = std::clamp(level, 1, 22);
+                break;
+            case Compression::Xz:
+                options.xzPreset = std::clamp(level, 0, 9);
+                options.xzExtreme = xzExtreme;
+                break;
+            case Compression::None:
+            case Compression::Auto:
+                break;
+        }
+        return options;
+    }
+
     std::expected<Compression, TarError>
     detectCompressionByMagic(std::filesystem::path const& path)
     {

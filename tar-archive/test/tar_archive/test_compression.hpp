@@ -72,7 +72,7 @@ namespace TarArchive::Test
             return accumulator;
         }
 
-        void runRoundTrip(Compression codec, std::string const& filename)
+        void runRoundTrip(Compression codec, std::string const& filename, CompressionOptions const& options = {})
         {
             const auto directory = compressionScratchDirectory();
             const auto path = directory / filename;
@@ -80,7 +80,7 @@ namespace TarArchive::Test
             const std::vector<std::byte> payload = generatePayload(250u * 1024u, 0xC0FFEEu);
 
             {
-                auto sink = makeSink(path, codec);
+                auto sink = makeSink(path, codec, options);
                 ASSERT_TRUE(sink.has_value()) << sink.error().toString();
                 const auto written = writeAllThroughSink(*sink.value(), payload);
                 ASSERT_TRUE(written.has_value()) << written.error().toString();
@@ -133,6 +133,52 @@ namespace TarArchive::Test
         EXPECT_EQ(compressionFromExtension("archive.tzst"), Compression::Zstd);
         EXPECT_EQ(compressionFromExtension("archive.tar.xz"), Compression::Xz);
     }
+
+    TEST(Compression, LevelIsPassedInTheCodecsOwnRange)
+    {
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Gzip, 6).gzipLevel, 6);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Bzip2, 4).bzip2BlockSize, 4);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Zstd, 19).zstdLevel, 19);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Xz, 0).xzPreset, 0);
+
+        const auto xz = compressionOptionsForLevel(Compression::Xz, 9, true);
+        EXPECT_EQ(xz.xzPreset, 9);
+        EXPECT_TRUE(xz.xzExtreme);
+        EXPECT_FALSE(compressionOptionsForLevel(Compression::Zstd, 3, true).xzExtreme);
+    }
+
+    TEST(Compression, LevelOutsideTheCodecsRangeIsClamped)
+    {
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Gzip, 0).gzipLevel, 1);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Gzip, 12).gzipLevel, 9);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Bzip2, 10).bzip2BlockSize, 9);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Zstd, 0).zstdLevel, 1);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Zstd, 30).zstdLevel, 22);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Xz, -1).xzPreset, 0);
+        EXPECT_EQ(compressionOptionsForLevel(Compression::Xz, 10).xzPreset, 9);
+    }
+
+    TEST(Compression, NoneTakesNoLevel)
+    {
+        const auto options = compressionOptionsForLevel(Compression::None, 5, true);
+        EXPECT_FALSE(options.gzipLevel.has_value());
+        EXPECT_FALSE(options.bzip2BlockSize.has_value());
+        EXPECT_FALSE(options.zstdLevel.has_value());
+        EXPECT_FALSE(options.xzPreset.has_value());
+        EXPECT_FALSE(options.xzExtreme);
+    }
+
+    TEST(Compression, ZstdUltraLevelRoundTrips)
+    {
+        runRoundTrip(Compression::Zstd, "ultra.zst", compressionOptionsForLevel(Compression::Zstd, 22));
+    }
+
+#ifdef TAR_ARCHIVE_WITH_XZ
+    TEST(Compression, XzExtremePresetRoundTrips)
+    {
+        runRoundTrip(Compression::Xz, "extreme.xz", compressionOptionsForLevel(Compression::Xz, 9, true));
+    }
+#endif
 
     TEST(Compression, MagicDetectionAgreesWithWrittenCodec)
     {
