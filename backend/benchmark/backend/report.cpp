@@ -134,6 +134,8 @@ namespace Benchmark
             "\n"
             "- **nui-sftp**: the app's operations driven like Session::doOperationQueueWork drives the queue: worked "
             "again right away after progress, asleep while a transfer runs until it wakes the queue.\n"
+            "- **nui-sftp unsafe fast**: the same in the unsafe fast mode, files below 1 MiB go straight to their "
+            "destination without the safety checks.\n"
             "- **libssh sftp_aio**: libssh directly on the same kind of connection, one file after another with 8 MiB "
             "of requests in flight.\n"
             "- **OpenSSH sftp**: the host's sftp program in batch mode, its start and login measured with an empty "
