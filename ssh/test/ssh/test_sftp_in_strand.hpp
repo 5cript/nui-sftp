@@ -227,7 +227,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto opened = fut.get();
         ASSERT_TRUE(opened.has_value());
         auto file = opened.value().lock();
@@ -258,7 +258,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto opened = fut.get();
         ASSERT_TRUE(opened.has_value());
         auto file = opened.value().lock();
@@ -413,7 +413,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
         ASSERT_DEBUG_DEATH({ (void)file->seekInStrand(0); }, ".*");
@@ -426,7 +426,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
         ASSERT_DEBUG_DEATH({ (void)file->tellInStrand(); }, ".*");
@@ -439,7 +439,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
         ASSERT_DEBUG_DEATH({ (void)file->statInStrand(); }, ".*");
@@ -452,7 +452,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
         ASSERT_DEBUG_DEATH({ (void)file->rewindInStrand(); }, ".*");
@@ -465,7 +465,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
         char buf = 0;
@@ -479,7 +479,7 @@ namespace SecureShell::Test
         auto fut = sftp->openFile(
             remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
         );
-        ASSERT_EQ(fut.wait_for(1s), std::future_status::ready);
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
         ASSERT_DEBUG_DEATH({ file->closeInStrand(false); }, ".*");
