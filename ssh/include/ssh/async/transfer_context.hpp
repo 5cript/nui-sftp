@@ -4,6 +4,7 @@
 #include <ssh/sftp_error.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -61,6 +62,15 @@ namespace SecureShell
         void calculateBytesPerSecond();
 
         /**
+         * @brief Calls @p observer once the transfer ended and at most every progressInterval while bytes move,
+         *        on the thread that ended or moved them. Set before the transfer's first turn, never changed after.
+         */
+        void observe(std::function<void()> observer);
+
+        /** @brief How often an observer hears of progress at most. */
+        static constexpr auto progressInterval = std::chrono::milliseconds{100};
+
+        /**
          * @brief Add to the running bytes-transferred counter from outside the
          *        async FileStream path (e.g. a sync read-loop driven by an
          *        Operation that still wants the throughput-meter machinery).
@@ -71,9 +81,17 @@ namespace SecureShell
       private:
         void end(Outcome outcome);
 
+        /**
+         * @brief Tells the observer of progress unless it heard of some within progressInterval. Called by the
+         *        transfer after each turn, on the processing thread.
+         */
+        void reportProgress();
+
       private:
         /** @brief Set by FileStream before the transfer starts, never changed after. */
         std::function<void()> wake_{};
+        std::function<void()> observer_{};
+        std::chrono::steady_clock::time_point lastProgressReport_{};
         std::atomic<Outcome> outcome_{Outcome::Running};
         mutable std::mutex errorMutex_{};
         std::optional<SftpError> error_{};
