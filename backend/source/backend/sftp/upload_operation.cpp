@@ -504,10 +504,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
         takeOverPartialFileInStrand(sftp);
     const auto tempResult = sftp.lstatInStrand(tempPath_);
 
-    // Permissions of what is uploaded: the target of a followed symlink, not the link.
-    std::error_code statusError{};
-    const auto status = std::filesystem::status(localNativePath_, statusError);
-    const auto perms = determinePerms(statusError ? std::filesystem::perms::unknown : Utility::localPermissions(status));
+    const auto perms = remoteFilePerms();
 
     // Adoption mechanic for temp file parts:
     if (tempResult.has_value())
@@ -590,6 +587,50 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     openedTemporaryFile_ = true;
 
     return {};
+}
+
+std::expected<void, UploadOperation::Error> UploadOperation::openDestinationInStrand(SecureShell::SftpSession& sftp)
+{
+    if (options_.createMissingDirectories)
+    {
+        if (auto res = ensureRemoteDirectoryExistsInStrand(sftp, *remotePath_.parent()); !res.has_value())
+            return std::unexpected(res.error());
+    }
+
+    using enum SecureShell::SftpSession::OpenType;
+    Log::debug("UploadOperation: Starting unsafe fast upload to '{}'.", remotePath_.value());
+    const auto openResult =
+        sftp.openFileInStrand(remotePath_, Write | Create | (options_.mayOverwrite ? Truncate : Exclusive), remoteFilePerms());
+    if (!openResult.has_value())
+    {
+        // Servers of SFTP version 3 refuse an exclusive open of an existing file with a plain failure.
+        if (!options_.mayOverwrite && sftp.lstatInStrand(remotePath_).has_value())
+        {
+            Log::warn(
+                "UploadOperation: Remote file '{}' already exists and may not be overwritten.", remotePath_.value()
+            );
+            return std::unexpected(Error{.type = ErrorType::FileExists});
+        }
+        Log::error(options_.failureToast, "Failed to open remote sftp file for upload: {}", openResult.error().message);
+        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
+    }
+
+    fileStream_ = openResult.value();
+    openedDestination_ = true;
+    return {};
+}
+
+std::filesystem::perms UploadOperation::remoteFilePerms() const
+{
+    // Permissions of what is uploaded: the target of a followed symlink, not the link.
+    std::error_code statusError{};
+    const auto status = std::filesystem::status(localNativePath_, statusError);
+    return determinePerms(statusError ? std::filesystem::perms::unknown : Utility::localPermissions(status));
+}
+
+Paths::RemotePath const& UploadOperation::writtenPath() const
+{
+    return unsafeFast_ ? remotePath_ : tempPath_;
 }
 
 void UploadOperation::takeOverPartialFileInStrand(SecureShell::SftpSession& sftp)
@@ -824,6 +865,22 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 
 std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
 {
+    unsafeFast_ = transfersUnsafeFast(options_.unsafeFastMode, totalSize_);
+    if (unsafeFast_)
+    {
+        // The buffer comes first: a bulk defers a file that finds none, its destination must still be untouched then.
+        const auto limits = sftp.limitsInStrand();
+        if (!limits)
+            return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = limits.error()});
+        return leaseBufferInStrand(sftp, limits->max_write_length)
+            .and_then(
+                [this, &sftp]()
+                {
+                    return openDestinationInStrand(sftp);
+                }
+            );
+    }
+
     if (auto result = openOrAdoptFileInStrand(sftp); !result.has_value())
         return std::unexpected(result.error());
 
@@ -833,8 +890,13 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(Sec
         Log::error(options_.failureToast, "UploadOperation: File stream expired after open.");
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
+    return leaseBufferInStrand(sftp, stream->writeLengthLimit());
+}
 
-    buffer_ = sftp.bufferProvider().leaseForTransfer(totalSize_, stream->writeLengthLimit());
+std::expected<void, UploadOperation::Error>
+UploadOperation::leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit)
+{
+    buffer_ = sftp.bufferProvider().leaseForTransfer(totalSize_, lengthLimit);
     if (buffer_.empty())
     {
         Log::error(options_.failureToast, "UploadOperation: No transfer buffer available from pool.");
@@ -891,7 +953,10 @@ void UploadOperation::cancelInStrand(bool adoptCancelState)
     cleanup();
     const bool openedTemporaryFile = std::exchange(openedTemporaryFile_, false);
     if (adoptCancelState && partialFileOnCancel_ == PartialFile::Discarded && openedTemporaryFile)
-        removeTemporaryFile();
+        removeRemoteFile(tempPath_);
+    // Nothing continues a partial destination, so a stopped or failed upload leaves none.
+    if (std::exchange(openedDestination_, false) && (adoptCancelState || state_ == OperationState::Failed))
+        removeRemoteFile(remotePath_);
 }
 
 void UploadOperation::partialFileOnCancel(PartialFile partial)
@@ -899,20 +964,20 @@ void UploadOperation::partialFileOnCancel(PartialFile partial)
     partialFileOnCancel_ = partial;
 }
 
-void UploadOperation::removeTemporaryFile()
+void UploadOperation::removeRemoteFile(Paths::RemotePath const& path)
 {
     const auto sftp = openSession(sftp_);
     if (!sftp)
         return;
     // Queued behind the close of the file on the server, which cleanup() queued.
     sftp->perform(
-        [weak = sftp_, temporary = tempPath_]()
+        [weak = sftp_, path]()
         {
             const auto session = openSession(weak);
             if (!session)
                 return;
-            if (const auto removed = session->removeFileInStrand(temporary); !removed.has_value())
-                Log::warn("UploadOperation: Cannot remove '{}': {}", temporary.value(), removed.error().message);
+            if (const auto removed = session->removeFileInStrand(path); !removed.has_value())
+                Log::warn("UploadOperation: Cannot remove '{}': {}", path.value(), removed.error().message);
         }
     );
 }
@@ -994,6 +1059,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Se
 
     // The modification time goes on the temp file, so nothing can fail once the destination is replaced.
     applyModificationTimeInStrand(sftp);
+    if (unsafeFast_)
+    {
+        openedDestination_ = false;
+        reportSent();
+        return {};
+    }
 
     auto moved = ComparedStateCheck::moveRemoteIntoPlaceInStrand(
         sftp,
@@ -1054,8 +1125,8 @@ void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sf
     attributes.flags = SSH_FILEXFER_ATTR_ACMODTIME;
     attributes.atime = seconds;
     attributes.mtime = seconds;
-    if (const auto applied = sftp.statInStrand(tempPath_, &attributes); !applied.has_value())
-        Log::warn("UploadOperation: Failed to set mtime on '{}': {}.", tempPath_.value(), applied.error().message);
+    if (const auto applied = sftp.statInStrand(writtenPath(), &attributes); !applied.has_value())
+        Log::warn("UploadOperation: Failed to set mtime on '{}': {}.", writtenPath().value(), applied.error().message);
 }
 
 std::filesystem::perms UploadOperation::determinePerms(std::filesystem::perms localPerms) const

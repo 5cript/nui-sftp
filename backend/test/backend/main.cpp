@@ -44,6 +44,7 @@
 #include "test_sync_session.hpp"
 #include "test_dropped_entry.hpp"
 #include "test_transfer_failures.hpp"
+#include "test_unsafe_fast_mode.hpp"
 #include "test_compared_state_check.hpp"
 #include "test_operation_queue.hpp"
 #include "test_existence_check.hpp"
