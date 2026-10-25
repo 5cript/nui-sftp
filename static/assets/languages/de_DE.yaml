@@ -786,7 +786,7 @@ settings:
     gssapiServerIdentityHelpText: "Die für die Authentifizierung verwendete GSSAPI Serveridentität."
     gssapiClientIdentityHelpText: "Die für die Authentifizierung verwendete GSSAPI Clientidentität."
     gssapiDelegateCredentialsHelpText: "Wenn aktiviert, werden GSSAPI Anmeldeinformationen an den Server delegiert."
-    noDelayHelpText: "Wenn aktiviert, wird der Nagle Algorithmus für SSH Verbindungen deaktiviert."
+    noDelayHelpText: "Wenn aktiviert, wird der Nagle Algorithmus für SSH Verbindungen deaktiviert. Ohne Einstellung aktiviert, weil Übertragungen vieler Dateien sonst immer wieder 40 ms stocken."
     bypassConfigHelpText: "Wenn aktiviert, wird die Standard SSH Konfigurationsdatei (~/.ssh/config) ignoriert."
     identityAgentHelpText: "Der Pfad zum Socket des SSH Identitätsagenten."
     connectTimeoutSecondsHelpText: "Die Zeitüberschreitung für den Verbindungsaufbau in Sekunden."
