@@ -63,14 +63,24 @@ namespace SecureShell
     void Session::start()
     {
         processingThread_.start(std::chrono::milliseconds{1});
+        // Asked on the processing thread before every wait, libssh closes the socket on a fatal error.
+        const auto watching = processingThread_.watchSocket(
+            [this]()
+            {
+                auto* const session = session_.getCSession();
+                return SocketWait::Watched{
+                    .socket = ssh_get_fd(session),
+                    .writable = (ssh_get_poll_flags(session) & SSH_WRITE_PENDING) != 0,
+                };
+            }
+        );
+        if (!watching)
+            Log::error("Channels are polled, waiting on the connection is not possible: {}", watching.error());
         createHiddenChannel();
     }
 
     void Session::createHiddenChannel()
     {
-        using namespace std::chrono_literals;
-        constexpr auto hiddenChannelPollInterval = 50ms;
-
         auto fut = createPtyChannel({
             .environment = std::nullopt,
             .localeEnv = std::nullopt,
@@ -107,9 +117,7 @@ namespace SecureShell
             {
                 if (onConnectionLoss)
                     onConnectionLoss();
-            },
-            // Only notices a lost connection, so an idle session wakes 20 times a second instead of a thousand.
-            hiddenChannelPollInterval
+            }
         );
     }
 

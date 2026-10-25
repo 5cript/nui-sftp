@@ -5,9 +5,17 @@
 #include <paths/native.hpp>
 #include <nui/utility/scope_exit.hpp>
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <filesystem>
+#include <fstream>
+#include <future>
+#include <mutex>
+#include <string>
+#include <vector>
 
 extern std::filesystem::path programDirectory;
 extern std::filesystem::path temporaryRoot;
@@ -584,4 +592,269 @@ namespace SecureShell::Test
         channel->close();
         EXPECT_FALSE(channel->close());
     }
+
+    namespace
+    {
+        /**
+         * @brief Collects a terminal's output and lets the test wait for a piece of it.
+         */
+        struct TerminalOutput
+        {
+            std::mutex mutex{};
+            std::condition_variable arrived{};
+            std::string text{};
+
+            std::function<void(std::string const&)> sink()
+            {
+                return [this](std::string const& data)
+                {
+                    {
+                        std::lock_guard lock{mutex};
+                        text += data;
+                    }
+                    arrived.notify_all();
+                };
+            }
+
+            bool waitFor(std::string const& piece, std::chrono::milliseconds limit = 2s)
+            {
+                std::unique_lock lock{mutex};
+                return arrived.wait_for(
+                    lock,
+                    limit,
+                    [this, &piece]
+                    {
+                        return text.find(piece) != std::string::npos;
+                    }
+                );
+            }
+        };
+    }
+
+    TEST_F(SshSessionTests, TerminalOutputArrivesAtOnceAfterTheConnectionWasIdle)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        auto expectedSession = makePasswordTestSession(result->port);
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        auto channel = expectedChannel.value().lock();
+        TerminalOutput output;
+        channelStartReading(channel, output.sink());
+        ASSERT_TRUE(output.waitFor("Welcome"));
+
+        // The thread sleeps on the socket now, the answer must still come right away.
+        std::this_thread::sleep_for(200ms);
+        const auto start = std::chrono::steady_clock::now();
+        channel->write("echo idle-marker");
+        channel->write("\r");
+        ASSERT_TRUE(output.waitFor("idle-marker\r\n"));
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        channel->close();
+    }
+
+    TEST_F(SshSessionTests, OutputReadByAnotherChannelsCallReachesItsTerminal)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        auto expectedSession = makePasswordTestSession(result->port);
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedReader = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedReader.has_value());
+        auto reader = expectedReader.value().lock();
+
+        TerminalOutput output;
+        channelStartReading(reader, output.sink());
+        ASSERT_TRUE(output.waitFor("Welcome"));
+
+        // Opening a channel waits for the server's answers and reads the reader's output that comes before them.
+        std::vector<std::shared_ptr<Channel>> others{};
+        for (int round = 0; round < 10; ++round)
+        {
+            reader->write(fmt::format("echo marker-{}", round));
+            reader->write("\r");
+            auto opened = session->createPtyChannel({});
+            ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+            auto other = opened.get();
+            ASSERT_TRUE(other.has_value());
+            others.push_back(other.value().lock());
+            ASSERT_TRUE(output.waitFor(fmt::format("\r\nmarker-{}", round), 1s)) << "round " << round << ": " << output.text;
+        }
+        reader->close();
+        for (auto const& other : others)
+            other->close();
+    }
+
+    TEST_F(SshSessionTests, ConnectionLossIsReportedWhileTheThreadWaitsOnTheConnection)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        std::promise<void> lost{};
+        std::atomic_bool reported{false};
+        auto expectedSession = makePasswordTestSession(
+            result->port,
+            [&lost, &reported]()
+            {
+                if (!reported.exchange(true))
+                    lost.set_value();
+            }
+        );
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        auto channel = expectedChannel.value().lock();
+        TerminalOutput output;
+        std::promise<void> exited{};
+        channelStartReading(channel, exited, output.sink());
+        ASSERT_TRUE(output.waitFor("Welcome"));
+        std::this_thread::sleep_for(100ms);
+
+        // The server ends the whole connection.
+        channel->write("logout");
+        channel->write("\r");
+        EXPECT_EQ(lost.get_future().wait_for(2s), std::future_status::ready);
+        EXPECT_EQ(exited.get_future().wait_for(2s), std::future_status::ready);
+    }
+
+    TEST_F(SshSessionTests, ClosingATerminalWhileTheThreadWaitsOnTheConnectionReturns)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        auto expectedSession = makePasswordTestSession(result->port);
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        auto channel = expectedChannel.value().lock();
+        TerminalOutput output;
+        std::atomic_bool exitReported{false};
+        channelStartReading(
+            channel,
+            output.sink(),
+            {},
+            [&exitReported]()
+            {
+                exitReported = true;
+            }
+        );
+        ASSERT_TRUE(output.waitFor("Welcome"));
+        std::this_thread::sleep_for(100ms);
+
+        auto closed = std::async(
+            std::launch::async,
+            [&channel]
+            {
+                return channel->close();
+            }
+        );
+        ASSERT_EQ(closed.wait_for(1s), std::future_status::ready);
+        EXPECT_TRUE(closed.get());
+        EXPECT_FALSE(exitReported.load());
+
+        auto destroyed = std::async(
+            std::launch::async,
+            [&session]
+            {
+                session.reset();
+            }
+        );
+        EXPECT_EQ(destroyed.wait_for(2s), std::future_status::ready);
+    }
+
+#ifdef __linux__
+    namespace
+    {
+        /**
+         * @brief Voluntary context switches of all threads of this process, each one a thread going to sleep.
+         */
+        long long voluntaryContextSwitches()
+        {
+            long long total = 0;
+            for (auto const& task : std::filesystem::directory_iterator{"/proc/self/task"})
+            {
+                std::ifstream status{task.path() / "status"};
+                std::string line{};
+                while (std::getline(status, line))
+                {
+                    constexpr std::string_view key = "voluntary_ctxt_switches:";
+                    if (line.starts_with(key))
+                        total += std::stoll(line.substr(key.size()));
+                }
+            }
+            return total;
+        }
+    }
+
+    TEST_F(SshSessionTests, AnIdleSessionWithAnOpenTerminalDoesNotWakeUp)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        auto expectedSession = makePasswordTestSession(result->port);
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        auto channel = expectedChannel.value().lock();
+        TerminalOutput output;
+        channelStartReading(channel, output.sink());
+        ASSERT_TRUE(output.waitFor("Welcome"));
+        std::this_thread::sleep_for(100ms);
+
+        const auto before = voluntaryContextSwitches();
+        std::this_thread::sleep_for(500ms);
+        const auto woken = voluntaryContextSwitches() - before;
+        // Polling every millisecond woke the processing thread about 500 times in this time.
+        EXPECT_LT(woken, 25);
+        channel->close();
+    }
+#endif
 }
