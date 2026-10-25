@@ -1,9 +1,10 @@
-include("${CMAKE_CURRENT_LIST_DIR}/../../../_cmake/dependencies/libssh.cmake")
 find_package(fmt CONFIG REQUIRED)
 
 # The ssh tests build a second copy instrumented with ThreadSanitizer.
 function(add_secure_shell_library name)
     set(SECURE_SHELL_SOURCE_DIRECTORY "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    # Imported targets are only visible in the directory that found them, the test directory calls this too.
+    include("${SECURE_SHELL_SOURCE_DIRECTORY}/../../../_cmake/dependencies/libssh.cmake")
     add_library(
         ${name}
         STATIC
