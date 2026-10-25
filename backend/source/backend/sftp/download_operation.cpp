@@ -599,22 +599,28 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openEmptyTempFi
 
     // Opening with trunc truncates the file restrictTempFile just created, and on ext4 a truncated file is written
     // back in full when it is closed (auto_da_alloc), which took 160 ms of a 400 ms download of 256 MiB. Only a
-    // leftover with content is truncated.
-    std::error_code sizeError{};
-    const auto existingSize = std::filesystem::file_size(tempNativePath_, sizeError);
-    std::error_code truncateError{};
-    if (!sizeError && existingSize != 0)
-        std::filesystem::resize_file(tempNativePath_, 0, truncateError);
-    if (sizeError || truncateError)
+    // leftover with content is truncated. On Windows restrictTempFile creates nothing, the open creates the file.
+    std::error_code fileError{};
+    const bool exists = std::filesystem::exists(tempNativePath_, fileError);
+    if (exists && !fileError)
+    {
+        const auto existingSize = std::filesystem::file_size(tempNativePath_, fileError);
+        if (!fileError && existingSize != 0)
+            std::filesystem::resize_file(tempNativePath_, 0, fileError);
+    }
+    if (fileError)
     {
         Log::error(
             "DownloadOperation: Cannot empty '{}': {}",
             Paths::nativeToUtf8(tempNativePath_),
-            Utility::errorMessage(sizeError ? sizeError : truncateError)
+            Utility::errorMessage(fileError)
         );
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
-    localFile_.open(tempNativePath_, std::ios::binary | std::ios::in | std::ios::out);
+    // Without in, out truncates, which only matters for an existing file.
+    localFile_.open(
+        tempNativePath_, exists ? std::ios::binary | std::ios::in | std::ios::out : std::ios::binary | std::ios::out
+    );
     return {};
 }
 
