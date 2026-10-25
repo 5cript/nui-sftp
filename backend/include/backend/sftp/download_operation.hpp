@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
+#include <backend/sftp/unsafe_fast_mode.hpp>
 #include <ssh/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
@@ -62,6 +63,8 @@ class DownloadOperation : public Operation
          *        transferred as it is now. Unset outside of sync.
          */
         std::optional<SharedData::ComparedState> comparedDestination{std::nullopt};
+        /** @brief See UnsafeFastMode, a link is always downloaded safely. */
+        UnsafeFastMode unsafeFastMode{};
     };
 
     SecureShell::ProcessingStrand* strand() const override
@@ -143,6 +146,27 @@ class DownloadOperation : public Operation
     std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
 
     /**
+     * @brief The unsafe fast mode's open: the destination itself, created or emptied. Only links in its path are
+     *        refused, an existing destination that may not be overwritten was refused before.
+     */
+    std::expected<void, Error> openDestination();
+
+    /**
+     * @brief Leases the transfer buffer for chunks of at most @p lengthLimit bytes.
+     */
+    std::expected<void, Error> leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit);
+
+    /**
+     * @brief The local file the download writes to: the destination in the unsafe fast mode, else the temp file.
+     */
+    std::filesystem::path const& writtenNativePath() const;
+
+    /**
+     * @brief Creates the parent directories of @p path when createMissingDirectories asks for it.
+     */
+    std::expected<void, Error> createMissingParents(std::filesystem::path const& path) const;
+
+    /**
      * @brief Refuses @p path when it runs through a symlink or junction, below the link free root when one is set,
      *        otherwise only at @p path itself.
      */
@@ -157,14 +181,14 @@ class DownloadOperation : public Operation
     Error sizeMismatch() const;
 
     /**
-     * @brief Creates the temp file, or limits an existing one, to its owner until the final permissions are set.
+     * @brief Creates the written file, or limits an existing one, to its owner until the final permissions are set.
      */
-    std::expected<void, Error> restrictTempFile() const;
+    std::expected<void, Error> restrictWrittenFile() const;
 
     /**
-     * @brief Restricts the temp file and opens it empty for writing.
+     * @brief Restricts the written file and opens it empty for writing.
      */
-    std::expected<void, Error> openEmptyTempFile();
+    std::expected<void, Error> openEmptyWrittenFile();
 
     /**
      * @brief The permissions of the finished file: inherited, configured, or those of a new file.
@@ -197,4 +221,8 @@ class DownloadOperation : public Operation
     std::uint64_t bytesInFile_{0u};
     /** @brief An adopted partial file already holds the whole content. */
     bool transferComplete_{false};
+    /** @brief The file is written in the unsafe fast mode, decided when it is opened. */
+    bool unsafeFast_{false};
+    /** @brief The unsafe fast mode opened the destination, which holds a partial file until the download completes. */
+    bool openedDestination_{false};
 };

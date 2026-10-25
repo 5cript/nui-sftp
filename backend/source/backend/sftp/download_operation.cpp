@@ -11,6 +11,7 @@
 #include <utility/link_safe_remove.hpp>
 
 #include <tuple>
+#include <utility>
 
 using namespace std::chrono_literals;
 
@@ -478,20 +479,8 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
     if (const auto refused = refuseLinkedPath(tempPath); !refused)
         return refused;
 
-    if (options_.createMissingDirectories)
-    {
-        std::error_code mkErr{};
-        std::filesystem::create_directories(tempPath.parent_path(), mkErr);
-        if (mkErr)
-        {
-            Log::error(
-                "DownloadOperation: Failed to create parent directories for '{}': {}.",
-                Paths::nativeToUtf8(tempPath),
-                Utility::errorMessage(mkErr)
-            );
-            return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
-        }
-    }
+    if (const auto created = createMissingParents(tempPath); !created)
+        return created;
 
     std::error_code existsError{};
     if (options_.tryContinue && std::filesystem::exists(tempPath, existsError))
@@ -542,13 +531,13 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
             );
             if (auto rewound = stream.seekInStrand(0); !rewound)
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
-            if (const auto opened = openEmptyTempFile(); !opened)
+            if (const auto opened = openEmptyWrittenFile(); !opened)
                 return opened;
         }
         else
         {
             Log::info("DownloadOperation: File '{}' is incomplete, continuing download.", Paths::nativeToUtf8(tempPath));
-            if (const auto restricted = restrictTempFile(); !restricted)
+            if (const auto restricted = restrictWrittenFile(); !restricted)
                 return restricted;
             localFile_.open(tempPath, std::ios::binary | std::ios::app);
             if (!localFile_.is_open())
@@ -565,7 +554,7 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
     }
     else
     {
-        if (const auto opened = openEmptyTempFile(); !opened)
+        if (const auto opened = openEmptyWrittenFile(); !opened)
             return opened;
     }
 
@@ -578,13 +567,54 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
     return {};
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::restrictTempFile() const
+std::expected<void, DownloadOperation::Error> DownloadOperation::createMissingParents(std::filesystem::path const& path) const
 {
-    if (const auto restricted = Utility::restrictToOwner(tempNativePath_); !restricted)
+    if (!options_.createMissingDirectories)
+        return {};
+    std::error_code mkErr{};
+    std::filesystem::create_directories(path.parent_path(), mkErr);
+    if (mkErr)
+    {
+        Log::error(
+            "DownloadOperation: Failed to create parent directories for '{}': {}.",
+            Paths::nativeToUtf8(path),
+            Utility::errorMessage(mkErr)
+        );
+        return std::unexpected(Error{.type = ErrorType::CannotCreateDirectory});
+    }
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::openDestination()
+{
+    // Opening for writing follows a link planted at the destination or above it, out of the target directory.
+    if (const auto refused = refuseLinkedPath(localNativePath_); !refused)
+        return refused;
+    if (const auto created = createMissingParents(localNativePath_); !created)
+        return created;
+    if (const auto opened = openEmptyWrittenFile(); !opened)
+        return opened;
+    if (!localFile_.is_open())
+    {
+        Log::error("DownloadOperation: Failed to open file: {}", options_.localPath.toUtf8());
+        return std::unexpected(Error{.type = ErrorType::OpenFailure});
+    }
+    openedDestination_ = true;
+    return {};
+}
+
+std::filesystem::path const& DownloadOperation::writtenNativePath() const
+{
+    return unsafeFast_ ? localNativePath_ : tempNativePath_;
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::restrictWrittenFile() const
+{
+    if (const auto restricted = Utility::restrictToOwner(writtenNativePath()); !restricted)
     {
         Log::error(
             "DownloadOperation: Cannot create '{}': {}",
-            Paths::nativeToUtf8(tempNativePath_),
+            Paths::nativeToUtf8(writtenNativePath()),
             Utility::errorMessage(restricted.error())
         );
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
@@ -592,34 +622,36 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::restrictTempFil
     return {};
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::openEmptyTempFile()
+std::expected<void, DownloadOperation::Error> DownloadOperation::openEmptyWrittenFile()
 {
-    if (const auto restricted = restrictTempFile(); !restricted)
+    if (const auto restricted = restrictWrittenFile(); !restricted)
         return restricted;
 
-    // Opening with trunc truncates the file restrictTempFile just created, and on ext4 a truncated file is written
+    auto const& writtenPath = writtenNativePath();
+
+    // Opening with trunc truncates the file restrictWrittenFile just created, and on ext4 a truncated file is written
     // back in full when it is closed (auto_da_alloc), which took 160 ms of a 400 ms download of 256 MiB. Only a
-    // leftover with content is truncated. On Windows restrictTempFile creates nothing, the open creates the file.
+    // leftover with content is truncated. On Windows restrictWrittenFile creates nothing, the open creates the file.
     std::error_code fileError{};
-    const bool exists = std::filesystem::exists(tempNativePath_, fileError);
+    const bool exists = std::filesystem::exists(writtenPath, fileError);
     if (exists && !fileError)
     {
-        const auto existingSize = std::filesystem::file_size(tempNativePath_, fileError);
+        const auto existingSize = std::filesystem::file_size(writtenPath, fileError);
         if (!fileError && existingSize != 0)
-            std::filesystem::resize_file(tempNativePath_, 0, fileError);
+            std::filesystem::resize_file(writtenPath, 0, fileError);
     }
     if (fileError)
     {
         Log::error(
             "DownloadOperation: Cannot empty '{}': {}",
-            Paths::nativeToUtf8(tempNativePath_),
+            Paths::nativeToUtf8(writtenPath),
             Utility::errorMessage(fileError)
         );
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
     // Without in, out truncates, which only matters for an existing file.
     localFile_.open(
-        tempNativePath_, exists ? std::ios::binary | std::ios::in | std::ios::out : std::ios::binary | std::ios::out
+        writtenPath, exists ? std::ios::binary | std::ios::in | std::ios::out : std::ios::binary | std::ios::out
     );
     return {};
 }
@@ -751,26 +783,26 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         options_.entry->permissions = targetInfo->permissions;
     }
 
-    auto openResult = openOrAdoptFileInStrand(*stream);
-    if (!openResult.has_value())
+    unsafeFast_ = transfersUnsafeFast(options_.unsafeFastMode, options_.entry->size);
+    // In the unsafe fast mode the buffer comes first: a bulk defers a file that finds none, its destination must still
+    // be untouched then.
+    auto opened = unsafeFast_ ? leaseBufferInStrand(sftp, stream->readLengthLimit())
+                                    .and_then(
+                                        [this]()
+                                        {
+                                            return openDestination();
+                                        }
+                                    )
+                              : openOrAdoptFileInStrand(*stream).and_then(
+                                    [this, &sftp, &stream]()
+                                    {
+                                        return leaseBufferInStrand(sftp, stream->readLengthLimit());
+                                    }
+                                );
+    if (!opened.has_value())
     {
         Log::error("DownloadOperation: Failed to open file.");
-        return std::unexpected(openResult.error());
-    }
-
-    buffer_ = sftp.bufferProvider().leaseForTransfer(options_.entry->size, stream->readLengthLimit());
-    if (buffer_.empty())
-    {
-        Log::error("DownloadOperation: No transfer buffer available from pool.");
-        return std::unexpected(
-            Error{
-                .type = ErrorType::SftpError,
-                .sftpError = SecureShell::SftpError{
-                    .message = "No buffer available from pool",
-                    .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
-                },
-            }
-        );
+        return std::unexpected(opened.error());
     }
 
     // Appending to a partial file or finishing a complete one reserves nothing.
@@ -785,6 +817,27 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
             return std::unexpected(Error{.type = ErrorType::OpenFailure});
         }
         localFile_.seekp(pos);
+    }
+
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error>
+DownloadOperation::leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit)
+{
+    buffer_ = sftp.bufferProvider().leaseForTransfer(options_.entry->size, lengthLimit);
+    if (buffer_.empty())
+    {
+        Log::error("DownloadOperation: No transfer buffer available from pool.");
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .sftpError = SecureShell::SftpError{
+                    .message = "No buffer available from pool",
+                    .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+                },
+            }
+        );
     }
 
     return {};
@@ -829,6 +882,18 @@ void DownloadOperation::cleanup()
                 Utility::errorMessage(removeError)
             );
     }
+    // Nothing continues a partial destination, so a stopped or failed download leaves none.
+    if (std::exchange(openedDestination_, false))
+    {
+        std::error_code removeError{};
+        std::filesystem::remove(localNativePath_, removeError);
+        if (removeError)
+            Log::warn(
+                "DownloadOperation: Cannot remove '{}': {}",
+                options_.localPath.toUtf8(),
+                Utility::errorMessage(removeError)
+            );
+    }
 }
 
 void DownloadOperation::pause(bool doPause)
@@ -866,7 +931,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
 
     localFile_.close();
 
-    auto const& tempPath = tempNativePath_;
+    auto const& tempPath = writtenNativePath();
 
     // A short file must never replace the destination. A reserved file has its full size from the start, so the
     // bytes written count.
@@ -909,6 +974,11 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         return std::unexpected(Error{.type = ErrorType::CannotSetFilePermissions});
     }
 
+    if (unsafeFast_)
+    {
+        openedDestination_ = false;
+        return {};
+    }
     return ComparedStateCheck::moveLocalIntoPlace(
         tempPath, localNativePath_, options_.mayOverwrite, options_.comparedDestination
     );
@@ -920,6 +990,9 @@ std::expected<std::filesystem::perms, DownloadOperation::Error> DownloadOperatio
     {
         return options_.filePermissions.and_then(Utility::sanitizePermissions).value_or(Utility::newFilePermissions());
     }
+    // The listing's permissions spare the unsafe fast mode the round trip.
+    if (unsafeFast_ && options_.entry->permissions != std::filesystem::perms::unknown)
+        return Utility::inheritablePermissions(options_.entry->permissions).value_or(Utility::newFilePermissions());
 
     auto stream = fileStream_.lock();
     if (!stream)
