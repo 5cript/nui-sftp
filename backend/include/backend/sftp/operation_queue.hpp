@@ -4,6 +4,7 @@
 #include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/remote_delete_guard.hpp>
+#include <backend/sftp/unsafe_fast_mode.hpp>
 #include <backend/sync/sync_session.hpp>
 #include <log/toast.hpp>
 #include <persistence/state/state.hpp>
@@ -381,6 +382,13 @@ class OperationQueue
     void paused(bool pause);
 
     /**
+     * @brief Whether files that open from now on are transferred in the unsafe fast mode, see UnsafeFastMode. Off for
+     *        every new queue. Uploads of File Tracking always stay safe, they continue partial files across renames.
+     */
+    bool unsafeFast() const;
+    void unsafeFast(bool enabled);
+
+    /**
      * @brief Test hook: @p observer sees every completion right before it is sent to the frontend. The application
      *        never sets one.
      */
@@ -436,6 +444,12 @@ class OperationQueue
   private:
     void completeOperation(OperationCompleted&& operationCompleted);
     void deepPause(bool pause);
+
+    /**
+     * @brief The mode a transfer of this queue asks when it opens a file. For an upload that tells @p onSent of its
+     *        files, File Tracking's, the safe mode.
+     */
+    UnsafeFastMode unsafeFastModeFor(UploadOperation::OnSent const& onSent = {}) const;
 
     std::string rpcName(std::string_view event) const;
 
@@ -551,6 +565,8 @@ class OperationQueue
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
     std::atomic_bool paused_{true};
+    /** @brief Shared with the transfers, which read it on the processing thread when they open a file. */
+    std::shared_ptr<std::atomic_bool> unsafeFast_{std::make_shared<std::atomic_bool>(false)};
     std::function<void(OperationCompleted const&)> completionObserver_{};
     std::unordered_map<Ids::OperationId, std::function<void(OperationCompleted const&)>, Ids::IdHash>
         completionCallbacks_{};

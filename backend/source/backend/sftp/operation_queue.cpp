@@ -16,6 +16,7 @@
 #include <shared_data/file_operations/operations_reordered.hpp>
 #include <shared_data/error_or_success.hpp>
 #include <shared_data/is_paused.hpp>
+#include <shared_data/unsafe_fast_mode_state.hpp>
 
 #include <boost/asio/post.hpp>
 
@@ -1086,6 +1087,27 @@ bool OperationQueue::paused() const
     return paused_;
 }
 
+bool OperationQueue::unsafeFast() const
+{
+    return unsafeFast_->load();
+}
+
+void OperationQueue::unsafeFast(bool enabled)
+{
+    if (unsafeFast_->exchange(enabled) != enabled)
+        Log::info("OperationQueue: unsafe fast mode {} for '{}'.", enabled ? "on" : "off", sessionId_.value());
+}
+
+UnsafeFastMode OperationQueue::unsafeFastModeFor(UploadOperation::OnSent const& onSent) const
+{
+    if (onSent)
+        return {};
+    return [enabled = unsafeFast_]()
+    {
+        return enabled->load();
+    };
+}
+
 bool OperationQueue::hasPriorityWork() const
 {
     return !priorityOperations_.empty();
@@ -1195,6 +1217,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         opts.bigFileOptimized = isBigFile || result->size >= Constants::bigFileCutOff;
         opts.entry = result.value();
         opts.createMissingDirectories = createMissingDirectories;
+        opts.unsafeFastMode = unsafeFastModeFor();
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onDownloadProgress")](
                                     auto min, auto max, auto current, auto bytesPerSecond
                                 )
@@ -1248,13 +1271,15 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     }
     else if (result->isDirectory())
     {
+        auto individualOptions = resolveDownloadOptions(transferOptions, resolvedTimeout);
+        individualOptions.unsafeFastMode = unsafeFastModeFor();
         auto bulk = std::make_unique<BulkDownloadOperation>(
             sftp.weak_from_this(),
             BulkDownloadOperation::BulkDownloadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", operationId),
                 .remotePath = remotePath,
                 .localPath = localPath,
-                .individualOptions = resolveDownloadOptions(transferOptions, resolvedTimeout),
+                .individualOptions = std::move(individualOptions),
                 .failFast = transferOptions.failFast.value_or(false),
                 .concurrency = bulkConcurrency_,
             }
@@ -1639,6 +1664,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             auto downloadOptions = resolveDownloadOptions(transferOptions, resolvedTimeout);
             // Sync plans list files of directories that do not exist locally yet.
             downloadOptions.createMissingDirectories = true;
+            downloadOptions.unsafeFastMode = unsafeFastModeFor();
             auto bulk = std::make_unique<BulkDownloadOperation>(
                 sftp.weak_from_this(),
                 BulkDownloadOperation::BulkDownloadOperationOptions{
@@ -1726,6 +1752,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
         opts.onSent = std::move(onSent);
+        opts.unsafeFastMode = unsafeFastModeFor(opts.onSent);
         opts.adoptPartialOf = std::move(adoptPartialOf);
         opts.failureToast = failureToast;
         opts.progressCallback = [weak = weak_from_this(), operationId, name = rpcName("onUploadProgress")](
@@ -1782,6 +1809,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         auto individualOptions = resolveUploadOptions(transferOptions, resolvedTimeout);
         individualOptions.sourceMayVanish = sourceMayVanish;
         individualOptions.onSent = std::move(onSent);
+        individualOptions.unsafeFastMode = unsafeFastModeFor(individualOptions.onSent);
         individualOptions.failureToast = failureToast;
         auto bulk = std::make_unique<BulkUploadOperation>(
             sftp.weak_from_this(),
@@ -1920,6 +1948,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             uploadOptions.createMissingDirectories = true;
             uploadOptions.sourceMayVanish = sourceMayVanish;
             uploadOptions.onSent = onSent;
+            uploadOptions.unsafeFastMode = unsafeFastModeFor(onSent);
             uploadOptions.failureToast = failureToast;
             auto bulk = std::make_unique<BulkUploadOperation>(
                 sftp.weak_from_this(),
@@ -2560,6 +2589,29 @@ void OperationQueue::closeSyncSession(Ids::SyncSessionId const& sessionId)
 
 void OperationQueue::registerRpc()
 {
+    on(rpcName("unsafeFastMode"))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply(SharedData::error("OperationQueue no longer exists"));
+                return reply(SharedData::ErrorOrSuccess{SharedData::UnsafeFastModeState{.enabled = self->unsafeFast()}});
+            }
+        );
+
+    on(rpcName("setUnsafeFastMode"))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, bool enabled)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply(SharedData::error("OperationQueue no longer exists"));
+                self->unsafeFast(enabled);
+                return reply(SharedData::success());
+            }
+        );
+
     on(rpcName("isPaused"))
         .perform(
             [weak = weak_from_this()](RpcHelper::RpcOnce&& reply)
