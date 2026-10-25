@@ -27,11 +27,12 @@ class CommandLineInterface {
                     return;
                 }
 
+                let reply;
                 if (this.eventMap.has(command.command)) {
-                    this.eventMap.get(command.command)(command);
+                    reply = this.eventMap.get(command.command)(command);
                 }
                 if (command.ack === true) {
-                    process.stdout.write(JSON.stringify({ ack: command.command }) + '\n');
+                    process.stdout.write(JSON.stringify({ ack: command.command, reply }) + '\n');
                 }
             }
         });

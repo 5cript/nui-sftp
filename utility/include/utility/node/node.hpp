@@ -38,6 +38,13 @@ namespace SecureShell::Test
          * @return true if the acknowledgement arrived.
          */
         bool command(std::string const& command, nlohmann::json const& arguments);
+        /**
+         * @brief Sends a command like command() with arguments and returns the reply of its acknowledgement, null
+         *        for a command without one.
+         *
+         * @return Nothing if no acknowledgement arrived.
+         */
+        std::optional<nlohmann::json> query(std::string const& command, nlohmann::json const& arguments = {});
         void terminate();
         int wait();
     };
