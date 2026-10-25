@@ -8,6 +8,7 @@
 #include <backend/sftp/upload_operation.hpp>
 #include <constants/sftp.hpp>
 #include <paths/local_path.hpp>
+#include <paths/native.hpp>
 #include <paths/remote_path.hpp>
 
 #include <fmt/format.h>
@@ -39,7 +40,7 @@ namespace Benchmark
             return Paths::LocalPath::make(path).transform_error(
                 [&path](auto const&)
                 {
-                    return fmt::format("invalid local path {}", path.string());
+                    return fmt::format("invalid local path {}", Paths::nativeToUtf8(path));
                 }
             );
         }

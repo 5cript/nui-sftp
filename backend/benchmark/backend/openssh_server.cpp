@@ -1,6 +1,7 @@
 #include "openssh_server.hpp"
 
 #include <docker/docker.hpp>
+#include <paths/native.hpp>
 
 #include <fmt/format.h>
 
@@ -100,9 +101,9 @@ namespace Benchmark
             const auto key = directory / "client_key";
             std::filesystem::create_directories(directory);
             std::filesystem::remove(key);
-            std::filesystem::remove(key.string() + ".pub");
+            std::filesystem::remove(std::filesystem::path{key} += ".pub");
             const auto generated =
-                Docker::run(fmt::format("ssh-keygen -q -t ed25519 -N '' -f {}", Docker::quote(key.string())));
+                Docker::run(fmt::format("ssh-keygen -q -t ed25519 -N '' -f {}", Docker::quote(Paths::nativeToUtf8(key))));
             if (generated.exitCode != 0)
                 return {};
             return key;
@@ -121,9 +122,9 @@ namespace Benchmark
 
     std::expected<std::string, std::string> localDigest(std::filesystem::path const& path)
     {
-        const auto result = Docker::run(digestCommand(path.string()));
+        const auto result = Docker::run(digestCommand(Paths::nativeToUtf8(path)));
         if (result.exitCode != 0)
-            return std::unexpected{fmt::format("digest of {} failed: {}", path.string(), result.output)};
+            return std::unexpected{fmt::format("digest of {} failed: {}", Paths::nativeToUtf8(path), result.output)};
         return trimmed(result.output).substr(0, 64);
     }
 
@@ -178,7 +179,7 @@ namespace Benchmark
 
                     if (const auto key = createClientKey(options.keyDirectory); !key.empty())
                     {
-                        std::ifstream publicKeyFile{key.string() + ".pub"};
+                        std::ifstream publicKeyFile{std::filesystem::path{key} += ".pub"};
                         std::stringstream publicKey;
                         publicKey << publicKeyFile.rdbuf();
                         const auto installed = server.execute(fmt::format(

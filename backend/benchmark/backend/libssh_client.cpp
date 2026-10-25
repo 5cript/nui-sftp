@@ -1,5 +1,7 @@
 #include "libssh_client.hpp"
 
+#include <paths/native.hpp>
+
 #include <fmt/format.h>
 
 #include <fcntl.h>
@@ -75,6 +77,15 @@ namespace Benchmark
         {
             return relative.empty() ? root : fmt::format("{}/{}", root, relative);
         }
+
+        /**
+         * @brief The directory part of the relative remote path @p relative, empty for a file at the root.
+         */
+        std::string remoteParent(std::string const& relative)
+        {
+            const auto slash = relative.rfind('/');
+            return slash == std::string::npos ? std::string{} : relative.substr(0, slash);
+        }
     }
 
     LibsshClient::LibsshClient(Connection& connection)
@@ -125,7 +136,7 @@ namespace Benchmark
         {
             const auto remotePath = joined(transfer.remotePath, relative);
             const auto localPath = transfer.localPath / relative;
-            const auto parent = std::filesystem::path{relative}.parent_path().generic_string();
+            const auto parent = remoteParent(relative);
             if (transfer.direction == Direction::Download)
             {
                 std::filesystem::create_directories(localPath.parent_path());
@@ -152,7 +163,7 @@ namespace Benchmark
             return std::unexpected{fmt::format("opening {} failed: {}", remotePath, sftp_get_error(sftp_))};
         std::ofstream local{localPath, std::ios::binary | std::ios::trunc};
         if (!local)
-            return std::unexpected{fmt::format("creating {} failed", localPath.string())};
+            return std::unexpected{fmt::format("creating {} failed", Paths::nativeToUtf8(localPath))};
 
         std::vector<char> buffer(readLength_);
         Requests requests;
@@ -188,7 +199,7 @@ namespace Benchmark
             return std::unexpected{fmt::format("creating {} failed: {}", remotePath, sftp_get_error(sftp_))};
         std::ifstream local{localPath, std::ios::binary};
         if (!local)
-            return std::unexpected{fmt::format("opening {} failed", localPath.string())};
+            return std::unexpected{fmt::format("opening {} failed", Paths::nativeToUtf8(localPath))};
 
         std::vector<char> buffer(writeLength_);
         Requests requests;
