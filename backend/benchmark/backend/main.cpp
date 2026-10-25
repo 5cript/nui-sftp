@@ -20,9 +20,11 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -44,6 +46,8 @@ namespace
         std::uint64_t mediumKibibytes{1024};
         std::uint64_t smallCount{2000};
         std::uint64_t smallKibibytes{4};
+        /** @brief The clients that run, by name; all when empty. */
+        std::set<std::string, std::less<>> clients{};
     };
 
     constexpr std::string_view usage =
@@ -55,7 +59,8 @@ namespace
         "  --medium-count <n>    Number of medium files (default: 64)\n"
         "  --medium-kib <n>      Size of a medium file (default: 1024)\n"
         "  --small-count <n>     Number of small files (default: 2000)\n"
-        "  --small-kib <n>       Size of a small file (default: 4)\n";
+        "  --small-kib <n>       Size of a small file (default: 4)\n"
+        "  --client <name>       Runs only this client, may be given more than once (default: all)\n";
 
     std::optional<std::uint64_t> parseNumber(std::string_view text)
     {
@@ -88,6 +93,11 @@ namespace
             if (option == "--output")
             {
                 arguments.output = std::filesystem::absolute(value);
+                continue;
+            }
+            if (option == "--client")
+            {
+                arguments.clients.emplace(value);
                 continue;
             }
             const auto number = parseNumber(value);
@@ -343,6 +353,18 @@ namespace
         clients.push_back(std::make_unique<LibsshClient>(connections[0]));
         clients.push_back(std::make_unique<ApplicationClient>(connections[1], false));
         clients.push_back(std::make_unique<ApplicationClient>(connections[2], true));
+        if (!arguments.clients.empty())
+        {
+            std::erase_if(
+                clients,
+                [&arguments](auto const& client)
+                {
+                    return !arguments.clients.contains(client->name());
+                }
+            );
+            if (!arguments.clients.contains(context.baselineClient))
+                context.notes.push_back(fmt::format("Only some clients ran, {} is not among them", context.baselineClient));
+        }
 
         std::vector<Measurement> measurements;
         for (auto const& source : sources)
