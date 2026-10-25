@@ -158,45 +158,6 @@ namespace
     }
 
     /**
-     * @brief The progress observer and the completion callback of one queued operation, the observer stays silent
-     *        once the operation completed.
-     */
-    struct ProgressUntilEnd
-    {
-        OperationQueue::ProgressObserver observer;
-        std::function<void(SharedData::OperationCompleted const&)> onCompleted;
-    };
-
-    /**
-     * @brief Hands the progress of an operation to @p observer until @p onCompleted hears it completed, both on the
-     *        strand. The observer is empty for an empty @p observer.
-     */
-    ProgressUntilEnd progressUntilEnd(
-        OperationQueue::ProgressObserver observer,
-        std::function<void(SharedData::OperationCompleted const&)> onCompleted
-    )
-    {
-        const auto ended = std::make_shared<bool>(false);
-        ProgressUntilEnd result{
-            .observer = {},
-            .onCompleted =
-                [ended, onCompleted = std::move(onCompleted)](SharedData::OperationCompleted const& completed)
-            {
-                *ended = true;
-                if (onCompleted)
-                    onCompleted(completed);
-            },
-        };
-        if (observer)
-            result.observer = [ended, observer = std::move(observer)](OperationQueue::OperationProgress const& progress)
-            {
-                if (!*ended)
-                    observer(progress);
-            };
-        return result;
-    }
-
-    /**
      * @brief Tells @p onProgress how far the single upload of @p request is, that of a directory by its entries.
      */
     OperationQueue::ProgressObserver singleUploadProgress(
@@ -329,15 +290,12 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     {
         const bool isDirectory = isDirectoryLocally(request.source);
         const auto sent = std::make_shared<SentFiles>();
-        auto progressing = progressUntilEnd(
-            onProgress ? singleUploadProgress(request, std::move(onProgress)) : OperationQueue::ProgressObserver{},
-            forgettingSentUpload(
-                request.destination, endOfUpload(session_, request, isDirectory, sent, std::move(onEnded))
-            )
-        );
+        // The queue drops the observer once the upload completed, before its end is handed on.
+        auto observer =
+            onProgress ? singleUploadProgress(request, std::move(onProgress)) : OperationQueue::ProgressObserver{};
         std::optional<Ids::OperationId> queuedAs{};
         auto queued = queue(
-            [&request, &sent, &queuedAs, &observer = progressing.observer](
+            [&request, &sent, &queuedAs, &observer](
                 OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId
             )
             {
@@ -368,7 +326,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 }
                 return added;
             },
-            std::move(progressing.onCompleted)
+            forgettingSentUpload(
+                request.destination, endOfUpload(session_, request, isDirectory, sent, std::move(onEnded))
+            )
         );
         if (queued && queuedAs)
             sentUploads_->insert_or_assign(request.destination.value(), *queuedAs);
@@ -500,9 +460,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 // The tracker decides anew what goes once the session is back.
                 queue.discardResumeBackup(cardId);
                 queue.leaveChangedDestinationsToOwner(cardId);
-                auto progressing = progressUntilEnd(
-                    onProgress ? bulkUploadProgress(std::move(files), std::move(onProgress))
-                               : OperationQueue::ProgressObserver{},
+                // The queue drops the observer once the bulk completed, before its ends are handed on.
+                if (onProgress)
+                    queue.whenProgressing(cardId, bulkUploadProgress(std::move(files), std::move(onProgress)));
+                queue.whenCompleted(
+                    cardId,
                     [session = session.weak_from_this(),
                         onEnded = std::move(onEnded),
                         sent,
@@ -514,9 +476,6 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         endUploads(session, completed, sources, destinations, sent->take(), onEnded);
                     }
                 );
-                if (progressing.observer)
-                    queue.whenProgressing(cardId, std::move(progressing.observer));
-                queue.whenCompleted(cardId, std::move(progressing.onCompleted));
                 session.resetQueueThrottle();
                 return {};
             }
