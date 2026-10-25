@@ -7,6 +7,7 @@
 #include <deque>
 #include <functional>
 #include <utility>
+#include <vector>
 #include <chrono>
 
 namespace SecureShell
@@ -111,17 +112,17 @@ namespace SecureShell
              * @brief Waits for every request still in flight and throws its answer away.
              *
              * @param canWait False when the file or the session is gone, then the requests are only freed.
-             * @param wait Takes the answer of one request, freeing it.
+             * @param wait Takes the answer of one request of the given length, freeing it.
              */
             template <typename WaitT>
-            void discard(bool canWait, WaitT&& wait) noexcept
+            void discard(bool canWait, WaitT&& wait)
             {
                 if (canWait)
                 {
                     for (auto& pending : pending_)
                     {
                         auto* request = pending.request.release();
-                        std::ignore = wait(&request);
+                        std::ignore = wait(&request, pending.length);
                         pending.request.reset(request);
                     }
                 }
@@ -185,15 +186,19 @@ namespace SecureShell
             }
 
             /**
+             * @brief Takes the answers into a buffer of its own, the transfer's may be gone when the stream closes.
+             *
              * @param file The open remote file, null when it was closed already.
              */
-            void discard(sftp_file file, char* buffer, SignedSizeType bufferSize) noexcept
+            void discard(sftp_file file)
             {
+                std::vector<char> scratch{};
                 RequestPipeline::discard(
                     file != nullptr,
-                    [buffer, bufferSize](sftp_aio* request)
+                    [&scratch](sftp_aio* request, SignedSizeType length)
                     {
-                        return sftp_aio_wait_read(request, buffer, static_cast<std::size_t>(bufferSize));
+                        scratch.resize(std::max(scratch.size(), static_cast<std::size_t>(length)));
+                        return sftp_aio_wait_read(request, scratch.data(), scratch.size());
                     }
                 );
             }
@@ -270,9 +275,15 @@ namespace SecureShell
             /**
              * @param file The open remote file, null when it was closed already.
              */
-            void discard(sftp_file file) noexcept
+            void discard(sftp_file file)
             {
-                RequestPipeline::discard(file != nullptr, sftp_aio_wait_write);
+                RequestPipeline::discard(
+                    file != nullptr,
+                    [](sftp_aio* request, SignedSizeType)
+                    {
+                        return sftp_aio_wait_write(request);
+                    }
+                );
             }
         };
     }
@@ -345,6 +356,9 @@ namespace SecureShell
         if (!sftp)
             return;
         assert(sftp->strand_->withinProcessingThread());
+        // The transfer may only see that it ended after this, when it can no longer wait for its requests.
+        if (discardInFlight_)
+            std::exchange(discardInFlight_, {})(file_.get());
         file_.reset();
         sftp->fileStreamRemoveItself(this, isBackElement);
     }
@@ -691,6 +705,15 @@ namespace SecureShell
         limits_ = {};
         return file_.release();
     }
+    template <typename PipelineT>
+    void FileStream::watchInFlight(std::shared_ptr<PipelineT> const& pipeline)
+    {
+        discardInFlight_ = [weakPipeline = std::weak_ptr<PipelineT>{pipeline}](sftp_file file)
+        {
+            if (auto pipeline = weakPipeline.lock(); pipeline)
+                pipeline->discard(file);
+        };
+    }
     std::shared_ptr<AsyncTransferContext> FileStream::makeTransferContext()
     {
         auto context = std::make_shared<AsyncTransferContext>();
@@ -715,6 +738,8 @@ namespace SecureShell
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
         auto context = makeTransferContext();
+        auto pipeline = std::make_shared<ReadPipeline>();
+        watchInFlight(pipeline);
         const auto [success, id] = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
@@ -722,14 +747,14 @@ namespace SecureShell
              onRead = std::move(onRead),
              context,
              totalFileSize,
-             pipeline = std::make_shared<ReadPipeline>()]() -> TaskStatus
+             pipeline]() -> TaskStatus
             {
                 auto stream = weakStream.lock();
                 auto sftp = stream ? stream->sftp_.lock() : nullptr;
                 // Waiting needs the session and the open file, without them the requests are only freed.
                 const auto discardPipeline = [&]()
                 {
-                    pipeline->discard(sftp ? stream->file_.get() : nullptr, buffer, bufferSize);
+                    pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
 
                 if (context->hasEnded())
@@ -786,7 +811,7 @@ namespace SecureShell
                 const auto turnBudget = std::max(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
                 SignedSizeType turnBytes = 0;
                 while (
-                    !pipeline->empty() && !context->paused() && turnBytes < turnBudget &&
+                    !pipeline->empty() && !context->paused() && !context->hasEnded() && turnBytes < turnBudget &&
                     !(turnBytes > 0 && turnExpired(turnStart, target))
                 )
                 {
@@ -871,6 +896,8 @@ namespace SecureShell
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
         auto context = makeTransferContext();
+        auto pipeline = std::make_shared<WritePipeline>();
+        watchInFlight(pipeline);
         const auto [success, id] = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
@@ -878,7 +905,7 @@ namespace SecureShell
              doRead = std::move(doRead),
              context,
              totalFileSize,
-             pipeline = std::make_shared<WritePipeline>()]() -> TaskStatus
+             pipeline]() -> TaskStatus
             {
                 auto stream = weakStream.lock();
                 auto sftp = stream ? stream->sftp_.lock() : nullptr;
@@ -938,7 +965,7 @@ namespace SecureShell
                 const auto turnBudget = std::max(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
                 SignedSizeType turnBytes = 0;
                 while (
-                    !pipeline->empty() && !context->paused() && turnBytes < turnBudget &&
+                    !pipeline->empty() && !context->paused() && !context->hasEnded() && turnBytes < turnBudget &&
                     !(turnBytes > 0 && turnExpired(turnStart, target))
                 )
                 {

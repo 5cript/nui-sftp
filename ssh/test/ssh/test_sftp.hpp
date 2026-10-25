@@ -1050,6 +1050,52 @@ namespace SecureShell::Test
     namespace
     {
         /**
+         * @brief Answers the sftp session received but nobody took, counted on its processing thread.
+         */
+        std::size_t queuedAnswers(SftpSession& sftp)
+        {
+            return sftp
+                .performPromise(
+                    [&sftp]()
+                    {
+                        std::size_t count = 0;
+                        for (auto* entry = static_cast<sftp_session>(sftp)->queue; entry != nullptr; entry = entry->next)
+                            ++count;
+                        return count;
+                    }
+                )
+                .get();
+        }
+    }
+
+    TEST_F(SftpTests, ClosingTheStreamOfACancelledReadTakesTheAnswersInFlight)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        GatedRead read;
+        ASSERT_TRUE(read.start(*sftp));
+
+        read.context->cancel();
+        // Queued behind the turn the gate holds, the close runs before the transfer sees the cancel.
+        auto closed = std::async(
+            std::launch::async,
+            [&read]
+            {
+                read.file->close();
+            }
+        );
+        std::this_thread::sleep_for(50ms);
+        read.release.set_value();
+        ASSERT_EQ(closed.wait_for(5s), std::future_status::ready);
+        ASSERT_TRUE(read.waitForEnd());
+
+        EXPECT_TRUE(readsFileOne(*sftp));
+        EXPECT_EQ(queuedAnswers(*sftp), 0u);
+    }
+
+    namespace
+    {
+        /**
          * @brief An asynchronous upload of a 64 KiB pattern in pieces of 1 KiB. The local read for the
          *        fourth piece waits until the test has done what it wants to do while three requests are in
          *        flight.
