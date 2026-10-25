@@ -17,6 +17,7 @@ namespace SecureShell
         : owner_{std::exchange(other.owner_, nullptr)}
         , strand_{std::move(other.strand_)}
         , channel_{std::move(other.channel_)}
+        , closing_{other.closing_.load()}
     {}
     Channel& Channel::operator=(Channel&& other)
     {
@@ -25,6 +26,7 @@ namespace SecureShell
             owner_ = std::exchange(other.owner_, nullptr);
             strand_ = std::exchange(other.strand_, nullptr);
             channel_ = std::exchange(other.channel_, nullptr);
+            closing_ = other.closing_.load();
         }
         return *this;
     }
@@ -34,7 +36,7 @@ namespace SecureShell
             return false;
 
         // Dont call on exit, its expected now and onExit is used for connection loss.
-        onExit_ = nullptr;
+        closing_ = true;
 
         return strand_
             ->pushFinalPromiseTask(
@@ -122,13 +124,13 @@ namespace SecureShell
 
         if (readOne(true) < 0)
         {
-            if (onExit_)
+            if (!closing_)
                 onExit_();
             return false;
         }
         if (readOne(false) < 0)
         {
-            if (onExit_)
+            if (!closing_)
                 onExit_();
             return false;
         }
