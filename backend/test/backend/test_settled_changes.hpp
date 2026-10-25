@@ -2,6 +2,7 @@
 
 #include <backend/file_tracking/settled_changes.hpp>
 #include <utility/temporary_directory.hpp>
+#include "io_context_runs.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -61,7 +62,7 @@ namespace Test
         add(FileAction::Modified, "/watched/notes.txt", true);
         EXPECT_TRUE(sent_.empty());
 
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         ASSERT_EQ(sent_.size(), 1u);
         EXPECT_EQ(sent_[0].path, "/watched/notes.txt");
@@ -73,7 +74,7 @@ namespace Test
         add(FileAction::Added, "/watched/new.txt", true);
         add(FileAction::Modified, "/watched/new.txt", true);
 
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         ASSERT_EQ(sent_.size(), 1u);
         EXPECT_EQ(sent_[0].action, FileAction::Added);
@@ -91,7 +92,7 @@ namespace Test
         EXPECT_EQ(sent_[0].path, "/watched/tree/file.txt");
         EXPECT_EQ(sent_[1].path, "/watched/./tree");
 
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         EXPECT_EQ(sent_.size(), 5u);
     }
@@ -101,7 +102,7 @@ namespace Test
         add(FileAction::Modified, "/watched/one.txt", true);
         add(FileAction::Modified, "/watched/two.txt", true);
 
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         EXPECT_EQ(sent_.size(), 2u);
     }
@@ -117,7 +118,7 @@ namespace Test
         EXPECT_EQ(sent_[0].action, FileAction::Added);
         EXPECT_EQ(sent_[1].action, FileAction::Modified);
         EXPECT_EQ(sent_[2].action, FileAction::Deleted);
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         EXPECT_EQ(sent_.size(), 4u);
     }
@@ -150,7 +151,7 @@ namespace Test
         ASSERT_EQ(sent_.size(), 2u);
         EXPECT_EQ(sent_[0].action, FileAction::Modified);
         EXPECT_EQ(sent_[1].action, FileAction::Deleted);
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
         EXPECT_EQ(sent_.size(), 2u);
     }
 
@@ -159,7 +160,7 @@ namespace Test
         add(FileAction::Modified, "/watched/notes.txt", true);
         changes_.reset();
 
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         EXPECT_TRUE(sent_.empty());
     }
@@ -174,7 +175,8 @@ namespace Test
             {
                 sent_.push_back(change);
             },
-            std::chrono::milliseconds{100}
+            // Far above the time between two writes, a stalled runner would send it in between.
+            std::chrono::milliseconds{500}
         );
         std::ofstream writer{file, std::ios::binary};
         writer << "chunk";
@@ -190,7 +192,7 @@ namespace Test
         }
         EXPECT_TRUE(sent_.empty());
         writer.close();
-        runFor(std::chrono::milliseconds{400});
+        ASSERT_TRUE(runUntilIdle(ioc_));
 
         ASSERT_EQ(sent_.size(), 1u);
         EXPECT_EQ(sent_[0].action, FileAction::Added);
