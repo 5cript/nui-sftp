@@ -46,10 +46,34 @@ namespace SecureShell
          * @brief Pushes a task that will be executed until the strand is finalized.
          * But not if the strand has been finalized and not simultaneously with any other push.
          *
-         * @param task The task to push.
+         * @param task The task to push, polling while it returns true.
+         * @param pollInterval How often the task looks at least, the thread's poll interval if unset.
          * @return std::pair<bool, ProcessingThread::PermanentTaskId> If the task was pushed and the id of the task.
          */
-        std::pair<bool, ProcessingThread::PermanentTaskId> pushPermanentTask(std::function<bool()> task)
+        std::pair<bool, ProcessingThread::PermanentTaskId> pushPermanentTask(
+            std::function<bool()> task,
+            std::optional<std::chrono::milliseconds> pollInterval = std::nullopt
+        )
+        {
+            return pushPermanentTask(
+                std::function<ProcessingThread::PermanentTaskStatus()>{
+                    [task = std::move(task)]()
+                    {
+                        return task() ? ProcessingThread::PermanentTaskStatus::Poll
+                                      : ProcessingThread::PermanentTaskStatus::Done;
+                    }
+                },
+                pollInterval
+            );
+        }
+
+        /**
+         * @brief Pushes a permanent task that says after each turn what it needs, see ProcessingThread::PermanentTaskStatus.
+         */
+        std::pair<bool, ProcessingThread::PermanentTaskId> pushPermanentTask(
+            std::function<ProcessingThread::PermanentTaskStatus()> task,
+            std::optional<std::chrono::milliseconds> pollInterval = std::nullopt
+        )
         {
             std::scoped_lock lock(mutex_);
             if (finalized_)
@@ -60,10 +84,13 @@ namespace SecureShell
             // Stale ids are reaped at finalization, where ProcessingThread::removePermanentTask
             // is a harmless no-op for unknown ids.
             auto result = processingThread_->pushPermanentTask(
-                [task = std::move(task)](ProcessingThread::PermanentTaskId)
-                {
-                    return task();
-                }
+                std::function<ProcessingThread::PermanentTaskStatus(ProcessingThread::PermanentTaskId)>{
+                    [task = std::move(task)](ProcessingThread::PermanentTaskId)
+                    {
+                        return task();
+                    }
+                },
+                pollInterval
             );
             this->permanentTasks_.insert(result.second);
             return result;
@@ -165,6 +192,14 @@ namespace SecureShell
         bool withinProcessingThread() const noexcept
         {
             return processingThread_->withinProcessingThread();
+        }
+
+        /**
+         * @brief Wakes the processing thread, see ProcessingThread::wake.
+         */
+        void wake()
+        {
+            processingThread_->wake();
         }
 
         bool isFinalized() const noexcept

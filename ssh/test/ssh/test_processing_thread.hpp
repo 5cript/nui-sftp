@@ -8,8 +8,11 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <latch>
+#include <stdexcept>
 #include <thread>
+#include <vector>
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -696,6 +699,8 @@ namespace SecureShell::Test
             }
         );
         awaiter.wait();
+        // The task may have run in a cycle already past its permanent tasks, the next cycle runs them.
+        ASSERT_TRUE(processingThread.awaitCycle());
         EXPECT_EQ(0, processingThread.permanentTaskCount());
     }
 
@@ -873,5 +878,297 @@ namespace SecureShell::Test
         }
         EXPECT_NE(starts[0], starts[1]);
         EXPECT_NE(starts[1], starts[2]);
+    }
+
+    namespace
+    {
+        using TaskStatus = ProcessingThread::PermanentTaskStatus;
+
+        /**
+         * @brief A permanent task that counts its turns and answers with a fixed status.
+         */
+        std::function<TaskStatus(ProcessingThread::PermanentTaskId)> countingTask(std::atomic_int& turns, TaskStatus status)
+        {
+            return [&turns, status](auto)
+            {
+                ++turns;
+                return status;
+            };
+        }
+
+        bool waitUntil(std::function<bool()> const& condition, std::chrono::milliseconds limit = 5s)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + limit;
+            while (!condition())
+            {
+                if (std::chrono::steady_clock::now() > deadline)
+                    return false;
+                std::this_thread::sleep_for(1ms);
+            }
+            return true;
+        }
+    }
+
+    TEST_F(ProcessingThreadTest, IdleTaskLetsTheThreadSleepUntilWoken)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Idle));
+        processingThread.start(1ms);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+
+        const auto asleep = turns.load();
+        std::this_thread::sleep_for(200ms);
+        EXPECT_EQ(turns.load(), asleep);
+
+        processingThread.wake();
+        ASSERT_TRUE(waitUntil(
+            [&turns, asleep]
+            {
+                return turns.load() > asleep;
+            }
+        ));
+        std::this_thread::sleep_for(100ms);
+        EXPECT_EQ(turns.load(), asleep + 1);
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, ThreadWithoutTasksDoesNotCycle)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.start(1ms);
+        std::this_thread::sleep_for(50ms);
+        // A permanent task pushed later must still run right away.
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Idle));
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() == 1;
+            },
+            1s
+        ));
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, PollingTaskRunsAboutOncePerItsInterval)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Poll), 20ms);
+        processingThread.start(1ms);
+        std::this_thread::sleep_for(500ms);
+        processingThread.stop();
+
+        // 25 turns at 20 ms; a thread polling at its own 1 ms would have run hundreds.
+        EXPECT_GE(turns.load(), 5);
+        EXPECT_LE(turns.load(), 40);
+    }
+
+    TEST_F(ProcessingThreadTest, ShortestPollIntervalDecidesTheSleep)
+    {
+        std::atomic_int slowTurns = 0;
+        std::atomic_int fastTurns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(slowTurns, TaskStatus::Poll), 200ms);
+        processingThread.pushPermanentTask(countingTask(fastTurns, TaskStatus::Poll), 10ms);
+        processingThread.start(1s);
+        std::this_thread::sleep_for(300ms);
+        processingThread.stop();
+
+        EXPECT_GE(fastTurns.load(), 5);
+        EXPECT_EQ(slowTurns.load(), fastTurns.load());
+    }
+
+    TEST_F(ProcessingThreadTest, BusyTaskKeepsTheThreadFromSleeping)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Busy));
+        processingThread.start(100ms);
+        std::this_thread::sleep_for(200ms);
+        processingThread.stop();
+
+        EXPECT_GT(turns.load(), 20);
+    }
+
+    TEST_F(ProcessingThreadTest, PushedTaskWakesASleepingThreadAtOnce)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Poll));
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+
+        const auto start = std::chrono::steady_clock::now();
+        auto done = processingThread.pushPromiseTask(
+            []
+            {
+                return 42;
+            }
+        );
+        ASSERT_EQ(done.wait_for(2s), std::future_status::ready);
+        EXPECT_EQ(done.get(), 42);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, StopWakesASleepingThread)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Poll));
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+
+        const auto start = std::chrono::steady_clock::now();
+        processingThread.stop();
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+        EXPECT_FALSE(processingThread.isRunning());
+    }
+
+    TEST_F(ProcessingThreadTest, DestroyingASleepingThreadReturns)
+    {
+        std::atomic_int ran = 0;
+        {
+            ProcessingThread processingThread;
+            processingThread.start(10s);
+            processingThread.pushTask(
+                [&ran]
+                {
+                    ++ran;
+                }
+            );
+            ASSERT_TRUE(waitUntil(
+                [&ran]
+                {
+                    return ran.load() == 1;
+                }
+            ));
+        }
+        EXPECT_EQ(ran.load(), 1);
+    }
+
+    TEST_F(ProcessingThreadTest, EveryAcceptedTaskRunsWhenStopRacesWithPushes)
+    {
+        constexpr int pushers = 4;
+        std::atomic_int accepted = 0;
+        std::atomic_int ran = 0;
+        std::atomic_bool keepPushing = true;
+        {
+            ProcessingThread processingThread;
+            processingThread.start(1ms);
+            std::vector<std::thread> threads;
+            for (int pusher = 0; pusher < pushers; ++pusher)
+            {
+                threads.emplace_back(
+                    [&]
+                    {
+                        while (keepPushing)
+                        {
+                            if (processingThread.pushTask(
+                                    [&ran]
+                                    {
+                                        ++ran;
+                                    }
+                                ))
+                            {
+                                ++accepted;
+                            }
+                            processingThread.wake();
+                        }
+                    }
+                );
+            }
+            std::this_thread::sleep_for(50ms);
+            processingThread.stop();
+            keepPushing = false;
+            for (auto& thread : threads)
+                thread.join();
+            // Tasks accepted after stop wait for the next start or for the destructor.
+        }
+        EXPECT_GT(accepted.load(), 0);
+        EXPECT_EQ(ran.load(), accepted.load());
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingTaskEndsTheThreadEvenWhileOthersPoll)
+    {
+        std::atomic_int turns = 0;
+        ProcessingThread processingThread;
+        processingThread.pushPermanentTask(countingTask(turns, TaskStatus::Poll), 10s);
+        processingThread.start(10s);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        EXPECT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                return !processingThread.isRunning();
+            },
+            2s
+        ));
+    }
+
+    TEST_F(ProcessingThreadTest, StrandWakeRunsAnIdleTaskAgain)
+    {
+        std::atomic_int turns = 0;
+        std::atomic_bool hasWork = false;
+        ProcessingThread processingThread;
+        auto strand = processingThread.createStrand();
+        strand->pushPermanentTask(
+            std::function<TaskStatus()>{
+                [&turns, &hasWork]
+                {
+                    ++turns;
+                    return hasWork.exchange(false) ? TaskStatus::Busy : TaskStatus::Idle;
+                }
+            }
+        );
+        processingThread.start(1ms);
+        ASSERT_TRUE(waitUntil(
+            [&turns]
+            {
+                return turns.load() >= 1;
+            }
+        ));
+        std::this_thread::sleep_for(50ms);
+        const auto asleep = turns.load();
+
+        hasWork = true;
+        strand->wake();
+        // One turn finds the work, the busy answer gives it one more turn, then it sleeps again.
+        ASSERT_TRUE(waitUntil(
+            [&turns, asleep]
+            {
+                return turns.load() >= asleep + 2;
+            }
+        ));
+        std::this_thread::sleep_for(100ms);
+        EXPECT_EQ(turns.load(), asleep + 2);
+        processingThread.stop();
     }
 }

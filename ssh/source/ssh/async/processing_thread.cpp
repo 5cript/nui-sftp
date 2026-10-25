@@ -1,6 +1,7 @@
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/async/processing_strand.hpp>
 
+#include <algorithm>
 #include <stdexcept>
 #include <future>
 
@@ -16,7 +17,7 @@ namespace SecureShell
     {
         return running_;
     }
-    void ProcessingThread::start(std::chrono::milliseconds const& minimumCycleWait)
+    void ProcessingThread::start(std::chrono::milliseconds const& pollInterval)
     {
         if (thread_.joinable())
             throw std::logic_error(
@@ -29,11 +30,11 @@ namespace SecureShell
         shuttingDown_ = false;
         std::promise<void> awaitThreadStart{};
         thread_ = std::thread(
-            [this, &awaitThreadStart, minimumCycleWait]
+            [this, &awaitThreadStart, pollInterval]
             {
                 awaitThreadStart.set_value();
                 processingThreadId_.store(std::this_thread::get_id());
-                run(minimumCycleWait);
+                run(pollInterval);
             }
         );
         awaitThreadStart.get_future().wait();
@@ -44,7 +45,9 @@ namespace SecureShell
         {
             std::lock_guard lock{taskMutex_};
             running_ = false;
+            wakeRequested_ = true;
         }
+        wakeUp_.notify_all();
         if (thread_.joinable())
             thread_.join();
 
@@ -72,15 +75,46 @@ namespace SecureShell
         {
             std::lock_guard lock{taskMutex_};
             tasks_.push_back(std::move(task));
+            wakeRequested_ = true;
         }
+        wakeUp_.notify_one();
         return true;
+    }
+    void ProcessingThread::wake()
+    {
+        {
+            std::lock_guard lock{taskMutex_};
+            wakeRequested_ = true;
+        }
+        wakeUp_.notify_one();
     }
     std::unique_ptr<ProcessingStrand> ProcessingThread::createStrand()
     {
         return std::make_unique<ProcessingStrand>(this);
     }
-    std::pair<bool, ProcessingThread::PermanentTaskId>
-    ProcessingThread::pushPermanentTask(std::function<bool(ProcessingThread::PermanentTaskId id)> task)
+    std::pair<bool, ProcessingThread::PermanentTaskId> ProcessingThread::pushPermanentTask(
+        std::function<bool(ProcessingThread::PermanentTaskId id)> task,
+        std::optional<std::chrono::milliseconds> pollInterval
+    )
+    {
+        if (!task)
+        {
+            throw std::invalid_argument("Task must not be empty.");
+        }
+        return pushPermanentTask(
+            std::function<PermanentTaskStatus(PermanentTaskId)>{
+                [task = std::move(task)](PermanentTaskId id)
+                {
+                    return task(id) ? PermanentTaskStatus::Poll : PermanentTaskStatus::Done;
+                }
+            },
+            pollInterval
+        );
+    }
+    std::pair<bool, ProcessingThread::PermanentTaskId> ProcessingThread::pushPermanentTask(
+        std::function<PermanentTaskStatus(ProcessingThread::PermanentTaskId id)> task,
+        std::optional<std::chrono::milliseconds> pollInterval
+    )
     {
         if (!task)
         {
@@ -97,9 +131,11 @@ namespace SecureShell
             std::lock_guard lock{taskMutex_};
             ++permanentTaskIdCounter_;
             id = PermanentTaskId{permanentTaskIdCounter_};
-            permanentTasks_.insert({id, std::move(task)});
+            permanentTasks_.insert({id, PermanentTask{.run = std::move(task), .pollInterval = pollInterval}});
             permanentTasksAvailable_ = true;
+            wakeRequested_ = true;
         }
+        wakeUp_.notify_one();
         return {true, id};
     }
     void ProcessingThread::clearPermanentTasks()
@@ -159,18 +195,21 @@ namespace SecureShell
         permanentTasksAvailable_ = !permanentTasks_.empty();
         return result > 0;
     }
-    void ProcessingThread::run(std::chrono::milliseconds const& minimumCycleWait)
+    void ProcessingThread::run(std::chrono::milliseconds const& pollInterval)
     {
-        auto timePoint = std::chrono::steady_clock::now();
-
         try
         {
             std::vector<PermanentTaskId> toRemove{};
             std::exception_ptr pendingException{};
             while (running_)
             {
-                timePoint = std::chrono::steady_clock::now();
-                cycleStart_ = timePoint;
+                {
+                    std::lock_guard lock{taskMutex_};
+                    wakeRequested_ = false;
+                }
+                cycleStart_ = std::chrono::steady_clock::now();
+                auto mostUrgent = PermanentTaskStatus::Idle;
+                auto nextPoll = std::chrono::steady_clock::time_point::max();
 
                 if (permanentTasksAvailable_)
                 {
@@ -191,11 +230,11 @@ namespace SecureShell
                         auto const& [id, task] = entry;
                         // Throwing tasks are removed (not re-run) and the exception is
                         // captured for rethrow at end of cycle so cleanup below still runs.
-                        bool keep = false;
+                        auto status = PermanentTaskStatus::Done;
                         const auto taskStart = std::chrono::steady_clock::now();
                         try
                         {
-                            keep = task(id);
+                            status = task.run(id);
                         }
                         catch (...)
                         {
@@ -209,8 +248,12 @@ namespace SecureShell
                             longestPosition = position;
                         }
                         ++position;
-                        if (!keep)
+                        if (status == PermanentTaskStatus::Done)
                             toRemove.push_back(id);
+                        else
+                            mostUrgent = std::min(mostUrgent, status);
+                        if (status == PermanentTaskStatus::Poll)
+                            nextPoll = std::min(nextPoll, cycleStart_ + task.pollInterval.value_or(pollInterval));
                         return running_ && !shuttingDown_;
                     };
                     bool keepGoing = true;
@@ -290,15 +333,7 @@ namespace SecureShell
                 if (pendingException)
                     std::rethrow_exception(pendingException);
 
-                if (minimumCycleWait.count() > 0)
-                {
-                    auto now = std::chrono::steady_clock::now();
-                    auto diff = now - timePoint;
-                    if (diff < minimumCycleWait)
-                    {
-                        std::this_thread::sleep_for(minimumCycleWait - diff);
-                    }
-                }
+                waitForWork(mostUrgent, nextPoll);
             }
         }
         catch (...)
@@ -306,6 +341,21 @@ namespace SecureShell
             std::lock_guard lock{taskMutex_};
             running_ = false;
         }
+    }
+    void ProcessingThread::waitForWork(PermanentTaskStatus mostUrgent, std::chrono::steady_clock::time_point nextPoll)
+    {
+        if (mostUrgent == PermanentTaskStatus::Busy)
+            return;
+
+        std::unique_lock lock{taskMutex_};
+        const auto workArrived = [this]()
+        {
+            return !running_ || wakeRequested_ || !tasks_.empty();
+        };
+        if (mostUrgent == PermanentTaskStatus::Poll)
+            wakeUp_.wait_until(lock, nextPoll, workArrived);
+        else
+            wakeUp_.wait(lock, workArrived);
     }
     std::chrono::steady_clock::duration ProcessingThread::cycleElapsed() const noexcept
     {
