@@ -254,21 +254,19 @@ namespace SecureShell
                 auto result = sftp_init(sftp);
                 if (result != SSH_OK)
                 {
-                    promise->set_value(
-                        std::unexpected(
-                            SftpError{
-                                .message = session_.getError(),
-                                .sshError = session_.getErrorCode(),
-                                .sftpError = sftp_get_error(sftp),
-                            }
-                        )
-                    );
+                    const SftpError error{
+                        .message = session_.getError(),
+                        .sshError = session_.getErrorCode(),
+                        .sftpError = sftp_get_error(sftp),
+                    };
                     sftp_free(sftp);
+                    return promise->set_value(std::unexpected(error));
                 }
 
+                // Kept before the caller hears of it, who may shut the session down and walk the list right away.
                 auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), sftp);
-                promise->set_value(sftpSession);
                 sftpSessions_.push_back(sftpSession);
+                promise->set_value(sftpSession);
             }
         );
 
