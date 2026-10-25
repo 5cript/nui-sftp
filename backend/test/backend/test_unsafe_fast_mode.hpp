@@ -158,8 +158,8 @@ namespace Test
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
-        writeLocalFile(localDirectory_.path() / "below.txt", alphabet(unsafeFastSizeLimit - 1));
-        writeLocalFile(localDirectory_.path() / "limit.txt", alphabet(unsafeFastSizeLimit));
+        writeLocalFile(localDirectory_.path() / "below.txt", alphabet(Constants::unsafeFastSizeLimit - 1));
+        writeLocalFile(localDirectory_.path() / "limit.txt", alphabet(Constants::unsafeFastSizeLimit));
 
         UploadOperation below{sftp, uploadOf("below.txt", always(true))};
         ASSERT_TRUE(below.prepare().has_value());
@@ -296,10 +296,10 @@ namespace Test
         CREATE_SERVER_AND_JOINER(sftpServer);
         auto [_, sftp] = createSftpSession(serverStartResult->port);
         ASSERT_TRUE(serverStartResult->command(
-            "createFile", {{"path", "/home/test/below.txt"}, {"size", unsafeFastSizeLimit - 1}}
+            "createFile", {{"path", "/home/test/below.txt"}, {"size", Constants::unsafeFastSizeLimit - 1}}
         ));
         ASSERT_TRUE(
-            serverStartResult->command("createFile", {{"path", "/home/test/limit.txt"}, {"size", unsafeFastSizeLimit}})
+            serverStartResult->command("createFile", {{"path", "/home/test/limit.txt"}, {"size", Constants::unsafeFastSizeLimit}})
         );
 
         DownloadOperation below{sftp, downloadOf("below.txt", always(true))};
