@@ -323,9 +323,13 @@ namespace SecureShell::Test
 
     TEST_F(SshSessionTests, ConnectFailsWithWrongAddressWithinTheTimeout)
     {
+        // Shorter than the fixture's, where the address is routed the connect waits all of it.
+        constexpr std::chrono::seconds shortTimeout{1};
+        auto options = getSessionOptions(22, "test", "0100::");
+        options.sshOptions->connectTimeoutSeconds = shortTimeout.count();
         std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
         auto session = makeSession(
-            getSessionOptions(22, "test", "0100::"),
+            options,
             +[](char const*, char* buf, std::size_t length, int, int, void*)
             {
                 static constexpr std::string_view pw = "test";
@@ -338,8 +342,8 @@ namespace SecureShell::Test
             []() {}
         );
         auto diff = std::chrono::steady_clock::now() - start;
-        // 1s leniency
-        EXPECT_LT(diff, (connectTimeout + 1s));
+        // An ignored timeout waits for the system's, a minute or more.
+        EXPECT_LT(diff, (shortTimeout + 5s));
         EXPECT_FALSE(session.has_value());
     }
 
