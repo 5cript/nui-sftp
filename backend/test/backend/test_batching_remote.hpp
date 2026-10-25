@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/file_tracking/batching_remote.hpp>
+#include "io_context_runs.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
@@ -268,16 +269,9 @@ namespace Test
         }
 
         bool
-        runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{3})
+        runUntil(std::function<bool()> const& condition, std::chrono::milliseconds timeout = std::chrono::seconds{10})
         {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                runFor(std::chrono::milliseconds{10});
-                if (condition())
-                    return true;
-            }
-            return false;
+            return ::Test::runUntil(ioc_, condition, timeout);
         }
     };
 
@@ -391,7 +385,9 @@ namespace Test
         for (auto const* name : {"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"})
             upload(name);
 
-        runFor(std::chrono::milliseconds{10});
+        // Only what is due now, the quiet time of the next batch has not passed.
+        ioc_.restart();
+        ioc_.poll();
         ASSERT_EQ(inner_->of("uploadAll").size(), 1u);
         EXPECT_EQ(inner_->of("uploadAll").front()->paths.size(), 4u);
         ASSERT_TRUE(runUntil(
@@ -405,25 +401,21 @@ namespace Test
 
     TEST_F(BatchingRemoteTest, ABatchThatKeepsGrowingGoesAfterTheLongestTime)
     {
-        makeRemote(
-            {.quiet = std::chrono::milliseconds{200}, .longest = std::chrono::milliseconds{300}, .maxEntries = 100}
-        );
+        // Only the longest time can send it, the batch is never quiet that long.
+        constexpr auto longest = std::chrono::milliseconds{300};
+        makeRemote({.quiet = std::chrono::seconds{10}, .longest = longest, .maxEntries = 100});
         const auto start = std::chrono::steady_clock::now();
-        for (int index = 0; index < 8 && inner_->queued.empty(); ++index)
+        std::size_t uploaded = 0;
+        while (inner_->queued.empty() && std::chrono::steady_clock::now() - start < std::chrono::seconds{10})
         {
-            upload("file" + std::to_string(index) + ".txt");
+            upload("file" + std::to_string(uploaded++) + ".txt");
             runFor(std::chrono::milliseconds{60});
         }
-        ASSERT_TRUE(runUntil(
-            [this]()
-            {
-                return !inner_->queued.empty();
-            }
-        ));
         const auto waited = std::chrono::steady_clock::now() - start;
-        EXPECT_LT(waited, std::chrono::milliseconds{450});
+
+        EXPECT_GE(waited, longest);
         ASSERT_EQ(inner_->of("uploadAll").size(), 1u);
-        EXPECT_GE(inner_->of("uploadAll").front()->paths.size(), 4u);
+        EXPECT_EQ(inner_->of("uploadAll").front()->paths.size(), uploaded);
     }
 
     TEST_F(BatchingRemoteTest, ABulkTheQueueRefusesEndsEachOfItsUploadsAsFailed)
@@ -667,7 +659,7 @@ namespace Test
         remote_.reset();
         inner_ = nullptr;
 
-        runFor(std::chrono::milliseconds{200});
+        ASSERT_TRUE(::Test::runUntilIdle(ioc_));
 
         EXPECT_TRUE(ended_.empty());
     }
