@@ -19,6 +19,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstddef>
 #include <fstream>
 #include <future>
@@ -151,6 +152,64 @@ namespace Test
                         return;
                 }
                 std::this_thread::sleep_for(2ms);
+            }
+            ADD_FAILURE() << "Timed out waiting for " << expectedCompletions << " completions";
+        }
+
+        /**
+         * @brief Works the queue like Session::doOperationQueueWork: again right away after progress, otherwise only
+         *        once the queue woke. Fails when the queue stops calling for work before @p expectedCompletions arrived.
+         */
+        void workByWakesUntilCompletions(std::size_t expectedCompletions)
+        {
+            struct WakeState
+            {
+                std::mutex mutex{};
+                std::condition_variable woken{};
+                bool requested{false};
+            };
+            const auto state = std::make_shared<WakeState>();
+            queue_->setWake(
+                [state]()
+                {
+                    {
+                        const std::scoped_lock lock{state->mutex};
+                        state->requested = true;
+                    }
+                    state->woken.notify_one();
+                }
+            );
+            const auto deadline = std::chrono::steady_clock::now() + 20s;
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                {
+                    const std::scoped_lock lock{state->mutex};
+                    state->requested = false;
+                }
+                const bool moreWork = runOnStrand([this]() {
+                    return queue_->work();
+                });
+                runOnStrand([]() {});
+                {
+                    std::scoped_lock lock{completionsMutex_};
+                    if (completions_.size() >= expectedCompletions)
+                        return;
+                }
+                if (moreWork)
+                    continue;
+                std::unique_lock lock{state->mutex};
+                if (!state->woken.wait_for(
+                        lock,
+                        5s,
+                        [&state]
+                        {
+                            return state->requested;
+                        }
+                    ))
+                {
+                    ADD_FAILURE() << "The queue waited and was not woken";
+                    return;
+                }
             }
             ADD_FAILURE() << "Timed out waiting for " << expectedCompletions << " completions";
         }
@@ -483,6 +542,111 @@ namespace Test
         std::vector<SharedData::OperationCompleted> completions_{};
         Utility::TemporaryDirectory localDirectory_{temporaryRoot, true};
     };
+
+    TEST_F(OperationQueueTests, ALargeDownloadCompletesWithTheQueueDrivenOnlyByWakes)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        constexpr std::uint64_t size = 1024 * 1024;
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", size}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addDownloadOperation(
+                *sftp,
+                Ids::generateOperationId(),
+                toLocal(localDirectory_.path() / "big.bin"),
+                remote("/home/test/big.bin"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        workByWakesUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_EQ(std::filesystem::file_size(localDirectory_.path() / "big.bin"), size);
+    }
+
+    TEST_F(OperationQueueTests, AddingAndResumingWakeTheQueue)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        const auto wakes = std::make_shared<std::atomic_int>(0);
+        queue->setWake(
+            [wakes]()
+            {
+                ++*wakes;
+            }
+        );
+
+        setPaused(true);
+        EXPECT_FALSE(runOnStrand([&]() {
+            return queue->work();
+        }));
+        const auto paused = wakes->load();
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addDownloadOperation(
+                *sftp,
+                Ids::generateOperationId(),
+                toLocal(localDirectory_.path() / "file1.txt"),
+                remote("/home/test/file1.txt"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        EXPECT_GT(wakes->load(), paused);
+
+        const auto added = wakes->load();
+        setPaused(false);
+        EXPECT_GT(wakes->load(), added);
+        workByWakesUntilCompletions(1);
+    }
+
+    TEST_F(OperationQueueTests, CancellingADownloadThatWaitsForItsTransferEndsIt)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", 8 * 1024 * 1024}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addDownloadOperation(
+                *sftp,
+                operationId,
+                toLocal(localDirectory_.path() / "big.bin"),
+                remote("/home/test/big.bin"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        // Worked until it waits for its transfer, nothing else drives it then.
+        for (int step = 0; step < 100 && runOnStrand([&]() {
+                 return queue->work();
+             });
+             ++step)
+        {
+        }
+        runOnStrand([&]() {
+            queue->cancel(operationId);
+        });
+        workUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+    }
 
     TEST_F(OperationQueueTests, DirectoryDownloadIsOneUnit)
     {

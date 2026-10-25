@@ -117,12 +117,18 @@ class OperationQueue
     void moveOperation(Ids::OperationId operationId, std::size_t newIndex);
 
     /**
-     * @brief Returns true if it should be called without delay again.
+     * @brief Works the operations at the head of the queue once.
      *
-     * @return true
-     * @return false
+     * @return true to be called again right away, false when every operation waits or nothing can run: then the
+     *         queue calls its wake once there is work again.
      */
     bool work();
+
+    /**
+     * @brief Sets what is called, from any thread, once the queue has work after work returned false: an operation
+     *        was added, cancelled, moved, paused or resumed, or a transfer progressed or ended.
+     */
+    void setWake(std::function<void()> wake);
 
     std::expected<void, Operation::Error> addDownloadOperation(
         SecureShell::SftpSession& sftp,
@@ -524,6 +530,22 @@ class OperationQueue
     ) -> std::function<void(std::expected<SharedData::Sync::ScanNode, std::string>)>;
 
   private:
+    void wake() const;
+
+    /**
+     * @brief Wakes the queue's driver when the method it guards returns, whatever it changed.
+     */
+    struct WakeOnReturn
+    {
+        OperationQueue const& queue;
+        ~WakeOnReturn()
+        {
+            queue.wake();
+        }
+    };
+
+  private:
+    std::function<void()> wake_{};
     Persistence::SftpOptions sftpOpts_{};
     Ids::SessionId sessionId_{};
     std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};

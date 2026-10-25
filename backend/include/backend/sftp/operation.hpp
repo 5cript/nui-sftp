@@ -16,6 +16,7 @@
 #include <libssh/sftp.h>
 
 #include <expected>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <system_error>
@@ -101,9 +102,20 @@ class Operation
 
     enum class WorkStatus
     {
+        /** @brief Work again right away. */
         MoreWork,
-        Complete
+        Complete,
+        /** @brief Nothing to do until the operation's wake is called, by a transfer that progressed or ended. */
+        Waiting,
     };
+
+    /**
+     * @brief Sets what the operation calls when it has work again after answering Waiting. Callable from any thread.
+     */
+    virtual void setWake(std::function<void()> wake)
+    {
+        wake_ = std::move(wake);
+    }
 
     /**
      * @brief Performs work for the operation depending on the operation type.
@@ -197,6 +209,14 @@ class Operation
     }
 
   protected:
+    /**
+     * @brief Lets @p context wake the queue when it progresses or ends.
+     */
+    void observeTransfer(SecureShell::AsyncTransferContext& context) const
+    {
+        context.observe(wake_);
+    }
+
     void enterState(OperationState newState)
     {
         state_ = newState;
@@ -264,6 +284,8 @@ class Operation
   protected:
     OperationState state_{OperationState::NotStarted};
     std::optional<Error> error_{std::nullopt};
+    /** @brief Set by the queue before the first work step, see setWake. */
+    std::function<void()> wake_{};
 
   private:
     Ids::OperationId id_;

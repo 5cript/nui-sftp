@@ -326,8 +326,8 @@ namespace
             context.notes.push_back(fmt::format("The OpenSSH sftp baseline did not run: {}", openSsh.error()));
 
         // Each client gets a connection of its own, so what one learned of the link does not carry over.
-        connections.reserve(3);
-        for (int index = 0; index < 3; ++index)
+        connections.reserve(2);
+        for (int index = 0; index < 2; ++index)
         {
             auto connection = connect(server->host(), OpenSshServer::port);
             if (!connection)
@@ -338,8 +338,7 @@ namespace
             connections.push_back(std::move(connection).value());
         }
         clients.push_back(std::make_unique<LibsshClient>(connections[0]));
-        clients.push_back(std::make_unique<ApplicationClient>(connections[1], Pacing::Session));
-        clients.push_back(std::make_unique<ApplicationClient>(connections[2], Pacing::Unthrottled));
+        clients.push_back(std::make_unique<ApplicationClient>(connections[1]));
 
         std::vector<Measurement> measurements;
         for (auto const& source : sources)

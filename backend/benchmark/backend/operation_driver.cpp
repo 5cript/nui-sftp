@@ -1,13 +1,14 @@
 #include "operation_driver.hpp"
 
-#include <backend/session.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <thread>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -37,18 +38,6 @@ namespace Benchmark
         }
     }
 
-    std::string_view toString(Pacing pacing)
-    {
-        switch (pacing)
-        {
-            case Pacing::Session:
-                return "queue pacing";
-            case Pacing::Unthrottled:
-                return "no pacing";
-        }
-        return "unknown";
-    }
-
     int queueParallelism()
     {
         return Persistence::defaultSftpConcurrency;
@@ -59,29 +48,51 @@ namespace Benchmark
         return std::clamp(Persistence::defaultBulkConcurrency, 1, std::max(1, queueParallelism() - 1));
     }
 
-    std::expected<void, std::string> runToCompletion(Operation& operation, Pacing pacing, std::chrono::seconds timeout)
+    std::expected<void, std::string> runToCompletion(Operation& operation, std::chrono::seconds timeout)
     {
+        // Shared with the wake: a transfer that outlives a failed run may still call it.
+        struct WakeState
+        {
+            std::mutex mutex{};
+            std::condition_variable woken{};
+            bool requested{false};
+        };
+        const auto state = std::make_shared<WakeState>();
+        operation.setWake(
+            [state]()
+            {
+                {
+                    const std::scoped_lock lock{state->mutex};
+                    state->requested = true;
+                }
+                state->woken.notify_one();
+            }
+        );
+
         const auto deadline = std::chrono::steady_clock::now() + timeout;
-        int unthrottled = 0;
-        std::chrono::milliseconds throttle = Session::queueStartThrottle;
         while (std::chrono::steady_clock::now() < deadline)
         {
+            {
+                const std::scoped_lock lock{state->mutex};
+                state->requested = false;
+            }
             const auto result = workOnce(operation);
             if (!result)
                 return std::unexpected{result.error().toString()};
             if (*result == Operation::WorkStatus::Complete)
                 return {};
-            if (pacing == Pacing::Unthrottled)
-                continue;
-
-            if (++unthrottled < 10)
+            if (*result == Operation::WorkStatus::Waiting)
             {
-                throttle = Session::queueStartThrottle;
-                continue;
+                std::unique_lock lock{state->mutex};
+                state->woken.wait_until(
+                    lock,
+                    deadline,
+                    [&state]
+                    {
+                        return state->requested;
+                    }
+                );
             }
-            unthrottled = 0;
-            throttle = std::min<std::chrono::milliseconds>(throttle * 2, Session::queueMaxThrottle);
-            std::this_thread::sleep_for(throttle);
         }
         return std::unexpected{fmt::format("did not complete within {} s", timeout.count())};
     }

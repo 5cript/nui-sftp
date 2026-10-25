@@ -31,8 +31,6 @@ class Session
 {
   public:
     constexpr static auto futureTimeout = std::chrono::seconds{10};
-    constexpr static auto queueStartThrottle = std::chrono::milliseconds{5};
-    constexpr static auto queueMaxThrottle = std::chrono::seconds{3};
 
     Session(
         Ids::SessionId id,
@@ -362,7 +360,7 @@ class Session
     /**
      * @brief Queues operations on the SFTP channel @p channelId with @p queue, called on the strand with the operation
      *        queue and the channel, and answers @p reply with the JSON it returns or with the message it fails with,
-     *        which the log names as the failure to queue @p description. A queued request resets the queue throttle.
+     *        which the log names as the failure to queue @p description. A queued request wakes the queue.
      */
     template <typename QueueT>
     void queueOnChannel(RpcHelper::RpcOnce&& reply, Ids::ChannelId channelId, std::string description, QueueT&& queue)
@@ -382,23 +380,34 @@ class Session
                     return reply.error(queued.error());
                 }
                 Log::info("Queued {}", description);
-                self.resetQueueThrottle();
+                self.wakeOperationQueue();
                 reply(*std::move(queued));
             },
             std::move(reply)
         );
     }
 
+    /**
+     * @brief Works the operation queue once on the strand, again right away while an operation made progress.
+     */
     void doOperationQueueWork();
-    void resetQueueThrottle();
+
+    /**
+     * @brief Works the operation queue soon, unless that is already scheduled. Callable from any thread.
+     */
+    void wakeOperationQueue();
+
+    /**
+     * @brief Posts doOperationQueueWork unless it is posted already. On the strand.
+     */
+    void scheduleOperationQueueWork();
 
   private:
     Ids::SessionId id_;
     /// Has nothing to do with pause/unpause - this is used for shutdown of the session.
     std::atomic_bool running_;
-    std::chrono::milliseconds operationThrottle_{5};
-    bool queueThrottleTimerIsRunning_{false};
-    int unthrottledLimitCounter_{0};
+    /** @brief A doOperationQueueWork is posted and not yet run. On the strand. */
+    bool operationQueueWorkScheduled_{false};
     std::unique_ptr<SecureShell::Session> session_{};
     std::shared_ptr<OperationQueue> operationQueue_;
     /// Non-owning. Lifetime is the SessionManager's, which outlives all

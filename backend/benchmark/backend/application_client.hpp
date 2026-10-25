@@ -13,7 +13,7 @@ namespace Benchmark
     class ApplicationClient : public Client
     {
       public:
-        ApplicationClient(Connection& connection, Pacing pacing);
+        explicit ApplicationClient(Connection& connection);
 
         std::string name() const override;
         std::expected<void, std::string> transfer(Transfer const& transfer) override;
@@ -24,6 +24,5 @@ namespace Benchmark
 
       private:
         Connection& connection_;
-        Pacing pacing_;
     };
 }

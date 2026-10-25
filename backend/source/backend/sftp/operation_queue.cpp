@@ -419,6 +419,7 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
 
 void OperationQueue::cancelAll()
 {
+    const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
         [weak = weak_from_this()]()
         {
@@ -441,6 +442,7 @@ void OperationQueue::cancelAll()
 
 void OperationQueue::dropAll()
 {
+    const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
         [weak = weak_from_this()]()
         {
@@ -462,6 +464,7 @@ void OperationQueue::dropAll()
 
 void OperationQueue::cancel(Ids::OperationId id)
 {
+    const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
         [weak = weak_from_this(), id = std::move(id)]()
         {
@@ -479,6 +482,7 @@ void OperationQueue::cancel(Ids::OperationId id)
 
 void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
 {
+    const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
         [weak = weak_from_this(), id = std::move(id), partial]()
         {
@@ -502,6 +506,7 @@ void OperationQueue::discardPartialUpload(
     std::function<void()> onDone
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     const auto suffix = Persistence::effectiveTempFileSuffix(
         sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{}).tempFileSuffix
     );
@@ -552,6 +557,7 @@ void OperationQueue::completeCancelled(Ids::OperationId const& id, Operation& op
 
 void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
 {
+    const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
         [weak = weak_from_this(), operationId = std::move(operationId), newIndex]() mutable
         {
@@ -778,6 +784,7 @@ void OperationQueue::adoptBulkResume(
     BulkResumeEntry entry
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     const auto [entryCount, directoriesWithContent] = std::visit(
         Utility::overloaded{
             [](SharedData::BulkDeleteRequest const& request)
@@ -844,6 +851,7 @@ void OperationQueue::adoptBulkResume(
 
 void OperationQueue::deepPause(bool pause)
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Every operation, not just the slot window: a reorder can push an operation with
     // running transfers out of the window, and it must still stop and start with the queue.
     for (auto& [id, operation] : operations_)
@@ -867,6 +875,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     {
         auto* operation = queue[item.index].second.get();
         operation->setParallelBudget(item.slots);
+        operation->setWake(wake_);
         if (operation->usesStrand() && !strand)
             strand = operation->strand();
     }
@@ -1004,6 +1013,7 @@ void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
                 std::ignore = operation.second->cancel(true);
                 return true;
             };
+            const WakeOnReturn wakeOnReturn{*self};
             if (std::erase_if(self->priorityOperations_, matches) + std::erase_if(self->operations_, matches) > 0)
             {
                 self->completeOperation(
@@ -1059,6 +1069,17 @@ bool OperationQueue::work()
     return workQueue(operations_);
 }
 
+void OperationQueue::setWake(std::function<void()> wake)
+{
+    wake_ = std::move(wake);
+}
+
+void OperationQueue::wake() const
+{
+    if (wake_)
+        wake_();
+}
+
 bool OperationQueue::paused() const
 {
     return paused_;
@@ -1071,6 +1092,7 @@ bool OperationQueue::hasPriorityWork() const
 
 void OperationQueue::paused(bool pause)
 {
+    const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
         [weak = weak_from_this(), pause]()
         {
@@ -1140,6 +1162,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     SharedData::OperationMode mode
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand
 
     auto fut = sftp.lstat(remotePath);
@@ -1329,6 +1352,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     SharedData::OperationMode mode
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand.
 
     if (roots.empty())
@@ -1467,6 +1491,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     SharedData::OperationMode mode
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand.
     if (localPaths.empty())
     {
@@ -1584,6 +1609,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
     Ids::OperationId const& bulkCardId
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand.
     auto transferOptions = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{});
     if (request.allowOverwrite)
@@ -1693,6 +1719,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
     Log::Toast failureToast
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand
 
     const auto localNativePath = localPath.native();
@@ -1858,6 +1885,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
     Log::Toast failureToast
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand.
     auto transferOptions = sftpOpts_.uploadOptions.value_or(Persistence::UploadOptions{});
     if (request.allowOverwrite)
@@ -1965,6 +1993,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     LocalOperationQueue& localDeleteQueue
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand
     using SharedData::Sync::Action;
     SharedData::Sync::SyncExecutionResult result{.failed = std::move(plan.refused)};
@@ -2165,6 +2194,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     SharedData::OperationMode mode
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     auto guard = remoteDeleteGuard(sftp);
     return addDeleteOperation(guard, sftp, std::move(operationId), remotePath, recursive, insertRefresh, mode);
 }
@@ -2179,6 +2209,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     SharedData::OperationMode mode
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand
     auto& targetQueue = queueFor(mode);
 
@@ -2249,6 +2280,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     Ids::OperationId bulkOperationId
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     auto guard = remoteDeleteGuard(sftp);
     return addBulkDeleteOperation(guard, sftp, request, std::move(bulkOperationId));
 }
@@ -2260,6 +2292,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     Ids::OperationId bulkOperationId
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand. One DeleteOperation, so one card and one completion for the whole request: files are
     // deleted as given, every real directory is scanned first and deleted with its content.
     auto& targetQueue = queueFor(request.mode);
@@ -2369,6 +2402,7 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
     SharedData::OperationMode mode
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand
 
     auto operation = std::make_unique<RenameOperation>(
@@ -2410,6 +2444,7 @@ void OperationQueue::addSyncScanOperation(
     bool ignoreHidden
 )
 {
+    const WakeOnReturn wakeOnReturn{*this};
     // Create (or replace) the SyncSession.  A fresh id from the frontend is the
     // norm; re-opening over an existing id is handled as "discard previous state".
     const auto remoteFoldsCase = [&]()
