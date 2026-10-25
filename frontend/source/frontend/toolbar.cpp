@@ -572,6 +572,11 @@ Nui::ElementRenderer Toolbar::operator()()
             .text = language->get("toolbar", "endSession"),
             .icon = GeneratedSvgs::decline(),
             .attributes = {
+                disabled = Nui::observe(impl_->sessionArea->hasActiveSession()).generate(
+                    [](bool hasSession) -> std::optional<bool> {
+                        return hasSession ? std::nullopt : std::optional<bool>{true};
+                    }
+                ),
                 onClick = [this]() {
                     if (impl_->sessionArea) {
                         impl_->sessionArea->removeActiveSession();
