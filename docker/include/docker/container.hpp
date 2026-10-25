@@ -48,9 +48,9 @@ namespace Docker
         std::expected<std::string, std::string> ipAddress() const;
 
         /**
-         * @brief Runs @p command through sh inside the container.
+         * @brief Runs @p command through sh inside the container, as @p user unless it is empty.
          */
-        CommandResult execute(std::string_view command) const;
+        CommandResult execute(std::string_view command, std::string_view user = {}) const;
 
       private:
         explicit Container(std::string name);

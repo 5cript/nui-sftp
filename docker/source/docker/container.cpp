@@ -82,8 +82,9 @@ namespace Docker
         return address;
     }
 
-    CommandResult Container::execute(std::string_view command) const
+    CommandResult Container::execute(std::string_view command, std::string_view user) const
     {
-        return run(fmt::format("docker exec {} sh -c {}", quote(name_), quote(command)));
+        const auto userArgument = user.empty() ? std::string{} : fmt::format("--user {} ", quote(user));
+        return run(fmt::format("docker exec {}{} sh -c {}", userArgument, quote(name_), quote(command)));
     }
 }
