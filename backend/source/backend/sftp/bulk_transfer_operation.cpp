@@ -198,6 +198,7 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
 
     const auto slotsBefore = slots_.size();
     const auto completedBefore = completedEntries_;
+    const auto releasesBefore = sftp.bufferProvider().releaseCount();
     if (const auto filled = fillSlots(sftp); !filled.has_value())
         return enterErrorState<WorkStatus>(filled.error());
     // Report newly started files before stepping them: small files finish within this very
@@ -208,9 +209,6 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
     const auto stepped = stepSlots();
     if (!stepped.has_value())
         return enterErrorState<WorkStatus>(stepped.error());
-    // Waiting only while every file waits for its transfer, which wakes the queue when it moves on.
-    const bool progressed = *stepped || slots_.size() > slotsBefore || completedEntries_ != completedBefore;
-
     std::erase_if(
         slots_,
         [](Slot const& slot)
@@ -218,6 +216,11 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
             return slot.finished;
         }
     );
+    // Waiting only while every file waits for its transfer or a buffer, which wake the queue when they move on.
+    // Counted after the erase: an entry deferred again for want of a buffer did not start.
+    const bool progressed = *stepped || slots_.size() > slotsBefore || completedEntries_ != completedBefore;
+    if (!progressed && !deferred_.empty())
+        wakeOnBufferRelease(sftp, releasesBefore);
 
     if (slots_.empty() && deferred_.empty() && cursor_ == entries_.size())
     {
@@ -342,7 +345,6 @@ std::expected<bool, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             continue;
         }
 
-        progressed = true;
         const auto error = result.error();
         if (isBufferShortage(error) && slot.bytes == 0)
         {
@@ -360,6 +362,7 @@ std::expected<bool, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
             continue;
         }
 
+        progressed = true;
         Log::log(
             failureLevelOf(error),
             common_.failureToast,
@@ -388,6 +391,14 @@ std::expected<bool, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
         return std::unexpected(error);
     }
     return progressed;
+}
+
+void BulkTransferOperation::wakeOnBufferRelease(SecureShell::SftpSession& sftp, std::size_t since)
+{
+    if (!wake_ || awaitedRelease_ == since)
+        return;
+    awaitedRelease_ = since;
+    sftp.bufferProvider().notifyOnRelease(since, wake_);
 }
 
 void BulkTransferOperation::finishSlot(Slot& slot, bool transferred)

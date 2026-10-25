@@ -8,6 +8,7 @@
 #include <utility/permissions.hpp>
 #include <utility/temporary_directory.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -217,6 +218,48 @@ namespace Test
         ASSERT_TRUE(std::filesystem::exists(localRoot / "doc2.txt"));
         EXPECT_EQ(readLocalFile(localRoot / "doc1.txt"), "Document 1 content");
         EXPECT_EQ(readLocalFile(localRoot / "doc2.txt"), "Document 2 content");
+        EXPECT_TRUE(operation.getFailed().empty());
+    }
+
+    TEST_F(BulkDownloadOperationTests, WaitsForAReturnedBufferWhenThePoolIsExhausted)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto scan = runScan(*sftp, "/home/test/Documents");
+        const auto localRoot = downloadDir_.path() / "Documents";
+        BulkDownloadOperation operation{
+            sftp, {.remotePath = remote("/home/test/Documents"), .localPath = toLocal(localRoot)}
+        };
+        operation.setScanResult(std::move(scan.entries), scan.totalBytes);
+        std::atomic_int wakes{0};
+        operation.setWake(
+            [&wakes]()
+            {
+                ++wakes;
+            }
+        );
+
+        // Every buffer the small files could get.
+        std::vector<SecureShell::BufferLease> held{};
+        while (auto lease = sftp->bufferProvider().lease(0))
+            held.push_back(std::move(lease));
+
+        auto last = BulkDownloadOperation::WorkStatus::MoreWork;
+        for (int step = 0; step < 50 && last != BulkDownloadOperation::WorkStatus::Waiting; ++step)
+        {
+            const auto worked = operation.work();
+            ASSERT_TRUE(worked.has_value());
+            last = worked.value();
+        }
+        ASSERT_EQ(last, BulkDownloadOperation::WorkStatus::Waiting);
+        EXPECT_EQ(wakes.load(), 0);
+
+        held.pop_back();
+        EXPECT_EQ(wakes.load(), 1);
+        held.clear();
+        ASSERT_EQ(runBulkToCompletion(operation), BulkDownloadOperation::WorkStatus::Complete);
+        EXPECT_EQ(readLocalFile(localRoot / "doc1.txt"), "Document 1 content");
         EXPECT_TRUE(operation.getFailed().empty());
     }
 

@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -355,6 +356,13 @@ class BulkTransferOperation : public Operation
      * @return Whether any child did more than wait for its transfer.
      */
     std::expected<bool, Error> stepSlots();
+
+    /**
+     * @brief Wakes the queue once a transfer buffer is returned, for deferred entries that wait for one.
+     *
+     * @param since The buffer provider's release count before the step that found no buffer.
+     */
+    void wakeOnBufferRelease(SecureShell::SftpSession& sftp, std::size_t since);
     /**
      * @brief Counts the entry of @p slot as done, as @p transferred or as a failure recorded for the user.
      */
@@ -398,6 +406,8 @@ class BulkTransferOperation : public Operation
     std::deque<std::size_t> deferred_{};
     bool retryDeferred_{true};
     bool bufferShortageLogged_{false};
+    /** @brief The release count the queue waits beyond for a buffer, see wakeOnBufferRelease. */
+    std::optional<std::size_t> awaitedRelease_{};
     std::size_t cursor_{0};
     std::uint64_t completedEntries_{0};
     std::uint64_t completedBytes_{0};
