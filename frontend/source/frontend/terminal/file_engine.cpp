@@ -593,17 +593,19 @@ void FileEngine::addArchiveDownload(
     Paths::LocalPath const& localArchivePath,
     int compressionCodec,
     int compressionLevel,
+    bool xzExtreme,
     bool mayOverwrite,
     SharedData::OperationMode mode,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
 )
 {
     Log::info(
-        "Requesting archive download: {} roots → {} (codec={}, level={})",
+        "Requesting archive download: {} roots → {} (codec={}, level={}, extreme={})",
         roots.size(),
         localArchivePath.toUtf8(),
         compressionCodec,
-        compressionLevel
+        compressionLevel,
+        xzExtreme
     );
 
     lazyOpen(
@@ -612,6 +614,7 @@ void FileEngine::addArchiveDownload(
             localArchivePath,
             compressionCodec,
             compressionLevel,
+            xzExtreme,
             mayOverwrite,
             mode,
             onOperationCreated = std::move(onOperationCreated)](auto const& channelId, std::string const& info)
@@ -648,6 +651,7 @@ void FileEngine::addArchiveDownload(
                 localArchivePath.toUtf8(),
                 compressionCodec,
                 compressionLevel,
+                xzExtreme,
                 mayOverwrite,
                 static_cast<int>(mode)
             );
@@ -660,17 +664,19 @@ void FileEngine::addArchiveUpload(
     Paths::RemotePath const& remoteArchivePath,
     int compressionCodec,
     int compressionLevel,
+    bool xzExtreme,
     bool mayOverwrite,
     SharedData::OperationMode mode,
     std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
 )
 {
     Log::info(
-        "Requesting archive upload: {} paths → {} (codec={}, level={})",
+        "Requesting archive upload: {} paths → {} (codec={}, level={}, extreme={})",
         localPaths.size(),
         remoteArchivePath.value(),
         compressionCodec,
-        compressionLevel
+        compressionLevel,
+        xzExtreme
     );
 
     lazyOpen(
@@ -679,6 +685,7 @@ void FileEngine::addArchiveUpload(
             remoteArchivePath,
             compressionCodec,
             compressionLevel,
+            xzExtreme,
             mayOverwrite,
             mode,
             onOperationCreated = std::move(onOperationCreated)](auto const& channelId, std::string const& info)
@@ -716,6 +723,7 @@ void FileEngine::addArchiveUpload(
                 remoteArchivePath.value(),
                 compressionCodec,
                 compressionLevel,
+                xzExtreme,
                 mayOverwrite,
                 static_cast<int>(mode)
             );

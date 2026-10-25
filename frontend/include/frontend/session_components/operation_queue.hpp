@@ -140,14 +140,15 @@ class OperationQueue
      *        local tar[.ext] archive. @p compressionCodec is the raw int value
      *        of TarArchive::Compression (None=1, Gzip=2, Bzip2=3, Zstd=4, Xz=5
      *        — see the archive_transfer_dialog.hpp local enum); the frontend
-     *        stays agnostic of codec specifics. @p compressionLevel is the
-     *        user-facing 1..9 slider value, remapped per-codec on the backend.
+     *        stays agnostic of codec specifics. @p compressionLevel is in the
+     *        codec's own range and @p xzExtreme only applies to xz.
      */
     void enqueueArchiveDownload(
         std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,
+        bool xzExtreme,
         bool mayOverwrite,
         SharedData::OperationMode mode,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated
@@ -159,6 +160,7 @@ class OperationQueue
         Paths::RemotePath const& remoteArchivePath,
         int compressionCodec,
         int compressionLevel,
+        bool xzExtreme,
         bool mayOverwrite,
         SharedData::OperationMode mode,
         std::function<void(std::optional<Ids::OperationId> const&, std::string const& info)> onOperationCreated

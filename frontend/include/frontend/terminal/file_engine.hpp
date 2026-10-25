@@ -182,14 +182,15 @@ class FileEngine
      *        tar[.ext] archive. @p compressionCodec is the raw integer value of
      *        TarArchive::Compression (backend-side); the frontend stays codec
      *        agnostic and the archive-transfer dialog produces the mapping.
-     *        @p compressionLevel is the user-facing 1..9 knob (re-scaled per
-     *        codec on the backend).
+     *        @p compressionLevel is in the codec's own range and @p xzExtreme
+     *        only applies to xz.
      */
     void addArchiveDownload(
         std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
         int compressionCodec,
         int compressionLevel,
+        bool xzExtreme,
         bool mayOverwrite,
         SharedData::OperationMode mode,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated
@@ -205,6 +206,7 @@ class FileEngine
         Paths::RemotePath const& remoteArchivePath,
         int compressionCodec,
         int compressionLevel,
+        bool xzExtreme,
         bool mayOverwrite,
         SharedData::OperationMode mode,
         std::function<void(std::optional<Ids::OperationId>, std::string const& info)> onOperationCreated

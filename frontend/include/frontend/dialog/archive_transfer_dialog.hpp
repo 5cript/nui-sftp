@@ -47,20 +47,22 @@ int backendCompressionCode(ArchiveCodec codec);
  *
  * @c fileStem is the user-entered filename without any `.tar[.ext]` suffix; the
  * caller composes the full filename using @c archiveCodecExtension.
- * @c compressionLevel is a user-facing 1..9 value ("fastest"..."smallest") that
- * the backend will rescale onto the codec's native range.
+ * @c compressionLevel is in the codec's own range: gzip level 1..9, bzip2 block
+ * size 1..9, zstd level 1..22, xz preset 0..9, unused for None.
  */
 struct ArchiveTransferResult
 {
     std::string fileStem;
     ArchiveCodec codec{ArchiveCodec::Gzip};
-    int compressionLevel{5};
+    int compressionLevel{6};
+    /** @brief OR the xz extreme flag into the preset, false for every other codec. */
+    bool xzExtreme{false};
 };
 
 /**
  * @brief Modal dialog that collects an archive filename stem, a compression
- * codec (extension dropdown), and a compression level (1..9 slider) from the
- * user. Mirrors the pimpl pattern used by InputDialog.
+ * codec (extension dropdown), and a compression level in that codec's own range
+ * from the user. Mirrors the pimpl pattern used by InputDialog.
  */
 class ArchiveTransferDialog
 {
@@ -82,11 +84,8 @@ class ArchiveTransferDialog
         /** @brief Initial filename stem shown in the input (no extension). */
         std::string initialFileStem{};
 
-        /** @brief Initial codec selection. */
+        /** @brief Initial codec selection, every codec starts at its own default level. */
         ArchiveCodec initialCodec{ArchiveCodec::Gzip};
-
-        /** @brief Initial compression level (clamped to 1..9). */
-        int initialCompressionLevel{5};
 
         /**
          * @brief Invoked exactly once when the dialog closes. Engaged when the
@@ -103,6 +102,12 @@ class ArchiveTransferDialog
 
   private:
     Nui::ElementRenderer dialogBody();
+
+    /**
+     * @brief The level slider, its notes and the xz extreme checkbox for @p codec, rendered again when the codec
+     * changes because each codec has its own range.
+     */
+    Nui::ElementRenderer compressionSection(ArchiveCodec codec);
 
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
