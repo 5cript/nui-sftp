@@ -620,9 +620,11 @@ namespace SecureShell
              pipeline = std::make_shared<ReadPipeline>()]()
             {
                 auto stream = weakStream.lock();
+                auto sftp = stream ? stream->sftp_.lock() : nullptr;
+                // Waiting needs the session and the open file, without them the requests are only freed.
                 const auto discardPipeline = [&]()
                 {
-                    pipeline->discard(stream ? stream->file_.get() : nullptr, buffer, bufferSize);
+                    pipeline->discard(sftp ? stream->file_.get() : nullptr, buffer, bufferSize);
                 };
 
                 if (context->hasEnded())
@@ -641,7 +643,6 @@ namespace SecureShell
                     return false;
                 }
 
-                auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
                     discardPipeline();
