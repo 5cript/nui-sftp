@@ -162,6 +162,11 @@ class DownloadOperation : public Operation
     std::expected<void, Error> restrictTempFile() const;
 
     /**
+     * @brief Restricts the temp file and opens it empty for writing.
+     */
+    std::expected<void, Error> openEmptyTempFile();
+
+    /**
      * @brief The permissions of the finished file: inherited, configured, or those of a new file.
      */
     std::expected<std::filesystem::perms, Error> finalPermissionsInStrand();

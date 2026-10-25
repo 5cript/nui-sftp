@@ -541,9 +541,8 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
             );
             if (auto rewound = stream.seekInStrand(0); !rewound)
                 return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
-            if (const auto restricted = restrictTempFile(); !restricted)
-                return restricted;
-            localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
+            if (const auto opened = openEmptyTempFile(); !opened)
+                return opened;
         }
         else
         {
@@ -565,9 +564,8 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
     }
     else
     {
-        if (const auto restricted = restrictTempFile(); !restricted)
-            return restricted;
-        localFile_.open(tempPath, std::ios::binary | std::ios::trunc);
+        if (const auto opened = openEmptyTempFile(); !opened)
+            return opened;
     }
 
     if (!localFile_.is_open())
@@ -590,6 +588,32 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::restrictTempFil
         );
         return std::unexpected(Error{.type = ErrorType::OpenFailure});
     }
+    return {};
+}
+
+std::expected<void, DownloadOperation::Error> DownloadOperation::openEmptyTempFile()
+{
+    if (const auto restricted = restrictTempFile(); !restricted)
+        return restricted;
+
+    // Opening with trunc truncates the file restrictTempFile just created, and on ext4 a truncated file is written
+    // back in full when it is closed (auto_da_alloc), which took 160 ms of a 400 ms download of 256 MiB. Only a
+    // leftover with content is truncated.
+    std::error_code sizeError{};
+    const auto existingSize = std::filesystem::file_size(tempNativePath_, sizeError);
+    std::error_code truncateError{};
+    if (!sizeError && existingSize != 0)
+        std::filesystem::resize_file(tempNativePath_, 0, truncateError);
+    if (sizeError || truncateError)
+    {
+        Log::error(
+            "DownloadOperation: Cannot empty '{}': {}",
+            Paths::nativeToUtf8(tempNativePath_),
+            Utility::errorMessage(sizeError ? sizeError : truncateError)
+        );
+        return std::unexpected(Error{.type = ErrorType::OpenFailure});
+    }
+    localFile_.open(tempNativePath_, std::ios::binary | std::ios::in | std::ios::out);
     return {};
 }
 
