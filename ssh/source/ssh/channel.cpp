@@ -13,23 +13,6 @@ namespace SecureShell
         /* close makes no sense, since this lives in a shared_ptr and will only ever end here when it was already
          * removed */
     }
-    Channel::Channel(Channel&& other)
-        : owner_{std::exchange(other.owner_, nullptr)}
-        , strand_{std::move(other.strand_)}
-        , channel_{std::move(other.channel_)}
-        , closing_{other.closing_.load()}
-    {}
-    Channel& Channel::operator=(Channel&& other)
-    {
-        if (this != &other)
-        {
-            owner_ = std::exchange(other.owner_, nullptr);
-            strand_ = std::exchange(other.strand_, nullptr);
-            channel_ = std::exchange(other.channel_, nullptr);
-            closing_ = other.closing_.load();
-        }
-        return *this;
-    }
     bool Channel::close(bool isBackElement)
     {
         if (strand_->isFinalized())
@@ -42,6 +25,7 @@ namespace SecureShell
             ->pushFinalPromiseTask(
                 [this, isBackElement]()
                 {
+                    removeCallbacks();
                     if (channel_ && channel_->isOpen())
                     {
                         channel_->sendEof();
@@ -81,28 +65,58 @@ namespace SecureShell
         }
         return promise->get_future();
     }
-    bool Channel::readTask(std::chrono::milliseconds pollTimeout)
+    int Channel::onData(ssh_session, ssh_channel, void* data, uint32_t length, int isStderr, void* self)
     {
-        if (!onStdout_ || !onStderr_ || !onExit_)
-            return false;
+        auto* channel = static_cast<Channel*>(self);
+        if (channel->closing_)
+            return static_cast<int>(length);
+        std::string const text{static_cast<char const*>(data), length};
+        if (isStderr != 0)
+            channel->onStderr_(text);
+        else
+            channel->onStdout_(text);
+        return static_cast<int>(length);
+    }
+    void Channel::onEnd(ssh_session, ssh_channel, void* self)
+    {
+        // Seen while another task read the socket: the read task reports it in the next cycle.
+        static_cast<Channel*>(self)->strand_->wake();
+    }
+    void Channel::registerCallbacks()
+    {
+        callbacks_ = {};
+        callbacks_.userdata = this;
+        callbacks_.channel_data_function = &Channel::onData;
+        callbacks_.channel_eof_function = &Channel::onEnd;
+        callbacks_.channel_close_function = &Channel::onEnd;
+        ssh_callbacks_init(&callbacks_);
+        callbacksRegistered_ = ssh_set_channel_callbacks(channel_->getCChannel(), &callbacks_) == SSH_OK;
+    }
+    void Channel::removeCallbacks()
+    {
+        if (callbacksRegistered_ && channel_)
+            ssh_remove_channel_callbacks(channel_->getCChannel(), &callbacks_);
+        callbacksRegistered_ = false;
+    }
+    ProcessingThread::PermanentTaskStatus Channel::readTask()
+    {
+        using enum ProcessingThread::PermanentTaskStatus;
+        if (!onStdout_ || !onStderr_ || !onExit_ || !channel_)
+            return Done;
 
-        if (!channel_)
-        {
-            std::this_thread::sleep_for(pollTimeout);
-            return false;
-        }
+        if (!callbacksRegistered_)
+            registerCallbacks();
 
         constexpr static int bufferSize = 1024;
         char buffer[bufferSize];
 
-        auto readOne = [this, &buffer, pollTimeout](bool stdout_)
+        // Reads the socket without waiting. Output then reaches the callbacks; the buffer only holds what arrived
+        // before they were registered.
+        auto readOne = [this, &buffer](bool stdout_)
         {
-            auto rdy = ssh_channel_poll_timeout(channel_->getCChannel(), pollTimeout.count(), stdout_ ? 0 : 1);
+            auto rdy = ssh_channel_poll_timeout(channel_->getCChannel(), 0, stdout_ ? 0 : 1);
             if (rdy < 0)
                 return -1;
-
-            if (rdy == 0)
-                return 0;
 
             while (rdy > 0)
             {
@@ -122,25 +136,20 @@ namespace SecureShell
             return rdy;
         };
 
-        if (readOne(true) < 0)
+        if (readOne(true) < 0 || readOne(false) < 0)
         {
+            removeCallbacks();
             if (!closing_)
                 onExit_();
-            return false;
+            return Done;
         }
-        if (readOne(false) < 0)
-        {
-            if (!closing_)
-                onExit_();
-            return false;
-        }
-        return true;
+        // Without callbacks output read by other calls waits in the buffer, which only polling finds.
+        return callbacksRegistered_ ? AwaitInput : Poll;
     }
     void Channel::startReading(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
-        std::function<void()> onExit,
-        std::optional<std::chrono::milliseconds> pollInterval
+        std::function<void()> onExit
     )
     {
         onStdout_ = std::move(onStdout);
@@ -148,11 +157,12 @@ namespace SecureShell
         onExit_ = std::move(onExit);
 
         auto [success, id] = strand_->pushPermanentTask(
-            [this]()
-            {
-                return readTask();
-            },
-            pollInterval
+            std::function<ProcessingThread::PermanentTaskStatus()>{
+                [this]()
+                {
+                    return readTask();
+                }
+            }
         );
         if (!success)
         {

@@ -122,7 +122,7 @@ namespace SecureShell::Test
         }
 
       public:
-        auto makePasswordTestSession(unsigned short port)
+        auto makePasswordTestSession(unsigned short port, std::function<void()> onConnectionLoss = {})
         {
             return makeSession(
                 getSessionOptions(port),
@@ -135,7 +135,7 @@ namespace SecureShell::Test
                 nullptr,
                 nullptr,
                 nullptr,
-                []()
+                onConnectionLoss ? std::move(onConnectionLoss) : []()
                 {
                     std::cout << "connection lost." << std::endl;
                 }

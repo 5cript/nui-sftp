@@ -1,6 +1,7 @@
 #pragma once
 
 #include <libssh/libsshpp.hpp>
+#include <libssh/callbacks.h>
 #include <ssh/async/processing_thread.hpp>
 #include <ssh/async/processing_strand.hpp>
 
@@ -23,8 +24,9 @@ namespace SecureShell
         ~Channel();
         Channel(Channel const&) = delete;
         Channel& operator=(Channel const&) = delete;
-        Channel(Channel&&);
-        Channel& operator=(Channel&&);
+        // Libssh's channel callbacks point at this object.
+        Channel(Channel&&) = delete;
+        Channel& operator=(Channel&&) = delete;
 
         operator ssh::Channel&()
         {
@@ -67,20 +69,25 @@ namespace SecureShell
         /**
          * @brief Starts reading and processing the channel.
          *
-         * @param onStdout
-         * @param onStderr
-         * @param onExit
-         * @param pollInterval How often the channel is looked at, the processing thread's poll interval if unset.
+         * Output reaches the handlers as libssh processes it, whichever call on the session read it from the
+         * socket, so the processing thread can sleep until the socket has data.
+         *
+         * @param onStdout Called on the processing thread with output.
+         * @param onStderr Called on the processing thread with error output.
+         * @param onExit Called on the processing thread when the channel or the connection ends, unless closed.
          */
         void startReading(
             std::function<void(std::string const&)> onStdout,
             std::function<void(std::string const&)> onStderr,
-            std::function<void()> onExit,
-            std::optional<std::chrono::milliseconds> pollInterval = std::nullopt
+            std::function<void()> onExit
         );
 
       private:
-        bool readTask(std::chrono::milliseconds pollTimeout = std::chrono::milliseconds{0});
+        ProcessingThread::PermanentTaskStatus readTask();
+        void registerCallbacks();
+        void removeCallbacks();
+        static int onData(ssh_session session, ssh_channel channel, void* data, uint32_t length, int isStderr, void* self);
+        static void onEnd(ssh_session session, ssh_channel channel, void* self);
 
       private:
         Session* owner_;
@@ -91,5 +98,8 @@ namespace SecureShell
         std::function<void()> onExit_{};
         /** @brief Set by close on the caller's thread, so the read task no longer reports the exit it expects. */
         std::atomic_bool closing_{false};
+        /** @brief Registered with libssh by the first read task, only touched on the processing thread. */
+        ssh_channel_callbacks_struct callbacks_{};
+        bool callbacksRegistered_{false};
     };
 }
