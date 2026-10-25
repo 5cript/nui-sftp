@@ -199,6 +199,13 @@ namespace SecureShell
          */
         std::shared_ptr<AsyncTransferContext> makeTransferContext();
 
+        /**
+         * @brief Lets closing the file first wait for the requests @p pipeline still has in flight, whose answers
+         *        would otherwise stay queued in the sftp session.
+         */
+        template <typename PipelineT>
+        void watchInFlight(std::shared_ptr<PipelineT> const& pipeline);
+
         template <typename FunctionT>
         void perform(FunctionT&& func);
 
@@ -213,5 +220,7 @@ namespace SecureShell
         std::weak_ptr<SftpSession> sftp_;
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file)>> file_;
         sftp_limits_struct limits_;
+        /** @brief Discards the requests of the running transfer, see watchInFlight. On the processing thread. */
+        std::function<void(sftp_file)> discardInFlight_{};
     };
 }
