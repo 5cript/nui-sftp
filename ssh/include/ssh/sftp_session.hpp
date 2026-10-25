@@ -395,7 +395,7 @@ namespace SecureShell
         }
 
         /**
-         * @brief Sizes this session's blocking data calls from measured round trips.
+         * @brief The round trip of this session's link, which bounds how long a transfer's turn blocks.
          */
         TransferChunkController& chunkController() noexcept
         {
