@@ -2,10 +2,12 @@
 
 #include <thread>
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <mutex>
 #include <functional>
 #include <map>
+#include <optional>
 #include <future>
 #include <memory>
 #include <vector>
@@ -35,6 +37,21 @@ namespace SecureShell
             }
         };
 
+        /**
+         * @brief What a permanent task needs after its turn, which decides whether the thread may sleep.
+         */
+        enum class PermanentTaskStatus
+        {
+            /** @brief The task is finished and is removed. */
+            Done,
+            /** @brief The task has more work, the next cycle starts right away. */
+            Busy,
+            /** @brief Nothing to do now, but the task must look again after the poll interval (a channel reader). */
+            Poll,
+            /** @brief Nothing to do until someone calls wake (a paused transfer). */
+            Idle,
+        };
+
         ProcessingThread();
         ~ProcessingThread();
         ProcessingThread(ProcessingThread const&) = delete;
@@ -45,12 +62,17 @@ namespace SecureShell
         /**
          * @brief Starts the processing thread.
          *
-         * @param waitCycleTimeout The time to wait for a task to become available before checking if the thread should
-         * stop.
-         * @param minimumCycleWait The minimum wait time between cycles to throttle the processing thread in case of the
-         * existence of permanent tasks.
+         * Between cycles the thread sleeps until a task is pushed or wake is called, and no longer than the poll
+         * interval while a permanent task polls. A busy permanent task keeps it from sleeping.
+         *
+         * @param pollInterval How long the thread sleeps at most while a permanent task polls.
          */
-        void start(std::chrono::milliseconds const& minimumCycleWait = std::chrono::milliseconds{0});
+        void start(std::chrono::milliseconds const& pollInterval = std::chrono::milliseconds{0});
+
+        /**
+         * @brief Wakes the thread for a cycle, for a permanent task whose state changed from outside.
+         */
+        void wake();
 
         /**
          * @brief Stops the processing thread. Executes all pending tasks.
@@ -109,7 +131,20 @@ namespace SecureShell
          * @param task The task to push.
          * @return std::pair<bool, PermanentTaskId> If the task was pushed and the id of the task.
          */
-        std::pair<bool, PermanentTaskId> pushPermanentTask(std::function<bool(ProcessingThread::PermanentTaskId)> task);
+        std::pair<bool, PermanentTaskId> pushPermanentTask(
+            std::function<PermanentTaskStatus(ProcessingThread::PermanentTaskId)> task,
+            std::optional<std::chrono::milliseconds> pollInterval = std::nullopt
+        );
+
+        /**
+         * @brief Pushes a permanent task that polls: true keeps it, false removes it.
+         *
+         * @param pollInterval How often the task looks at least, the thread's poll interval if unset.
+         */
+        std::pair<bool, PermanentTaskId> pushPermanentTask(
+            std::function<bool(ProcessingThread::PermanentTaskId)> task,
+            std::optional<std::chrono::milliseconds> pollInterval = std::nullopt
+        );
 
         /**
          * @brief Removes a permanent task.
@@ -167,7 +202,23 @@ namespace SecureShell
         std::unique_ptr<ProcessingStrand> createStrand();
 
       private:
-        void run(std::chrono::milliseconds const& minimumCycleWait);
+        void run(std::chrono::milliseconds const& pollInterval);
+
+        /**
+         * @brief Sleeps after a cycle as far as its permanent tasks allow, until something wakes the thread.
+         *
+         * @param nextPoll When the earliest polling task wants to look again.
+         */
+        void waitForWork(PermanentTaskStatus mostUrgent, std::chrono::steady_clock::time_point nextPoll);
+
+        /**
+         * @brief A permanent task and how often it polls.
+         */
+        struct PermanentTask
+        {
+            std::function<PermanentTaskStatus(PermanentTaskId)> run;
+            std::optional<std::chrono::milliseconds> pollInterval;
+        };
 
       private:
         std::thread thread_{};
@@ -184,8 +235,11 @@ namespace SecureShell
         // are not starved when earlier ones exhaust the cycle.
         std::size_t permanentRotation_{0};
         std::vector<std::function<void()>> deferredTaskModification_{};
+        std::condition_variable_any wakeUp_{};
+        /** @brief Set under taskMutex_ by everything that needs a cycle, cleared when a cycle starts. */
+        bool wakeRequested_{false};
 
         std::deque<std::function<void()>> tasks_{};
-        std::map<PermanentTaskId, std::function<bool(ProcessingThread::PermanentTaskId)>> permanentTasks_{};
+        std::map<PermanentTaskId, PermanentTask> permanentTasks_{};
     };
 }
