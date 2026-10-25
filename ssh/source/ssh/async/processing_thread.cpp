@@ -42,12 +42,14 @@ namespace SecureShell
     void ProcessingThread::stop()
     {
         shuttingDown_ = true;
+        bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
             running_ = false;
             wakeRequested_ = true;
+            interruptSocketWait = waitingOnSocket_;
         }
-        wakeUp_.notify_all();
+        notifyWake(interruptSocketWait);
         if (thread_.joinable())
             thread_.join();
 
@@ -72,21 +74,45 @@ namespace SecureShell
             return false;
         }
 
+        bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
             tasks_.push_back(std::move(task));
             wakeRequested_ = true;
+            interruptSocketWait = waitingOnSocket_;
         }
-        wakeUp_.notify_one();
+        notifyWake(interruptSocketWait);
         return true;
     }
     void ProcessingThread::wake()
     {
+        bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
             wakeRequested_ = true;
+            interruptSocketWait = waitingOnSocket_;
         }
-        wakeUp_.notify_one();
+        notifyWake(interruptSocketWait);
+    }
+    void ProcessingThread::notifyWake(bool interruptSocketWait)
+    {
+        wakeUp_.notify_all();
+        // Set before waitingOnSocket_ under the same lock, and destroyed only after the thread ended.
+        if (interruptSocketWait)
+            socketWait_->wake();
+    }
+    std::expected<void, std::string> ProcessingThread::watchSocket(std::function<SocketWait::Watched()> watched)
+    {
+        std::lock_guard lock{taskMutex_};
+        if (!socketWait_)
+        {
+            auto created = SocketWait::create();
+            if (!created)
+                return std::unexpected(std::move(created).error());
+            socketWait_ = std::move(created).value();
+        }
+        watchedSocket_ = std::move(watched);
+        return {};
     }
     std::unique_ptr<ProcessingStrand> ProcessingThread::createStrand()
     {
@@ -127,6 +153,7 @@ namespace SecureShell
         }
 
         PermanentTaskId id{-1};
+        bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
             ++permanentTaskIdCounter_;
@@ -134,8 +161,9 @@ namespace SecureShell
             permanentTasks_.insert({id, PermanentTask{.run = std::move(task), .pollInterval = pollInterval}});
             permanentTasksAvailable_ = true;
             wakeRequested_ = true;
+            interruptSocketWait = waitingOnSocket_;
         }
-        wakeUp_.notify_one();
+        notifyWake(interruptSocketWait);
         return {true, id};
     }
     void ProcessingThread::clearPermanentTasks()
@@ -208,8 +236,7 @@ namespace SecureShell
                     wakeRequested_ = false;
                 }
                 cycleStart_ = std::chrono::steady_clock::now();
-                auto mostUrgent = PermanentTaskStatus::Idle;
-                auto nextPoll = std::chrono::steady_clock::time_point::max();
+                CycleNeeds needs{};
 
                 if (permanentTasksAvailable_)
                 {
@@ -248,12 +275,18 @@ namespace SecureShell
                             longestPosition = position;
                         }
                         ++position;
+                        const auto lookAgain = cycleStart_ + task.pollInterval.value_or(pollInterval);
                         if (status == PermanentTaskStatus::Done)
                             toRemove.push_back(id);
                         else
-                            mostUrgent = std::min(mostUrgent, status);
+                            needs.mostUrgent = std::min(needs.mostUrgent, status);
                         if (status == PermanentTaskStatus::Poll)
-                            nextPoll = std::min(nextPoll, cycleStart_ + task.pollInterval.value_or(pollInterval));
+                            needs.nextPoll = std::min(needs.nextPoll, lookAgain);
+                        if (status == PermanentTaskStatus::AwaitInput)
+                        {
+                            needs.awaitsInput = true;
+                            needs.inputFallback = std::min(needs.inputFallback, lookAgain);
+                        }
                         return running_ && !shuttingDown_;
                     };
                     bool keepGoing = true;
@@ -333,7 +366,7 @@ namespace SecureShell
                 if (pendingException)
                     std::rethrow_exception(pendingException);
 
-                waitForWork(mostUrgent, nextPoll);
+                waitForWork(needs);
             }
         }
         catch (...)
@@ -342,9 +375,9 @@ namespace SecureShell
             running_ = false;
         }
     }
-    void ProcessingThread::waitForWork(PermanentTaskStatus mostUrgent, std::chrono::steady_clock::time_point nextPoll)
+    void ProcessingThread::waitForWork(CycleNeeds const& needs)
     {
-        if (mostUrgent == PermanentTaskStatus::Busy)
+        if (needs.mostUrgent == PermanentTaskStatus::Busy)
             return;
 
         std::unique_lock lock{taskMutex_};
@@ -352,8 +385,31 @@ namespace SecureShell
         {
             return !running_ || wakeRequested_ || !tasks_.empty();
         };
-        if (mostUrgent == PermanentTaskStatus::Poll)
-            wakeUp_.wait_until(lock, nextPoll, workArrived);
+        if (workArrived())
+            return;
+
+        std::optional<std::chrono::steady_clock::time_point> deadline{};
+        if (needs.mostUrgent == PermanentTaskStatus::Poll)
+            deadline = needs.nextPoll;
+        if (needs.awaitsInput)
+        {
+            const auto watched = socketWait_ && watchedSocket_ ? watchedSocket_() : SocketWait::Watched{};
+            if (watched.socket != SSH_INVALID_SOCKET)
+            {
+                waitingOnSocket_ = true;
+                lock.unlock();
+                const auto result = socketWait_->wait(watched, deadline);
+                lock.lock();
+                waitingOnSocket_ = false;
+                // A failing poll must not spin, so the tasks look again after their interval.
+                if (result == SocketWait::Result::Failed)
+                    wakeUp_.wait_until(lock, needs.inputFallback, workArrived);
+                return;
+            }
+            deadline = std::min(deadline.value_or(needs.inputFallback), needs.inputFallback);
+        }
+        if (deadline)
+            wakeUp_.wait_until(lock, *deadline, workArrived);
         else
             wakeUp_.wait(lock, workArrived);
     }

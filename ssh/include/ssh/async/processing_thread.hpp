@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ssh/async/socket_wait.hpp>
+
 #include <thread>
 #include <atomic>
 #include <condition_variable>
@@ -46,8 +48,13 @@ namespace SecureShell
             Done,
             /** @brief The task has more work, the next cycle starts right away. */
             Busy,
-            /** @brief Nothing to do now, but the task must look again after the poll interval (a channel reader). */
+            /** @brief Nothing to do now, but the task must look again after the poll interval. */
             Poll,
+            /**
+             * @brief Nothing to do until the watched socket has data or someone calls wake (a channel reader). Without
+             *        a watched socket this polls.
+             */
+            AwaitInput,
             /** @brief Nothing to do until someone calls wake (a paused transfer). */
             Idle,
         };
@@ -63,7 +70,8 @@ namespace SecureShell
          * @brief Starts the processing thread.
          *
          * Between cycles the thread sleeps until a task is pushed or wake is called, and no longer than the poll
-         * interval while a permanent task polls. A busy permanent task keeps it from sleeping.
+         * interval while a permanent task polls. While one awaits input it also wakes when the watched socket has
+         * data. A busy permanent task keeps it from sleeping.
          *
          * @param pollInterval How long the thread sleeps at most while a permanent task polls.
          */
@@ -73,6 +81,15 @@ namespace SecureShell
          * @brief Wakes the thread for a cycle, for a permanent task whose state changed from outside.
          */
         void wake();
+
+        /**
+         * @brief Sets the socket the thread waits on while a permanent task awaits input.
+         *
+         * @param watched Called on the processing thread before every such wait, so it may ask libssh for the
+         *        socket, which libssh closes on a fatal error. An invalid socket falls back to polling.
+         * @return Why the wake handle could not be created, the thread then keeps polling.
+         */
+        std::expected<void, std::string> watchSocket(std::function<SocketWait::Watched()> watched);
 
         /**
          * @brief Stops the processing thread. Executes all pending tasks.
@@ -205,11 +222,29 @@ namespace SecureShell
         void run(std::chrono::milliseconds const& pollInterval);
 
         /**
-         * @brief Sleeps after a cycle as far as its permanent tasks allow, until something wakes the thread.
-         *
-         * @param nextPoll When the earliest polling task wants to look again.
+         * @brief What the permanent tasks of one cycle need from the wait after it.
          */
-        void waitForWork(PermanentTaskStatus mostUrgent, std::chrono::steady_clock::time_point nextPoll);
+        struct CycleNeeds
+        {
+            PermanentTaskStatus mostUrgent{PermanentTaskStatus::Idle};
+            /** @brief When the earliest polling task wants to look again. */
+            std::chrono::steady_clock::time_point nextPoll{std::chrono::steady_clock::time_point::max()};
+            bool awaitsInput{false};
+            /** @brief When tasks that await input look again if there is no socket to wait on. */
+            std::chrono::steady_clock::time_point inputFallback{std::chrono::steady_clock::time_point::max()};
+        };
+
+        /**
+         * @brief Sleeps after a cycle as far as its permanent tasks allow, until something wakes the thread.
+         */
+        void waitForWork(CycleNeeds const& needs);
+
+        /**
+         * @brief Wakes the thread after wakeRequested_ was set.
+         *
+         * @param interruptSocketWait Whether the thread was waiting on the socket when the flag was set.
+         */
+        void notifyWake(bool interruptSocketWait);
 
         /**
          * @brief A permanent task and how often it polls.
@@ -238,6 +273,10 @@ namespace SecureShell
         std::condition_variable_any wakeUp_{};
         /** @brief Set under taskMutex_ by everything that needs a cycle, cleared when a cycle starts. */
         bool wakeRequested_{false};
+        /** @brief Under taskMutex_: the thread sleeps in socketWait_, so a wake must go through it. */
+        bool waitingOnSocket_{false};
+        std::function<SocketWait::Watched()> watchedSocket_{};
+        std::unique_ptr<SocketWait> socketWait_{};
 
         std::deque<std::function<void()>> tasks_{};
         std::map<PermanentTaskId, PermanentTask> permanentTasks_{};
