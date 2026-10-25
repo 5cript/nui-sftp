@@ -737,6 +737,7 @@ namespace SecureShell
                 }
 
                 context->calculateBytesPerSecond();
+                context->reportProgress();
                 if (context->bytesTransferred_.load() >= totalFileSize && pipeline->empty())
                 {
                     context->complete();
@@ -842,6 +843,7 @@ namespace SecureShell
                 }
 
                 context->calculateBytesPerSecond();
+                context->reportProgress();
                 if (remainingWrite == 0)
                 {
                     context->complete();

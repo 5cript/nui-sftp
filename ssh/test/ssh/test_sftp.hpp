@@ -1045,6 +1045,63 @@ namespace SecureShell::Test
         read.context->cancel();
     }
 
+    TEST_F(SftpTests, TransferObserverHearsOfTheEnd)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto opened =
+            sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        std::atomic_int calls{0};
+        std::atomic_bool lastSawTheEnd{false};
+        std::shared_ptr<AsyncTransferContext> context{};
+        // Observed from the processing thread before the first turn, like the operations do.
+        auto started = file->strand()->pushPromiseTask(
+            [&]()
+            {
+                auto result = file->readAsyncInStrand(
+                    fileSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [](IFileStream::SignedSizeType)
+                    {
+                        return true;
+                    }
+                );
+                if (!result.has_value())
+                    return false;
+                context = result.value();
+                context->observe(
+                    [&calls, &lastSawTheEnd, weakContext = std::weak_ptr{context}]()
+                    {
+                        ++calls;
+                        if (auto observed = weakContext.lock(); observed)
+                            lastSawTheEnd = observed->hasEnded();
+                    }
+                );
+                return true;
+            }
+        );
+        ASSERT_EQ(started.wait_for(2s), std::future_status::ready);
+        ASSERT_TRUE(started.get());
+
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!context->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(5ms);
+        ASSERT_TRUE(context->hasEnded());
+        // The end is reported after the outcome is set, so a woken queue finds the transfer ended.
+        while (!lastSawTheEnd && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(5ms);
+        EXPECT_TRUE(lastSawTheEnd);
+        EXPECT_GE(calls.load(), 1);
+        EXPECT_EQ(context->outcome(), AsyncTransferContext::Outcome::Completed);
+    }
+
     TEST_F(SftpTests, MockServerCanFailReads)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

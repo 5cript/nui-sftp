@@ -5,7 +5,24 @@ namespace SecureShell
     void AsyncTransferContext::end(Outcome outcome)
     {
         auto expected = Outcome::Running;
-        outcome_.compare_exchange_strong(expected, outcome);
+        if (outcome_.compare_exchange_strong(expected, outcome) && observer_)
+            observer_();
+    }
+
+    void AsyncTransferContext::observe(std::function<void()> observer)
+    {
+        observer_ = std::move(observer);
+    }
+
+    void AsyncTransferContext::reportProgress()
+    {
+        if (!observer_)
+            return;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastProgressReport_ < progressInterval)
+            return;
+        lastProgressReport_ = now;
+        observer_();
     }
 
     void AsyncTransferContext::cancel()
