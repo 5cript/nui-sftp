@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <optional>
@@ -1360,6 +1361,91 @@ namespace SecureShell::Test
         ASSERT_EQ(destroyed.wait_for(5s), std::future_status::ready);
         upload.file.reset();
         upload.context->cancel();
+    }
+
+    TEST_F(SftpTests, ReadWhoseCallbackClosesTheStreamFailsAndLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto opened =
+            sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        std::atomic_int calls{0};
+        auto started = file->readAsync(
+            fileSize,
+            buffer.data(),
+            static_cast<IFileStream::SignedSizeType>(buffer.size()),
+            [&calls, stream = file.get()](IFileStream::SignedSizeType)
+            {
+                // On the processing thread with requests in flight, the close runs right here.
+                if (++calls == 3)
+                    stream->close();
+                return true;
+            }
+        );
+        ASSERT_EQ(started.wait_for(2s), std::future_status::ready);
+        auto context = started.get().value();
+
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!context->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(5ms);
+        ASSERT_TRUE(context->hasEnded());
+        EXPECT_EQ(context->outcome(), AsyncTransferContext::Outcome::Failed);
+        ASSERT_TRUE(context->error().has_value());
+        EXPECT_EQ(context->error()->wrapperError, WrapperErrors::FileNull);
+        EXPECT_EQ(calls.load(), 3);
+        EXPECT_TRUE(readsFileOne(*sftp));
+        EXPECT_EQ(queuedAnswers(*sftp), 0u);
+    }
+
+    TEST_F(SftpTests, UploadWhoseLocalReadClosesTheStreamFailsAndLeavesTheSessionUsable)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto opened = sftp->openFile(
+            remote("/home/test/uploaded.bin"),
+            SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
+            std::filesystem::perms{0644u}
+        );
+        ASSERT_EQ(opened.wait_for(2s), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        std::atomic_int calls{0};
+        auto started = file->writeAsync(
+            fileSize,
+            buffer.data(),
+            static_cast<IFileStream::SignedSizeType>(buffer.size()),
+            [&calls, &buffer, stream = file.get()](IFileStream::SignedSizeType bytes) -> IFileStream::SignedSizeType
+            {
+                // Three writes are in flight when the close runs.
+                if (++calls == 4)
+                    stream->close();
+                const auto length = std::min(bytes, static_cast<IFileStream::SignedSizeType>(buffer.size()));
+                std::fill_n(buffer.begin(), length, 'x');
+                return length;
+            }
+        );
+        ASSERT_EQ(started.wait_for(2s), std::future_status::ready);
+        auto context = started.get().value();
+
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!context->hasEnded() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(5ms);
+        ASSERT_TRUE(context->hasEnded());
+        EXPECT_EQ(context->outcome(), AsyncTransferContext::Outcome::Failed);
+        ASSERT_TRUE(context->error().has_value());
+        EXPECT_EQ(context->error()->wrapperError, WrapperErrors::FileNull);
+        EXPECT_EQ(calls.load(), 4);
+        EXPECT_TRUE(readsFileOne(*sftp));
+        EXPECT_EQ(queuedAnswers(*sftp), 0u);
     }
 
     TEST_F(SftpTests, TransferObserverHearsOfTheEnd)

@@ -33,6 +33,14 @@ namespace SecureShell
             };
         }
 
+        SftpError closedError()
+        {
+            return SftpError{
+                .message = "The file was closed during the transfer",
+                .wrapperError = WrapperErrors::FileNull,
+            };
+        }
+
         SftpError transferError(SftpSession const& sftp, std::string_view what)
         {
             auto error = sftp.lastError();
@@ -88,6 +96,20 @@ namespace SecureShell
                 return window_;
             }
 
+            /**
+             * @brief Whether the stream closed the file under the transfer, possibly from the transfer's own callback.
+             *        Its requests were discarded then and the file must no longer be used.
+             */
+            bool fileClosed() const noexcept
+            {
+                return fileClosed_;
+            }
+
+            void markFileClosed() noexcept
+            {
+                fileClosed_ = true;
+            }
+
           protected:
             void push(sftp_aio request, std::uint64_t offset, SignedSizeType length)
             {
@@ -138,6 +160,7 @@ namespace SecureShell
             std::deque<PendingRequest> pending_{};
             SignedSizeType inFlightBytes_{0};
             RequestWindow window_{};
+            bool fileClosed_{false};
         };
 
         /**
@@ -270,6 +293,8 @@ namespace SecureShell
                 while (unsent > 0 && inFlightBytes() < window().windowBytes())
                 {
                     const auto amountRead = doRead(std::min(unsent, window().requestBytes(upperBound)));
+                    if (fileClosed())
+                        return std::unexpected(closedError());
                     if (amountRead <= 0)
                     {
                         return std::unexpected(SftpError{
@@ -751,7 +776,10 @@ namespace SecureShell
         discardInFlight_ = [weakPipeline = std::weak_ptr<PipelineT>{pipeline}](sftp_file file)
         {
             if (auto pipeline = weakPipeline.lock(); pipeline)
+            {
                 pipeline->discard(file);
+                pipeline->markFileClosed();
+            }
         };
     }
     std::shared_ptr<AsyncTransferContext> FileStream::makeTransferContext()
@@ -832,6 +860,8 @@ namespace SecureShell
                 };
 
                 auto* const file = stream->file_.get();
+                if (file == nullptr || pipeline->fileClosed())
+                    return failWith(closedError());
                 const auto lengthLimit = static_cast<SignedSizeType>(stream->readLengthLimit());
                 const auto upperBound =
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
@@ -878,6 +908,8 @@ namespace SecureShell
                     }
                     context->bytesTransferred_ += received->received;
                     turnBytes += received->received;
+                    if (pipeline->fileClosed())
+                        return failWith(closedError());
 
                     if (received->received < received->requested)
                     {
@@ -988,6 +1020,8 @@ namespace SecureShell
                 };
 
                 auto* const file = stream->file_.get();
+                if (file == nullptr || pipeline->fileClosed())
+                    return failWith(closedError());
                 const auto lengthLimit = static_cast<SignedSizeType>(stream->writeLengthLimit());
                 const auto upperBound =
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
