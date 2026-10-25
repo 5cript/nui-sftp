@@ -4,6 +4,7 @@
 #include <ssh/sftp_error.hpp>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -32,6 +33,10 @@ namespace SecureShell
         friend FileStream;
 
         bool paused() const;
+        /**
+         * @brief Pauses or resumes the transfer; resuming wakes the processing thread, which sleeps while
+         *        every transfer is paused.
+         */
         void pause(bool doPause);
         /**
          * @brief Ends the transfer as canceled unless it already ended.
@@ -67,6 +72,8 @@ namespace SecureShell
         void end(Outcome outcome);
 
       private:
+        /** @brief Set by FileStream before the transfer starts, never changed after. */
+        std::function<void()> wake_{};
         std::atomic<Outcome> outcome_{Outcome::Running};
         mutable std::mutex errorMutex_{};
         std::optional<SftpError> error_{};

@@ -12,6 +12,8 @@ namespace SecureShell
 {
     namespace
     {
+        using TaskStatus = ProcessingThread::PermanentTaskStatus;
+
         /** @brief Bytes one upload moves per turn at most, and a download at least; several turns make up a cycle. */
         constexpr IFileStream::SignedSizeType targetBytesPerTurn = 256 * 1024;
 
@@ -600,6 +602,20 @@ namespace SecureShell
         limits_ = {};
         return file_.release();
     }
+    std::shared_ptr<AsyncTransferContext> FileStream::makeTransferContext()
+    {
+        auto context = std::make_shared<AsyncTransferContext>();
+        context->wake_ = [weakStream = weak_from_this()]()
+        {
+            if (auto stream = weakStream.lock(); stream)
+            {
+                if (auto sftp = stream->sftp_.lock(); sftp)
+                    sftp->strand_->wake();
+            }
+        };
+        return context;
+    }
+
     std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> FileStream::readAsyncInStrand(
         SignedSizeType totalFileSize,
         char* buffer,
@@ -609,7 +625,7 @@ namespace SecureShell
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
-        auto context = std::make_shared<AsyncTransferContext>();
+        auto context = makeTransferContext();
         const auto [success, id] = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
@@ -617,7 +633,7 @@ namespace SecureShell
              onRead = std::move(onRead),
              context,
              totalFileSize,
-             pipeline = std::make_shared<ReadPipeline>()]()
+             pipeline = std::make_shared<ReadPipeline>()]() -> TaskStatus
             {
                 auto stream = weakStream.lock();
                 auto sftp = stream ? stream->sftp_.lock() : nullptr;
@@ -630,35 +646,35 @@ namespace SecureShell
                 if (context->hasEnded())
                 {
                     discardPipeline();
-                    return false;
+                    return TaskStatus::Done;
                 }
                 // Answers in flight wait in the session while paused, so nothing moves until resumed.
                 if (context->paused())
                 {
                     pipeline->window().restartSample();
-                    return true;
+                    return TaskStatus::Idle;
                 }
                 if (!stream)
                 {
                     context->fail(expiredError("File stream"));
-                    return false;
+                    return TaskStatus::Done;
                 }
 
                 if (!sftp)
                 {
                     discardPipeline();
                     context->fail(expiredError("SFTP session"));
-                    return false;
+                    return TaskStatus::Done;
                 }
                 const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
-                    return true;
+                    return TaskStatus::Busy;
 
                 const auto failWith = [&](SftpError error)
                 {
                     discardPipeline();
                     context->fail(std::move(error));
-                    return false;
+                    return TaskStatus::Done;
                 };
 
                 auto* const file = stream->file_.get();
@@ -724,9 +740,9 @@ namespace SecureShell
                 if (context->bytesTransferred_.load() >= totalFileSize && pipeline->empty())
                 {
                     context->complete();
-                    return false;
+                    return TaskStatus::Done;
                 }
-                return true;
+                return TaskStatus::Busy;
             }
         );
         if (!success)
@@ -764,31 +780,32 @@ namespace SecureShell
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
-        auto context = std::make_shared<AsyncTransferContext>();
+        auto context = makeTransferContext();
         const auto [success, id] = strand()->pushPermanentTask(
-            [weakStream = weak_from_this(), buffer, bufferSize, doRead = std::move(doRead), context, totalFileSize]()
+            [weakStream = weak_from_this(), buffer, bufferSize, doRead = std::move(doRead), context, totalFileSize](
+            ) -> TaskStatus
             {
                 if (context->hasEnded())
-                    return false;
+                    return TaskStatus::Done;
                 if (context->paused())
-                    return true;
+                    return TaskStatus::Idle;
 
                 auto stream = weakStream.lock();
                 if (!stream)
                 {
                     context->fail(expiredError("File stream"));
-                    return false;
+                    return TaskStatus::Done;
                 }
 
                 auto sftp = stream->sftp_.lock();
                 if (!sftp)
                 {
                     context->fail(expiredError("SFTP session"));
-                    return false;
+                    return TaskStatus::Done;
                 }
                 const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
-                    return true;
+                    return TaskStatus::Busy;
 
                 auto remainingWrite = totalFileSize - context->bytesTransferred_.load();
                 const auto lengthLimit = static_cast<SignedSizeType>(stream->writeLengthLimit());
@@ -808,7 +825,7 @@ namespace SecureShell
                             .message = "Reading the local file failed",
                             .wrapperError = WrapperErrors::LocalIoFailure,
                         });
-                        return false;
+                        return TaskStatus::Done;
                     }
                     const auto requested = std::min(remainingWrite, amountRead);
                     const auto callStart = std::chrono::steady_clock::now();
@@ -816,7 +833,7 @@ namespace SecureShell
                     if (result < 0)
                     {
                         context->fail(transferError(*sftp, "Writing the remote file failed"));
-                        return false;
+                        return TaskStatus::Done;
                     }
                     sftp->chunkController().recordDataCall(result, chunk, std::chrono::steady_clock::now() - callStart);
                     remainingWrite -= result;
@@ -828,9 +845,9 @@ namespace SecureShell
                 if (remainingWrite == 0)
                 {
                     context->complete();
-                    return false;
+                    return TaskStatus::Done;
                 }
-                return true;
+                return TaskStatus::Busy;
             }
         );
         if (!success)

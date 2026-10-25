@@ -63,6 +63,8 @@ namespace SecureShell
     void AsyncTransferContext::pause(bool doPause)
     {
         paused_.store(doPause);
+        if (!doPause && wake_)
+            wake_();
     }
 
     void AsyncTransferContext::addBytesTransferred(SignedSizeType delta)
