@@ -166,7 +166,7 @@ class Channel {
         this.channelState.columns = cols;
         this.stream.rows = rows;
         this.stream.columns = cols;
-        this.terminal.resize(cols, rows);
+        this.terminal?.resize(cols, rows);
         this.stream.emit('resize');
     }
 
