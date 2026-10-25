@@ -63,6 +63,10 @@ namespace FileTracking
             File file;
             /** @brief Seen on its way, it is done once it is no longer. */
             bool started{false};
+            /** @brief Listed among the bulk's failed entries. */
+            bool leftOut{false};
+            /** @brief The last update that saw it on its way, 0 for none. */
+            std::uint64_t onItsWayIn{0u};
             std::optional<UploadProgress> told{};
         };
 
@@ -81,6 +85,9 @@ namespace FileTracking
       private:
         std::vector<Entry> entries_;
         std::optional<Directory> directory_;
+        /** @brief The entries seen on their way that were not told done yet, by index. */
+        std::vector<std::size_t> started_{};
+        std::uint64_t updates_{0u};
     };
 
     /**

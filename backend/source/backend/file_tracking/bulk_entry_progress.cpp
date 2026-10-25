@@ -1,8 +1,6 @@
 #include <backend/file_tracking/bulk_entry_progress.hpp>
 
 #include <algorithm>
-#include <map>
-#include <set>
 #include <utility>
 
 namespace FileTracking
@@ -88,34 +86,56 @@ namespace FileTracking
     std::vector<BulkEntryProgress::EntryProgress>
     BulkEntryProgress::updateFiles(SharedData::BulkProgress const& progress)
     {
-        const std::set<std::uint64_t> leftOutIndices(
-            progress.failedEntryIndices.begin(), progress.failedEntryIndices.end()
-        );
-        std::map<std::uint64_t, SharedData::BulkFileProgress const*> onTheirWay;
-        for (auto const& file : progress.inFlight)
-            onTheirWay.emplace(file.entryIndex, &file);
-        // Every entry ended, those that were never seen on their way too.
-        const bool through = progress.fileCount > 0u && progress.fileCurrentIndex >= progress.fileCount;
-
+        const auto update = ++updates_;
         std::vector<EntryProgress> changed;
-        for (std::size_t index = 0; index < entries_.size(); ++index)
+        for (auto const& file : progress.inFlight)
         {
+            const auto index = static_cast<std::size_t>(file.entryIndex);
+            if (index >= entries_.size() || entries_[index].onItsWayIn == update)
+                continue;
             auto& entry = entries_[index];
-            if (const auto found = onTheirWay.find(index); found != onTheirWay.end())
-            {
-                entry.started = true;
-                entry.file.sizeBytes = found->second->totalBytes;
-                tellChanged(
-                    entry.told, index, onItsWay(entry.file.source, found->second->bytes, entry.file.sizeBytes), changed
-                );
-            }
-            else if (leftOutIndices.contains(index))
-                tellChanged(
-                    entry.told, index, leftOut(entry.told ? entry.told->bytesSent : 0u, entry.file.sizeBytes), changed
-                );
-            else if (entry.started || through)
-                tellChanged(entry.told, index, done(entry.file.sizeBytes), changed);
+            if (!std::exchange(entry.started, true))
+                started_.push_back(index);
+            entry.onItsWayIn = update;
+            entry.file.sizeBytes = file.totalBytes;
+            tellChanged(entry.told, index, onItsWay(entry.file.source, file.bytes, entry.file.sizeBytes), changed);
         }
+        for (const auto failedIndex : progress.failedEntryIndices)
+        {
+            const auto index = static_cast<std::size_t>(failedIndex);
+            if (index >= entries_.size() || entries_[index].onItsWayIn == update)
+                continue;
+            auto& entry = entries_[index];
+            entry.leftOut = true;
+            tellChanged(
+                entry.told, index, leftOut(entry.told ? entry.told->bytesSent : 0u, entry.file.sizeBytes), changed
+            );
+        }
+        const auto isDone = [this, update](std::size_t index)
+        {
+            auto const& entry = entries_[index];
+            return entry.onItsWayIn != update && !entry.leftOut;
+        };
+        // Every entry ended, those that were never seen on their way too.
+        if (progress.fileCount > 0u && progress.fileCurrentIndex >= progress.fileCount)
+        {
+            for (std::size_t index = 0; index < entries_.size(); ++index)
+                if (isDone(index))
+                    tellChanged(entries_[index].told, index, done(entries_[index].file.sizeBytes), changed);
+        }
+        else
+            std::erase_if(
+                started_,
+                [this, update, &isDone, &changed](std::size_t index)
+                {
+                    if (entries_[index].onItsWayIn == update)
+                        return false;
+                    if (isDone(index))
+                        tellChanged(entries_[index].told, index, done(entries_[index].file.sizeBytes), changed);
+                    return true;
+                }
+            );
+        std::ranges::sort(changed, {}, &EntryProgress::index);
         return changed;
     }
 
