@@ -742,14 +742,18 @@ namespace SecureShell::Test
 
         std::array<char, 1024> buffer{};
         std::atomic<SignedSize> readCount{0};
+        // The first piece waits for the test, the whole file would arrive before it could act otherwise.
+        std::promise<void> testActed{};
+        const auto acted = testActed.get_future().share();
 
         auto ctxFut = file->readAsync(
             static_cast<SignedSize>(totalSize),
             buffer.data(),
             static_cast<SignedSize>(buffer.size()),
-            [&readCount](SignedSize bytesRead)
+            [&readCount, acted](SignedSize bytesRead)
             {
-                readCount += bytesRead;
+                if (readCount.fetch_add(bytesRead) == 0)
+                    acted.wait_for(5s);
                 return true;
             }
         );
@@ -759,6 +763,7 @@ namespace SecureShell::Test
         auto ctx = std::move(ctxResult).value();
 
         ctx->pause(true);
+        testActed.set_value();
         std::this_thread::sleep_for(200ms);
         const auto snapshot = ctx->bytesTransferred();
         std::this_thread::sleep_for(200ms);
@@ -793,14 +798,18 @@ namespace SecureShell::Test
 
         std::array<char, 1024> buffer{};
         std::atomic<SignedSize> readCount{0};
+        // The first piece waits for the test, the whole file would arrive before it could act otherwise.
+        std::promise<void> testActed{};
+        const auto acted = testActed.get_future().share();
 
         auto ctxFut = file->readAsync(
             static_cast<SignedSize>(totalSize),
             buffer.data(),
             static_cast<SignedSize>(buffer.size()),
-            [&readCount](SignedSize bytesRead)
+            [&readCount, acted](SignedSize bytesRead)
             {
-                readCount += bytesRead;
+                if (readCount.fetch_add(bytesRead) == 0)
+                    acted.wait_for(5s);
                 return true;
             }
         );
@@ -811,6 +820,7 @@ namespace SecureShell::Test
 
         ctx->pause(true);
         ctx->cancel();
+        testActed.set_value();
 
         EXPECT_TRUE(ctx->hasEnded());
 

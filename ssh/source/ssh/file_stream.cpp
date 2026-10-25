@@ -632,7 +632,8 @@ namespace SecureShell
                     discardPipeline();
                     return false;
                 }
-                if (context->paused() && pipeline->empty())
+                // Answers in flight wait in the session while paused, so nothing moves until resumed.
+                if (context->paused())
                 {
                     pipeline->window().restartSample();
                     return true;
@@ -666,8 +667,6 @@ namespace SecureShell
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
                 const auto fillPipeline = [&]() -> std::expected<void, SftpError>
                 {
-                    if (context->paused())
-                        return {};
                     const auto unrequested =
                         totalFileSize - context->bytesTransferred_.load() - pipeline->inFlightBytes();
                     return pipeline->fill(*sftp, file, unrequested, upperBound);
@@ -681,7 +680,10 @@ namespace SecureShell
                 const auto turnStart = std::chrono::steady_clock::now();
                 const auto turnBudget = std::max(targetBytesPerTurn, pipeline->window().windowBytes() / 4);
                 SignedSizeType turnBytes = 0;
-                while (!pipeline->empty() && turnBytes < turnBudget && !(turnBytes > 0 && turnExpired(turnStart, target)))
+                while (
+                    !pipeline->empty() && !context->paused() && turnBytes < turnBudget &&
+                    !(turnBytes > 0 && turnExpired(turnStart, target))
+                )
                 {
                     const auto received = pipeline->receiveOldest(*sftp, buffer, bufferSize);
                     if (!received)
