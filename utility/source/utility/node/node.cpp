@@ -57,8 +57,14 @@ namespace SecureShell::Test
 
     bool NodeProcessResult::command(std::string const& command, nlohmann::json const& arguments)
     {
+        return query(command, arguments).has_value();
+    }
+
+    std::optional<nlohmann::json>
+    NodeProcessResult::query(std::string const& command, nlohmann::json const& arguments)
+    {
         if (port == 0 || killed || code != 0)
-            return false;
+            return std::nullopt;
 
         nlohmann::json commandObject = arguments.is_object() ? arguments : nlohmann::json::object();
         commandObject["command"] = command;
@@ -74,7 +80,7 @@ namespace SecureShell::Test
         if (ec)
         {
             std::cerr << "Failed to write command: " << Utility::errorMessage(ec) << std::endl;
-            return false;
+            return std::nullopt;
         }
 
         std::string received{};
@@ -85,11 +91,15 @@ namespace SecureShell::Test
             if (ec || readAmount == 0)
             {
                 std::cerr << "Failed to read command acknowledgement: " << Utility::errorMessage(ec) << std::endl;
-                return false;
+                return std::nullopt;
             }
             received.append(buffer.data(), readAmount);
         }
-        return received.find(fmt::format("\"ack\":\"{}\"", command)) != std::string::npos;
+        const auto acknowledgement =
+            nlohmann::json::parse(received.substr(0, received.find('\n')), nullptr, false);
+        if (!acknowledgement.is_object() || acknowledgement.value("ack", "") != command)
+            return std::nullopt;
+        return acknowledgement.value("reply", nlohmann::json{});
     }
 
     int NodeProcessResult::wait()

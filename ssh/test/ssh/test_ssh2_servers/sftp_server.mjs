@@ -182,6 +182,8 @@ const faults = {
 };
 // Extension name to extension data, announced in the VERSION packet.
 const advertisedExtensions = {};
+// Requests by their packet type since the last resetRequestCounts.
+let requestCounts = {};
 
 // True when this rename has to fail. Counts down the renames allowed before failing.
 const renameFails = () => {
@@ -337,6 +339,12 @@ const server = new Server({
                 const handles = new Map();
                 const sftpStream = accept();
                 advertiseExtensions(sftpStream);
+                const emit = sftpStream.emit.bind(sftpStream);
+                sftpStream.emit = (event, ...args) => {
+                    if (typeof event === 'string' && /^[A-Z]+$/.test(event))
+                        requestCounts[event] = (requestCounts[event] ?? 0) + 1;
+                    return emit(event, ...args);
+                };
                 sftpStream.on('OPEN', (reqid, filename, flags, attrs) => {
                     filename = resolveFileName(filename);
 
@@ -983,6 +991,10 @@ cli.on('denyDirectory', (command) => {
 cli.on('denyStat', (command) => {
     faults.deniedStats.add(command.path);
 });
+cli.on('resetRequestCounts', () => {
+    requestCounts = {};
+});
+cli.on('requestCounts', () => requestCounts);
 cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });
