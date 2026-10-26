@@ -104,7 +104,7 @@ void ConfirmDialog::open(OpenOptions const& options)
     if (totalRows > shownRows)
         impl_->table.addRow({fmt::format(fmt::runtime(language->get("confirmDialog", "andMore")), totalRows - shownRows)});
     impl_->text = options.text;
-    impl_->dialog->setButtonLabels(localizedButtonLabels());
+    impl_->dialog->setButtonLabels(options.buttonLabels.value_or(localizedButtonLabels()));
     impl_->pendingOnClose = options.onClose;
     impl_->dialog->open(
         {.styleVariant = options.styleVariant,

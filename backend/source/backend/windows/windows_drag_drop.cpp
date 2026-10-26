@@ -131,18 +131,9 @@ EnableWindowsDragDrop::EnableWindowsDragDrop(Nui::Window& wnd, Nui::RpcHub& hub)
 
                 try
                 {
-                    auto reply = nlohmann::json{
-                        {"entries", entries},
-                        {"dropMetadata", messageJson.value("dropMetadata", "")},
-                    };
-
-                    if (messageJson.contains("isLeft"))
-                        reply["isLeft"] = messageJson["isLeft"];
-
-                    if (messageJson.contains("subdir"))
-                        reply["subdir"] = messageJson["subdir"];
-
-                    RpcHelper::callRemoteSafely(hub, "SessionArea::onFilesDropped", reply);
+                    RpcHelper::callRemoteSafely(
+                        hub, "SessionArea::onFilesDropped", droppedFilesMessage(messageJson, entries)
+                    );
                 }
                 catch (std::exception const& exc)
                 {

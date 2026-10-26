@@ -3,6 +3,7 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/file_explorer/file_explorer_texts.hpp>
 #include <frontend/file_explorer/place_names.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 #include <frontend/session_components/file_tracking.hpp>
 #include <nui-file-explorer/preprocessor.hpp>
 #include <script-nui-components/popup_menu.hpp>
@@ -641,6 +642,184 @@ void LocalSideModel::onDropExternal(
     }
     else
         onTransfer(items, subDir);
+}
+
+std::expected<std::vector<SharedData::LocalCopyEntry>, Paths::PathError> LocalSideModel::localCopyCandidates(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir
+) const
+{
+    return currentLocalPath()
+        .and_then(
+            [&subDir](Paths::LocalPath const& directory)
+            {
+                return FileExplorer::targetDirectoryOf(directory, subDir);
+            }
+        )
+        .and_then(
+            [this, &items](Paths::LocalPath const& directory)
+            {
+                return transferCandidates<SharedData::LocalCopyEntry>(
+                    items,
+                    [this](NuiFileExplorer::Item const& item)
+                    {
+                        return localPathOf(item);
+                    },
+                    directory
+                );
+            }
+        );
+}
+
+void LocalSideModel::onDropOnSide(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir,
+    NuiFileExplorer::DropAction suggested
+)
+{
+    using NuiFileExplorer::DropAction;
+
+    auto candidates = localCopyCandidates(items, subDir);
+    if (!candidates)
+        return showPathRefused(language->get("localSideModel", "copyFailedTitle"), candidates.error());
+    if (candidates->empty())
+        return;
+    // Items let go where they already are were most likely dropped by accident, a move would not change anything.
+    const auto inPlace = std::ranges::all_of(
+        *candidates,
+        [](SharedData::LocalCopyEntry const& candidate)
+        {
+            return candidate.source == candidate.destination;
+        }
+    );
+    if (inPlace && suggested == DropAction::Move)
+        return;
+
+    const auto destinationDirectory = candidates->front().destination.parent().value_or(Paths::LocalPath{});
+    const auto text = candidates->size() > 1
+        ? fmt::format(
+              fmt::runtime(language->get("localSideModel", "dropMultipleConfirmText")),
+              candidates->size(),
+              destinationDirectory.toUtf8()
+          )
+        : fmt::format(
+              fmt::runtime(language->get("localSideModel", "dropSingleConfirmText")),
+              candidates->front().destination.filename()->view(),
+              destinationDirectory.toUtf8()
+          );
+    auto buttonLabels = localizedButtonLabels();
+    buttonLabels.yes = language->get("localSideModel", "moveButton");
+    buttonLabels.no = language->get("localSideModel", "copyButton");
+
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Primary,
+        .headerText = language->get("localSideModel", "dropConfirmTitle"),
+        .text = text,
+        .buttons = ConfirmDialog::Button::Yes | ConfirmDialog::Button::No | ConfirmDialog::Button::Cancel,
+        .focusButton = suggested == DropAction::Copy ? ConfirmDialog::Button::No : ConfirmDialog::Button::Yes,
+        .buttonLabels = std::move(buttonLabels),
+        .listItems = pathList(items),
+        .onClose = lifetime_.guarded(
+            [this, candidates = *std::move(candidates)](std::optional<ConfirmDialog::Button> button) mutable
+            {
+                if (button == ConfirmDialog::Button::Yes)
+                    return copyOrMove(std::move(candidates), DropAction::Move);
+                if (button == ConfirmDialog::Button::No)
+                    return copyOrMove(std::move(candidates), DropAction::Copy);
+                Log::info("Local drop cancelled");
+            }
+        ),
+    });
+}
+
+void LocalSideModel::onPasteOnSide(
+    std::vector<NuiFileExplorer::Item> const& items,
+    std::optional<std::string> const& subDir,
+    NuiFileExplorer::DropAction action
+)
+{
+    auto candidates = localCopyCandidates(items, subDir);
+    if (!candidates)
+        return showPathRefused(language->get("localSideModel", "copyFailedTitle"), candidates.error());
+    copyOrMove(*std::move(candidates), action);
+}
+
+void LocalSideModel::copyOrMove(std::vector<SharedData::LocalCopyEntry> candidates, NuiFileExplorer::DropAction action)
+{
+    using NuiFileExplorer::DropAction;
+
+    const auto intoItself = std::ranges::find_if(
+        candidates,
+        [](SharedData::LocalCopyEntry const& candidate)
+        {
+            return candidate.isDirectory && candidate.source != candidate.destination &&
+                candidate.destination.isWithin(candidate.source);
+        }
+    );
+    if (intoItself != candidates.end())
+        return showCopyFailed(
+            fmt::format(
+                fmt::runtime(language->get("localSideModel", "copyIntoItself")), intoItself->source.toUtf8()
+            )
+        );
+
+    // A copy onto its own source is put next to it under a free name, nothing can be replaced.
+    std::vector<SharedData::LocalCopyEntry> duplicates;
+    std::vector<SharedData::LocalCopyEntry> checked;
+    for (auto& candidate : candidates)
+    {
+        if (candidate.source != candidate.destination)
+            checked.push_back(std::move(candidate));
+        else if (action == DropAction::Copy)
+            duplicates.push_back(std::move(candidate));
+    }
+
+    auto enqueue = lifetime_.guarded(
+        [this, duplicates = std::move(duplicates), action](std::vector<SharedData::LocalCopyEntry> accepted)
+        {
+            accepted.insert(accepted.end(), duplicates.begin(), duplicates.end());
+            if (accepted.empty())
+                return;
+            if (!operationQueue_)
+            {
+                Log::warn("Cannot queue the copy of local items: no operation queue is set");
+                return showCopyFailed(language->get("operationQueue", "unknownError"));
+            }
+            operationQueue_->enqueueLocalCopy(
+                {.entries = std::move(accepted), .move = action == DropAction::Move},
+                lifetime_.guarded(
+                    [this](std::optional<std::string> const& error)
+                    {
+                        if (!error)
+                            return;
+                        const auto reason = language->translate(*error);
+                        Log::error("Failed to queue the copy of local items: {}", reason);
+                        showCopyFailed(reason);
+                    }
+                )
+            );
+        }
+    );
+    if (checked.empty())
+        return enqueue({});
+    checkDestinations<SharedData::LocalCopyEntry>(
+        std::move(checked),
+        {
+            .overwriteHeaderText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
+            .overwriteText = language->get("localSideModel", "copyOverwriteText"),
+        },
+        std::move(enqueue)
+    );
+}
+
+void LocalSideModel::showCopyFailed(std::string const& reason)
+{
+    confirmDialog_->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+        .headerText = language->get("localSideModel", "copyFailedTitle"),
+        .text = reason,
+        .buttons = ConfirmDialog::Button::Ok,
+    });
 }
 
 void LocalSideModel::onRename(NuiFileExplorer::Item const& item)

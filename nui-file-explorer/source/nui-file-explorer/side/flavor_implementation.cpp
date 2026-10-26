@@ -8,8 +8,22 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 namespace NuiFileExplorer
 {
+    namespace
+    {
+        /**
+         * @brief The drag data type that marks a drag of items from the left or right side. Unlike the data, the
+         *        types can be read while the drag is still over a side.
+         */
+        std::string sideDragType(bool isLeft)
+        {
+            return isLeft ? "application/x-nui-file-explorer-left" : "application/x-nui-file-explorer-right";
+        }
+    }
+
     FlavorImplementation::FlavorImplementation(Side& side, Side* otherSide)
         : side_{&side}
         , otherSide_{otherSide}
@@ -27,6 +41,7 @@ namespace NuiFileExplorer
         event.stopPropagation();
         event.preventDefault();
 
+        const auto suggested = suggestedDropAction(event);
         auto eventExtracted = extractDropEvent(event, side_->model(), droppedOnItem);
         if (!eventExtracted.has_value())
             return;
@@ -36,9 +51,11 @@ namespace NuiFileExplorer
 
         if (eventExtracted->externDroppedItems.has_value())
         {
-            if (side_->model().isLeft())
+            if (side_->model().acceptsDropOnSide())
             {
-                side_->model().onError(Error{.code = ErrorCode::ExternalDropOnLocalSide});
+                side_->model().onDropOnSide(
+                    *eventExtracted->externDroppedItems, eventExtracted->internalDropSubdir, suggested
+                );
                 return;
             }
             Nui::WebApi::Console::log("External items dropped: ", eventExtracted->externDroppedItems->size());
@@ -67,8 +84,17 @@ namespace NuiFileExplorer
             }
             else
             {
-                // TODO: else its a move within the same side.
-                side_->model().onError(Error{.code = ErrorCode::DropOnSameSide});
+                const auto selectedItems = impl().selectionManager.selectedItems();
+                // Dropping the dragged items on one of themselves is taken for a drag that was given up.
+                if (droppedOnItem && std::ranges::any_of(
+                                         selectedItems,
+                                         [&droppedOnItem](Item const& item)
+                                         {
+                                             return item.fullPath == droppedOnItem->fullPath;
+                                         }
+                                     ))
+                    return;
+                side_->model().onDropOnSide(selectedItems, eventExtracted->internalDropSubdir, suggested);
             }
         }
     }
@@ -131,12 +157,33 @@ namespace NuiFileExplorer
         Nui::val info = Nui::val::object();
         info.set("isLeft", side_->model().isLeft());
         dataTransferOpt->setData("application/json", Nui::JSON::stringify(info));
+        dataTransferOpt->setData(sideDragType(side_->model().isLeft()), "1");
+        event.val()["dataTransfer"].set("effectAllowed", "copyMove"s);
     }
 
     void FlavorImplementation::onDelegatedDragOver(Nui::WebApi::DragEvent event)
     {
         event.val().call<void>("preventDefault");
         setHoverItem(resolveItemIndex(event.val()["target"]));
+
+        // The cursor tells what a drop does: items of this side move or copy within it, if it allows that, anything
+        // else is transferred or taken from the desktop as a copy. The desktop never sees a move, it must not
+        // remove what it dragged.
+        auto dataTransfer = event.val()["dataTransfer"];
+        if (dataTransfer.isNull() || dataTransfer.isUndefined())
+            return;
+        const auto types = dataTransfer["types"];
+        const auto fromThisSide = !types.isNull() && !types.isUndefined() &&
+            types.call<bool>("includes", sideDragType(side_->model().isLeft()));
+        const auto effect = [&]() -> std::string
+        {
+            if (!fromThisSide)
+                return "copy";
+            if (!side_->model().acceptsDropOnSide())
+                return "none";
+            return suggestedDropAction(event) == DropAction::Copy ? "copy" : "move";
+        }();
+        dataTransfer.set("dropEffect", effect);
     }
 
     void FlavorImplementation::onDelegatedDragLeave(Nui::WebApi::DragEvent event)

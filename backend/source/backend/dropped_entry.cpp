@@ -77,5 +77,7 @@ nlohmann::json droppedFilesMessage(nlohmann::json const& request, std::vector<Sh
         message["isLeft"] = request["isLeft"];
     if (request.contains("subdir"))
         message["subdir"] = request["subdir"];
+    if (request.contains("copy"))
+        message["copy"] = request["copy"];
     return message;
 }

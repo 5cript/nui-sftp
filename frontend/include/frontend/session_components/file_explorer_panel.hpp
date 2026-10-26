@@ -111,15 +111,15 @@ class FileExplorerPanel
     Nui::ElementRenderer makeFileExplorerElement();
 
     /**
-     * @brief Handles drag-and-drop of external files onto the session area
-     *        (Windows).  Drops onto the local side show a "not implemented"
-     *        dialog; drops onto the remote side hand the entries to the
-     *        LocalSideModel::onTransfer path as an upload.
+     * @brief Handles files dropped from the desktop that the backend read the paths of. Drops onto the local side
+     *        are moved or copied there, @p suggested says which the modifier keys asked for; drops onto the remote
+     *        side are uploaded.
      */
     void onDrop(
         bool isLocalSide,
         std::vector<SharedData::DroppedItem> entries,
-        std::optional<std::string> const& subdir
+        std::optional<std::string> const& subdir,
+        NuiFileExplorer::DropAction suggested
     );
 
     /** @brief Drops layout metadata for the given session layout id. */

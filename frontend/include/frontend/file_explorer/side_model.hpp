@@ -455,7 +455,10 @@ class SideModel
             fileEngine_->rename(from, to, overwrite, std::move(onRenamed));
     }
 
-  private:
+    /**
+     * @brief Checks which destinations of @p candidates exist, asks about each existing one with the overwrite texts
+     *        of @p prompt and hands the accepted entries to @p onAccepted. Nothing is accepted when the check fails.
+     */
     template <typename EntryT>
     void checkDestinations(
         std::vector<EntryT> candidates,
@@ -492,6 +495,7 @@ class SideModel
             fileEngine_->existsBatchRemote(destinations, std::move(onExists));
     }
 
+  private:
     template <typename EntryT>
     void askOverwrites(
         std::shared_ptr<FileExplorer::OverwriteDecisions<EntryT>> decisions,

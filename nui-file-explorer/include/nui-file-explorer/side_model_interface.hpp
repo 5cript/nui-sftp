@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nui-file-explorer/item.hpp>
+#include <nui-file-explorer/drop_action.hpp>
 #include <nui-file-explorer/error.hpp>
 #include <nui-file-explorer/flavor.hpp>
 #include <nui-file-explorer/places_provider_interface.hpp>
@@ -124,6 +125,42 @@ namespace NuiFileExplorer
             std::optional<std::string> const& subDir,
             bool issueWebkitWarning
         ) = 0;
+
+        /**
+         * @brief Whether items may be dropped on the side they come from, and items from the desktop on this side
+         *        itself instead of being handed to the other side.
+         */
+        virtual bool acceptsDropOnSide() const
+        {
+            return false;
+        }
+
+        /**
+         * @brief Items of this side or from the desktop were dropped on this side, see @ref acceptsDropOnSide.
+         *
+         * @param subDir Where the items go below the directory this side shows, as for @ref onTransfer.
+         * @param suggested What the modifier keys held during the drop ask for.
+         */
+        virtual void onDropOnSide(
+            std::vector<Item> const& /*items*/,
+            std::optional<std::string> const& /*subDir*/,
+            DropAction /*suggested*/
+        )
+        {
+            onError(Error{.code = ErrorCode::DropOnSameSide});
+        }
+
+        /**
+         * @brief Items cut (@p action Move) or copied on this side were pasted on it, see @ref acceptsDropOnSide.
+         *
+         * @param subDir Where the items go below the directory this side shows, as for @ref onTransfer.
+         */
+        virtual void onPasteOnSide(
+            std::vector<Item> const& /*items*/,
+            std::optional<std::string> const& /*subDir*/,
+            DropAction /*action*/
+        )
+        {}
 
         /**
          * @brief Triggered when an error occurs. The model words the error, so it can localize it.

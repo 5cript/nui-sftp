@@ -37,6 +37,8 @@ namespace NuiFileExplorer
         // How long the type-ahead buffer survives between keystrokes. A new keystroke
         // resets this; once it expires the buffer is cleared and the highlight is lifted.
         constexpr int typeAheadIdleTimeoutMs = 750;
+
+        std::uint64_t clipboardSequence = 0;
     }
 
     Side::Side(SideSettings settings, std::unique_ptr<ISideModel> model)
@@ -173,31 +175,22 @@ namespace NuiFileExplorer
             updateItems(true, false);
             return;
         }
-        if (event.key() == "c" && (event.ctrlKey() || event.metaKey()))
+        const auto commandKey = event.ctrlKey() || event.metaKey();
+        if (commandKey && (event.key() == "c" || event.key() == "x"))
         {
-            const auto selectedItems = this->selectedItems();
+            const auto cut = event.key() == "x";
+            // Only a side that moves items within itself can cut, the other side would copy them anyway.
+            if (cut && !impl_->model->acceptsDropOnSide())
+                return;
+            auto selectedItems = this->selectedItems();
             if (!selectedItems.empty())
-                impl_->copiedFiles = selectedItems;
+                impl_->clipboard = {.items = std::move(selectedItems), .cut = cut, .sequence = ++clipboardSequence};
             return;
         }
-        if (event.key() == "v" && (event.ctrlKey() || event.metaKey()))
+        if (commandKey && event.key() == "v")
         {
-            if (impl_->otherSide)
-            {
-                const auto& copiedFiles = impl_->otherSide->impl_->copiedFiles;
-                if (!copiedFiles.empty())
-                {
-                    // A single selected directory takes the items, else the directory this side shows.
-                    const auto selectedItems = this->selectedItems();
-                    const auto target = selectedItems.size() == 1
-                        ? transferTargetOf(selectedItems.front())
-                        : std::expected<std::optional<std::string>, Error>{std::nullopt};
-                    if (!target)
-                        impl_->model->onError(target.error());
-                    else
-                        impl_->otherSide->model().onTransfer(copiedFiles, *target);
-                }
-            }
+            pasteClipboard();
+            return;
         }
 
         if (impl_->selectionManager.onKeyboardEvent(event))
@@ -219,6 +212,41 @@ namespace NuiFileExplorer
         }
 
         actionWasTaken.disarm();
+    }
+
+    void Side::pasteClipboard()
+    {
+        auto* const otherClipboard = impl_->otherSide ? &impl_->otherSide->impl_->clipboard : nullptr;
+        const auto fromOtherSide = otherClipboard != nullptr && !otherClipboard->items.empty() &&
+            otherClipboard->sequence > impl_->clipboard.sequence;
+        auto& clipboard = fromOtherSide ? *otherClipboard : impl_->clipboard;
+        if (clipboard.items.empty())
+            return;
+        if (!fromOtherSide && !impl_->model->acceptsDropOnSide())
+            return;
+
+        const auto selectedItems = this->selectedItems();
+        const auto intoSelection = selectedItems.size() == 1 &&
+            std::ranges::none_of(
+                                       clipboard.items,
+                                       [&selectedItems](Item const& item)
+                                       {
+                                           return item.fullPath == selectedItems.front().fullPath;
+                                       }
+            );
+        const auto target = intoSelection ? transferTargetOf(selectedItems.front())
+                                          : std::expected<std::optional<std::string>, Error>{std::nullopt};
+        if (!target)
+            return impl_->model->onError(target.error());
+
+        if (fromOtherSide)
+            return impl_->otherSide->model().onTransfer(clipboard.items, *target);
+        const auto items = clipboard.items;
+        const auto action = clipboard.cut ? DropAction::Move : DropAction::Copy;
+        // Cut items are gone from where they were, they can be pasted only once.
+        if (clipboard.cut)
+            clipboard = {};
+        impl_->model->onPasteOnSide(items, *target, action);
     }
 
     Nui::ElementRenderer Side::operator()()

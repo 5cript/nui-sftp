@@ -264,7 +264,8 @@ void SessionArea::registerRpc()
             session->onDrop(
                 isLeft,
                 json.value("entries", nlohmann::json::array()).get<std::vector<SharedData::DroppedItem>>(),
-                subdir
+                subdir,
+                json.value("copy", false) ? NuiFileExplorer::DropAction::Copy : NuiFileExplorer::DropAction::Move
             );
         }
     );

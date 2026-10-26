@@ -96,7 +96,16 @@ namespace NuiFileExplorer
         std::map<long long, std::weak_ptr<Nui::Dom::BasicElement>> searchResultElements;
         std::weak_ptr<Nui::Dom::BasicElement> pathBoxElement{};
 
-        std::vector<Item> copiedFiles{};
+        /** @brief Items copied or cut on this side, for a paste on either side. */
+        struct Clipboard
+        {
+            std::vector<Item> items{};
+            /** @brief The items move when they are pasted on this side. */
+            bool cut{false};
+            /** @brief Grows with every copy or cut on any side, the newest clipboard of both sides is pasted. */
+            std::uint64_t sequence{0};
+        };
+        Clipboard clipboard{};
         std::function<void(std::filesystem::path, std::filesystem::path)> onSynchronize{};
 
         ScriptNuiComponents::DropdownMenu newItemMenu{};

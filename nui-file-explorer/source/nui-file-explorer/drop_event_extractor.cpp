@@ -33,6 +33,16 @@ namespace NuiFileExplorer
         }
     }
 
+    DropAction suggestedDropAction(Nui::WebApi::DragEvent const& event)
+    {
+        const auto held = [&event](char const* key)
+        {
+            const auto value = event.val()[key];
+            return value.isTrue();
+        };
+        return held("ctrlKey") || held("altKey") ? DropAction::Copy : DropAction::Move;
+    }
+
     std::optional<DropEventResult>
     extractDropEvent(Nui::WebApi::DragEvent event, ISideModel& sideModel, std::optional<Item> const& droppedOnItem)
     {
@@ -61,6 +71,7 @@ namespace NuiFileExplorer
                 {"type", "filedrop"},
                 {"isLeft", sideModel.isLeft()},
                 {"dropMetadata", sideModel.dropMetadata()},
+                {"copy", suggestedDropAction(event) == DropAction::Copy},
             };
             if (result.internalDropSubdir)
                 msg["subdir"] = *result.internalDropSubdir;
@@ -80,6 +91,7 @@ namespace NuiFileExplorer
                 {"isLeft", sideModel.isLeft()},
                 {"dropMetadata", sideModel.dropMetadata()},
                 {"names", droppedFileNames(files)},
+                {"copy", suggestedDropAction(event) == DropAction::Copy},
             };
             if (result.internalDropSubdir)
                 claim["subdir"] = *result.internalDropSubdir;

@@ -283,10 +283,11 @@ std::string Session::layoutId() const
 void Session::onDrop(
     bool isLocalSide,
     std::vector<SharedData::DroppedItem> entries,
-    std::optional<std::string> const& subdir
+    std::optional<std::string> const& subdir,
+    NuiFileExplorer::DropAction suggested
 )
 {
-    impl_->fileExplorerPanel.onDrop(isLocalSide, std::move(entries), subdir);
+    impl_->fileExplorerPanel.onDrop(isLocalSide, std::move(entries), subdir, suggested);
 }
 
 auto Session::makeChannelElement() -> Nui::ElementRenderer

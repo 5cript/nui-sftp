@@ -226,6 +226,13 @@ namespace NuiFileExplorer
         void onContextMenu(ItemWithInternals* item, Nui::val event);
         void onItemClicked(ItemWithInternals const& item, Nui::WebApi::MouseEvent event);
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
+
+        /**
+         * @brief Pastes what was copied or cut last on either side: items of the other side are transferred, items of
+         *        this side are copied or moved within it. A single selected directory that is not one of the items
+         *        takes them, else the directory this side shows.
+         */
+        void pasteClipboard();
         void search(std::string query);
         void onPathBoxSuggestionHit(std::filesystem::path const& path);
 

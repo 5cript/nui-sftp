@@ -17,6 +17,12 @@ namespace NuiFileExplorer
         bool issueWebkitWarning = false;
     };
 
+    /**
+     * @brief What the modifier keys held during @p event ask for: Ctrl, or Alt (Option on macOS), copies, anything
+     *        else moves.
+     */
+    DropAction suggestedDropAction(Nui::WebApi::DragEvent const& event);
+
     std::optional<DropEventResult>
     extractDropEvent(Nui::WebApi::DragEvent event, ISideModel& sideModel, std::optional<Item> const& droppedOnItem);
 }
