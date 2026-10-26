@@ -113,7 +113,8 @@ class LocalOperationQueue
     /**
      * @brief Queues a copy or move of explorer items with one card that refreshes the local listing. A move is
      *        refused as a whole when one source is a root directory or contains a home directory, it removes them.
-     *        Assumed in strand.
+     *        A move or a copy that replaces something is refused while local deletion is prevented. Assumed in
+     *        strand.
      *
      * @return A message for Utility::localizedMessage or the language file saying why nothing was queued.
      */

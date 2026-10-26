@@ -433,4 +433,34 @@ namespace Test
         EXPECT_FALSE(addCopy({.operationId = Ids::generateOperationId()}).has_value()) << "nothing to copy";
         EXPECT_TRUE(completionsAfterSettling().empty());
     }
+
+    TEST_F(LocalOperationQueueTests, MovesAndReplacingCopiesAreRefusedWhileDeletionIsPrevented)
+    {
+        const auto tree = makeTree("tree");
+        const auto target = root_.path() / "target";
+        std::filesystem::create_directories(target);
+        const auto request = [&](bool move, bool mayOverwrite)
+        {
+            return addCopy({
+                .operationId = Ids::generateOperationId(),
+                .request =
+                    {.entries = {{.source = local(tree), .destination = local(target / "tree"), .mayOverwrite = mayOverwrite}},
+                     .move = move},
+            });
+        };
+
+        deletionPrevented_->store(true);
+        const auto move = request(true, false);
+        ASSERT_FALSE(move.has_value());
+        EXPECT_EQ(move.error(), "backend.rpcFilesystem.deletionPrevented");
+        EXPECT_FALSE(request(false, true).has_value()) << "replacing a destination deletes it";
+        EXPECT_TRUE(completionsAfterSettling().empty());
+        EXPECT_TRUE(std::filesystem::exists(tree / "inner" / "a.txt"));
+
+        EXPECT_TRUE(request(false, false).has_value()) << "a plain copy deletes nothing";
+        deletionPrevented_->store(false);
+        const auto finished = waitForCompletions(1);
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_TRUE(std::filesystem::exists(target / "tree" / "inner" / "a.txt"));
+    }
 }

@@ -230,6 +230,14 @@ std::expected<void, std::string> LocalOperationQueue::addCopy(CopyRequest reques
     auto& entries = request.request.entries;
     if (entries.empty())
         return std::unexpected(std::string{"backend.localCopy.nothingToCopy"});
+    // A move removes its sources and a replacing copy its destinations, both delete.
+    const auto deletes =
+        request.request.move || std::ranges::any_of(entries, &SharedData::LocalCopyEntry::mayOverwrite);
+    if (deletes && (!localDeletionPrevented_ || localDeletionPrevented_->load()))
+    {
+        Log::warn("A local move or replacing copy was asked for, but deletion is prevented by configuration.");
+        return std::unexpected(std::string{"backend.rpcFilesystem.deletionPrevented"});
+    }
     std::vector<Paths::LocalPath> sources;
     sources.reserve(entries.size());
     std::ranges::transform(entries, std::back_inserter(sources), &SharedData::LocalCopyEntry::source);
