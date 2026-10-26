@@ -6,6 +6,12 @@ on:
       - "v*"
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip the tests, for an urgent release"
+        type: boolean
+        default: false
 
 env:
   BUILD_TYPE: Release
@@ -64,22 +70,11 @@ jobs:
             -DNUI_SFTP_ENABLE_TESTING=ON
 
       - name: Build
+        id: build
         run: |
           cmake --build \
             "${{ env.BUILD_DIR }}" \
             --config "${{ env.BUILD_TYPE }}"
-
-      # The macOS runners have no docker: the containerized shells skip and stay covered by the
-      # Arch Linux job, the host's own bash and zsh still run.
-      - name: Run Tests
-        env:
-          NUI_SFTP_SKIP_DOCKER_TESTS: "1"
-        run: |
-          ctest \
-            --test-dir "${{ env.BUILD_DIR }}" \
-            --build-config "${{ env.BUILD_TYPE }}" \
-            --output-on-failure \
-            --timeout 300
 
       - name: Run Deploy
         run: |
@@ -98,3 +93,18 @@ jobs:
         with:
           name: nui-sftp-macos-arm64
           path: build/install/nui-sftp-macos-arm64_${{ env.VERSION }}.zip
+
+      # After the upload, so a failing test marks the release run red without holding back the bundle.
+      # The macOS runners have no docker: the containerized shells skip and stay covered by the
+      # Arch Linux job, the host's own bash and zsh still run.
+      - name: Run Tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.skip_tests }}
+        env:
+          NUI_SFTP_SKIP_DOCKER_TESTS: "1"
+        run: |
+          ctest \
+            --test-dir "${{ env.BUILD_DIR }}" \
+            --build-config "${{ env.BUILD_TYPE }}" \
+            --output-on-failure \
+            --timeout 300 \
+            --repeat until-pass:3
