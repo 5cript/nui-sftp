@@ -17,9 +17,30 @@
 namespace
 {
     /**
-     * @brief Tells the user how a delete ended that no queue showed.
+     * @brief The language key of the notice about a local operation of @p type that ended, @p outcome is "Done",
+     *        "PartlyDone" or "Failed".
      */
-    void notifyUnshownCompletion(SharedData::OperationCompleted const& completed, std::string const& directory)
+    std::string noticeKey(SharedData::OperationType type, std::string_view outcome)
+    {
+        switch (type)
+        {
+            case SharedData::OperationType::LocalCopy:
+                return fmt::format("localCopy{}", outcome);
+            case SharedData::OperationType::LocalMove:
+                return fmt::format("localMove{}", outcome);
+            default:
+                return fmt::format("localDelete{}", outcome);
+        }
+    }
+
+    /**
+     * @brief Tells the user how a local operation of @p type ended that no queue showed.
+     */
+    void notifyUnshownCompletion(
+        SharedData::OperationCompleted const& completed,
+        SharedData::OperationType type,
+        std::string const& directory
+    )
     {
         using enum SharedData::OperationCompletionReason;
         switch (completed.reason)
@@ -28,17 +49,17 @@ namespace
             {
                 if (completed.failedEntries.empty())
                     return Notifications::success(
-                        fmt::format(fmt::runtime(language->get("operationQueue", "localDeleteDone")), directory)
+                        fmt::format(fmt::runtime(language->get("operationQueue", noticeKey(type, "Done").c_str())), directory)
                     );
-                return Notifications::warning(
-                    fmt::format(fmt::runtime(language->get("operationQueue", "localDeletePartlyDone")), directory)
-                );
+                return Notifications::warning(fmt::format(
+                    fmt::runtime(language->get("operationQueue", noticeKey(type, "PartlyDone").c_str())), directory
+                ));
             }
             case Failed:
             {
                 return Notifications::error(
                     fmt::format(
-                        fmt::runtime(language->get("operationQueue", "localDeleteFailed")),
+                        fmt::runtime(language->get("operationQueue", noticeKey(type, "Failed").c_str())),
                         directory,
                         completed.error ? completed.error->toString() : language->get("operationQueue", "unknownError")
                     )
@@ -82,6 +103,15 @@ LocalOperationRouter::LocalOperationRouter()
             [this](SharedData::BulkDeleteProgress const& progress)
             {
                 onDeleteProgress(progress);
+            }
+        )
+    );
+    registrations_.push_back(
+        Nui::RpcClient::autoRegisterFunction(
+            "LocalOperationQueue::onCopyProgress",
+            [this](SharedData::BulkProgress const& progress)
+            {
+                onCopyProgress(progress);
             }
         )
     );
@@ -188,6 +218,16 @@ void LocalOperationRouter::onDeleteProgress(SharedData::BulkDeleteProgress const
         found->second.host->onDeleteProgress(progress);
 }
 
+void LocalOperationRouter::onCopyProgress(SharedData::BulkProgress const& progress)
+{
+    const auto found = routed_.find(progress.operationId);
+    if (found == routed_.end())
+        return;
+    found->second.copyProgress = progress;
+    if (found->second.host)
+        found->second.host->onLocalCopyProgress(progress);
+}
+
 void LocalOperationRouter::onOperationCompleted(Nui::val val)
 {
     SharedData::OperationCompleted completed{};
@@ -211,7 +251,11 @@ void LocalOperationRouter::onOperationCompleted(Nui::val val)
         return host->onOperationCompleted(std::move(completed));
 
     auto const& added = routed.mapped().added;
-    notifyUnshownCompletion(completed, added && added->localPath ? added->localPath->toUtf8() : std::string{});
+    notifyUnshownCompletion(
+        completed,
+        added ? added->type : SharedData::OperationType::LocalDelete,
+        added && added->localPath ? added->localPath->toUtf8() : std::string{}
+    );
 }
 
 void LocalOperationRouter::show(Routed& routed, OperationQueue& queue)
@@ -223,6 +267,8 @@ void LocalOperationRouter::show(Routed& routed, OperationQueue& queue)
         queue.onScanProgress(*routed.scanProgress);
     if (routed.deleteProgress)
         queue.onDeleteProgress(*routed.deleteProgress);
+    if (routed.copyProgress)
+        queue.onLocalCopyProgress(*routed.copyProgress);
 }
 
 OperationQueue* LocalOperationRouter::newestQueue() const

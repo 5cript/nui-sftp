@@ -18,6 +18,7 @@
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operations_reordered.hpp>
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/local_copy_request.hpp>
 #include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/unsafe_fast_mode_state.hpp>
@@ -203,6 +204,17 @@ class OperationQueue
     );
 
     /**
+     * @brief Queues the copy or move of local items in the backend's local operation queue, as one operation whose
+     *        card shows here and refreshes the local listing when it ends. Needs no connection; with one it waits
+     *        while this queue is paused. @p onAck gets the error when the backend refused it, nothing when it was
+     *        queued.
+     */
+    void enqueueLocalCopy(
+        SharedData::LocalCopyRequest request,
+        std::function<void(std::optional<std::string> const& error)> onAck
+    );
+
+    /**
      * @brief The queue belongs to a connected session and can take operations.
      */
     bool isActive() const;
@@ -363,6 +375,7 @@ class OperationQueue
     void onBulkDownloadProgress(SharedData::BulkProgress const& progress);
     void onBulkUploadProgress(SharedData::BulkProgress const& progress);
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
+    void onLocalCopyProgress(SharedData::BulkProgress const& progress);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onOperationCompleted(Nui::val val);
     void onOperationCompleted(SharedData::OperationCompleted completed);

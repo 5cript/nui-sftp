@@ -23,8 +23,8 @@ struct DisplayedBulkOperation
         Ids::OperationId operationId,
         ConfirmDialog& confirmDialog,
         SharedData::OperationType type,
-        Paths::LocalPath localPath,
-        Paths::RemotePath remotePath,
+        std::string sourceText,
+        std::string destinationText,
         std::function<void(OperationCard const& operation)> doRemoveSelf,
         std::shared_ptr<Nui::Observed<bool>> doDeletionCountdown,
         std::function<void()> onCompleteAction,
@@ -39,8 +39,8 @@ struct DisplayedBulkOperation
               std::move(onCompleteAction)
           }
         , ScanningCard{scanning}
-        , localPath_{std::move(localPath)}
-        , remotePath_{std::move(remotePath)}
+        , sourceText_{std::move(sourceText)}
+        , destinationText_{std::move(destinationText)}
         , totalProgressBar_({
               .height = std::string{progressHeight},
               .minimum = 0,
@@ -129,26 +129,20 @@ struct DisplayedBulkOperation
                 div{
                     style = "flex-grow: 1; overflow: hidden; min-width: 0;"
                 }(
-                    [this]() -> Nui::ElementRenderer {
-                        const auto localText = localPath_.toUtf8();
-                        const auto remoteText = remotePath_.value();
-                        const auto& srcPath = type_ == SharedData::OperationType::BulkUpload ? localText : remoteText;
-                        const auto& dstPath = type_ == SharedData::OperationType::BulkUpload ? remoteText : localText;
-                        return div{
-                            class_ = "opq-transfer-route",
-                            alt = fmt::format("{} → {}", srcPath, dstPath)
-                        }(
-                            span{
-                                class_ = "opq-route-segment"
-                            }(srcPath),
-                            span{
-                                class_ = "opq-route-arrow"
-                            }(Svgs::arrowRight()),
-                            span{
-                                class_ = "opq-route-segment"
-                            }(dstPath)
-                        );
-                    }()
+                    div{
+                        class_ = "opq-transfer-route",
+                        alt = fmt::format("{} → {}", sourceText_, destinationText_)
+                    }(
+                        span{
+                            class_ = "opq-route-segment"
+                        }(sourceText_),
+                        span{
+                            class_ = "opq-route-arrow"
+                        }(Svgs::arrowRight()),
+                        span{
+                            class_ = "opq-route-segment"
+                        }(destinationText_)
+                    )
                 ),
                 span{
                     class_ = "opq-status-text opq-status-count"
@@ -223,7 +217,7 @@ struct DisplayedBulkOperation
 
     std::optional<ResumableOp> resumableDescriptor() const override
     {
-        if (isCompletedState())
+        if (isCompletedState() || SharedData::isLocalOperation(type_))
             return std::nullopt;
         return Resumable::Bulk{.operationId = operationId()};
     }
@@ -338,8 +332,9 @@ struct DisplayedBulkOperation
     }
 
   private:
-    Paths::LocalPath localPath_;
-    Paths::RemotePath remotePath_;
+    /** @brief Where the items come from, as the route of the card shows it. */
+    std::string sourceText_;
+    std::string destinationText_;
     Nui::Observed<std::uint64_t> fileCurrentIndex{0ull};
     Nui::Observed<std::uint64_t> fileCount{0ull};
     Nui::Observed<std::make_signed_t<std::size_t>> bytesPerSecond{0};

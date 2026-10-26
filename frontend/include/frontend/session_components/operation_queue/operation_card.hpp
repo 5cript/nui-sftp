@@ -24,6 +24,8 @@
 #include <ui5-sap-icons/icons/edit.hpp>
 #include <ui5-sap-icons/icons/drill-up.hpp>
 #include <ui5-sap-icons/icons/attachment-zip-file.hpp>
+#include <ui5-sap-icons/icons/copy.hpp>
+#include <ui5-sap-icons/icons/move.hpp>
 
 #include <utility/language.hpp>
 #include <utility/convert_naming_convention.hpp>
@@ -180,6 +182,14 @@ class OperationCard : public OperationCardInterface
                         type_ == SharedData::OperationType::LocalDelete)
                     {
                         return Ui5Icons::delete_();
+                    }
+                    else if (type_ == SharedData::OperationType::LocalCopy)
+                    {
+                        return Ui5Icons::copy();
+                    }
+                    else if (type_ == SharedData::OperationType::LocalMove)
+                    {
+                        return Ui5Icons::move();
                     }
                     else if (type_ == SharedData::OperationType::CustomAction)
                     {
