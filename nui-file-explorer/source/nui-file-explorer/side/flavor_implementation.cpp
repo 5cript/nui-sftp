@@ -41,7 +41,6 @@ namespace NuiFileExplorer
         event.stopPropagation();
         event.preventDefault();
 
-        const auto suggested = suggestedDropAction(event);
         auto eventExtracted = extractDropEvent(event, side_->model(), droppedOnItem);
         if (!eventExtracted.has_value())
             return;
@@ -54,7 +53,9 @@ namespace NuiFileExplorer
             if (side_->model().acceptsDropOnSide())
             {
                 side_->model().onDropOnSide(
-                    *eventExtracted->externDroppedItems, eventExtracted->internalDropSubdir, suggested
+                    *eventExtracted->externDroppedItems,
+                    eventExtracted->internalDropSubdir,
+                    suggestedDropAction(event, true)
                 );
                 return;
             }
@@ -94,7 +95,9 @@ namespace NuiFileExplorer
                                          }
                                      ))
                     return;
-                side_->model().onDropOnSide(selectedItems, eventExtracted->internalDropSubdir, suggested);
+                side_->model().onDropOnSide(
+                    selectedItems, eventExtracted->internalDropSubdir, suggestedDropAction(event, false)
+                );
             }
         }
     }
@@ -181,7 +184,7 @@ namespace NuiFileExplorer
                 return "copy";
             if (!side_->model().acceptsDropOnSide())
                 return "none";
-            return suggestedDropAction(event) == DropAction::Copy ? "copy" : "move";
+            return suggestedDropAction(event, false) == DropAction::Copy ? "copy" : "move";
         }();
         dataTransfer.set("dropEffect", effect);
     }

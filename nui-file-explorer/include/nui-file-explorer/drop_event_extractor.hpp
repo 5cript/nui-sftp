@@ -18,10 +18,10 @@ namespace NuiFileExplorer
     };
 
     /**
-     * @brief What the modifier keys held during @p event ask for: Ctrl, or Alt (Option on macOS), copies, anything
-     *        else moves.
+     * @brief What the modifier keys held during @p event ask for. Items of a side move unless Ctrl, or Alt (Option on
+     *        macOS), asks for a copy; items from the desktop are copied unless Shift, or Cmd on macOS, asks for a move.
      */
-    DropAction suggestedDropAction(Nui::WebApi::DragEvent const& event);
+    DropAction suggestedDropAction(Nui::WebApi::DragEvent const& event, bool fromDesktop);
 
     std::optional<DropEventResult>
     extractDropEvent(Nui::WebApi::DragEvent event, ISideModel& sideModel, std::optional<Item> const& droppedOnItem);
