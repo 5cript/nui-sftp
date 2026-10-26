@@ -314,23 +314,10 @@ Nui::ElementRenderer FileExplorerPanel::makeFileExplorerElement()
 void FileExplorerPanel::onDrop(
     bool isLocalSide,
     std::vector<SharedData::DroppedItem> entries,
-    std::optional<std::string> const& subdir
+    std::optional<std::string> const& subdir,
+    NuiFileExplorer::DropAction suggested
 )
 {
-    if (isLocalSide)
-    {
-        // confirm dialog: not implemented
-        Log::warn("Dropping files on local side is not implemented.");
-        impl_->confirmDialog->open({
-            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-            .headerText = language->get("sessionFrontend", "dropNotImplementedTitle"),
-            .text = language->get("sessionFrontend", "dropNotImplementedText"),
-            .buttons = ConfirmDialog::Button::Ok,
-            .neverShowAgainId = "dropNotImplemented",
-        });
-        return;
-    }
-
     std::vector<NuiFileExplorer::Item> items;
     items.reserve(entries.size());
     std::transform(
@@ -343,6 +330,8 @@ void FileExplorerPanel::onDrop(
         }
     );
 
+    if (isLocalSide)
+        return localSideModel().onDropOnSide(items, subdir, suggested);
     localSideModel().onTransfer(items, subdir);
 }
 

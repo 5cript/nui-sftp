@@ -67,8 +67,6 @@ std::string fileExplorerErrorText(NuiFileExplorer::Error const& error)
     using enum NuiFileExplorer::ErrorCode;
     switch (error.code)
     {
-        case ExternalDropOnLocalSide:
-            return language->get("sessionFrontend", "dropNotImplementedText");
         case DropOnSameSide:
             return language->get("fileExplorer", "errors", "dropOnSameSide");
         case DropDataUnreadable:

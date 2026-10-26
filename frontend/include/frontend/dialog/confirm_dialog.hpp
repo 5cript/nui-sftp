@@ -42,6 +42,8 @@ class ConfirmDialog
         std::string text = "";
         Button buttons = Button::Ok;
         std::optional<Button> focusButton = std::nullopt;
+        /** @brief Other labels for the buttons, the usual ones of the current language otherwise. */
+        std::optional<ScriptNuiComponents::Dialog::ButtonLabels> buttonLabels = std::nullopt;
         struct ListElement
         {
             std::string text;

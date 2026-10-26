@@ -2,6 +2,7 @@
 
 #include <frontend/file_explorer/side_model.hpp>
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
+#include <shared_data/file_operations/local_copy_request.hpp>
 #include <shared_data/opener_capabilities.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
@@ -80,6 +81,32 @@ class LocalSideModel
         std::optional<std::string> const& subDir,
         bool issueWebkitWarning
     ) override;
+    bool acceptsDropOnSide() const override
+    {
+        return true;
+    }
+
+    /**
+     * @brief Asks whether to move or copy @p items into the listed directory, or its subdirectory @p subDir, the
+     *        button of @p suggested first in focus. Items dropped where they already are need no question for a
+     *        move, nothing happens.
+     */
+    void onDropOnSide(
+        std::vector<NuiFileExplorer::Item> const& items,
+        std::optional<std::string> const& subDir,
+        NuiFileExplorer::DropAction suggested
+    ) override;
+
+    /**
+     * @brief Moves or copies @p items into the listed directory, or its subdirectory @p subDir, asking only about
+     *        destinations that exist.
+     */
+    void onPasteOnSide(
+        std::vector<NuiFileExplorer::Item> const& items,
+        std::optional<std::string> const& subDir,
+        NuiFileExplorer::DropAction action
+    ) override;
+
     void onRename(NuiFileExplorer::Item const& item) override;
     void onProperties(NuiFileExplorer::Item const& item) override;
     void onError(NuiFileExplorer::Error const& error) override;
@@ -143,6 +170,24 @@ class LocalSideModel
     void enqueueUploads(std::vector<SharedData::BulkUploadEntry> accepted);
 
     void enqueueSingleUpload(SharedData::BulkUploadEntry const& entry, bool allowOverwrite, bool insertRefresh);
+
+    /**
+     * @brief The entries that copy or move @p items into the listed directory, or its subdirectory @p subDir.
+     */
+    std::expected<std::vector<SharedData::LocalCopyEntry>, Paths::PathError>
+    localCopyCandidates(std::vector<NuiFileExplorer::Item> const& items, std::optional<std::string> const& subDir) const;
+
+    /**
+     * @brief Copies or moves @p candidates in the local operation queue after asking about each existing
+     *        destination. A move of an item to where it is does nothing, a copy of it is put next to it under a free
+     *        name.
+     */
+    void copyOrMove(std::vector<SharedData::LocalCopyEntry> candidates, NuiFileExplorer::DropAction action);
+
+    /**
+     * @brief Shows why copying or moving local items did not start.
+     */
+    void showCopyFailed(std::string const& reason);
 
     /**
      * @brief Creates the item at @p path through the backend @p function, which takes the path as @p pathArgument,

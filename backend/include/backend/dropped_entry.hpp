@@ -18,7 +18,7 @@ std::optional<SharedData::DroppedItem> droppedItemFromPath(std::filesystem::path
 
 /**
  * @brief The SessionArea::onFilesDropped message for files the frontend handed to the backend.
- * @param request The frontend's message, its isLeft, subdir and dropMetadata go back with the files.
+ * @param request The frontend's message, its isLeft, subdir, copy and dropMetadata go back with the files.
  * @param entries The dropped files.
  */
 nlohmann::json droppedFilesMessage(nlohmann::json const& request, std::vector<SharedData::DroppedItem> const& entries);

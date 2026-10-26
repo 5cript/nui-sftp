@@ -9,9 +9,7 @@ namespace NuiFileExplorer
      */
     enum class ErrorCode
     {
-        /// External items were dropped onto the local side, which does not support it.
-        ExternalDropOnLocalSide,
-        /// Items were dragged onto the side they came from; moving within a side is not supported.
+        /// Items were dragged onto the side they came from, which does not support moving or copying within it.
         DropOnSameSide,
         /// The drag and drop payload could not be read. The detail holds the parser error.
         DropDataUnreadable,

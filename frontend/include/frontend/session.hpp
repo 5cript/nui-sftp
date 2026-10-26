@@ -161,9 +161,13 @@ class Session
      */
     void runInTerminal(std::string const& command, bool execute);
 
-    /** @brief Handles files dropped onto the session area (Windows). */
-    void
-    onDrop(bool isLocalSide, std::vector<SharedData::DroppedItem> entries, std::optional<std::string> const& subdir);
+    /** @brief Handles files dropped from the desktop, see FileExplorerPanel::onDrop. */
+    void onDrop(
+        bool isLocalSide,
+        std::vector<SharedData::DroppedItem> entries,
+        std::optional<std::string> const& subdir,
+        NuiFileExplorer::DropAction suggested
+    );
 
     /**
      * @brief Ejects local-shell channels from the aux engine.  Used by
