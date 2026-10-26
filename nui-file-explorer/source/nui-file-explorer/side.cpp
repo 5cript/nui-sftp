@@ -736,10 +736,9 @@ namespace NuiFileExplorer
         {
             namespace Snc = ScriptNuiComponents;
 
-            // Paste on a directory puts the items into it, anywhere else into the directory this side shows.
-            const auto pasteInto = item != nullptr && item->item.isDirectoryLike() && !item->item.isParentLink
-                ? std::optional{item->item}
-                : std::nullopt;
+            // Paste on a directory or ".." puts the items into it, anywhere else into the directory this side shows.
+            const auto pasteInto =
+                item != nullptr && item->item.isDirectoryLike() ? std::optional{item->item} : std::nullopt;
             auto const& texts = impl_->texts.value().contextMenu;
             menuItems.insert(
                 menuItems.begin(),
