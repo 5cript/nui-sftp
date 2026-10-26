@@ -56,6 +56,7 @@ add_library(
         sftp/delete_operation.cpp
         sftp/local_file_problem.cpp
         sftp/local_delete_operation.cpp
+        sftp/local_copy_operation.cpp
         sftp/remote_delete_guard.cpp
         sftp/rename_operation.cpp
         sftp/archive_download_operation.cpp

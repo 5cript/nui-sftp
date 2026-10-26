@@ -18,8 +18,18 @@ namespace SharedData
         Delete,
         BulkDelete,
         LocalDelete,
+        LocalCopy,
+        LocalMove,
         ArchiveDownload,
         ArchiveUpload,
         CustomAction
     )
+
+    /**
+     * @brief True for the operations of the local operation queue, which runs apart from the sessions.
+     */
+    inline bool isLocalOperation(OperationType type)
+    {
+        return type == OperationType::LocalDelete || type == OperationType::LocalCopy || type == OperationType::LocalMove;
+    }
 }
