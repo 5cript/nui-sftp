@@ -357,6 +357,28 @@ namespace Test
         EXPECT_EQ(read(root_.path() / "real" / "file (copy).txt"), "file") << "a copy onto itself takes a free name";
     }
 
+    TEST_F(LocalCopyOperationTests, AHardLinkElsewhereIsAnotherItem)
+    {
+        write(root_.path() / "a" / "file.txt", "file");
+        std::filesystem::create_directories(root_.path() / "b");
+        std::filesystem::create_hard_link(root_.path() / "a" / "file.txt", root_.path() / "b" / "file.txt");
+
+        LocalCopyOperation copy{
+            options({entry(root_.path() / "a" / "file.txt", root_.path() / "b" / "file.txt", true)}, false)
+        };
+        ASSERT_TRUE(workToEnd(copy).has_value());
+        EXPECT_EQ(countEntries(root_.path() / "a"), 1u) << "no duplicate next to the source";
+
+        LocalCopyOperation move{
+            options({entry(root_.path() / "a" / "file.txt", root_.path() / "b" / "file.txt", true)}, true)
+        };
+        const auto result = workToEnd(move);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(move.getFailed().empty());
+        EXPECT_FALSE(std::filesystem::exists(root_.path() / "a" / "file.txt"));
+        EXPECT_EQ(read(root_.path() / "b" / "file.txt"), "file");
+    }
+
     TEST_F(LocalCopyOperationTests, AMoveOntoItselfDoesNothing)
     {
         write(root_.path() / "file.txt", "file");
