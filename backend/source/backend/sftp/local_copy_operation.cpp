@@ -20,7 +20,8 @@ namespace
 
     /**
      * @brief True when @p destination is the item @p source of @p kind reached by another path, a bind mount or a
-     *        mapped drive. Links are never taken for their target.
+     *        mapped drive. Links are never taken for their target. A file counts only when it lies in the same
+     *        directory under the same name, a hard link elsewhere is another item of the same file.
      */
     bool isSameItem(
         std::filesystem::path const& source,
@@ -33,7 +34,10 @@ namespace
         std::error_code error{};
         if (Utility::noFollowKindOf(destination, error) != kind || error)
             return false;
-        return std::filesystem::equivalent(source, destination, error) && !error;
+        if (kind == Utility::NoFollowKind::Directory)
+            return std::filesystem::equivalent(source, destination, error) && !error;
+        return source.filename() == destination.filename() &&
+            std::filesystem::equivalent(source.parent_path(), destination.parent_path(), error) && !error;
     }
 
     /**
