@@ -300,6 +300,63 @@ namespace Test
         EXPECT_EQ(read(root_.path() / "target" / "folder" / "sub" / "c.txt"), "c");
     }
 
+    TEST_F(LocalCopyOperationTests, AMoveIntoAnExistingDirectoryRenamesItsItems)
+    {
+        write(root_.path() / "folder" / "a.txt", "new a");
+        write(root_.path() / "target" / "folder" / "b.txt", "old b");
+        std::filesystem::create_hard_link(root_.path() / "folder" / "a.txt", root_.path() / "witness.txt");
+
+        LocalCopyOperation operation{
+            options({entry(root_.path() / "folder", root_.path() / "target" / "folder", true)}, true)
+        };
+        const auto result = workToEnd(operation);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(operation.getFailed().empty());
+        EXPECT_FALSE(std::filesystem::exists(root_.path() / "folder"));
+        EXPECT_TRUE(std::filesystem::equivalent(root_.path() / "target" / "folder" / "a.txt", root_.path() / "witness.txt"))
+            << "the file is renamed, not copied";
+    }
+
+    TEST_F(LocalCopyOperationTests, AMergedDirectoryKeepsItsPermissions)
+    {
+#ifdef _WIN32
+        GTEST_SKIP() << "POSIX permissions";
+#endif
+        using std::filesystem::perms;
+        write(root_.path() / "folder" / "a.txt", "a");
+        write(root_.path() / "folder" / "sub" / "b.txt", "b");
+        write(root_.path() / "target" / "folder" / "c.txt", "c");
+        std::filesystem::permissions(root_.path() / "folder", perms::owner_all);
+        std::filesystem::permissions(root_.path() / "folder" / "sub", perms::owner_all);
+        const auto existing = perms::owner_all | perms::group_read | perms::group_exec;
+        std::filesystem::permissions(root_.path() / "target" / "folder", existing);
+
+        LocalCopyOperation operation{
+            options({entry(root_.path() / "folder", root_.path() / "target" / "folder", true)}, false)
+        };
+        const auto result = workToEnd(operation);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(std::filesystem::status(root_.path() / "target" / "folder").permissions(), existing);
+        EXPECT_EQ(std::filesystem::status(root_.path() / "target" / "folder" / "sub").permissions(), perms::owner_all)
+            << "a created directory takes the permissions of its source";
+    }
+
+    TEST_F(LocalCopyOperationTests, AnItemReachedByAnotherPathIsTakenForItself)
+    {
+        write(root_.path() / "real" / "file.txt", "file");
+        if (!makeDirectoryLink(root_.path() / "link", root_.path() / "real"))
+            GTEST_SKIP() << "cannot create directory links here";
+
+        LocalCopyOperation operation{
+            options({entry(root_.path() / "real" / "file.txt", root_.path() / "link" / "file.txt", true)}, false)
+        };
+        const auto result = workToEnd(operation);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(operation.getFailed().empty());
+        EXPECT_EQ(read(root_.path() / "real" / "file.txt"), "file");
+        EXPECT_EQ(read(root_.path() / "real" / "file (copy).txt"), "file") << "a copy onto itself takes a free name";
+    }
+
     TEST_F(LocalCopyOperationTests, AMoveOntoItselfDoesNothing)
     {
         write(root_.path() / "file.txt", "file");

@@ -19,6 +19,24 @@ namespace
     }
 
     /**
+     * @brief True when @p destination is the item @p source of @p kind reached by another path, a bind mount or a
+     *        mapped drive. Links are never taken for their target.
+     */
+    bool isSameItem(
+        std::filesystem::path const& source,
+        Utility::NoFollowKind kind,
+        std::filesystem::path const& destination
+    )
+    {
+        if (kind == Utility::NoFollowKind::Link)
+            return false;
+        std::error_code error{};
+        if (Utility::noFollowKindOf(destination, error) != kind || error)
+            return false;
+        return std::filesystem::equivalent(source, destination, error) && !error;
+    }
+
+    /**
      * @brief Why the last stream operation failed, as far as errno tells.
      */
     std::string streamFailure()
@@ -190,7 +208,7 @@ void LocalCopyOperation::prepare(SharedData::LocalCopyEntry const& entry)
         return settle();
     }
 
-    if (prepared.source == prepared.destination)
+    if (prepared.source == prepared.destination || isSameItem(prepared.source, prepared.kind, prepared.destination))
     {
         if (options_.move)
             return arrive();
@@ -325,8 +343,35 @@ bool LocalCopyOperation::workCopy(std::chrono::steady_clock::time_point deadline
         recordFailure(source, ErrorType::FileStatFailed, error);
         return false;
     }
+    if (options_.move && renameItem(source, destination, kind))
+        return false;
     copyItem(source, destination, kind, true);
     return false;
+}
+
+bool LocalCopyOperation::renameItem(
+    std::filesystem::path const& source,
+    std::filesystem::path const& destination,
+    Utility::NoFollowKind kind
+)
+{
+    using Utility::NoFollowKind;
+
+    std::error_code error{};
+    const auto destinationKind = Utility::noFollowKindOf(destination, error);
+    if (error ||
+        (destinationKind != NoFollowKind::Missing &&
+         (kind == NoFollowKind::Directory || destinationKind == NoFollowKind::Directory)))
+        return false;
+    const auto size = kind == NoFollowKind::Other ? std::filesystem::file_size(source, error) : 0u;
+    const auto bytes = error ? 0u : size;
+    std::filesystem::rename(source, destination, error);
+    if (error)
+        return false;
+    lastItem_ = Paths::nativeToUtf8(source);
+    ++entriesDone_;
+    bytesDone_ += bytes;
+    return true;
 }
 
 bool LocalCopyOperation::workRemoveSource(std::chrono::steady_clock::time_point deadline)
@@ -426,7 +471,12 @@ void LocalCopyOperation::copyItem(
             std::filesystem::directory_iterator iterator{source, error};
             if (error)
                 return recordFailure(source, ErrorType::DirectoryUnreadable, error);
-            directories_.push_back({.source = source, .destination = destination, .iterator = std::move(iterator)});
+            directories_.push_back({
+                .source = source,
+                .destination = destination,
+                .iterator = std::move(iterator),
+                .created = destinationKind == NoFollowKind::Missing,
+            });
             return;
         }
         case NoFollowKind::Other:
@@ -565,6 +615,10 @@ void LocalCopyOperation::leaveDirectory()
 {
     const auto frame = std::move(directories_.back());
     directories_.pop_back();
+    ++entriesDone_;
+    // An existing directory that was merged into keeps its own permissions.
+    if (!frame.created)
+        return;
     // A read only source directory is copied as such, once its content is written.
     std::error_code error{};
     const auto status = std::filesystem::status(frame.source, error);
@@ -576,7 +630,6 @@ void LocalCopyOperation::leaveDirectory()
             Paths::nativeToUtf8(frame.destination),
             Utility::errorMessage(error)
         );
-    ++entriesDone_;
 }
 
 void LocalCopyOperation::recordFailure(std::filesystem::path const& path, ErrorType type, std::error_code const& error)
