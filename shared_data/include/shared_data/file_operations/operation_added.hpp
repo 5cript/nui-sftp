@@ -28,6 +28,8 @@ namespace SharedData
         std::optional<bool> scanPhase{};
         /** @brief Single transfers: whether the destination may be replaced, a resume asks for the same. */
         std::optional<bool> allowOverwrite{};
+        /** @brief Local copies and moves only: the directory the items go to. */
+        std::optional<Paths::LocalPath> localDestination{};
     };
     BOOST_DESCRIBE_STRUCT(
         OperationAdded,
@@ -42,6 +44,7 @@ namespace SharedData
          destination,
          insertRefresh,
          scanPhase,
-         allowOverwrite)
+         allowOverwrite,
+         localDestination)
     )
 }

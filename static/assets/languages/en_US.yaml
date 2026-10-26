@@ -1344,6 +1344,9 @@ backend:
     createDirectoryPrevented: "Directory creation is prevented by configuration."
     removeSomeFailed: "Not every item could be deleted ({} failed). Everything else was deleted.\n\nNot deleted:\n{}"
     removeRefused: "Nothing was deleted. '{}' is a root directory, contains your home directory, or is not a valid absolute path."
+  localCopy:
+    nothingToCopy: "Nothing was given to copy or move."
+    moveRefused: "Nothing was moved. '{}' is a root directory or contains your home directory."
   opener:
     sessionBusUnavailable: "D-Bus session bus is unavailable."
     sessionBusUnavailableOpenFile: "Session bus is unavailable; cannot open files via xdg-desktop-portal. This typically happens when running as root or without a user D-Bus session."

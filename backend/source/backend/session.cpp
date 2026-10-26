@@ -138,6 +138,7 @@ void Session::start()
             self->registerRpcSftpAddBulkUploadOperation();
             self->registerRpcSftpAddBulkDeleteOperation();
             self->registerRpcAddLocalDeleteOperation();
+            self->registerRpcAddLocalCopyOperation();
             self->registerRpcSftpExistsBatch();
             self->registerRpcSftpOpenSyncSession();
             self->registerRpcSftpRecomputeSyncDiff();
@@ -1762,6 +1763,30 @@ void Session::registerRpcAddLocalDeleteOperation()
                 const auto added = self->localOperationQueue_->addExplorerDelete(
                     Ids::makeOperationId(operationIdString), paths, self->id_, self->operationQueue_->paused()
                 );
+                if (!added)
+                    return reply.error(added.error());
+                reply(SharedData::success());
+            }
+        );
+}
+
+void Session::registerRpcAddLocalCopyOperation()
+{
+    on(fmt::format("Session::{}::addLocalCopy", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& operationIdString, SharedData::LocalCopyRequest request
+            )
+            {
+                auto self = weak.lock();
+                if (!self || !self->operationQueue_)
+                    return reply.error("Session no longer exists");
+                const auto added = self->localOperationQueue_->addCopy({
+                    .operationId = Ids::makeOperationId(operationIdString),
+                    .request = std::move(request),
+                    .owner = self->id_,
+                    .held = self->operationQueue_->paused(),
+                });
                 if (!added)
                     return reply.error(added.error());
                 reply(SharedData::success());
