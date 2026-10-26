@@ -306,7 +306,15 @@ class SideModel
                         Log::info("Transfer cancelled");
                         return;
                     }
-                    checkDestinations(std::move(candidates), std::move(prompt), std::move(onAccepted));
+                    checkDestinations<EntryT>(
+                        std::move(candidates),
+                        std::move(prompt),
+                        [onAccepted = std::move(onAccepted)](std::vector<EntryT> accepted)
+                        {
+                            if (!accepted.empty())
+                                onAccepted(std::move(accepted));
+                        }
+                    );
                 }
             ),
         });
@@ -457,7 +465,8 @@ class SideModel
 
     /**
      * @brief Checks which destinations of @p candidates exist, asks about each existing one with the overwrite texts
-     *        of @p prompt and hands the accepted entries to @p onAccepted. Nothing is accepted when the check fails.
+     *        of @p prompt and hands the accepted entries to @p onAccepted, also when none were accepted. Nothing is
+     *        accepted and @p onAccepted is not called when the check fails.
      */
     template <typename EntryT>
     void checkDestinations(
@@ -505,12 +514,7 @@ class SideModel
     {
         const auto* question = decisions->nextQuestion();
         if (question == nullptr)
-        {
-            auto accepted = decisions->takeAccepted();
-            if (!accepted.empty())
-                onAccepted(std::move(accepted));
-            return;
-        }
+            return onAccepted(decisions->takeAccepted());
 
         const auto destination = FileExplorer::pathText(question->destination);
         Log::info("The destination '{}' exists, asking whether to overwrite it.", destination);
