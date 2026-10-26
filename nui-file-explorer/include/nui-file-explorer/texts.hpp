@@ -63,6 +63,9 @@ namespace NuiFileExplorer
         {
             std::string synchronize{"Synchronize..."};
             std::string synchronizeHint{"Select exactly one directory on each side to synchronize."};
+            std::string cut{"Cut"};
+            std::string copy{"Copy"};
+            std::string paste{"Paste"};
         };
 
         struct Origin

@@ -25,6 +25,9 @@
 #include <ui5-sap-icons/icons/search.hpp>
 #include <ui5-sap-icons/icons/menu.hpp>
 #include <ui5-sap-icons/icons/synchronize.hpp>
+#include <ui5-sap-icons/icons/copy.hpp>
+#include <ui5-sap-icons/icons/paste.hpp>
+#include <ui5-sap-icons/icons/scissors.hpp>
 #include <ui5-sap-icons/icons/laptop.hpp>
 #include <ui5-sap-icons/icons/it-host.hpp>
 
@@ -178,18 +181,24 @@ namespace NuiFileExplorer
         const auto commandKey = event.ctrlKey() || event.metaKey();
         if (commandKey && (event.key() == "c" || event.key() == "x"))
         {
-            const auto cut = event.key() == "x";
-            // Only a side that moves items within itself can cut, the other side would copy them anyway.
-            if (cut && !impl_->model->acceptsDropOnSide())
-                return;
-            auto selectedItems = this->selectedItems();
-            if (!selectedItems.empty())
-                impl_->clipboard = {.items = std::move(selectedItems), .cut = cut, .sequence = ++clipboardSequence};
+            copyToClipboard(selectedItems(), event.key() == "x");
             return;
         }
         if (commandKey && event.key() == "v")
         {
-            pasteClipboard();
+            // A single selected directory that is not one of the items takes them.
+            auto const* clipboard = pasteableClipboard();
+            const auto selectedItems = this->selectedItems();
+            const auto intoSelection = clipboard != nullptr && selectedItems.size() == 1 &&
+                selectedItems.front().isDirectoryLike() &&
+                std::ranges::none_of(
+                                           clipboard->items,
+                                           [&selectedItems](Item const& item)
+                                           {
+                                               return item.fullPath == selectedItems.front().fullPath;
+                                           }
+                );
+            pasteClipboard(intoSelection ? std::optional{selectedItems.front()} : std::nullopt);
             return;
         }
 
@@ -214,28 +223,35 @@ namespace NuiFileExplorer
         actionWasTaken.disarm();
     }
 
-    void Side::pasteClipboard()
+    void Side::copyToClipboard(std::vector<Item> items, bool cut)
+    {
+        // Only a side that moves items within itself can cut, the other side would copy them anyway.
+        if (items.empty() || (cut && !impl_->model->acceptsDropOnSide()))
+            return;
+        impl_->clipboard = {.items = std::move(items), .cut = cut, .sequence = ++clipboardSequence};
+    }
+
+    SideImplementation::Clipboard* Side::pasteableClipboard()
     {
         auto* const otherClipboard = impl_->otherSide ? &impl_->otherSide->impl_->clipboard : nullptr;
-        const auto fromOtherSide = otherClipboard != nullptr && !otherClipboard->items.empty() &&
-            otherClipboard->sequence > impl_->clipboard.sequence;
-        auto& clipboard = fromOtherSide ? *otherClipboard : impl_->clipboard;
-        if (clipboard.items.empty())
-            return;
-        if (!fromOtherSide && !impl_->model->acceptsDropOnSide())
-            return;
+        if (otherClipboard != nullptr && !otherClipboard->items.empty() &&
+            otherClipboard->sequence > impl_->clipboard.sequence)
+            return otherClipboard;
+        if (impl_->clipboard.items.empty() || !impl_->model->acceptsDropOnSide())
+            return nullptr;
+        return &impl_->clipboard;
+    }
 
-        const auto selectedItems = this->selectedItems();
-        const auto intoSelection = selectedItems.size() == 1 &&
-            std::ranges::none_of(
-                                       clipboard.items,
-                                       [&selectedItems](Item const& item)
-                                       {
-                                           return item.fullPath == selectedItems.front().fullPath;
-                                       }
-            );
-        const auto target = intoSelection ? transferTargetOf(selectedItems.front())
-                                          : std::expected<std::optional<std::string>, Error>{std::nullopt};
+    void Side::pasteClipboard(std::optional<Item> const& into)
+    {
+        auto* const clipboardPointer = pasteableClipboard();
+        if (clipboardPointer == nullptr)
+            return;
+        auto& clipboard = *clipboardPointer;
+        const auto fromOtherSide = &clipboard != &impl_->clipboard;
+
+        const auto target =
+            into ? transferTargetOf(*into) : std::expected<std::optional<std::string>, Error>{std::nullopt};
         if (!target)
             return impl_->model->onError(target.error());
 
@@ -714,6 +730,50 @@ namespace NuiFileExplorer
                     impl_->texts.value().contextMenu.synchronizeHint
                 ));
             }
+        }
+
+        if (impl_->model->acceptsDropOnSide())
+        {
+            namespace Snc = ScriptNuiComponents;
+
+            // Paste on a directory puts the items into it, anywhere else into the directory this side shows.
+            const auto pasteInto = item != nullptr && item->item.isDirectoryLike() && !item->item.isParentLink
+                ? std::optional{item->item}
+                : std::nullopt;
+            auto const& texts = impl_->texts.value().contextMenu;
+            menuItems.insert(
+                menuItems.begin(),
+                {
+                    Snc::PopupMenu::item(
+                        texts.cut,
+                        Ui5Icons::scissors(),
+                        [this, clickItems]()
+                        {
+                            copyToClipboard(clickItems, true);
+                        },
+                        clickItems.empty()
+                    ),
+                    Snc::PopupMenu::item(
+                        texts.copy,
+                        Ui5Icons::copy(),
+                        [this, clickItems]()
+                        {
+                            copyToClipboard(clickItems, false);
+                        },
+                        clickItems.empty()
+                    ),
+                    Snc::PopupMenu::item(
+                        texts.paste,
+                        Ui5Icons::paste(),
+                        [this, pasteInto]()
+                        {
+                            pasteClipboard(pasteInto);
+                        },
+                        pasteableClipboard() == nullptr
+                    ),
+                    Snc::PopupMenu::separator(),
+                }
+            );
         }
 
         impl_->contextMenuPopup.setItems(std::move(menuItems));

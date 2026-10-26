@@ -53,6 +53,9 @@ NuiFileExplorer::Texts fileExplorerTexts()
             {
                 .synchronize = language->get("fileExplorer", "contextMenu", "synchronize"),
                 .synchronizeHint = language->get("fileExplorer", "contextMenu", "synchronizeHint"),
+                .cut = language->get("fileExplorer", "contextMenu", "cut"),
+                .copy = language->get("fileExplorer", "contextMenu", "copy"),
+                .paste = language->get("fileExplorer", "contextMenu", "paste"),
             },
         .origin =
             {
