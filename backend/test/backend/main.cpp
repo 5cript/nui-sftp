@@ -6,6 +6,7 @@
 #include "test_scan_operation.hpp"
 #include "test_local_delete_guard.hpp"
 #include "test_local_delete_operation.hpp"
+#include "test_local_copy_operation.hpp"
 #include "test_local_removal.hpp"
 #include "test_local_operation_queue.hpp"
 #include "test_remote_delete_guard.hpp"

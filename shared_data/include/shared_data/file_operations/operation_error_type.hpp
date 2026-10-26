@@ -49,6 +49,8 @@ namespace SharedData
         InvalidName,
         LinkInLocalPath,
         ChannelClosed,
-        ChangedSinceCompare
+        ChangedSinceCompare,
+        CopyIntoItself,
+        CopyFailed
     );
 }
