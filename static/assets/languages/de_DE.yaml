@@ -50,6 +50,9 @@ fileExplorer:
     uploadAndWatchIntoSelectionHint: "Lädt es in das auf der Serverseite ausgewählte Verzeichnis {} hoch und beobachtet es hier weiter. Jede Änderung, die Sie speichern, wird erneut hochgeladen, bis Sie die Beobachtung unter Dateiüberwachung beenden."
     synchronize: "Synchronisieren..."
     synchronizeHint: "Wählen Sie auf jeder Seite genau ein Verzeichnis zum Synchronisieren aus."
+    cut: "Ausschneiden"
+    copy: "Kopieren"
+    paste: "Einfügen"
   archiveDefaultName: "archiv"
   toolbar:
     newMenu: "Neu"

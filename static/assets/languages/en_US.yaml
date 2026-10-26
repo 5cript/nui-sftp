@@ -50,6 +50,9 @@ fileExplorer:
     uploadAndWatchIntoSelectionHint: "Uploads it into the directory selected on the remote side, {}, and keeps watching it here. Every change you save is uploaded again, until you stop the watch in File Tracking."
     synchronize: "Synchronize..."
     synchronizeHint: "Select exactly one directory on each side to synchronize."
+    cut: "Cut"
+    copy: "Copy"
+    paste: "Paste"
   archiveDefaultName: "archive"
   toolbar:
     newMenu: "New"

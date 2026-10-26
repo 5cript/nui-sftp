@@ -228,11 +228,24 @@ namespace NuiFileExplorer
         void processKeyboardEvent(Nui::WebApi::KeyboardEvent event);
 
         /**
-         * @brief Pastes what was copied or cut last on either side: items of the other side are transferred, items of
-         *        this side are copied or moved within it. A single selected directory that is not one of the items
-         *        takes them, else the directory this side shows.
+         * @brief Puts @p items on this side's clipboard, @p cut moves them when they are pasted on this side. Only a
+         *        side that accepts drops on itself can cut.
          */
-        void pasteClipboard();
+        void copyToClipboard(std::vector<Item> items, bool cut);
+
+        /**
+         * @brief The clipboard a paste on this side takes: the one of either side copied or cut to last, nullptr when
+         *        there is nothing this side can paste.
+         */
+        SideImplementation::Clipboard* pasteableClipboard();
+
+        /**
+         * @brief Pastes what was copied or cut last on either side: items of the other side are transferred, items of
+         *        this side are copied or moved within it.
+         *
+         * @param into The directory that takes the items, the directory this side shows when unset.
+         */
+        void pasteClipboard(std::optional<Item> const& into);
         void search(std::string query);
         void onPathBoxSuggestionHit(std::filesystem::path const& path);
 
