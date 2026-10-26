@@ -1342,6 +1342,9 @@ backend:
     createDirectoryPrevented: "Das Erstellen von Verzeichnissen ist durch die Konfiguration verhindert."
     removeSomeFailed: "Nicht alle Elemente konnten gelöscht werden ({} fehlgeschlagen). Alle anderen wurden gelöscht.\n\nNicht gelöscht:\n{}"
     removeRefused: "Es wurde nichts gelöscht. '{}' ist ein Wurzelverzeichnis, enthält Ihr Heimatverzeichnis oder ist kein gültiger absoluter Pfad."
+  localCopy:
+    nothingToCopy: "Es wurde nichts zum Kopieren oder Verschieben angegeben."
+    moveRefused: "Es wurde nichts verschoben. '{}' ist ein Wurzelverzeichnis oder enthält Ihr Heimatverzeichnis."
   opener:
     sessionBusUnavailable: "Der D-Bus-Sitzungsbus ist nicht verfügbar."
     sessionBusUnavailableOpenFile: "Der Sitzungsbus ist nicht verfügbar, Dateien können nicht über xdg-desktop-portal geöffnet werden. Das passiert typischerweise bei Ausführung als root oder ohne D-Bus-Benutzersitzung."

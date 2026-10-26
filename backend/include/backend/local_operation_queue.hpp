@@ -1,10 +1,12 @@
 #pragma once
 
 #include <backend/rpc_helper.hpp>
+#include <backend/sftp/local_copy_operation.hpp>
 #include <backend/sftp/local_delete_operation.hpp>
 #include <ids/ids.hpp>
 #include <paths/local_path.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
+#include <shared_data/file_operations/local_copy_request.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
 
@@ -20,14 +22,16 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 /**
- * @brief Runs local deletes apart from the SSH sessions, so closing a tab or losing a connection never stops one.
+ * @brief Runs local deletes, copies and moves apart from the SSH sessions, so closing a tab or losing a connection
+ *        never stops one.
  *
- * The deletes run one after another on the strand the queue shares with the sessions, a work step at a time, and
- * report to the frontend under "LocalOperationQueue::...". A delete a session started waits while the queue of that
- * session is paused, for as long as the session exists.
+ * The operations run one after another on the strand the queue shares with the sessions, a work step at a time, and
+ * report to the frontend under "LocalOperationQueue::...". An operation a session started waits while the queue of
+ * that session is paused, for as long as the session exists.
  */
 class LocalOperationQueue
     : public RpcHelper::StrandRpc
@@ -54,6 +58,16 @@ class LocalOperationQueue
         std::vector<SharedData::ComparedState> comparedStates{};
     };
 
+    struct CopyRequest
+    {
+        Ids::OperationId operationId{};
+        SharedData::LocalCopyRequest request{};
+        /** @brief The session whose paused queue holds the copy, none for a copy without a session. */
+        std::optional<Ids::SessionId> owner{};
+        /** @brief The queue of @ref owner is paused, so the copy starts held. */
+        bool held{false};
+    };
+
     LocalOperationQueue(
         boost::asio::any_io_executor executor,
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
@@ -69,7 +83,8 @@ class LocalOperationQueue
 
     /**
      * @brief Handles "LocalOperationQueue::addDelete" (operation id, local paths), the delete of explorer items
-     *        without a session, and "LocalOperationQueue::cancel" (operation id).
+     *        without a session, "LocalOperationQueue::addCopy" (operation id, SharedData::LocalCopyRequest), their
+     *        copy or move, and "LocalOperationQueue::cancel" (operation id).
      */
     void registerRpc();
 
@@ -96,25 +111,34 @@ class LocalOperationQueue
     );
 
     /**
-     * @brief Holds the deletes of @p owner, or lets them run again. Assumed in strand.
+     * @brief Queues a copy or move of explorer items with one card that refreshes the local listing. A move is
+     *        refused as a whole when one source is a root directory or contains a home directory, it removes them.
+     *        Assumed in strand.
+     *
+     * @return A message for Utility::localizedMessage or the language file saying why nothing was queued.
+     */
+    std::expected<void, std::string> addCopy(CopyRequest request);
+
+    /**
+     * @brief Holds the operations of @p owner, or lets them run again. Assumed in strand.
      */
     void hold(Ids::SessionId const& owner, bool held);
 
     /**
-     * @brief The deletes of @p owner run on their own from now on, never held again. Assumed in strand.
+     * @brief The operations of @p owner run on their own from now on, never held again. Assumed in strand.
      */
     void release(Ids::SessionId const& owner);
 
     /**
-     * @brief Ends the delete @p operationId as canceled and tells the frontend. Assumed in strand.
+     * @brief Ends the operation @p operationId as canceled and tells the frontend. Assumed in strand.
      */
     void cancel(Ids::OperationId const& operationId);
 
     /**
-     * @brief Works the first delete that is not held for one step and tells the frontend when it ends. Assumed in
+     * @brief Works the first operation that is not held for one step and tells the frontend when it ends. Assumed in
      *        strand; the queue drives itself, this is public for tests.
      *
-     * @return True while a delete that is not held is left.
+     * @return True while an operation that is not held is left.
      */
     bool work();
 
@@ -124,14 +148,22 @@ class LocalOperationQueue
     void setCompletionObserver(std::function<void(OperationCompleted const&)> observer);
 
   private:
-    struct QueuedDelete
+    struct QueuedOperation
     {
         Ids::OperationId operationId;
-        std::unique_ptr<LocalDeleteOperation> operation;
+        std::variant<std::unique_ptr<LocalDeleteOperation>, std::unique_ptr<LocalCopyOperation>> operation;
         std::optional<Ids::SessionId> owner;
         bool held;
         bool priority;
+
+        Operation& base() const;
+        std::vector<std::pair<std::string, Operation::Error>> const& failed() const;
     };
+
+    /**
+     * @brief Inserts @p queued, a priority operation before every other one, and starts working.
+     */
+    void enqueue(QueuedOperation queued);
 
     /**
      * @brief Posts the next work step unless one is posted already.
@@ -139,14 +171,14 @@ class LocalOperationQueue
     void schedule();
 
     void complete(
-        QueuedDelete const& queued,
+        QueuedOperation const& queued,
         SharedData::OperationCompletionReason reason,
         std::optional<Operation::Error> error
     );
     std::string rpcName(std::string_view event) const;
 
     std::shared_ptr<std::atomic_bool const> localDeletionPrevented_;
-    std::deque<QueuedDelete> deletes_{};
+    std::deque<QueuedOperation> operations_{};
     bool scheduled_{false};
     std::function<void(OperationCompleted const&)> completionObserver_{};
 };

@@ -256,6 +256,7 @@ class Session
      *        LocalOperationQueue::addExplorerDelete.
      */
     void registerRpcAddLocalDeleteOperation();
+    void registerRpcAddLocalCopyOperation();
     void registerRpcSftpExistsBatch();
     void registerRpcSftpOpenSyncSession();
     void registerRpcSftpRecomputeSyncDiff();

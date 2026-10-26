@@ -84,6 +84,16 @@ namespace Test
             );
         }
 
+        std::expected<void, std::string> addCopy(LocalOperationQueue::CopyRequest request)
+        {
+            return runOnStrand(
+                [this, &request]()
+                {
+                    return queue_->addCopy(std::move(request));
+                }
+            );
+        }
+
         /**
          * @brief The completions once @p expected arrived, the queue working on its own; fails after a while.
          */
@@ -364,5 +374,63 @@ namespace Test
         ASSERT_EQ(finished.size(), 1u);
         EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
         EXPECT_FALSE(std::filesystem::exists(tree));
+    }
+
+    TEST_F(LocalOperationQueueTests, ACopyAndAMoveRunAfterTheirOwnerContinues)
+    {
+        const auto copied = makeTree("copied");
+        const auto moved = makeTree("moved");
+        const auto target = root_.path() / "target";
+        std::filesystem::create_directories(target);
+
+        const auto copyId = Ids::generateOperationId();
+        ASSERT_TRUE(addCopy({
+                                .operationId = copyId,
+                                .request = {.entries = {{.source = local(copied), .destination = local(target / "copied")}}},
+                                .owner = owner_,
+                                .held = true,
+                            })
+                        .has_value());
+        const auto moveId = Ids::generateOperationId();
+        ASSERT_TRUE(addCopy({
+                                .operationId = moveId,
+                                .request =
+                                    {.entries = {{.source = local(moved), .destination = local(target / "moved")}},
+                                     .move = true},
+                            })
+                        .has_value());
+
+        auto finished = waitForCompletions(1);
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().operationId, moveId) << "the held copy waits";
+        EXPECT_FALSE(std::filesystem::exists(moved));
+        EXPECT_TRUE(std::filesystem::exists(target / "moved" / "inner" / "a.txt"));
+        EXPECT_FALSE(std::filesystem::exists(target / "copied"));
+
+        runOnStrand(
+            [this]()
+            {
+                queue_->hold(owner_, false);
+            }
+        );
+        finished = waitForCompletions(2);
+        ASSERT_EQ(finished.size(), 2u);
+        EXPECT_EQ(finished[1].operationId, copyId);
+        EXPECT_EQ(finished[1].reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_TRUE(std::filesystem::exists(copied / "inner" / "a.txt"));
+        EXPECT_TRUE(std::filesystem::exists(target / "copied" / "inner" / "a.txt"));
+    }
+
+    TEST_F(LocalOperationQueueTests, AMoveOfARootAndAnEmptyRequestAreRefused)
+    {
+        const auto rootDirectory = local(std::filesystem::path{root_.path()}.root_path());
+        const auto refused = addCopy({
+            .operationId = Ids::generateOperationId(),
+            .request = {.entries = {{.source = rootDirectory, .destination = local(root_.path() / "root")}}, .move = true},
+        });
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_NE(refused.error().find("backend.localCopy.moveRefused"), std::string::npos) << refused.error();
+        EXPECT_FALSE(addCopy({.operationId = Ids::generateOperationId()}).has_value()) << "nothing to copy";
+        EXPECT_TRUE(completionsAfterSettling().empty());
     }
 }
