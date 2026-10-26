@@ -2,6 +2,7 @@
 
 #include <ids/ids.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
+#include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/operation_added.hpp>
 #include <shared_data/file_operations/scan_progress.hpp>
 
@@ -67,11 +68,13 @@ class LocalOperationRouter
         std::optional<SharedData::OperationAdded> added{};
         std::optional<SharedData::ScanProgress> scanProgress{};
         std::optional<SharedData::BulkDeleteProgress> deleteProgress{};
+        std::optional<SharedData::BulkProgress> copyProgress{};
     };
 
     void onOperationAdded(SharedData::OperationAdded const& added);
     void onScanProgress(SharedData::ScanProgress const& progress);
     void onDeleteProgress(SharedData::BulkDeleteProgress const& progress);
+    void onCopyProgress(SharedData::BulkProgress const& progress);
     void onOperationCompleted(Nui::val val);
 
     /**

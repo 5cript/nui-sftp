@@ -416,7 +416,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
 
     auto doCancel = [this,
                         operationId = operation.operationId(),
-                        cancelName = operation.type() == SharedData::OperationType::LocalDelete
+                        cancelName = SharedData::isLocalOperation(operation.type())
                             ? std::string{"LocalOperationQueue::cancel"}
                             : fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value())]()
     {
@@ -840,6 +840,23 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 added.scanPhase.value_or(false)
             );
         }
+        else if (added.type == SharedData::OperationType::LocalCopy || added.type == SharedData::OperationType::LocalMove)
+        {
+            return std::make_unique<DisplayedBulkOperation>(
+                added.operationId,
+                *impl_->confirmDialog,
+                added.type,
+                added.localPath ? added.localPath->toUtf8() : std::string{},
+                added.localDestination ? added.localDestination->toUtf8() : std::string{},
+                [this](OperationCard<DisplayedBulkOperation> const& operation)
+                {
+                    cancelOperation(operation);
+                },
+                impl_->autoClean,
+                localRefresh,
+                added.scanPhase.value_or(false)
+            );
+        }
         else if (added.type == SharedData::OperationType::BulkDownload)
         {
             if (!added.localPath)
@@ -859,8 +876,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 added.operationId,
                 *impl_->confirmDialog,
                 SharedData::OperationType::BulkDownload,
-                *added.localPath,
-                *added.remotePath,
+                added.remotePath->value(),
+                added.localPath->toUtf8(),
                 [this](OperationCard<DisplayedBulkOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -889,8 +906,8 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 added.operationId,
                 *impl_->confirmDialog,
                 SharedData::OperationType::BulkUpload,
-                *added.localPath,
-                *added.remotePath,
+                added.localPath->toUtf8(),
+                added.remotePath->value(),
                 [this](OperationCard<DisplayedBulkOperation> const& operation)
                 {
                     cancelOperation(operation);
@@ -991,7 +1008,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
     // Kick-to-top is meaningful only for the regular queue. Priority cards do
     // not get a handler — even though the button is rendered, CSS hides it
     // when the parent is the priority list (see .opq-priority-list rule).
-    if (added.mode != SharedData::OperationMode::PriorityQueued && added.type != SharedData::OperationType::LocalDelete)
+    if (added.mode != SharedData::OperationMode::PriorityQueued && !SharedData::isLocalOperation(added.type))
     {
         card->setKickToTopHandler(
             [this, opId = added.operationId]()
@@ -1053,6 +1070,26 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
     renderer->setProgress(progress);
 }
 
+void OperationQueue::onLocalCopyProgress(SharedData::BulkProgress const& progress)
+{
+    auto* operation = impl_->findOperation(progress.operationId);
+    if (!operation)
+    {
+        Log::error("Received local copy progress for unknown operation id: {}", progress.operationId.value());
+        return;
+    }
+    if (operation->type() != SharedData::OperationType::LocalCopy &&
+        operation->type() != SharedData::OperationType::LocalMove)
+    {
+        Log::error(
+            "Received local copy progress for operation id: {} which is no local copy", progress.operationId.value()
+        );
+        return;
+    }
+    if (auto* card = operation->getCardSpecifically<DisplayedBulkOperation>(); card)
+        card->setProgress(progress);
+}
+
 void OperationQueue::onDownloadProgress(SharedData::TransferProgress const& progress)
 {
     auto* operation = impl_->findOperation(progress.operationId);
@@ -1110,6 +1147,8 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
         }
         case SharedData::OperationType::BulkDownload:
         case SharedData::OperationType::BulkUpload:
+        case SharedData::OperationType::LocalCopy:
+        case SharedData::OperationType::LocalMove:
         {
             if (auto* card = operation->getCardSpecifically<DisplayedBulkOperation>(); card)
                 card->setScanProgress(progress.totalBytes, progress.totalScanned);
@@ -1428,6 +1467,34 @@ void OperationQueue::enqueueLocalDelete(
     );
 }
 
+void OperationQueue::enqueueLocalCopy(
+    SharedData::LocalCopyRequest request,
+    std::function<void(std::optional<std::string> const& error)> onAck
+)
+{
+    Log::info("Frontend Operation Queue local {}: {} items", request.move ? "move" : "copy", request.entries.size());
+
+    const auto operationId = Ids::generateOperationId();
+    LocalOperationRouter::instance().host(operationId, *this);
+    // With a connection the copy is held while the queue of the connection is paused.
+    const auto rpcName = isActive() ? fmt::format("Session::{}::addLocalCopy", impl_->sessionId.value())
+                                    : std::string{"LocalOperationQueue::addCopy"};
+    Nui::RpcClient::callWithBackChannel(
+        rpcName,
+        [onAck = std::move(onAck), operationId](SharedData::ErrorOrSuccess<> const& result)
+        {
+            if (!result)
+            {
+                LocalOperationRouter::instance().forget(operationId);
+                return onAck(result.error);
+            }
+            onAck(std::nullopt);
+        },
+        operationId.value(),
+        request
+    );
+}
+
 bool OperationQueue::isActive() const
 {
     return impl_->sessionId.isValid();
@@ -1710,7 +1777,7 @@ void OperationQueue::requestMoveOperation(Ids::OperationId const& opId, std::siz
     }
     // Local operations run in the backend's local operation queue, which keeps its own order.
     if (const auto* operation = impl_->findOperation(opId);
-        !isActive() || (operation && operation->type() == SharedData::OperationType::LocalDelete))
+        !isActive() || (operation && SharedData::isLocalOperation(operation->type())))
         return;
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::moveOperation", impl_->sessionId.value()),
