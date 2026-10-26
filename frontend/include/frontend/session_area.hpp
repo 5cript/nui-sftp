@@ -14,6 +14,10 @@
 #include <nui/frontend/element_renderer.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
+#include <cstddef>
+#include <functional>
+#include <string>
+
 class SessionArea
 {
   public:
@@ -37,8 +41,13 @@ class SessionArea
      * @brief Opens a session of the settings.
      *
      * @param userIndex The index of the user to log in as, 0 for the default user of the server.
+     * @param onOpened Called once the session opened or failed to open, also when no session has that name.
      */
-    void addSession(std::string const& name, std::size_t userIndex = 0u);
+    void addSession(
+        std::string const& name,
+        std::size_t userIndex = 0u,
+        std::function<void(bool success, std::string const& info)> onOpened = {}
+    );
     /**
      * @brief Connects to a server that is not in the settings.
      *

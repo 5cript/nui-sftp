@@ -229,6 +229,7 @@ Main::LoggerSetup::LoggerSetup(Persistence::StateHolder& stateHolder)
 
 Main::Main(ProgramOptions options, ForkPool* forkPool)
     : shuttingDown_{false}
+    , devToolsEnabled_{options.enableDevTools}
     , programDir_{boost::dll::program_location().parent_path().native()}
     , stateHolder_{programDir_}
     , loggerSetup_{stateHolder_}
@@ -295,6 +296,7 @@ void Main::registerRpc()
     sshSessionManager_->registerRpc();
     registerInitialWarningGetter();
     registerVersionGetter();
+    registerDevToolsGetter();
     registerCommandStore();
 
     defaultPlacesProvider_ = std::make_unique<NuiFileExplorer::DefaultPlacesProvider>(hub_);
@@ -452,6 +454,17 @@ void Main::registerVersionGetter()
                     {"browserEngine", browserEngineDescription()},
                 }
             );
+        }
+    );
+}
+
+void Main::registerDevToolsGetter()
+{
+    hub_.registerFunction(
+        "Main::getDevToolsEnabled",
+        [this](std::string responseId)
+        {
+            RpcHelper::callRemoteSafely(hub_, responseId, nlohmann::json{{"enabled", devToolsEnabled_}});
         }
     );
 }

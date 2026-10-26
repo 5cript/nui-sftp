@@ -35,6 +35,7 @@
 #include <nui/frontend/elements/nil.hpp>
 #include <nui/frontend/attributes.hpp>
 
+#include <utility>
 #include <vector>
 
 using namespace Nui;
@@ -115,6 +116,7 @@ struct Session::Implementation
     std::function<void(Session const*)> onReconnectSucceeded;
     std::function<void(Session const*)> onReconnectCancel;
     std::function<void(Session const*)> onReconnectNow;
+    std::function<void(bool success, std::string const& info)> onOpened;
 
     /**
      * @brief Sends a command to the last interacted terminal; tells the user when there is none or
@@ -196,6 +198,7 @@ struct Session::Implementation
         , onReconnectSucceeded{std::move(params.onReconnectSucceeded)}
         , onReconnectCancel{std::move(params.onReconnectCancel)}
         , onReconnectNow{std::move(params.onReconnectNow)}
+        , onOpened{std::move(params.onOpened)}
     {
         // Recompare: rerun the whole scan-and-diff flow with the dialog's current
         // settings, reusing the cached local+remote roots.  The old provider is
@@ -794,6 +797,9 @@ void Session::openSftp(std::string const& username, bool forceOpen)
 
 void Session::onOpenSession(bool success, std::string const& info)
 {
+    if (impl_->onOpened)
+        std::exchange(impl_->onOpened, {})(success, info);
+
     if (!success)
     {
         // Reconnect path: let SessionArea schedule the next retry.  It keeps

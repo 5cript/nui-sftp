@@ -24,6 +24,10 @@
 #include <nui/frontend/api/timer.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
+#include <nui/frontend/rpc_client.hpp>
+
+#include <cstddef>
+#include <string>
 
 namespace
 {
@@ -69,6 +73,8 @@ struct MainPage::Implementation
     Nui::TimerHandle setupWait;
     NotificationLog notificationLog;
     LanguageChangeListener panelTitlesListener{};
+    /** @brief Only registered with dev tools, see static/source/automation.js. */
+    Nui::RpcClient::AutoUnregister automationConnectUnregister{};
 
     Implementation(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
         : stateHolder{stateHolder}
@@ -113,6 +119,31 @@ struct MainPage::Implementation
         Log::info("MainPage::~Implementation()");
         Notifications::attach(nullptr);
     }
+
+    /**
+     * @brief Lets nuiAutomation.connect open a saved session by name, for smoke tests over CDP.
+     */
+    void registerAutomation()
+    {
+        automationConnectUnregister = Nui::RpcClient::autoRegisterFunction(
+            "Automation::connect",
+            [this](Nui::val request)
+            {
+                const auto id = request["id"].as<std::string>();
+                const auto name = request["name"].as<std::string>();
+                const auto userIndex = static_cast<std::size_t>(request["userIndex"].as<unsigned int>());
+                Log::info("Automation: connecting to '{}' as user {}", name, userIndex);
+                sessionArea.addSession(
+                    name,
+                    userIndex,
+                    [id](bool success, std::string const& info)
+                    {
+                        Nui::val::global("nuiAutomation").call<void>("settle", id, success, info);
+                    }
+                );
+            }
+        );
+    }
 };
 
 MainPage::MainPage(Persistence::StateHolder* stateHolder, FrontendEvents* events, ThemeController& themeController)
@@ -131,6 +162,14 @@ void MainPage::onSetupComplete()
         {
             if (!response.hasOwnProperty("success") || !response["success"].as<bool>())
                 Log::error("FileTracker::stopAll failed");
+        }
+    );
+    Nui::RpcClient::callWithBackChannel(
+        "Main::getDevToolsEnabled",
+        [this](Nui::val response)
+        {
+            if (response.hasOwnProperty("enabled") && response["enabled"].as<bool>())
+                impl_->registerAutomation();
         }
     );
     applyPanelTitles();

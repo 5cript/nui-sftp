@@ -69,6 +69,8 @@ class Session
         std::function<void(Session const*)> onReconnectCancel{};
         /** @brief Overlay Now (skip remaining backoff; on the preserved Session). */
         std::function<void(Session const*)> onReconnectNow{};
+        /** @brief Called once when the session opened or failed to open, with the reason on failure. */
+        std::function<void(bool success, std::string const& info)> onOpened{};
 
         /* Initial visual state */
         bool visible = false;

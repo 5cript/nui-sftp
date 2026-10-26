@@ -8,11 +8,13 @@
 
 #include <script-nui-components/tabs.hpp>
 
+#include <fmt/format.h>
 #include <nui/frontend/api/console.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/attributes.hpp>
 #include <nui/rpc.hpp>
 
+#include <functional>
 #include <list>
 #include <unordered_map>
 #include <variant>
@@ -432,16 +434,22 @@ Session::Params SessionArea::makeSessionParams(
     return params;
 }
 
-void SessionArea::addSession(std::string const& name, std::size_t userIndex)
+void SessionArea::addSession(
+    std::string const& name,
+    std::size_t userIndex,
+    std::function<void(bool success, std::string const& info)> onOpened
+)
 {
     loadState(
         *impl_->stateHolder,
         impl_->confirmDialog,
-        [this, name, userIndex](bool success, Persistence::State const& state)
+        [this, name, userIndex, onOpened = std::move(onOpened)](bool success, Persistence::State const& state)
         {
             if (!success)
             {
                 Log::error("Failed to load state while adding session '{}'", name);
+                if (onOpened)
+                    onOpened(false, "Failed to load the settings");
                 return;
             }
 
@@ -449,6 +457,8 @@ void SessionArea::addSession(std::string const& name, std::size_t userIndex)
             if (iter == end(state.sessions))
             {
                 Log::error("No engine found for name: {}", name);
+                if (onOpened)
+                    onOpened(false, fmt::format("No session named '{}'", name));
                 return;
             }
 
@@ -459,7 +469,7 @@ void SessionArea::addSession(std::string const& name, std::size_t userIndex)
             const auto tabId = impl_->tabs.add(name, true);
             Log::info("Adding session: {} with layout {}. Tab ID: {}", name, impl_->toolbar->selectedLayout(), tabId);
 
-            impl_->sessions.emplace_back(std::make_unique<Session>(makeSessionParams(
+            auto params = makeSessionParams(
                 std::move(engine),
                 state.uiOptions,
                 name,
@@ -467,7 +477,9 @@ void SessionArea::addSession(std::string const& name, std::size_t userIndex)
                 impl_->sessions.size() == 0,
                 tabId,
                 std::nullopt
-            )));
+            );
+            params.onOpened = onOpened;
+            impl_->sessions.emplace_back(std::make_unique<Session>(std::move(params)));
 
             setSelected(tabId);
         },

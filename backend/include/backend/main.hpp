@@ -51,11 +51,14 @@ class Main
   private:
     void registerInitialWarningGetter();
     void registerVersionGetter();
+    void registerDevToolsGetter();
     void registerCommandStore();
     void onRpcAlive();
 
   private:
     std::atomic_bool shuttingDown_;
+    /** @brief Started with --enable-dev-tools, or a debug build. Gates the frontend automation hooks. */
+    bool devToolsEnabled_;
     std::filesystem::path programDir_;
     Persistence::StateHolder stateHolder_;
     struct LoggerSetup
