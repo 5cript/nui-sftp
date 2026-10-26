@@ -19,8 +19,8 @@
  * @brief Copies or moves local items in the LocalOperationQueue, a work step at a time, so it can be held and
  *        canceled and shows progress. Links and junctions are copied as links and never followed.
  *
- * A move renames each item first and copies it only when that is not possible, across file systems or into an
- * existing directory, then removes the source unless something of it could not be copied. A copy onto its own source
+ * A move renames each item first, merges into an existing directory by renaming its items, and copies only what cannot
+ * be renamed, across file systems, then removes the source unless something of it could not be moved. A copy onto its own source
  * duplicates the item next to itself under a free name. A file is written to a hidden sibling and renamed over its
  * destination once complete, so a failed copy never leaves a half written file in place of an existing one.
  */
@@ -140,6 +140,8 @@ class LocalCopyOperation : public Operation
         std::filesystem::path source;
         std::filesystem::path destination;
         std::filesystem::directory_iterator iterator;
+        /** @brief The destination did not exist before, it takes the permissions of the source. */
+        bool created;
     };
 
     struct FileCopy
@@ -172,6 +174,16 @@ class LocalCopyOperation : public Operation
         std::filesystem::path const& destination,
         Utility::NoFollowKind kind,
         bool replace
+    );
+    /**
+     * @brief Moves the item @p source of @p kind within a merged directory by renaming it, unless a directory waits
+     *        at @p destination to be merged with.
+     * @return False when the item must be copied instead.
+     */
+    bool renameItem(
+        std::filesystem::path const& source,
+        std::filesystem::path const& destination,
+        Utility::NoFollowKind kind
     );
     void startFile(std::filesystem::path const& source, std::filesystem::path const& destination);
     bool continueFile(std::chrono::steady_clock::time_point deadline);
