@@ -805,7 +805,7 @@ void LocalSideModel::copyOrMove(std::vector<SharedData::LocalCopyEntry> candidat
     checkDestinations<SharedData::LocalCopyEntry>(
         std::move(checked),
         {
-            .overwriteHeaderText = language->get("localSideModel", "fileAlreadyExistsOverwriteHeader"),
+            .overwriteHeaderText = language->get("localSideModel", "copyOverwriteHeader"),
             .overwriteText = language->get("localSideModel", "copyOverwriteText"),
         },
         std::move(enqueue)

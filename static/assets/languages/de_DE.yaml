@@ -174,6 +174,7 @@ localSideModel:
   dropMultipleConfirmText: "Die folgenden {} Elemente nach {} verschieben oder kopieren?"
   moveButton: "Verschieben"
   copyButton: "Kopieren"
+  copyOverwriteHeader: "Vorhandenes Element ersetzen?"
   copyOverwriteText: "Ersetzen dieses Elements erlauben? Ein Verzeichnis wird mit dem vorhandenen zusammengeführt, gleichnamige Dateien darin werden ersetzt."
   copyFailedTitle: "Kopieren oder Verschieben fehlgeschlagen"
   copyIntoItself: "'{}' kann nicht in sich selbst kopiert oder verschoben werden."
