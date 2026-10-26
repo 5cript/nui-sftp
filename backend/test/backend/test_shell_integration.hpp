@@ -28,6 +28,7 @@
 #    include <string>
 #    include <string_view>
 #    include <unordered_map>
+#    include <utility>
 #    include <vector>
 
 extern char** environ;
@@ -108,8 +109,21 @@ namespace Test
          */
         void write(std::string_view data)
         {
+            if (release_)
+                linesTypedAhead_ += static_cast<std::size_t>(std::ranges::count(data, '\n'));
             if (!pty_->write(data))
                 ADD_FAILURE() << "The pty is closed, " << data.size() << " byte(s) of input were dropped.";
+        }
+
+        /**
+         * @brief Keeps the shell from starting until the test first waits for it, what it wrote until then is
+         *        typeahead. @p release lets the shell start.
+         */
+        void holdStartUntilFirstWait(std::function<void()> release)
+        {
+            release_ = std::move(release);
+            echoesFrom_ = output_.size();
+            linesTypedAhead_ = 0;
         }
 
         /**
@@ -117,16 +131,8 @@ namespace Test
          */
         bool waitUntil(std::function<bool()> const& done, std::chrono::milliseconds timeout = std::chrono::seconds{10})
         {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            while (!done())
-            {
-                if (std::chrono::steady_clock::now() > deadline)
-                    return false;
-                if (context_.stopped())
-                    context_.restart();
-                context_.run_for(std::chrono::milliseconds{10});
-            }
-            return true;
+            releaseStart();
+            return pumpUntil(done, timeout);
         }
 
         std::string const& output() const
@@ -157,30 +163,6 @@ namespace Test
         }
 
         /**
-         * @brief Pumps the pty until no output arrived for @p quiet, e.g. after a prompt redraw.
-         */
-        bool waitForQuiet(std::chrono::milliseconds quiet, std::chrono::milliseconds timeout = std::chrono::seconds{5})
-        {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            auto lastSize = output_.size();
-            auto lastChange = std::chrono::steady_clock::now();
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                if (context_.stopped())
-                    context_.restart();
-                context_.run_for(std::chrono::milliseconds{10});
-                if (output_.size() != lastSize)
-                {
-                    lastSize = output_.size();
-                    lastChange = std::chrono::steady_clock::now();
-                }
-                else if (std::chrono::steady_clock::now() - lastChange >= quiet)
-                    return true;
-            }
-            return false;
-        }
-
-        /**
          * @brief Saves the raw output and the payloads this double found, for the headless xterm
          *        test to replay through the real parser (static/test/osc_handler.test.mjs).
          */
@@ -197,6 +179,51 @@ namespace Test
         }
 
       private:
+        /**
+         * @brief Runs the read handlers that are due, waiting at most a moment for the next one.
+         */
+        void pump()
+        {
+            if (context_.stopped())
+                context_.restart();
+            context_.run_one_for(std::chrono::milliseconds{10});
+            context_.poll();
+        }
+
+        bool pumpUntil(std::function<bool()> const& done, std::chrono::milliseconds timeout)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + timeout;
+            while (!done())
+            {
+                if (std::chrono::steady_clock::now() > deadline)
+                    return false;
+                pump();
+            }
+            return true;
+        }
+
+        /**
+         * @brief Lets a held shell start once its tty echoed every line typed ahead, they are all in it then.
+         */
+        void releaseStart()
+        {
+            if (!release_)
+                return;
+            const auto release = std::exchange(release_, {});
+            const auto echoed = pumpUntil(
+                [this]() {
+                    std::size_t lines = 0;
+                    for (auto at = output_.find("\r\n", echoesFrom_); at != std::string::npos;
+                         at = output_.find("\r\n", at + 2))
+                        ++lines;
+                    return lines >= linesTypedAhead_;
+                },
+                std::chrono::seconds{10}
+            );
+            EXPECT_TRUE(echoed) << "the tty did not echo the " << linesTypedAhead_ << " line(s) typed ahead";
+            release();
+        }
+
         /**
          * @brief Answers "ESC [ c" like a terminal. fish 4 asks at startup and waits for the answer;
          *        xterm.js gives it in the app, so the test pty has to as well.
@@ -224,6 +251,9 @@ namespace Test
         std::vector<std::string> chunks_{};
         OscScanner scanner_{ShellIntegration::oscCode};
         std::string queryScan_{};
+        std::function<void()> release_{};
+        std::size_t echoesFrom_{0};
+        std::size_t linesTypedAhead_{0};
     };
 
 
@@ -361,12 +391,24 @@ namespace Test
             {
                 arguments.push_back("-e");
                 arguments.push_back(fmt::format("{}={}", key, value));
+                // The sh of the bash images sets a PS1 of its own and does not export it.
+                if (key == "PS1")
+                {
+                    arguments.push_back("-e");
+                    arguments.push_back(fmt::format("NUI_PS1={}", value));
+                }
             }
             // The marker tells the test that the docker client attached and switched our pty to raw
             // mode. What the test writes next is typeahead in the container's pty while the shell is
-            // still starting, exactly what the app's first write meets.
+            // still starting, exactly what the app's first write meets. The shell starts on SIGUSR1,
+            // which the test sends once the typeahead is in.
             arguments.push_back(launch.image);
-            arguments.insert(arguments.end(), {"sh", "-c", R"(printf "nui-ready\n"; sleep 0.3; exec "$0" "$@")"});
+            arguments.insert(
+                arguments.end(),
+                {"sh",
+                 "-c",
+                 R"(trap 'released=1' USR1; export PS1="$NUI_PS1"; unset NUI_PS1; printf "nui-ready\n"; while [ -z "$released" ]; do sleep 0.01; done; exec "$0" "$@")"}
+            );
             arguments.push_back(launch.shell);
             arguments.insert(arguments.end(), launch.arguments.begin(), launch.arguments.end());
 
@@ -399,6 +441,9 @@ namespace Test
                 std::chrono::seconds{30}
             )) << "the container never started:\n"
                << shell_->output();
+            shell_->holdStartUntilFirstWait([name = containerName_]() {
+                Docker::run(fmt::format("docker kill --signal=USR1 {}", Docker::quote(name)));
+            });
         }
 
         std::string containerName_{};
@@ -421,6 +466,19 @@ namespace Test
     const std::vector<std::string> bashArguments{"--norc", "--noprofile", "-i"};
     const std::vector<std::string> zshArguments{"-f", "-i"};
     const std::vector<std::string> fishArguments{"--no-config", "-i"};
+    constexpr std::string_view interruptedMarker = "[nui-interrupted]";
+    /// fish ignores PS1, this prompt is the one the other shells show. Unlike them it shows nothing after a Ctrl-C
+    /// on an empty line, the marker tells that it handled the signal.
+    const std::vector<std::string> fishArgumentsWithPrompt{
+        "--no-config",
+        "--init-command",
+        fmt::format(
+            "function fish_prompt; printf '%s' '{}'; end; function nui_test_interrupted --on-signal SIGINT; printf '%s' '{}'; end",
+            prompt,
+            interruptedMarker
+        ),
+        "-i"
+    };
     const Settings historySettings{{"PROMPT_COMMAND", "true"}, {"HISTCONTROL", "ignoreboth"}};
 
     struct ShellConfiguration
@@ -464,7 +522,7 @@ namespace Test
             {"HostBashWithPromptCommand", "bash", bashArguments, remote, {{"PROMPT_COMMAND", "true; :"}}},
             {"HostBashIgnoreBoth", "bash", bashArguments, remote, historySettings},
             {"HostZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), carried(ShellKind::Zsh)},
-            {"HostFishLocal", "fish", fishArguments, local(ShellKind::Fish), carried(ShellKind::Fish)},
+            {"HostFishLocal", "fish", fishArgumentsWithPrompt, local(ShellKind::Fish), carried(ShellKind::Fish)},
         };
         for (auto const image : DockerShells::bashImages)
         {
@@ -475,7 +533,9 @@ namespace Test
         const std::string shells{DockerShells::shellsImage};
         configurations.push_back({"AlpineZshLocal", "zsh", zshArguments, local(ShellKind::Zsh), carried(ShellKind::Zsh), shells});
         configurations.push_back({"AlpineZshRemote", "zsh", zshArguments, remote, {}, shells});
-        configurations.push_back({"AlpineFishLocal", "fish", fishArguments, local(ShellKind::Fish), carried(ShellKind::Fish), shells});
+        configurations.push_back(
+            {"AlpineFishLocal", "fish", fishArgumentsWithPrompt, local(ShellKind::Fish), carried(ShellKind::Fish), shells}
+        );
         return configurations;
     }
 
@@ -556,6 +616,54 @@ namespace Test
             return sync();
         }
 
+        /**
+         * @brief How often the prompt was shown so far.
+         */
+        std::size_t promptsShown() const
+        {
+            std::size_t shown = 0;
+            auto const& output = shell_->output();
+            for (auto at = output.find(prompt); at != std::string::npos; at = output.find(prompt, at + prompt.size()))
+                ++shown;
+            return shown;
+        }
+
+        /**
+         * @brief Pumps until the prompt is shown after @p token, the last word the shell echoed.
+         */
+        void awaitPromptAfter(std::string_view token)
+        {
+            EXPECT_TRUE(shell_->waitUntil([&]() {
+                auto const& output = shell_->output();
+                const auto echoed = output.rfind(token);
+                return echoed != std::string::npos && output.find(prompt, echoed) != std::string::npos;
+            })) << "no prompt after " << token << ", output tail:\n"
+                << tail(shell_->output());
+        }
+
+        /**
+         * @brief Pumps until the prompt was shown more than @p shown times.
+         */
+        void awaitPromptAgain(std::size_t shown)
+        {
+            EXPECT_TRUE(shell_->waitUntil([&]() {
+                return promptsShown() > shown;
+            })) << "the prompt was not shown again, output tail:\n"
+                << tail(shell_->output());
+        }
+
+        /**
+         * @brief Pumps until the shell handled a Ctrl-C written when the output was @p outputSize long and the prompt
+         *        shown @p shown times: it shows its prompt again, fish its interrupted marker.
+         */
+        void awaitInterruptHandled(std::size_t outputSize, std::size_t shown)
+        {
+            EXPECT_TRUE(shell_->waitUntil([&]() {
+                return promptsShown() > shown || shell_->output().find(interruptedMarker, outputSize) != std::string::npos;
+            })) << "the Ctrl-C was not handled, output tail:\n"
+                << tail(shell_->output());
+        }
+
         static std::string tail(std::string const& text)
         {
             return text.size() > 1500 ? text.substr(text.size() - 1500) : text;
@@ -611,10 +719,18 @@ namespace Test
         EXPECT_EQ(commandsFor("   \n"), Commands{}) << "blank line";
         // sync() returns at preexec, while the marker still runs. fish keeps isig on, so a Ctrl-C
         // before its prompt is back is a SIGINT that skips the preexec hooks of the next command.
-        shell_->waitForQuiet(std::chrono::milliseconds{400});
+        awaitPromptAfter(fmt::format("nui-sync-{}", syncCount_));
+        // fish asks the terminal before each prompt and reads the answer later, a Ctrl-C (isig) would flush an
+        // answer still unread and leave fish waiting for it. Every shell redraws its prompt on Ctrl-L, by then it
+        // read what came before.
+        const auto shownBeforeClear = promptsShown();
+        shell_->write("\x0c");
+        awaitPromptAgain(shownBeforeClear);
         // Line editors flush typeahead on Ctrl-C, so the next line waits until the redraw is done.
+        const auto outputSize = shell_->output().size();
+        const auto shown = promptsShown();
         shell_->write("echo never\x03");
-        shell_->waitForQuiet(std::chrono::milliseconds{400});
+        awaitInterruptHandled(outputSize, shown);
         EXPECT_EQ(sync(), Commands{}) << "line abandoned with Ctrl-C";
         EXPECT_EQ(commandsFor("echo never\x15"), Commands{}) << "line cleared with Ctrl-U";
     }
@@ -922,7 +1038,12 @@ namespace Test
         ASSERT_TRUE(shell_->waitUntil([&]() {
             return shell_->output().find("nui-marker-42\r\n") != std::string::npos;
         })) << shell_->output();
-        shell_->waitForQuiet(std::chrono::milliseconds{300});
+        // What the shell shows after the marker, its prompt included, comes before the output of the next command.
+        const auto isFish = GetParam().kind == ShellIntegration::ShellKind::Fish;
+        shell_->write(isFish ? "echo nui-end-(math 1 + 1)\n" : "echo nui-end-$((1 + 1))\n");
+        ASSERT_TRUE(shell_->waitUntil([&]() {
+            return shell_->output().find("nui-end-2\r\n") != std::string::npos;
+        })) << shell_->output();
 
         const auto check = [&](std::string const& filtered, std::string const& how) {
             const auto visible = visibleText(filtered);
