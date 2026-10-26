@@ -223,6 +223,11 @@ Worth knowing:
   `chrome://inspect`. Extra Chromium switches go into `NUI_CEF_ARGUMENTS`, for
   example `--ozone-platform=headless` for runs without a display.
 
+- With DevTools on, the page has `nuiAutomation.connect(name, userIndex = 0)`,
+  which opens the saved session `name` and resolves `{success, info}` once it
+  opened or failed (also for an unknown name). Release builds without
+  `--enable-dev-tools` do not register it and the call rejects.
+
 - With the native engine, tell the debugger to ignore `SIGUSR1` and `SIGXCPU`,
   otherwise the WebKit and JS runtimes will repeatedly trip it. For gdb:
 
