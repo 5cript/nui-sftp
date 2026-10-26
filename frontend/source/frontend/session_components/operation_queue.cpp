@@ -840,7 +840,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
                 added.scanPhase.value_or(false)
             );
         }
-        else if (added.type == SharedData::OperationType::LocalCopy || added.type == SharedData::OperationType::LocalMove)
+        else if (SharedData::isLocalTransfer(added.type))
         {
             return std::make_unique<DisplayedBulkOperation>(
                 added.operationId,
@@ -1078,8 +1078,7 @@ void OperationQueue::onLocalCopyProgress(SharedData::BulkProgress const& progres
         Log::error("Received local copy progress for unknown operation id: {}", progress.operationId.value());
         return;
     }
-    if (operation->type() != SharedData::OperationType::LocalCopy &&
-        operation->type() != SharedData::OperationType::LocalMove)
+    if (!SharedData::isLocalTransfer(operation->type()))
     {
         Log::error(
             "Received local copy progress for operation id: {} which is no local copy", progress.operationId.value()

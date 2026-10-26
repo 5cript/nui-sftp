@@ -26,10 +26,18 @@ namespace SharedData
     )
 
     /**
+     * @brief True for a local copy or move.
+     */
+    inline bool isLocalTransfer(OperationType type)
+    {
+        return type == OperationType::LocalCopy || type == OperationType::LocalMove;
+    }
+
+    /**
      * @brief True for the operations of the local operation queue, which runs apart from the sessions.
      */
     inline bool isLocalOperation(OperationType type)
     {
-        return type == OperationType::LocalDelete || type == OperationType::LocalCopy || type == OperationType::LocalMove;
+        return type == OperationType::LocalDelete || isLocalTransfer(type);
     }
 }
