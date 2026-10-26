@@ -288,6 +288,7 @@ localSideModel:
   dropMultipleConfirmText: "Move or copy the following {} items to {}?"
   moveButton: "Move"
   copyButton: "Copy"
+  copyOverwriteHeader: "Replace Existing Item?"
   copyOverwriteText: "Allow replacing this item? A directory is merged with the existing one, files in it with the same name are replaced."
   copyFailedTitle: "Copy or Move Failed"
   copyIntoItself: "'{}' cannot be copied or moved into itself."
