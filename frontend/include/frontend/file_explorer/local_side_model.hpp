@@ -99,12 +99,13 @@ class LocalSideModel
 
     /**
      * @brief Moves or copies @p items into the listed directory, or its subdirectory @p subDir, asking only about
-     *        destinations that exist.
+     *        destinations that exist. @p onQueued runs once the backend queued them.
      */
     void onPasteOnSide(
         std::vector<NuiFileExplorer::Item> const& items,
         std::optional<std::string> const& subDir,
-        NuiFileExplorer::DropAction action
+        NuiFileExplorer::DropAction action,
+        std::function<void()> onQueued
     ) override;
 
     void onRename(NuiFileExplorer::Item const& item) override;
@@ -180,9 +181,13 @@ class LocalSideModel
     /**
      * @brief Copies or moves @p candidates in the local operation queue after asking about each existing
      *        destination. A move of an item to where it is does nothing, a copy of it is put next to it under a free
-     *        name.
+     *        name. @p onQueued runs once the backend queued them.
      */
-    void copyOrMove(std::vector<SharedData::LocalCopyEntry> candidates, NuiFileExplorer::DropAction action);
+    void copyOrMove(
+        std::vector<SharedData::LocalCopyEntry> candidates,
+        NuiFileExplorer::DropAction action,
+        std::function<void()> onQueued = {}
+    );
 
     /**
      * @brief Shows why copying or moving local items did not start.

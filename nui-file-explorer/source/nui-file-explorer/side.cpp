@@ -186,18 +186,9 @@ namespace NuiFileExplorer
         }
         if (commandKey && event.key() == "v")
         {
-            // A single selected directory that is not one of the items takes them.
-            auto const* clipboard = pasteableClipboard();
+            // A single selected directory takes the items.
             const auto selectedItems = this->selectedItems();
-            const auto intoSelection = clipboard != nullptr && selectedItems.size() == 1 &&
-                selectedItems.front().isDirectoryLike() &&
-                std::ranges::none_of(
-                                           clipboard->items,
-                                           [&selectedItems](Item const& item)
-                                           {
-                                               return item.fullPath == selectedItems.front().fullPath;
-                                           }
-                );
+            const auto intoSelection = selectedItems.size() == 1 && selectedItems.front().isDirectoryLike();
             pasteClipboard(intoSelection ? std::optional{selectedItems.front()} : std::nullopt);
             return;
         }
@@ -233,13 +224,14 @@ namespace NuiFileExplorer
 
     SideImplementation::Clipboard* Side::pasteableClipboard()
     {
-        auto* const otherClipboard = impl_->otherSide ? &impl_->otherSide->impl_->clipboard : nullptr;
-        if (otherClipboard != nullptr && !otherClipboard->items.empty() &&
-            otherClipboard->sequence > impl_->clipboard.sequence)
+        auto* const ownClipboard =
+            !impl_->clipboard.items.empty() && impl_->model->acceptsDropOnSide() ? &impl_->clipboard : nullptr;
+        auto* const otherClipboard = impl_->otherSide && !impl_->otherSide->impl_->clipboard.items.empty()
+            ? &impl_->otherSide->impl_->clipboard
+            : nullptr;
+        if (otherClipboard != nullptr && (ownClipboard == nullptr || otherClipboard->sequence > ownClipboard->sequence))
             return otherClipboard;
-        if (impl_->clipboard.items.empty() || !impl_->model->acceptsDropOnSide())
-            return nullptr;
-        return &impl_->clipboard;
+        return ownClipboard;
     }
 
     void Side::pasteClipboard(std::optional<Item> const& into)
@@ -250,19 +242,33 @@ namespace NuiFileExplorer
         auto& clipboard = *clipboardPointer;
         const auto fromOtherSide = &clipboard != &impl_->clipboard;
 
-        const auto target =
-            into ? transferTargetOf(*into) : std::expected<std::optional<std::string>, Error>{std::nullopt};
+        // A directory that is one of the items cannot take them, the directory this side shows does.
+        const auto intoOneOfThem = into && std::ranges::any_of(
+                                               clipboard.items,
+                                               [&into](Item const& item)
+                                               {
+                                                   return item.fullPath == into->fullPath;
+                                               }
+                                           );
+        const auto target = into && !intoOneOfThem ? transferTargetOf(*into)
+                                                   : std::expected<std::optional<std::string>, Error>{std::nullopt};
         if (!target)
             return impl_->model->onError(target.error());
 
         if (fromOtherSide)
             return impl_->otherSide->model().onTransfer(clipboard.items, *target);
-        const auto items = clipboard.items;
         const auto action = clipboard.cut ? DropAction::Move : DropAction::Copy;
-        // Cut items are gone from where they were, they can be pasted only once.
-        if (clipboard.cut)
-            clipboard = {};
-        impl_->model->onPasteOnSide(items, *target, action);
+        impl_->model->onPasteOnSide(
+            clipboard.items,
+            *target,
+            action,
+            [impl = impl_.get(), cut = clipboard.cut, sequence = clipboard.sequence]()
+            {
+                // Cut items are gone from where they were, they can be pasted only once.
+                if (cut && impl->clipboard.sequence == sequence)
+                    impl->clipboard = {};
+            }
+        );
     }
 
     Nui::ElementRenderer Side::operator()()

@@ -154,11 +154,13 @@ namespace NuiFileExplorer
          * @brief Items cut (@p action Move) or copied on this side were pasted on it, see @ref acceptsDropOnSide.
          *
          * @param subDir Where the items go below the directory this side shows, as for @ref onTransfer.
+         * @param onQueued Called once the items are on their way, a cut is then taken off the clipboard.
          */
         virtual void onPasteOnSide(
             std::vector<Item> const& /*items*/,
             std::optional<std::string> const& /*subDir*/,
-            DropAction /*action*/
+            DropAction /*action*/,
+            std::function<void()> /*onQueued*/
         )
         {}
 

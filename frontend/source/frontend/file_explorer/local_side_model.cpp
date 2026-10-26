@@ -735,16 +735,21 @@ void LocalSideModel::onDropOnSide(
 void LocalSideModel::onPasteOnSide(
     std::vector<NuiFileExplorer::Item> const& items,
     std::optional<std::string> const& subDir,
-    NuiFileExplorer::DropAction action
+    NuiFileExplorer::DropAction action,
+    std::function<void()> onQueued
 )
 {
     auto candidates = localCopyCandidates(items, subDir);
     if (!candidates)
         return showPathRefused(language->get("localSideModel", "copyFailedTitle"), candidates.error());
-    copyOrMove(*std::move(candidates), action);
+    copyOrMove(*std::move(candidates), action, std::move(onQueued));
 }
 
-void LocalSideModel::copyOrMove(std::vector<SharedData::LocalCopyEntry> candidates, NuiFileExplorer::DropAction action)
+void LocalSideModel::copyOrMove(
+    std::vector<SharedData::LocalCopyEntry> candidates,
+    NuiFileExplorer::DropAction action,
+    std::function<void()> onQueued
+)
 {
     using NuiFileExplorer::DropAction;
 
@@ -775,7 +780,9 @@ void LocalSideModel::copyOrMove(std::vector<SharedData::LocalCopyEntry> candidat
     }
 
     auto enqueue = lifetime_.guarded(
-        [this, duplicates = std::move(duplicates), action](std::vector<SharedData::LocalCopyEntry> accepted)
+        [this, duplicates = std::move(duplicates), action, onQueued = std::move(onQueued)](
+            std::vector<SharedData::LocalCopyEntry> accepted
+        )
         {
             accepted.insert(accepted.end(), duplicates.begin(), duplicates.end());
             if (accepted.empty())
@@ -788,10 +795,14 @@ void LocalSideModel::copyOrMove(std::vector<SharedData::LocalCopyEntry> candidat
             operationQueue_->enqueueLocalCopy(
                 {.entries = std::move(accepted), .move = action == DropAction::Move},
                 lifetime_.guarded(
-                    [this](std::optional<std::string> const& error)
+                    [this, onQueued](std::optional<std::string> const& error)
                     {
                         if (!error)
+                        {
+                            if (onQueued)
+                                onQueued();
                             return;
+                        }
                         const auto reason = language->translate(*error);
                         Log::error("Failed to queue the copy of local items: {}", reason);
                         showCopyFailed(reason);
