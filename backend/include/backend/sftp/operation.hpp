@@ -11,8 +11,6 @@
 #include <ssh/sftp_session.hpp>
 #include <log/log.hpp>
 
-#include <ids/ids.hpp>
-
 #include <libssh/sftp.h>
 
 #include <expected>
@@ -24,9 +22,7 @@
 class Operation
 {
   public:
-    Operation()
-        : id_{Ids::generateOperationId()}
-    {}
+    Operation() = default;
     Operation(Operation const&) = delete;
     Operation& operator=(Operation const&) = delete;
     Operation(Operation&&) = delete;
@@ -59,11 +55,6 @@ class Operation
             Log::error("Operation: Cannot perform task on strand, no processing strand available.");
             return false;
         }
-    }
-
-    Ids::OperationId id() const
-    {
-        return id_;
     }
 
     using OperationState = SharedData::OperationState;
@@ -291,7 +282,4 @@ class Operation
     std::optional<Error> error_{std::nullopt};
     /** @brief Set by the queue before the first work step, see setWake. */
     std::function<void()> wake_{};
-
-  private:
-    Ids::OperationId id_;
 };
