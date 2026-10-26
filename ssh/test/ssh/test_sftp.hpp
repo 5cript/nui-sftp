@@ -807,6 +807,9 @@ namespace SecureShell::Test
         std::array<char, 1024> buffer{};
         std::atomic<SignedSize> readCount{0};
         // The first piece waits for the test, the whole file would arrive before it could act otherwise.
+        // The test waits for that piece too, a piece still in flight when it acts would arrive after it looked.
+        std::promise<void> firstPieceArrived{};
+        auto firstPiece = firstPieceArrived.get_future();
         std::promise<void> testActed{};
         const auto acted = testActed.get_future().share();
 
@@ -814,10 +817,13 @@ namespace SecureShell::Test
             static_cast<SignedSize>(totalSize),
             buffer.data(),
             static_cast<SignedSize>(buffer.size()),
-            [&readCount, acted](SignedSize bytesRead)
+            [&readCount, &firstPieceArrived, acted](SignedSize bytesRead)
             {
                 if (readCount.fetch_add(bytesRead) == 0)
+                {
+                    firstPieceArrived.set_value();
                     acted.wait_for(5s);
+                }
                 return true;
             }
         );
@@ -825,6 +831,7 @@ namespace SecureShell::Test
         auto ctxResult = ctxFut.get();
         ASSERT_TRUE(ctxResult.has_value());
         auto ctx = std::move(ctxResult).value();
+        ASSERT_EQ(firstPiece.wait_for(replyTimeout), std::future_status::ready);
 
         ctx->pause(true);
         testActed.set_value();
@@ -864,6 +871,9 @@ namespace SecureShell::Test
         std::array<char, 1024> buffer{};
         std::atomic<SignedSize> readCount{0};
         // The first piece waits for the test, the whole file would arrive before it could act otherwise.
+        // The test waits for that piece too, a piece still in flight when it acts would arrive after it looked.
+        std::promise<void> firstPieceArrived{};
+        auto firstPiece = firstPieceArrived.get_future();
         std::promise<void> testActed{};
         const auto acted = testActed.get_future().share();
 
@@ -871,10 +881,13 @@ namespace SecureShell::Test
             static_cast<SignedSize>(totalSize),
             buffer.data(),
             static_cast<SignedSize>(buffer.size()),
-            [&readCount, acted](SignedSize bytesRead)
+            [&readCount, &firstPieceArrived, acted](SignedSize bytesRead)
             {
                 if (readCount.fetch_add(bytesRead) == 0)
+                {
+                    firstPieceArrived.set_value();
                     acted.wait_for(5s);
+                }
                 return true;
             }
         );
@@ -882,6 +895,7 @@ namespace SecureShell::Test
         auto ctxResult = ctxFut.get();
         ASSERT_TRUE(ctxResult.has_value());
         auto ctx = std::move(ctxResult).value();
+        ASSERT_EQ(firstPiece.wait_for(replyTimeout), std::future_status::ready);
 
         ctx->pause(true);
         ctx->cancel();
