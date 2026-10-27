@@ -174,6 +174,7 @@ struct DisplayedBulkOperation
             }(
                 totalProgressBar_()
             ),
+            cancelNote(totalProgressBar_),
             div{
                 class_ = "opq-bulk-files"
             }(
@@ -203,7 +204,9 @@ struct DisplayedBulkOperation
             }
             if (totalProgressBar_.textMode() == ScriptNuiComponents::ProgressBarTextMode::Percent)
                 totalProgressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
-            totalProgressBar_.setZeroAsComplete();
+            // A cancelled bar stays where it stopped, one that never started stays empty.
+            if (newState != SharedData::OperationState::Canceled)
+                totalProgressBar_.setZeroAsComplete();
             inFlightRows_.clear();
         }
     }
