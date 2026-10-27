@@ -18,6 +18,7 @@ target_link_libraries(
     nui-sftp-frontend-test
     PUBLIC
         shared-data
+        nui-events
         GTest::gtest
         GTest::gmock_main
         GTest::gtest_main
