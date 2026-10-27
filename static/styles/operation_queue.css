@@ -324,30 +324,30 @@ header.opq-controls {
     }
 }
 
-/* Stop, grey until hovered, with the menu of the other stop options next to it as one control. */
-.opq-stop-split,
-.opq-stop-btn.opq-stop-single {
-    border: 1px solid var(--opq-border-faint);
-    border-radius: 8px;
-}
-
-.opq-stop-split {
+/* Cancel, grey until hovered, with the menu of the other cancel options next to it. */
+.opq-cancel-split {
     display: inline-flex;
-    overflow: hidden;
+    align-items: center;
 }
 
-.opq-stop-btn,
-.opq-stop-more {
+.opq-cancel-main,
+.opq-cancel-more {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    height: 24px;
-    padding: 0 8px;
+    height: 26px;
+    padding: 0 8px 0 4px;
     border: 0;
+    border-radius: 13px;
     background: transparent;
-    color: var(--color);
+    color: var(--opq-muted);
     font-size: 12px;
     cursor: pointer;
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
 
     &:hover {
         background: rgba(255, 107, 107, 0.16);
@@ -355,20 +355,19 @@ header.opq-controls {
     }
 }
 
-.opq-stop-more {
-    padding: 0 4px;
-    border-left: 1px solid var(--opq-border-faint);
-    color: var(--opq-muted);
-
-    &:hover {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--color);
-    }
+.opq-cancel-more {
+    padding: 0 3px;
+    border-radius: 6px;
 
     svg {
         width: 10px;
         height: 10px;
         fill: currentColor;
+    }
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--color);
     }
 }
 
@@ -377,14 +376,19 @@ header.opq-controls {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
     padding: 0;
     border: 0;
     border-radius: 6px;
     background: transparent;
     color: var(--opq-muted);
     cursor: pointer;
+
+    svg {
+        width: 15px;
+        height: 15px;
+    }
 
     &:hover {
         background: rgba(255, 255, 255, 0.06);
@@ -412,15 +416,21 @@ header.opq-controls {
     }
 }
 
-/* Below this width the queue shows stop as its icon alone. */
+/* Below this width the queue shows cancel as its icon alone. */
 @container operation-queue (max-width: 640px) {
-    .opq-stop-label {
+    .opq-cancel-label {
         display: none;
     }
 
-    .opq-stop-btn {
-        padding: 0 7px;
+    .opq-cancel-main {
+        padding: 0 5px;
     }
+}
+
+/* The shine says data is moving: only on a running card of a queue that is not paused. */
+.opq-card:not(.opq-running) .script-nui-progress-bar > .script-nui-progress-bar-shine,
+.operation-queue[data-paused] .script-nui-progress-bar > .script-nui-progress-bar-shine {
+    display: none;
 }
 
 .opq-kept-note {

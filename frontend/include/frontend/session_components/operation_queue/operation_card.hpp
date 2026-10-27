@@ -14,8 +14,8 @@
 #include <frontend/components/svg/scan.hpp>
 #include <frontend/components/svg/pause.hpp>
 #include <frontend/components/svg/play.hpp>
-#include <frontend/components/svg/stop.hpp>
-#include <frontend/components/svg/dismiss.hpp>
+#include <frontend/components/svg/cancel.hpp>
+#include <frontend/components/svg/delete.hpp>
 #include <frontend/components/svg/scan_animated.hpp>
 #include <frontend/components/icon_panel.hpp>
 
@@ -134,6 +134,8 @@ class OperationCard : public OperationCardInterface
                         return keptPartialFiles_.value() ? "opq-canceled opq-kept" : "opq-canceled";
                     else if (state == SharedData::OperationState::PartialSuccess)
                         return "opq-partial-success";
+                    else if (state == SharedData::OperationState::Running)
+                        return "opq-running";
                     else
                         return "";
                 }(), !isSubgridOperation ? "opq-card-gridspan": "opq-card-subgrid");
@@ -396,8 +398,8 @@ class OperationCard : public OperationCardInterface
 
     /**
      * @brief The buttons at the end of the card: continue and discard for a transfer that kept its partial files, a
-     *        quiet remove for an ended operation, stop otherwise, with the stop menu next to it for a transfer that
-     *        deletes its partial files. The label of stop hides in a narrow queue, see operation_queue.css.
+     *        quiet remove for an ended operation, cancel otherwise, with the cancel menu next to it for a transfer that
+     *        deletes its partial files. The label of cancel hides in a narrow queue, see operation_queue.css.
      */
     Nui::ElementRenderer actions() const
     {
@@ -406,10 +408,10 @@ class OperationCard : public OperationCardInterface
         using Nui::Elements::div;
         using Nui::Elements::span;
 
-        const auto stopContent = [](){
+        const auto cancelContent = [](){
             return fragment(
-                Svgs::stop(),
-                span{class_ = "opq-stop-label"}(language->get("operationQueue", "stop"))
+                Svgs::cancel(),
+                span{class_ = "opq-cancel-label"}(language->get("operationQueue", "cancel"))
             );
         };
 
@@ -449,22 +451,22 @@ class OperationCard : public OperationCardInterface
                 onClick = [this](){
                     cancel();
                 }
-            }(Svgs::dismiss());
+            }(Svgs::deleteIcon());
         }
         if (deletesPartialFilesOnCancel_.value().value_or(false))
         {
             return div{
-                class_ = "opq-stop-split"
+                class_ = "opq-cancel-split"
             }(
                 button{
-                    class_ = "opq-stop-btn",
+                    class_ = "opq-cancel-main",
                     Nui::Attributes::title = language->get("operationQueue", "cancelDeletingPartialFiles"),
                     onClick = [this](){
                         cancel();
                     }
-                }(stopContent()),
+                }(cancelContent()),
                 button{
-                    class_ = "opq-stop-more",
+                    class_ = "opq-cancel-more",
                     id = cancelMenuAnchorId(),
                     Nui::Attributes::title = language->get("operationQueue", "moreCancelOptions"),
                     "aria-label"_attr = language->get("operationQueue", "moreCancelOptions"),
@@ -477,14 +479,14 @@ class OperationCard : public OperationCardInterface
             );
         }
         return button{
-            class_ = "opq-stop-btn opq-stop-single",
+            class_ = "opq-cancel-main",
             Nui::Attributes::title = deletesPartialFilesOnCancel_.value() == false
                 ? language->get("operationQueue", "cancelKeepsPartialFiles")
-                : language->get("operationQueue", "stop"),
+                : language->get("operationQueue", "cancel"),
             onClick = [this](){
                 cancel();
             }
-        }(stopContent());
+        }(cancelContent());
         // clang-format on
     }
 
