@@ -128,6 +128,11 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
                 .numberBase = decltype(SftpOptions::UploadOptions::customDirectoryPermissions)::NumberBase::Octal,
             }
         },
+        .doCleanup{
+            uploadFactory_.identity({"sftpOptions", "uploadOptions", "doCleanup"}),
+            onChange,
+            nulloptReset(uploadOptions.doCleanup, onChange),
+        },
         .symlinkHandling{
             std::vector<Persistence::SymlinkHandling>{
                 Persistence::SymlinkHandling::AsSymlink,
@@ -195,6 +200,8 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
     downloadOptions.tryContinue.fallback(Persistence::defaultTryContinue);
     uploadOptions.tryContinue.fallback(Persistence::defaultTryContinue);
     downloadOptions.markAsDownloaded.fallback(Persistence::defaultMarkAsDownloaded);
+    downloadOptions.doCleanup.fallback(Persistence::defaultDoCleanup);
+    uploadOptions.doCleanup.fallback(Persistence::defaultDoCleanup);
 }
 
 void SftpOptions::applyToState(Persistence::SftpOptions& state) const
@@ -227,20 +234,26 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
 
     if (uploadOptionsEngaged.value())
     {
-        state.uploadOptions = Persistence::UploadOptions{Persistence::CommonTransferOptions{
-            .tempFileSuffix = uploadOptions.tempFileSuffix.value(),
-            .mayOverwrite = uploadOptions.mayOverwrite.value(),
-            .tryContinue = uploadOptions.tryContinue.value(),
-            .inheritPermissions = uploadOptions.inheritPermissions.value(),
-            .customFilePermissions = uploadOptions.customFilePermissions.valueIsValid()
-                ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customFilePermissions.value())
-                : std::nullopt,
-            .customDirectoryPermissions = uploadOptions.customDirectoryPermissions.valueIsValid()
-                ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customDirectoryPermissions.value())
-                : std::nullopt,
-            .symlinkHandling = uploadOptions.symlinkHandling.value(),
-            .failFast = uploadOptions.failFast.value(),
-        }};
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-designator"
+        state.uploadOptions = Persistence::UploadOptions{
+            Persistence::CommonTransferOptions{
+                .tempFileSuffix = uploadOptions.tempFileSuffix.value(),
+                .mayOverwrite = uploadOptions.mayOverwrite.value(),
+                .tryContinue = uploadOptions.tryContinue.value(),
+                .inheritPermissions = uploadOptions.inheritPermissions.value(),
+                .customFilePermissions = uploadOptions.customFilePermissions.valueIsValid()
+                    ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customFilePermissions.value())
+                    : std::nullopt,
+                .customDirectoryPermissions = uploadOptions.customDirectoryPermissions.valueIsValid()
+                    ? uShortOptionalToFilesystemPermsOptional(uploadOptions.customDirectoryPermissions.value())
+                    : std::nullopt,
+                .symlinkHandling = uploadOptions.symlinkHandling.value(),
+                .failFast = uploadOptions.failFast.value(),
+            },
+            .doCleanup = uploadOptions.doCleanup.value(),
+        };
+#pragma clang diagnostic pop
     }
 
     assignIfValid(state.concurrency, concurrency);
@@ -303,6 +316,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.inheritPermissions.value(std::nullopt);
         uploadOptions.customFilePermissions.value(std::nullopt);
         uploadOptions.customDirectoryPermissions.value(std::nullopt);
+        uploadOptions.doCleanup.value(std::nullopt);
         uploadOptions.symlinkHandling.value(std::nullopt);
         uploadOptions.failFast.value(std::nullopt);
     }
@@ -319,6 +333,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.customDirectoryPermissions.value(
             filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
+        uploadOptions.doCleanup.value(state.uploadOptions->doCleanup);
         uploadOptions.symlinkHandling.value(state.uploadOptions->symlinkHandling);
         uploadOptions.failFast.value(state.uploadOptions->failFast);
     }
@@ -379,6 +394,7 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.customDirectoryPermissions.inherit(
             filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
+        uploadOptions.doCleanup.inherit(state.uploadOptions->doCleanup);
         uploadOptions.symlinkHandling.inherit(state.uploadOptions->symlinkHandling);
         uploadOptions.failFast.inherit(state.uploadOptions->failFast);
     }
@@ -390,6 +406,7 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.inheritPermissions.inherit(std::nullopt);
         uploadOptions.customFilePermissions.inherit(std::nullopt);
         uploadOptions.customDirectoryPermissions.inherit(std::nullopt);
+        uploadOptions.doCleanup.inherit(std::nullopt);
         uploadOptions.symlinkHandling.inherit(std::nullopt);
         uploadOptions.failFast.inherit(std::nullopt);
     }
@@ -437,6 +454,7 @@ Nui::ElementRenderer SftpOptions::render()
                 uploadOptions.inheritPermissions(),
                 uploadOptions.customFilePermissions(),
                 uploadOptions.customDirectoryPermissions(),
+                uploadOptions.doCleanup(),
                 uploadOptions.symlinkHandling(),
                 uploadOptions.failFast()
             )

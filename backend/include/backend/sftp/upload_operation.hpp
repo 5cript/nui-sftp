@@ -66,6 +66,8 @@ class UploadOperation : public Operation
         bool mayOverwrite{false};
         bool tryContinue{Persistence::defaultTryContinue};
         bool inheritPermissions{Persistence::defaultInheritPermissions};
+        /** @brief A canceled upload deletes its temporary file, see PartialFile. */
+        bool doCleanup{Persistence::defaultDoCleanup};
         bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
