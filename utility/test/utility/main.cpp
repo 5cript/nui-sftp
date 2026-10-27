@@ -16,6 +16,7 @@
 #include "test_permissions.hpp"
 #include "test_rename.hpp"
 #include "test_resource_root.hpp"
+#include "test_link_copy.hpp"
 #include "test_link_safe_remove.hpp"
 #include "test_shared_input_file_stream.hpp"
 #include "test_shell_integration.hpp"

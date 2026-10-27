@@ -28,6 +28,7 @@ else()
         rename.cpp
         shared_input_file_stream.cpp
         link_safe_remove.cpp
+        link_copy.cpp
         no_follow_tree_walk.cpp
         download_mark.cpp
         resources.cpp

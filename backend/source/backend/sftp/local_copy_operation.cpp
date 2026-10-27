@@ -2,6 +2,7 @@
 #include <paths/native.hpp>
 #include <utility/error_message.hpp>
 #include <utility/extended_length_path.hpp>
+#include <utility/link_copy.hpp>
 
 #include <fmt/format.h>
 
@@ -470,9 +471,8 @@ void LocalCopyOperation::copyItem(
                 return refuseReplacing();
             if (destinationKind != NoFollowKind::Missing && !Utility::removeNoFollow(destination, error) && error)
                 return recordFailure(destination, ErrorType::DeleteFailed, error);
-            std::filesystem::copy_symlink(source, destination, error);
-            if (error)
-                return recordFailure(source, ErrorType::CannotCreateSymlink, error);
+            if (auto copied = Utility::copyLink(source, destination); !copied)
+                return recordFailure(source, ErrorType::CannotCreateSymlink, copied.error());
             ++entriesDone_;
             return;
         }
