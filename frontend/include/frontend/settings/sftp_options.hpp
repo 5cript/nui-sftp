@@ -53,6 +53,7 @@ struct SftpOptions : public GroupKeys
         BoolSetting<true> inheritPermissions;
         NumberSetting<unsigned short, true> customFilePermissions;
         NumberSetting<unsigned short, true> customDirectoryPermissions;
+        BoolSetting<true> doCleanup;
         ComboSetting<Persistence::SymlinkHandling, std::string, true> symlinkHandling;
         BoolSetting<true> failFast;
     };

@@ -61,6 +61,11 @@ namespace Persistence
      */
     inline constexpr bool defaultMarkAsDownloaded = true;
 
+    /**
+     * @brief Whether a canceled transfer deletes its partial file when doCleanup is not set.
+     */
+    inline constexpr bool defaultDoCleanup = true;
+
     struct CommonTransferOptions : public DefaultMissingMember
     {
         std::optional<std::string> tempFileSuffix{std::nullopt};
@@ -98,8 +103,13 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(DownloadOptions, (CommonTransferOptions), (reserveSpace, doCleanup, markAsDownloaded))
 
     struct UploadOptions : public CommonTransferOptions
-    {};
-    BOOST_DESCRIBE_STRUCT(UploadOptions, (CommonTransferOptions), ())
+    {
+        /**
+         * @brief Delete the partial file on the server when an upload is canceled. Unset means on.
+         */
+        std::optional<bool> doCleanup{std::nullopt};
+    };
+    BOOST_DESCRIBE_STRUCT(UploadOptions, (CommonTransferOptions), (doCleanup))
 
     // Default number of queue operations worked on in parallel.
     inline constexpr int defaultSftpConcurrency = 4;

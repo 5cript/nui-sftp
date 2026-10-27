@@ -36,7 +36,7 @@ class DownloadOperation : public Operation
         bool reserveSpace{false};
         bool tryContinue{Persistence::defaultTryContinue};
         bool inheritPermissions{Persistence::defaultInheritPermissions};
-        bool doCleanup{true};
+        bool doCleanup{Persistence::defaultDoCleanup};
         bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};

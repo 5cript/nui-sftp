@@ -279,6 +279,7 @@ namespace
             .mayOverwrite = opts.mayOverwrite.value_or(def.mayOverwrite),
             .tryContinue = opts.tryContinue.value_or(def.tryContinue),
             .inheritPermissions = opts.inheritPermissions.value_or(def.inheritPermissions),
+            .doCleanup = opts.doCleanup.value_or(def.doCleanup),
             .filePermissions = opts.customFilePermissions ? opts.customFilePermissions : def.filePermissions,
             .directoryPermissions =
                 opts.customDirectoryPermissions ? opts.customDirectoryPermissions : def.directoryPermissions,

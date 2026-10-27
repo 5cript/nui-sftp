@@ -1423,6 +1423,7 @@ namespace Test
         };
         ASSERT_TRUE(workUntilPartlySent(operation, sent));
 
+        operation.partialFileOnCancel(UploadOperation::PartialFile::Kept);
         ASSERT_TRUE(operation.cancel(true).has_value());
 
         const auto partial = remoteSizeOf(*sftp, remote("/home/test/kept.bin.filepart"));
@@ -1520,6 +1521,7 @@ namespace Test
                 }
             };
             ASSERT_TRUE(workUntilPartlySent(stopped, sent));
+            stopped.partialFileOnCancel(UploadOperation::PartialFile::Kept);
             ASSERT_TRUE(stopped.cancel(true).has_value());
         }
         const auto kept = remoteSizeOf(*sftp, remote("/home/test/old.bin.filepart"));
@@ -1611,6 +1613,7 @@ namespace Test
                 }
             };
             ASSERT_TRUE(workUntilPartlySent(stopped, sent));
+            stopped.partialFileOnCancel(UploadOperation::PartialFile::Kept);
             ASSERT_TRUE(stopped.cancel(true).has_value());
             EXPECT_EQ(stopped.state(), SharedData::OperationState::Canceled);
         }
