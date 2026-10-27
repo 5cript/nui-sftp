@@ -369,7 +369,16 @@ class OperationQueue
     void cancelOperation(OperationCard const& operation, bool keepPartialFiles = false);
     void cancelAll();
     void togglePause();
+    /**
+     * @brief Cancels every operation, keeping the partial files when @p keepPartialFiles is set. Otherwise it asks
+     *        first whether to delete the partial files that cards kept before, when there are any.
+     */
     void askBackendToCancelAll(bool keepPartialFiles = false);
+
+    /**
+     * @brief Cancels every operation without asking, see askBackendToCancelAll.
+     */
+    void cancelAllInBackend(bool keepPartialFiles);
 
     /**
      * @brief Removes the cards Cancel All canceled. A transfer this cancel keeps the partial files of stays, its
