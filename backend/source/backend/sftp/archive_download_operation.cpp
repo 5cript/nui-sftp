@@ -736,6 +736,9 @@ void ArchiveDownloadOperation::setScanResultForRoot(
 
 void ArchiveDownloadOperation::cleanup()
 {
+    // The temp file goes anyway: padding the open entry would compress and write its whole remainder.
+    if (writer_)
+        writer_->discard();
     currentEntry_.reset();
     if (auto stream = currentStream_.lock(); stream)
         stream->close(false);

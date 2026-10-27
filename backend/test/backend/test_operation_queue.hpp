@@ -1056,6 +1056,96 @@ namespace Test
     }
 #endif
 
+    TEST_F(OperationQueueTests, CancellingARunningArchiveUploadEndsIt)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto localPath = localDirectory_.path() / "archiveBig";
+        std::filesystem::create_directories(localPath);
+        {
+            std::ofstream big{localPath / "big.bin", std::ios::binary};
+            const std::string chunk(1024 * 1024, 'x');
+            for (int index = 0; index < 32; ++index)
+                big << chunk;
+        }
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addArchiveUploadOperation(
+                *sftp,
+                operationId,
+                {toLocal(localPath)},
+                remote("/home/test/big.tar.gz"),
+                TarArchive::Compression::Gzip,
+                {},
+                false
+            );
+        }).has_value());
+        for (int step = 0; step < 20 && runOnStrand([&]() {
+                 return queue->work();
+             });
+             ++step)
+        {
+        }
+        ASSERT_TRUE(completions().empty());
+        runOnStrand([&]() {
+            queue->cancel(operationId);
+        });
+        workUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("big.tar.gz.filepart"));
+    }
+
+    TEST_F(OperationQueueTests, CancellingARunningArchiveDownloadEndsIt)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        constexpr std::uint64_t size = 32u * 1024u * 1024u;
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", size}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto archivePath = localDirectory_.path() / "big.tar.gz";
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addArchiveDownloadOperation(
+                *sftp,
+                operationId,
+                {SharedData::ArchiveDownloadRoot{
+                    .path = remote("/home/test/big.bin"),
+                    .entry = SharedData::DirectoryEntry{
+                        .name = "big.bin", .type = SharedData::FileType::Regular, .size = size
+                    },
+                }},
+                toLocal(archivePath),
+                TarArchive::Compression::Gzip,
+                {},
+                false
+            );
+        }).has_value());
+        for (int step = 0; step < 20 && runOnStrand([&]() {
+                 return queue->work();
+             });
+             ++step)
+        {
+        }
+        ASSERT_TRUE(completions().empty());
+        runOnStrand([&]() {
+            queue->cancel(operationId);
+        });
+        workUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(std::filesystem::exists(archivePath));
+        EXPECT_FALSE(std::filesystem::exists(archivePath.string() + ".filepart"));
+    }
+
     TEST_F(OperationQueueTests, DirectoryUploadCreatesDirectoriesWithTheDefaultModeWhenNotInheriting)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

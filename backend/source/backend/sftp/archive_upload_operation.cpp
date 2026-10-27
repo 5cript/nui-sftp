@@ -720,6 +720,9 @@ void ArchiveUploadOperation::setScanResultForRoot(
 
 void ArchiveUploadOperation::cleanup()
 {
+    // The temp file goes anyway: padding the open entry would compress and send its whole remainder.
+    if (writer_)
+        writer_->discard();
     currentEntry_.reset();
     currentLocalFile_.close();
     writer_.reset();
