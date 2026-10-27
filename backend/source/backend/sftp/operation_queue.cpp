@@ -1548,6 +1548,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
             .totalBytes = totalPayloadBytes,
             .localPath = localArchivePath,
             .scanPhase = scanPhase,
+            // Nothing continues a partial archive.
+            .deletesPartialFilesOnCancel = true,
         }
     );
 
@@ -1671,6 +1673,8 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
             .totalBytes = estimatedTotalBytes,
             .remotePath = remoteArchivePath,
             .scanPhase = scanPhase,
+            // Nothing continues a partial archive.
+            .deletesPartialFilesOnCancel = true,
         }
     );
     return {};

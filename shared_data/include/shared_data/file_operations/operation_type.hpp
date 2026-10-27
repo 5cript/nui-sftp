@@ -34,6 +34,15 @@ namespace SharedData
     }
 
     /**
+     * @brief True for packing into or unpacking from an archive. Nothing continues its partial file, a cancel always
+     *        deletes it.
+     */
+    inline bool isArchiveTransfer(OperationType type)
+    {
+        return type == OperationType::ArchiveDownload || type == OperationType::ArchiveUpload;
+    }
+
+    /**
      * @brief True for the operations of the local operation queue, which runs apart from the sessions.
      */
     inline bool isLocalOperation(OperationType type)
