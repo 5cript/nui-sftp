@@ -336,11 +336,12 @@ namespace NuiFileExplorer
                         class_ = item.observeClassRelevant([&item](){
                             const auto searchHighlight = item.searchHighlight();
                             const auto isDropHovered = item.isDropHovered();
-                            return fmt::format("nui-file-grid-table-row {} {} {}",
+                            return fmt::format("nui-file-grid-table-row {} {} {} {}",
                                 item.isSelected() ? "selected" : "",
                                 searchHighlight == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
                                 : searchHighlight == ItemWithInternals::SearchHighlight::Muted ? "is-muted" : "",
-                                isDropHovered ? "drop-hovered" : "");
+                                isDropHovered ? "drop-hovered" : "",
+                                item.isPendingDelete() ? "pending-delete" : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
@@ -368,8 +369,8 @@ namespace NuiFileExplorer
                                 width = "16",
                                 height = "16",
                                 style = item.item.type == Item::Type::Directory
-                                    ? "filter: hue-rotate(120deg)"
-                                    : "filter: invert(100%) brightness(2)",
+                                    ? "--nui-file-grid-icon-filter: hue-rotate(120deg)"
+                                    : "--nui-file-grid-icon-filter: invert(100%) brightness(2)",
                             }(),
                             span{}(item.displayFilename)
                         ),

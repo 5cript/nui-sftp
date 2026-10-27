@@ -3,11 +3,15 @@
 #include <utility/language.hpp>
 #include <script-nui-components/popup_menu.hpp>
 
+#include <nui/event_system/event_context.hpp>
+
 #include <ui5-sap-icons/icons/add-favorite.hpp>
 #include <ui5-sap-icons/icons/unfavorite.hpp>
 
 #include <algorithm>
 #include <iterator>
+#include <string_view>
+#include <unordered_set>
 
 void SideModel::operationQueue(OperationQueue* operationQueue)
 {
@@ -218,6 +222,30 @@ bool SideModel::isComplete() const
 void SideModel::setItemUpdateFunction(std::function<void(bool, bool)> doUpdate)
 {
     refreshCallback_ = std::move(doUpdate);
+}
+
+void SideModel::setPendingDeleteFunction(
+    std::function<void(std::vector<std::filesystem::path> const&)> markPendingDelete
+)
+{
+    pendingDeleteCallback_ = std::move(markPendingDelete);
+}
+
+void SideModel::markPendingDelete(std::vector<std::string> const& targets)
+{
+    if (!pendingDeleteCallback_ || targets.empty())
+        return;
+
+    const std::unordered_set<std::string_view> targetSet{targets.begin(), targets.end()};
+    std::vector<std::filesystem::path> fullPaths;
+    for (auto const& item : items_)
+    {
+        const auto path = itemPathText(item);
+        if (path && targetSet.contains(*path))
+            fullPaths.push_back(item.fullPath);
+    }
+    pendingDeleteCallback_(fullPaths);
+    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 const std::vector<NuiFileExplorer::Item>& SideModel::items() const
 {

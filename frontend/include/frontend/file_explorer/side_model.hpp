@@ -88,6 +88,11 @@ class SideModel
     OperationQueue* operationQueue();
 
     void setItemUpdateFunction(std::function<void(bool, bool)> doUpdate) override;
+
+    /**
+     * @brief Sets the function that overlays the shown items at the given full paths as being deleted.
+     */
+    void setPendingDeleteFunction(std::function<void(std::vector<std::filesystem::path> const&)> markPendingDelete);
     const std::vector<NuiFileExplorer::Item>& items() const override;
     void onPathChange(std::filesystem::path const& path) override
     {
@@ -173,6 +178,12 @@ class SideModel
      *        name is no single path segment.
      */
     std::vector<ConfirmDialog::OpenOptions::ListElement> pathList(std::vector<NuiFileExplorer::Item> const& items) const;
+
+    /**
+     * @brief Overlays the shown items at @p targets, UTF-8 paths as @ref itemPathText gives them, as being deleted
+     *        until the next listing.
+     */
+    void markPendingDelete(std::vector<std::string> const& targets);
 
     /**
      * @brief Shows the directory @p item stands for: the parent for "..", else the item's own path, the side may
@@ -584,6 +595,7 @@ class SideModel
     std::filesystem::path listedPath_{};
     std::filesystem::path preNavigatePath_{};
     std::function<void(bool, bool)> refreshCallback_{nullptr};
+    std::function<void(std::vector<std::filesystem::path> const&)> pendingDeleteCallback_{};
     bool reapplySelectionOnce_{false};
     std::string dropMetadata_{};
     std::shared_ptr<Nui::Observed<std::vector<std::filesystem::path>>> favorites_{

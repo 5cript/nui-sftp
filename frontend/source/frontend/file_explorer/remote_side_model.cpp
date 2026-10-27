@@ -410,15 +410,28 @@ void RemoteSideModel::enqueueDeletes(
     if (entries.empty())
         return;
 
+    std::vector<std::string> targets;
+    targets.reserve(entries.size());
+    std::ranges::transform(
+        entries,
+        std::back_inserter(targets),
+        [](SharedData::BulkDeleteEntry const& entry)
+        {
+            return entry.target.value();
+        }
+    );
+
     operationQueue_->enqueueBulkDelete(
         std::move(entries),
         /*insertRefresh*/ true,
         SharedData::OperationMode::Queued,
         /*onBulkComplete*/ {},
         lifetime_.guarded(
-            [this](bool success, std::string const& info)
+            [this, targets = std::move(targets)](bool success, std::string const& info)
             {
-                if (!success)
+                if (success)
+                    markPendingDelete(targets);
+                else
                 {
                     Log::error("Bulk delete failed: {}", info);
                     confirmDialog_->open({

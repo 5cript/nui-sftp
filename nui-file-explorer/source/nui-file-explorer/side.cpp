@@ -858,6 +858,16 @@ namespace NuiFileExplorer
         return result;
     }
 
+    void Side::markPendingDelete(std::vector<std::filesystem::path> const& fullPaths)
+    {
+        const std::set<std::filesystem::path> targets{fullPaths.begin(), fullPaths.end()};
+        for (auto& item : impl_->items.value())
+        {
+            if (targets.contains(item.item.fullPath))
+                item.isPendingDelete(true);
+        }
+    }
+
     Nui::ElementRenderer Side::originIconAndKind()
     {
         using namespace Nui::Attributes;

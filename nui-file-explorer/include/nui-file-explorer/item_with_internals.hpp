@@ -46,6 +46,7 @@ namespace NuiFileExplorer
             , displayMtime{sourceItem.readableMTime()}
             , searchHighlighted_{std::make_shared<Nui::Observed<SearchHighlight>>(SearchHighlight::Off)}
             , isDropHovered_{std::make_shared<Nui::Observed<bool>>(false)}
+            , isPendingDelete_{std::make_shared<Nui::Observed<bool>>(false)}
             , selected_{std::make_shared<Nui::Observed<bool>>(false)}
         {}
 
@@ -69,7 +70,8 @@ namespace NuiFileExplorer
 
         auto observeClassRelevant(auto&& fn) const
         {
-            return Nui::observe(selected_, searchHighlighted_, isDropHovered_).generate(std::forward<decltype(fn)>(fn));
+            return Nui::observe(selected_, searchHighlighted_, isDropHovered_, isPendingDelete_)
+                .generate(std::forward<decltype(fn)>(fn));
         }
 
         auto observeSelected(auto&& fn) const
@@ -97,6 +99,17 @@ namespace NuiFileExplorer
             *isDropHovered_ = value;
         }
 
+        bool isPendingDelete() const
+        {
+            return isPendingDelete_->value();
+        }
+
+        void isPendingDelete(bool value)
+        {
+            if (isPendingDelete_->value() != value)
+                *isPendingDelete_ = value;
+        }
+
       public:
         Item item;
         std::weak_ptr<Nui::Dom::BasicElement> element;
@@ -111,6 +124,8 @@ namespace NuiFileExplorer
       private:
         std::shared_ptr<Nui::Observed<SearchHighlight>> searchHighlighted_;
         std::shared_ptr<Nui::Observed<bool>> isDropHovered_;
+        /** @brief A delete of the item is queued, the mark lasts until the next listing. */
+        std::shared_ptr<Nui::Observed<bool>> isPendingDelete_;
         std::shared_ptr<Nui::Observed<bool>> selected_;
     };
 }

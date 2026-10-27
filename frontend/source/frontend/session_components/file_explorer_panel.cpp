@@ -263,6 +263,22 @@ void FileExplorerPanel::setup()
     );
     if (auto* remote = remoteSideModel(); remote)
     {
+        remote->setPendingDeleteFunction(
+            [this](std::vector<std::filesystem::path> const& fullPaths)
+            {
+                if (auto* side = remoteFileGridSide(); side)
+                    side->markPendingDelete(fullPaths);
+            }
+        );
+    }
+    localSideModel().setPendingDeleteFunction(
+        [this](std::vector<std::filesystem::path> const& fullPaths)
+        {
+            localFileGridSide().markPendingDelete(fullPaths);
+        }
+    );
+    if (auto* remote = remoteSideModel(); remote)
+    {
         remote->setLocalModel(&localSideModel());
         localSideModel().setRemoteModel(remote);
     }
