@@ -100,6 +100,29 @@ GeneralSettings::GeneralSettings(
                 return "???";
             },
         },
+        .reducedMotion = ComboSetting<Persistence::ReducedMotion, std::string>{
+            {Persistence::ReducedMotion::System, Persistence::ReducedMotion::Reduce, Persistence::ReducedMotion::NoPreference},
+            userInterfaceFactory_.identity({"general", "userInterface", "reducedMotion"}),
+            onChange,
+            [this, onChange]()
+            {
+                userInterface.reducedMotion.value(Persistence::ReducedMotion::System);
+                onChange();
+            },
+            [](Persistence::ReducedMotion preference) -> std::string
+            {
+                switch (preference)
+                {
+                    case Persistence::ReducedMotion::System:
+                        return language->get("settings", "general", "userInterface", "reducedMotionSystem");
+                    case Persistence::ReducedMotion::Reduce:
+                        return language->get("settings", "general", "userInterface", "reducedMotionReduce");
+                    case Persistence::ReducedMotion::NoPreference:
+                        return language->get("settings", "general", "userInterface", "reducedMotionNoPreference");
+                }
+                return "???";
+            },
+        },
         .showHiddenFilesLocally = BoolSetting<>{
             userInterfaceFactory_.identity({"general", "userInterface", "showHiddenFilesLocally"}),
             onChange,
@@ -371,6 +394,7 @@ void GeneralSettings::applyToState(Persistence::State& state) const
     // Ui Options
     state.uiOptions.theme = userInterface.theme.value();
     state.uiOptions.darkLightMode = userInterface.darkLightMode.value();
+    state.uiOptions.reducedMotion = userInterface.reducedMotion.value();
     state.uiOptions.showHiddenFilesLocally = userInterface.showHiddenFilesLocally.value();
     state.uiOptions.showHiddenFilesRemotely = userInterface.showHiddenFilesRemotely.value();
     state.uiOptions.fileGridPathBarOnTop = userInterface.fileGridPathBarOnTop.value();
@@ -414,6 +438,7 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     // Ui Options
     userInterface.theme.value(state.uiOptions.theme);
     userInterface.darkLightMode.value(state.uiOptions.darkLightMode);
+    userInterface.reducedMotion.value(state.uiOptions.reducedMotion.value_or(Persistence::ReducedMotion::System));
     userInterface.showHiddenFilesLocally.value(state.uiOptions.showHiddenFilesLocally);
     userInterface.showHiddenFilesRemotely.value(state.uiOptions.showHiddenFilesRemotely);
     userInterface.fileGridPathBarOnTop.value(state.uiOptions.fileGridPathBarOnTop);
@@ -484,6 +509,7 @@ Nui::ElementRenderer GeneralSettings::render(
         auto userInterfaceUi = fragment(
             userInterface.theme(),
             userInterface.darkLightMode(),
+            userInterface.reducedMotion(),
             userInterface.showHiddenFilesLocally(),
             userInterface.showHiddenFilesRemotely(),
             userInterface.fileGridPathBarOnTop(),

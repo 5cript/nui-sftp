@@ -16,6 +16,7 @@ add_library(
         opener_risk.cpp
         program_options.cpp
         inspector_environment.cpp
+        reduced_motion.cpp
         password/password_prompter.cpp
         password/password_request.cpp
         process/process.cpp
@@ -76,6 +77,7 @@ if (WIN32)
             windows/main_windows.cpp
             windows/opener_windows.cpp
             windows/browser_engine_windows.cpp
+            windows/reduced_motion_windows.cpp
     )
 elseif(APPLE)
     enable_language(OBJCXX)
@@ -102,7 +104,14 @@ elseif(APPLE)
             "-framework UniformTypeIdentifiers"
     )
     if (NOT NUI_BROWSER_ENGINE STREQUAL "cef")
-        target_sources(backend PRIVATE mac/main_mac.mm mac/web_view_hooks.mm mac/browser_engine_mac.mm)
+        target_sources(
+            backend
+            PRIVATE
+                mac/main_mac.mm
+                mac/web_view_hooks.mm
+                mac/browser_engine_mac.mm
+                reduced_motion_unsupported.cpp
+        )
         target_link_libraries(backend PRIVATE "-framework WebKit")
     endif()
 else()
@@ -122,6 +131,7 @@ else()
                 linux/main_linux.cpp
                 linux/gtk_portal_parent_window.cpp
                 linux/browser_engine_linux.cpp
+                reduced_motion_unsupported.cpp
         )
     endif()
     # GLib's GDBus replaces sd-bus for portal calls: Ubuntu 24.04's xdg-dbus-proxy
@@ -140,7 +150,14 @@ endif()
 
 # Chromium on Linux and macOS: the hooks of the main window.
 if (NUI_BROWSER_ENGINE STREQUAL "cef")
-    target_sources(backend PRIVATE cef/main_cef.cpp cef/cef_hooks.cpp cef/browser_engine_cef.cpp)
+    target_sources(
+        backend
+        PRIVATE
+            cef/main_cef.cpp
+            cef/cef_hooks.cpp
+            cef/browser_engine_cef.cpp
+            cef/reduced_motion_cef.cpp
+    )
     target_link_libraries(backend PUBLIC Nui::cef)
 endif()
 

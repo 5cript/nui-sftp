@@ -71,6 +71,7 @@ struct GeneralSettings
     {
         ComboSetting<std::string, std::string> theme;
         ComboSetting<SharedData::DarkLightMode, std::string> darkLightMode;
+        ComboSetting<Persistence::ReducedMotion, std::string> reducedMotion;
         BoolSetting<> showHiddenFilesLocally;
         BoolSetting<> showHiddenFilesRemotely;
         BoolSetting<> fileGridPathBarOnTop;

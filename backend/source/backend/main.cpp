@@ -21,6 +21,7 @@
 
 #include <backend/browser_engine.hpp>
 #include <backend/inspector_environment.hpp>
+#include <backend/reduced_motion.hpp>
 #include <paths/local_path_segment.hpp>
 #include <paths/native.hpp>
 #include <backend/process/process_store.hpp>
@@ -337,10 +338,16 @@ void Main::registerRpc()
                 return state.localFilesystemOptions.openRiskyFiles.value_or(Persistence::RiskyFilePolicy::Warn);
             };
             riskyFilePolicy_.store(riskyFilePolicyOf(holder.stateCache()));
+            applyReducedMotion(
+                window_, holder.stateCache().uiOptions.reducedMotion.value_or(Persistence::ReducedMotion::System)
+            );
             stateHolder_.onSaved(
                 [this, riskyFilePolicyOf](Persistence::State const& state)
                 {
                     riskyFilePolicy_.store(riskyFilePolicyOf(state));
+                    applyReducedMotion(
+                        window_, state.uiOptions.reducedMotion.value_or(Persistence::ReducedMotion::System)
+                    );
                     sshSessionManager_->fileTrackingDefaults(state.fileTrackingOptions);
                 }
             );

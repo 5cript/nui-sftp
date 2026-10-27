@@ -5,15 +5,28 @@
 #include <constants/persistence.hpp>
 
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 
 namespace Persistence
 {
+    /**
+     * @brief What the page's prefers-reduced-motion media feature reports.
+     */
+    enum class ReducedMotion
+    {
+        System,
+        Reduce,
+        NoPreference
+    };
+    BOOST_DESCRIBE_ENUM(ReducedMotion, System, Reduce, NoPreference)
+
     struct UiOptions : public DefaultMissingMember
     {
         std::string theme{Constants::defaultThemeName};
         SharedData::DarkLightMode darkLightMode{SharedData::DarkLightMode::System};
+        std::optional<ReducedMotion> reducedMotion{std::nullopt};
         bool showHiddenFilesLocally{false};
         bool showHiddenFilesRemotely{false};
         bool fileGridPathBarOnTop{false};
@@ -54,6 +67,7 @@ namespace Persistence
         (),
         (theme,
             darkLightMode,
+            reducedMotion,
             showHiddenFilesLocally,
             showHiddenFilesRemotely,
             fileGridPathBarOnTop,
