@@ -10,14 +10,17 @@
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/sftp_session.hpp>
 #include <log/log.hpp>
+#include <paths/remote_path.hpp>
 
 #include <libssh/sftp.h>
 
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <system_error>
+#include <vector>
 
 class Operation
 {
@@ -43,6 +46,32 @@ class Operation
     virtual void pause(bool)
     {
         /* noop */
+    }
+
+    /**
+     * @brief The temporary files a canceled transfer left for a later transfer to continue.
+     */
+    struct KeptPartialFiles
+    {
+        std::vector<std::filesystem::path> local{};
+        std::vector<Paths::RemotePath> remote{};
+    };
+
+    /**
+     * @brief The next cancel keeps the partial files, whatever the options say. Called before cancel(true).
+     */
+    virtual void keepPartialFiles()
+    {
+        /* noop */
+    }
+
+    /**
+     * @brief What a cancel leaves to continue, nothing for an operation that deletes its partial files on cancel or
+     *        transfers no files.
+     */
+    virtual std::optional<KeptPartialFiles> keptPartialFiles() const
+    {
+        return std::nullopt;
     }
 
     template <typename FunctionT>

@@ -404,7 +404,7 @@ void OperationQueue::cancelAll()
 }
 
 template <typename OperationCard>
-void OperationQueue::cancelOperation(OperationCard const& operation)
+void OperationQueue::cancelOperation(OperationCard const& operation, bool keepPartialFiles)
 {
     if (operation.isCompletedState())
     {
@@ -416,33 +416,38 @@ void OperationQueue::cancelOperation(OperationCard const& operation)
 
     auto doCancel = [this,
                         operationId = operation.operationId(),
-                        cancelName = SharedData::isLocalOperation(operation.type())
-                            ? std::string{"LocalOperationQueue::cancel"}
-                            : fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value())]()
+                        isLocal = SharedData::isLocalOperation(operation.type()),
+                        keepPartialFiles]()
     {
-        Nui::RpcClient::callWithBackChannel(
-            cancelName,
-            lifetime_.guarded(
-                [this, operationId](SharedData::ErrorOrSuccess<> const& result)
+        auto onCanceled = lifetime_.guarded(
+            [this, operationId](SharedData::ErrorOrSuccess<> const& result)
+            {
+                if (!result)
                 {
-                    if (!result)
-                    {
-                        return Log::error(
-                            "Failed to cancel operation id {}: {}", operationId.value(), result.error.value()
-                        );
-                    }
-
-                    auto* operation = impl_->findOperation(operationId);
-                    if (operation)
-                        operation->state(SharedData::OperationState::Canceled);
-                    Nui::globalEventContext.executeActiveEventsImmediately();
+                    return Log::error(
+                        "Failed to cancel operation id {}: {}", operationId.value(), result.error.value()
+                    );
                 }
-            ),
-            operationId
+
+                auto* operation = impl_->findOperation(operationId);
+                if (operation)
+                    operation->state(SharedData::OperationState::Canceled);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
         );
+        if (isLocal)
+            Nui::RpcClient::callWithBackChannel("LocalOperationQueue::cancel", std::move(onCanceled), operationId);
+        else
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("OperationQueue::{}::cancel", impl_->sessionId.value()),
+                std::move(onCanceled),
+                operationId,
+                keepPartialFiles
+            );
     };
 
-    if (operation.warrantsCancelConfirm())
+    // Keeping the partial files loses nothing that a confirmation would protect.
+    if (!keepPartialFiles && operation.warrantsCancelConfirm())
     {
         impl_->confirmDialog->open({
             .headerText = language->get("operationQueue", "cancelOperationHeader"),
@@ -1906,7 +1911,7 @@ void OperationQueue::togglePause()
     );
 }
 
-void OperationQueue::askBackendToCancelAll()
+void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
 {
     if (!isActive())
     {
@@ -1927,7 +1932,8 @@ void OperationQueue::askBackendToCancelAll()
                 else
                     Log::error("Failed to cancel all operation queue: {}", result.error.value());
             }
-        )
+        ),
+        keepPartialFiles
     );
 }
 

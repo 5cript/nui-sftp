@@ -68,6 +68,14 @@ class BulkDownloadOperation : public BulkTransferOperation
      */
     std::optional<SharedData::BulkDownloadRequest> resumeRequest(SharedData::BulkDownloadRequest request) const;
 
+    void keepPartialFiles() override;
+
+    /**
+     * @brief The temporary files of the entries it has not finished, see unfinishedEntryIndices. Nothing when its
+     *        files delete their partial file on cancel.
+     */
+    std::optional<KeptPartialFiles> keptPartialFiles() const override;
+
   protected:
     std::expected<void, Error>
     prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) override;

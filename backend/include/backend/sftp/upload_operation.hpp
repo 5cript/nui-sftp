@@ -159,12 +159,14 @@ class UploadOperation : public Operation
     std::expected<void, UploadOperation::Error> cancel(bool adoptCancelState) override;
 
     /**
-     * @brief What a later cancel(true) does with the temporary file this upload wrote to, kept unless told otherwise.
-     *        A temporary file it did not open itself always stays.
+     * @brief What a later cancel(true) does with the temporary file this upload wrote to, as doCleanup says unless
+     *        told otherwise. A temporary file it did not open itself always stays.
      */
     void partialFileOnCancel(PartialFile partial);
 
     void pause(bool doPause) override;
+    void keepPartialFiles() override;
+    std::optional<KeptPartialFiles> keptPartialFiles() const override;
 
     std::expected<void, Error> prepare();
     std::expected<void, Error> finalize();

@@ -4,6 +4,7 @@
 #include <utility/localized_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <paths/common_parent.hpp>
+#include <paths/native.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <functional>
 #include <iterator>
 #include <optional>
@@ -163,6 +165,12 @@ namespace
                 return changedSinceCompare(failed.second);
             }
         );
+    }
+
+    OperationQueue::PartialFilesOnCancel partialFilesOnCancel(bool keepPartialFiles)
+    {
+        return keepPartialFiles ? OperationQueue::PartialFilesOnCancel::Kept
+                                : OperationQueue::PartialFilesOnCancel::AsConfigured;
     }
 
     OperationQueue::OperationCompleted makeCompletedOperation(
@@ -419,11 +427,11 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
     };
 }
 
-void OperationQueue::cancelAll()
+void OperationQueue::cancelAll(PartialFilesOnCancel partialFiles)
 {
     const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
-        [weak = weak_from_this()]()
+        [weak = weak_from_this(), partialFiles]()
         {
             auto self = weak.lock();
             if (!self)
@@ -436,7 +444,7 @@ void OperationQueue::cancelAll()
             for (auto& [id, callback] : waiting)
                 callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
             for (auto& [id, operation] : cancelled)
-                self->completeCancelled(id, *operation);
+                self->completeCancelledByUser(id, *operation, partialFiles);
             Log::info("All operations in the queue have been canceled.");
         }
     );
@@ -464,11 +472,11 @@ void OperationQueue::dropAll()
     );
 }
 
-void OperationQueue::cancel(Ids::OperationId id)
+void OperationQueue::cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles)
 {
     const WakeOnReturn wakeOnReturn{*this};
     within_strand_do(
-        [weak = weak_from_this(), id = std::move(id)]()
+        [weak = weak_from_this(), id = std::move(id), partialFiles]()
         {
             auto self = weak.lock();
             if (!self)
@@ -477,7 +485,50 @@ void OperationQueue::cancel(Ids::OperationId id)
             const auto cancelled = self->takeOperation(id);
             self->failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
             if (cancelled)
-                self->completeCancelled(id, *cancelled);
+                self->completeCancelledByUser(id, *cancelled, partialFiles);
+        }
+    );
+}
+
+bool OperationQueue::continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
+{
+    auto kept = keptTransfers_.extract(id);
+    if (kept.empty() || !kept.mapped().resume)
+        return false;
+    adoptBulkResume(sftp, id, *std::move(kept.mapped().resume));
+    return true;
+}
+
+void OperationQueue::discardKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
+{
+    auto kept = keptTransfers_.extract(id);
+    if (kept.empty())
+        return;
+    auto& partialFiles = kept.mapped().partialFiles;
+    for (auto const& path : partialFiles.local)
+    {
+        std::error_code removeError{};
+        if (std::filesystem::remove(path, removeError))
+            Log::info("OperationQueue: removed the partial download '{}'.", Paths::nativeToUtf8(path));
+        else if (removeError)
+            Log::warn(
+                "OperationQueue: cannot remove '{}': {}", Paths::nativeToUtf8(path), Utility::errorMessage(removeError)
+            );
+    }
+    if (partialFiles.remote.empty())
+        return;
+    sftp.perform(
+        [weak = sftp.weak_from_this(), remote = std::move(partialFiles.remote)]()
+        {
+            const auto session = weak.lock();
+            if (!session)
+                return;
+            // Entries that never started have none.
+            for (auto const& path : remote)
+            {
+                if (session->removeFileInStrand(path).has_value())
+                    Log::info("OperationQueue: removed the partial upload '{}'.", path.value());
+            }
         }
     );
 }
@@ -555,6 +606,35 @@ void OperationQueue::completeCancelled(Ids::OperationId const& id, Operation& op
 {
     std::ignore = operation.cancel(true);
     completeOperation(makeCompletedOperation(OperationQueue::CompletionReason::Canceled, id, operation));
+}
+
+void OperationQueue::completeCancelledByUser(
+    Ids::OperationId const& id,
+    Operation& operation,
+    PartialFilesOnCancel partialFiles
+)
+{
+    if (partialFiles == PartialFilesOnCancel::Kept)
+        operation.keepPartialFiles();
+    std::ignore = operation.cancel(true);
+    auto completed = makeCompletedOperation(OperationQueue::CompletionReason::Canceled, id, operation);
+    completed.keptPartialFiles = rememberKeptPartialFiles(id, operation);
+    completeOperation(std::move(completed));
+}
+
+bool OperationQueue::rememberKeptPartialFiles(Ids::OperationId const& id, Operation const& operation)
+{
+    auto partialFiles = operation.keptPartialFiles();
+    if (!partialFiles)
+        return false;
+    KeptTransfer kept{.partialFiles = *std::move(partialFiles)};
+    if (auto backup = bulkResumeStash_.extract(id); !backup.empty())
+    {
+        leaveOutFinished(operation, backup.mapped());
+        kept.resume = std::move(backup.mapped());
+    }
+    keptTransfers_.insert_or_assign(id, std::move(kept));
+    return true;
 }
 
 void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
@@ -1265,6 +1345,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .allowOverwrite = allowOverwrite,
+                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
             }
         );
 
@@ -1312,6 +1393,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .scanPhase = true,
+                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
             }
         );
 
@@ -1689,6 +1771,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                     .insertRefresh = unit.insertRefresh,
                     .localPath = *unit.localRoot,
                     .remotePath = *unit.remoteRoot,
+                    .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
                 }
             );
         }
@@ -1800,6 +1883,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .allowOverwrite = allowOverwrite,
+                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
             }
         );
 
@@ -1847,6 +1931,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .scanPhase = true,
+                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
             }
         );
 
@@ -1975,6 +2060,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
                     .insertRefresh = unit.insertRefresh,
                     .localPath = *unit.localRoot,
                     .remotePath = *unit.remoteRoot,
+                    .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
                 }
             );
         }
@@ -2631,26 +2717,26 @@ void OperationQueue::registerRpc()
 
     on(rpcName("cancel"))
         .perform(
-            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, Ids::OperationId operationId)
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, Ids::OperationId operationId, bool keepPartialFiles)
             {
                 auto self = weak.lock();
                 if (!self)
                     return reply(SharedData::error("OperationQueue no longer exists"));
 
-                self->cancel(std::move(operationId));
+                self->cancel(std::move(operationId), partialFilesOnCancel(keepPartialFiles));
                 return reply(SharedData::success());
             }
         );
 
     on(rpcName("cancelAll"))
         .perform(
-            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply)
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, bool keepPartialFiles)
             {
                 auto self = weak.lock();
                 if (!self)
                     return reply(SharedData::error("OperationQueue no longer exists"));
 
-                self->cancelAll();
+                self->cancelAll(partialFilesOnCancel(keepPartialFiles));
                 return reply(SharedData::success());
             }
         );

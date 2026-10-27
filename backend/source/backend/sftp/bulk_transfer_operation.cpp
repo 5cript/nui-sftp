@@ -723,11 +723,19 @@ void BulkTransferOperation::cancelChildrenInStrand(bool adoptCancelState)
 {
     for (auto& slot : slots_)
     {
-        if (slot.child)
-            std::ignore = slot.child->cancel(adoptCancelState);
+        if (!slot.child)
+            continue;
+        if (keepPartialFiles_)
+            slot.child->keepPartialFiles();
+        std::ignore = slot.child->cancel(adoptCancelState);
     }
     slots_.clear();
     deferred_.clear();
+}
+
+void BulkTransferOperation::keepPartialFiles()
+{
+    keepPartialFiles_ = true;
 }
 
 std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(bool adoptCancelState)

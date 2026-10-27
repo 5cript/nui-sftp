@@ -897,6 +897,21 @@ void DownloadOperation::cleanup()
     }
 }
 
+void DownloadOperation::keepPartialFiles()
+{
+    options_.doCleanup = false;
+}
+
+std::optional<Operation::KeptPartialFiles> DownloadOperation::keptPartialFiles() const
+{
+    if (options_.doCleanup)
+        return std::nullopt;
+    // The unsafe fast mode wrote to the destination, which a cancel removes.
+    if (unsafeFast_ || tempNativePath_.empty())
+        return KeptPartialFiles{};
+    return KeptPartialFiles{.local = {tempNativePath_}};
+}
+
 void DownloadOperation::pause(bool doPause)
 {
     if (asyncTransferContext_)

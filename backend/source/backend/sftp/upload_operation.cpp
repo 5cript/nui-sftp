@@ -965,6 +965,21 @@ void UploadOperation::partialFileOnCancel(PartialFile partial)
     partialFileOnCancel_ = partial;
 }
 
+void UploadOperation::keepPartialFiles()
+{
+    partialFileOnCancel_ = PartialFile::Kept;
+}
+
+std::optional<Operation::KeptPartialFiles> UploadOperation::keptPartialFiles() const
+{
+    if (partialFileOnCancel_ == PartialFile::Discarded)
+        return std::nullopt;
+    // The unsafe fast mode wrote to the destination, which a cancel removes.
+    if (unsafeFast_ || tempPath_.empty())
+        return KeptPartialFiles{};
+    return KeptPartialFiles{.remote = {tempPath_}};
+}
+
 void UploadOperation::removeRemoteFile(Paths::RemotePath const& path)
 {
     const auto sftp = openSession(sftp_);
