@@ -144,6 +144,11 @@ class DisplayedTransferOperation
     {
         if (isCompletedState())
             return std::nullopt;
+        return continuationDescriptor();
+    }
+
+    std::optional<ResumableOp> continuationDescriptor() const override
+    {
         if (type_ == SharedData::OperationType::Download)
             return Resumable::Download{
                 .source = remotePath_, .destination = localPath_, .allowOverwrite = allowOverwrite_

@@ -341,6 +341,95 @@ header.opq-controls {
     margin-left: 4px;
 }
 
+.opq-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 4px;
+    white-space: nowrap;
+}
+
+.opq-actions .opq-cancel-btn {
+    margin-left: 0;
+}
+
+/* Cancel and the menu of the other cancel options as one control. */
+.opq-cancel-split {
+    display: inline-flex;
+    border: 1px solid var(--opq-border-faint);
+    border-radius: 8px;
+    overflow: hidden;
+
+    .opq-btn {
+        border: 0;
+        border-radius: 0;
+    }
+
+    .opq-cancel-more {
+        border-left: 1px solid var(--opq-border-faint);
+        padding: 3px 3px;
+        display: inline-flex;
+        align-items: center;
+
+        svg {
+            width: 10px;
+            height: 10px;
+            fill: currentColor;
+        }
+    }
+}
+
+.opq-cancel-all-host {
+    display: contents;
+}
+
+.opq-cancel-all-split {
+    display: inline-flex;
+    align-self: stretch;
+
+    .opq-cancel-all-more {
+        display: inline-flex;
+        align-items: center;
+        padding: 0 5px;
+        margin-left: -1px;
+        border: 1px solid var(--opq-border-faint);
+        border-radius: 0 4px 4px 0;
+        background: transparent;
+        color: var(--color);
+        cursor: pointer;
+
+        svg {
+            width: 10px;
+            height: 10px;
+            fill: currentColor;
+        }
+    }
+}
+
+.opq-kept-note {
+    font-size: 12px;
+    color: var(--opq-warn);
+}
+
+.opq-continue-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--theme-color);
+
+    svg {
+        width: 10px;
+        height: 10px;
+        fill: currentColor;
+    }
+}
+
+.opq-actions .opq-cancel-btn svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+}
+
 /* dynamic content area */
 .opq-body {
     overflow: hidden;
@@ -537,6 +626,11 @@ header.opq-controls {
     --opq-state-color: rgba(153, 153, 153, 0.04);
     border-color: rgba(153, 153, 153, 0.50);
     color: var(--opq-gray)
+}
+
+.opq-card.opq-canceled.opq-kept {
+    --opq-state-color: rgba(255, 181, 52, 0.10);
+    border-color: rgba(255, 181, 52, 0.40);
 }
 
 .opq-card.opq-partial-success {

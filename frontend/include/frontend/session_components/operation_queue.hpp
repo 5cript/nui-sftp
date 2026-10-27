@@ -363,6 +363,29 @@ class OperationQueue
     void cancelAll();
     void togglePause();
     void askBackendToCancelAll(bool keepPartialFiles = false);
+
+    /**
+     * @brief Removes the cards Cancel All canceled. A transfer that keeps its partial files stays, its completion
+     *        turns it into a card to continue or discard them.
+     */
+    void removeCardsCanceledByAll(bool keepPartialFiles);
+
+    /**
+     * @brief Opens the cancel menu next to the element @p anchorId: cancel deleting the partial files or keeping them,
+     *        of one card or of all of them when @p forAll is set. @p onChoice hears whether to keep them.
+     */
+    void openCancelMenu(std::string const& anchorId, bool forAll, std::function<void(bool keepPartialFiles)> onChoice);
+
+    /**
+     * @brief Goes on with the transfer of the card @p operationId that a cancel stopped keeping its partial files.
+     *        Takes the id by value: the card, whose handler may hold the id, goes first.
+     */
+    void continueKept(Ids::OperationId operationId);
+
+    /**
+     * @brief Deletes the partial files the card @p operationId kept, and the card.
+     */
+    void discardKept(Ids::OperationId operationId);
     void changeAutoClean(bool doClean);
 
     /**

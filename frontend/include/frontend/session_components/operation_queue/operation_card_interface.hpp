@@ -14,12 +14,14 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/is_paused.hpp>
 #include <shared_data/error_or_success.hpp>
+#include <ids/ids.hpp>
 
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <string>
 
 class OperationCardInterface
 {
@@ -36,6 +38,41 @@ class OperationCardInterface
     virtual Nui::ElementRenderer operator()() const = 0;
     virtual void setError(SharedData::OperationError const& error) = 0;
     virtual void failedEntries(std::vector<std::pair<std::string, SharedData::OperationError>> entries) = 0;
+    virtual Ids::OperationId operationId() const = 0;
+
+    /**
+     * @brief What the cancel options of a transfer card call, installed by the queue like setKickToTopHandler.
+     */
+    struct PartialFileHandlers
+    {
+        /** @brief Opens the cancel menu next to the element with the given id. */
+        std::function<void(std::string const& anchorId)> openCancelMenu{};
+        std::function<void()> continueTransfer{};
+        std::function<void()> discardPartialFiles{};
+    };
+    virtual void setPartialFileHandlers(PartialFileHandlers handlers) = 0;
+
+    /**
+     * @brief Whether a cancel deletes the partial files of the transfer, unknown for other operations. A card that
+     *        deletes them offers to keep them too.
+     */
+    virtual void deletesPartialFilesOnCancel(std::optional<bool> deletes) = 0;
+    virtual std::optional<bool> deletesPartialFilesOnCancel() const = 0;
+
+    /**
+     * @brief The transfer was canceled keeping its partial files, the card offers to continue or discard them.
+     */
+    virtual void keptPartialFiles(bool kept) = 0;
+    virtual bool keptPartialFiles() const = 0;
+
+    /**
+     * @brief The transfer as its owner queues it anew to continue its kept partial file, whatever its state. Nothing
+     *        for a bulk, which the backend queues again under its id.
+     */
+    virtual std::optional<ResumableOp> continuationDescriptor() const
+    {
+        return std::nullopt;
+    }
 
     /**
      * @brief Install a click handler for the kick-to-top affordance.  The

@@ -524,6 +524,56 @@ void FileEngine::closeSyncSession(Ids::SyncSessionId syncSessionId)
     );
 }
 
+void FileEngine::continueKept(
+    Ids::OperationId const& operationId,
+    std::function<void(std::optional<bool> requeued, std::string const& info)> onDone
+)
+{
+    lazyOpen(
+        [this, operationId, onDone = std::move(onDone)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+                return onDone(std::nullopt, info);
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::continueKept", impl_->engine->sshSessionId().value()),
+                [onDone = std::move(onDone)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error"))
+                        return onDone(std::nullopt, val["error"].as<std::string>());
+                    onDone(val.hasOwnProperty("requeued") && val["requeued"].as<bool>(), "Success");
+                },
+                channelId.value().value(),
+                operationId.value()
+            );
+        }
+    );
+}
+
+void FileEngine::discardKept(
+    Ids::OperationId const& operationId,
+    std::function<void(bool success, std::string const& info)> onDone
+)
+{
+    lazyOpen(
+        [this, operationId, onDone = std::move(onDone)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+                return onDone(false, info);
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::discardKept", impl_->engine->sshSessionId().value()),
+                [onDone = std::move(onDone)](Nui::val val)
+                {
+                    if (val.hasOwnProperty("error"))
+                        return onDone(false, val["error"].as<std::string>());
+                    onDone(true, "Success");
+                },
+                channelId.value().value(),
+                operationId.value()
+            );
+        }
+    );
+}
+
 void FileEngine::addDownload(
     Paths::RemotePath const& source,
     Paths::LocalPath const& destination,

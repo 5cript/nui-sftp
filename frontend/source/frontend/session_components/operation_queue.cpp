@@ -32,8 +32,12 @@
 #include <script-nui-components/button.hpp>
 #include <script-nui-components/switch.hpp>
 #include <script-nui-components/pagination.hpp>
+#include <script-nui-components/popup_menu.hpp>
 
 #include <ui5-sap-icons/icons/synchronize.hpp>
+#include <ui5-sap-icons/icons/delete.hpp>
+#include <ui5-sap-icons/icons/stop.hpp>
+#include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -65,6 +69,10 @@ struct OperationQueue::Implementation
     std::shared_ptr<Nui::Observed<bool>> autoClean{std::make_shared<Nui::Observed<bool>>(false)};
     /** @brief Mirrors the backend queue, which starts every connection with it off. */
     std::shared_ptr<Nui::Observed<bool>> unsafeFast{std::make_shared<Nui::Observed<bool>>(false)};
+    /** @brief The cancel options of a card or of Cancel All, opened next to the button that asked for them. */
+    ScriptNuiComponents::PopupMenu cancelMenu{};
+    /** @brief A transfer of the connection deletes its partial files on cancel, so Cancel All offers to keep them. */
+    Nui::Observed<bool> offersToKeepPartialFiles{false};
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> priorityOperations;
     ObservedRandomAccessMap<Ids::OperationId, DisplayedOperation, std::map> operations;
 
@@ -334,7 +342,8 @@ OperationQueue::OperationQueue(
                 {
                     for (auto* front = queue.front(); front != nullptr; front = queue.front())
                     {
-                        if (front->isCompletedState())
+                        // A card that kept its partial files waits for the user to continue or discard them.
+                        if (front->isCompletedState() && !front->keptPartialFiles())
                         {
                             auto duration = now - front->completionTime();
                             if (duration >= autoRemoveTime)
@@ -359,7 +368,7 @@ OperationQueue::OperationQueue(
                     impl_->history,
                     [&](auto const& entry)
                     {
-                        if (!entry->isCompletedState())
+                        if (!entry->isCompletedState() || entry->keptPartialFiles())
                             return false;
                         if (now - entry->completionTime() < autoRemoveTime)
                             return false;
@@ -447,7 +456,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation, bool keepPa
     };
 
     // Keeping the partial files loses nothing that a confirmation would protect.
-    if (!keepPartialFiles && operation.warrantsCancelConfirm())
+    if (!keepPartialFiles && operation.deletesPartialFilesOnCancel() != false && operation.warrantsCancelConfirm())
     {
         impl_->confirmDialog->open({
             .headerText = language->get("operationQueue", "cancelOperationHeader"),
@@ -1022,6 +1031,35 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             }
         );
     }
+    card->deletesPartialFilesOnCancel(added.deletesPartialFilesOnCancel);
+    if (added.deletesPartialFilesOnCancel.value_or(false))
+        impl_->offersToKeepPartialFiles = true;
+    card->setPartialFileHandlers({
+        .openCancelMenu =
+            [this, opId = added.operationId](std::string const& anchorId)
+        {
+            openCancelMenu(
+                anchorId,
+                false,
+                [this, opId](bool keepPartialFiles)
+                {
+                    // An operation that ended meanwhile has nothing left to cancel, its card stays.
+                    if (auto* operation = impl_->findOperation(opId); operation && !operation->isCompletedState())
+                        cancelOperation(operation->card(), keepPartialFiles);
+                }
+            );
+        },
+        .continueTransfer =
+            [this, opId = added.operationId]()
+        {
+            continueKept(opId);
+        },
+        .discardPartialFiles =
+            [this, opId = added.operationId]()
+        {
+            discardKept(opId);
+        },
+    });
     Log::info("Inserting operation id: {} into operation queue", added.operationId.value());
     try
     {
@@ -1404,6 +1442,7 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
         }
         case (SharedData::OperationCompletionReason::Canceled):
         {
+            operation->card().keptPartialFiles(completed.keptPartialFiles);
             operation->state(SharedData::OperationState::Canceled);
             break;
         }
@@ -1921,12 +1960,12 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         lifetime_.guarded(
-            [this](SharedData::ErrorOrSuccess<> const& result)
+            [this, keepPartialFiles](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (result)
                 {
                     Log::info("Operation queue all was canceled");
-                    cancelAll();
+                    removeCardsCanceledByAll(keepPartialFiles);
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 }
                 else
@@ -1934,6 +1973,110 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
             }
         ),
         keepPartialFiles
+    );
+}
+
+void OperationQueue::removeCardsCanceledByAll(bool keepPartialFiles)
+{
+    const auto keepsCard = [keepPartialFiles](DisplayedOperation& operation)
+    {
+        if (operation.isCompletedState())
+            return operation.keptPartialFiles();
+        const auto deletes = operation.card().deletesPartialFilesOnCancel();
+        return deletes.has_value() && (keepPartialFiles || !*deletes);
+    };
+    LocalOperationRouter::instance().cancelHostedBy(*this);
+    for (auto* cards : {&impl_->operations, &impl_->priorityOperations})
+    {
+        std::vector<Ids::OperationId> removed;
+        for (auto const& operation : cards->observedValues().value())
+        {
+            if (!keepsCard(*operation))
+                removed.push_back(operation->key());
+        }
+        for (auto const& operationId : removed)
+            cards->erase(operationId);
+    }
+    std::erase_if(
+        impl_->history,
+        [&](auto const& entry)
+        {
+            if (keepsCard(*entry))
+                return false;
+            impl_->historyIndex.erase(entry->key().value());
+            return true;
+        }
+    );
+    // The failed list survives Cancel All, as in cancelAll().
+    impl_->recomputePageCount();
+}
+
+void OperationQueue::openCancelMenu(
+    std::string const& anchorId,
+    bool forAll,
+    std::function<void(bool keepPartialFiles)> onChoice
+)
+{
+    namespace Snc = ScriptNuiComponents;
+    impl_->cancelMenu.setItems({
+        Snc::PopupMenu::item(
+            language->get("operationQueue", forAll ? "cancelAllDeletingPartialFiles" : "cancelDeletingPartialFiles"),
+            Ui5Icons::delete_(),
+            [onChoice]()
+            {
+                onChoice(false);
+            }
+        ),
+        Snc::PopupMenu::item(
+            language->get("operationQueue", forAll ? "cancelAllKeepingPartialFiles" : "cancelKeepingPartialFiles"),
+            Ui5Icons::stop(),
+            [onChoice]()
+            {
+                onChoice(true);
+            }
+        ),
+    });
+    impl_->cancelMenu.openNextTo(anchorId);
+}
+
+void OperationQueue::continueKept(Ids::OperationId operationId)
+{
+    auto* operation = impl_->findOperation(operationId);
+    if (!operation || !impl_->fileEngine)
+        return;
+    const auto descriptor = operation->continuationDescriptor();
+    // A bulk comes back under its id, before the reply, so its card has to be gone by then.
+    impl_->eraseOperation(operationId);
+    Nui::globalEventContext.executeActiveEventsImmediately();
+    impl_->fileEngine->continueKept(
+        operationId,
+        lifetime_.guarded(
+            [this, operationId, descriptor](std::optional<bool> requeued, std::string const& info)
+            {
+                if (!requeued)
+                    return Log::error("Cannot continue the transfer {}: {}", operationId.value(), info);
+                if (!*requeued && descriptor)
+                    enqueueResumable(*descriptor);
+            }
+        )
+    );
+}
+
+void OperationQueue::discardKept(Ids::OperationId operationId)
+{
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->discardKept(
+        operationId,
+        lifetime_.guarded(
+            [this, operationId](bool success, std::string const& info)
+            {
+                if (!success)
+                    return Log::error("Cannot delete the partial files of {}: {}", operationId.value(), info);
+                impl_->eraseOperation(operationId);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        )
     );
 }
 
@@ -2242,15 +2385,44 @@ Nui::ElementRenderer OperationQueue::operator()()
                     }
                 },
             }),
-            Snc::button({
-                .text = language->getObserved("operationQueue", "cancelAll"),
-                .attributes = {
-                    onClick = [this](){
-                        askBackendToCancelAll();
-                    },
-                    style = "align-self: stretch"
-                },
-            }),
+            // A wrapper, not a fragment: a fragment renders anew at the end of the header.
+            div{
+                class_ = "opq-cancel-all-host"
+            }(
+                observe(impl_->offersToKeepPartialFiles),
+                [this]() -> Nui::ElementRenderer {
+                    namespace Snc = ScriptNuiComponents;
+                    auto cancelAllButton = Snc::button({
+                        .text = language->getObserved("operationQueue", "cancelAll"),
+                        .attributes = {
+                            onClick = [this](){
+                                askBackendToCancelAll();
+                            },
+                            style = "align-self: stretch"
+                        },
+                    });
+                    if (!impl_->offersToKeepPartialFiles.value())
+                        return cancelAllButton;
+                    const auto anchorId = fmt::format("opq-cancel-all-more-{}", static_cast<void const*>(this));
+                    return div{
+                        class_ = "opq-cancel-all-split"
+                    }(
+                        std::move(cancelAllButton),
+                        button{
+                            class_ = "opq-cancel-all-more",
+                            id = anchorId,
+                            Nui::Attributes::title = language->get("operationQueue", "moreCancelOptions"),
+                            "aria-label"_attr = language->get("operationQueue", "moreCancelOptions"),
+                            onClick = [this, anchorId](){
+                                openCancelMenu(anchorId, true, [this](bool keepPartialFiles) {
+                                    askBackendToCancelAll(keepPartialFiles);
+                                });
+                            }
+                        }(Ui5Icons::slim_arrow_down())
+                    );
+                }
+            ),
+            impl_->cancelMenu(),
             // Conditional render: avoid creating the button in the DOM until
             // a minimize actually happens.  If we instead toggled visibility
             // via `style=display:none`, the button's shine-color `style` and

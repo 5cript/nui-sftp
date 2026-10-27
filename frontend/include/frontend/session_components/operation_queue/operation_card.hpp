@@ -26,6 +26,8 @@
 #include <ui5-sap-icons/icons/attachment-zip-file.hpp>
 #include <ui5-sap-icons/icons/copy.hpp>
 #include <ui5-sap-icons/icons/move.hpp>
+#include <ui5-sap-icons/icons/media-play.hpp>
+#include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 
 #include <utility/language.hpp>
 #include <utility/convert_naming_convention.hpp>
@@ -118,16 +120,16 @@ class OperationCard : public OperationCardInterface
             reference = [this](std::weak_ptr<Nui::Dom::BasicElement>&& element){
                 cardElement_ = std::move(element);
             },
-            class_ = observe(state_).generate([this](){
+            class_ = observe(state_, keptPartialFiles_).generate([this](){
                 const auto state = state_.value();
                 const auto isSubgridOperation = type_ == SharedData::OperationType::Scan || type_ == SharedData::OperationType::LocalScan;
-                return fmt::format("opq-card {} {}", [&state]() -> std::string {
+                return fmt::format("opq-card {} {}", [this, &state]() -> std::string {
                     if (state == SharedData::OperationState::Completed)
                         return "opq-completed";
                     else if (state == SharedData::OperationState::Failed)
                         return "opq-failed";
                     else if (state == SharedData::OperationState::Canceled)
-                        return "opq-canceled";
+                        return keptPartialFiles_.value() ? "opq-canceled opq-kept" : "opq-canceled";
                     else if (state == SharedData::OperationState::PartialSuccess)
                         return "opq-partial-success";
                     else
@@ -271,18 +273,14 @@ class OperationCard : public OperationCardInterface
                     return "?";
                 })
             ),
-            // Cancel / Remove
-            button {
-                class_ = "opq-btn opq-cancel-btn",
-                onClick = [this](){
-                    cancel();
-                }
+            // Cancel / Remove, or continue and discard what a cancel kept
+            div{
+                class_ = "opq-actions"
             }(
-                observe(state_).generate([this]() -> std::string {
-                    if (isCompletedState())
-                        return "X";
-                    return "X";
-                })
+                observe(state_, deletesPartialFilesOnCancel_, keptPartialFiles_),
+                [this]() -> Nui::ElementRenderer {
+                    return actions();
+                }
             )
         );
         // clang-format on
@@ -300,9 +298,34 @@ class OperationCard : public OperationCardInterface
         doRemoveSelf_(*this);
     }
 
-    Ids::OperationId operationId() const
+    Ids::OperationId operationId() const override
     {
         return operationId_;
+    }
+
+    void setPartialFileHandlers(PartialFileHandlers handlers) override
+    {
+        partialFileHandlers_ = std::move(handlers);
+    }
+
+    void deletesPartialFilesOnCancel(std::optional<bool> deletes) override
+    {
+        deletesPartialFilesOnCancel_ = deletes;
+    }
+
+    std::optional<bool> deletesPartialFilesOnCancel() const override
+    {
+        return deletesPartialFilesOnCancel_.value();
+    }
+
+    void keptPartialFiles(bool kept) override
+    {
+        keptPartialFiles_ = kept;
+    }
+
+    bool keptPartialFiles() const override
+    {
+        return keptPartialFiles_.value();
     }
 
     Nui::ElementRenderer elapsedTime() const
@@ -363,6 +386,87 @@ class OperationCard : public OperationCardInterface
         kickToTopHandler_ = std::move(handler);
     }
 
+  private:
+    std::string cancelMenuAnchorId() const
+    {
+        return fmt::format("opq-cancel-more-{}", operationId_.value());
+    }
+
+    /**
+     * @brief The buttons at the end of the card: continue and discard for a transfer that kept its partial files,
+     *        cancel with the cancel menu next to it for one that deletes them, a plain cancel or remove otherwise.
+     */
+    Nui::ElementRenderer actions() const
+    {
+        using namespace Nui::Elements;
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+
+        // clang-format off
+        if (state_.value() == SharedData::OperationState::Canceled && keptPartialFiles_.value())
+        {
+            return fragment(
+                span{class_ = "opq-kept-note"}(language->get("operationQueue", "partialFilesKept")),
+                button{
+                    class_ = "opq-btn opq-continue-btn",
+                    Nui::Attributes::title = language->get("operationQueue", "continueKeptTitle"),
+                    onClick = [this](){
+                        if (partialFileHandlers_.continueTransfer)
+                            partialFileHandlers_.continueTransfer();
+                    }
+                }(
+                    Ui5Icons::media_play(),
+                    span{}(language->get("operationQueue", "continueKept"))
+                ),
+                button{
+                    class_ = "opq-btn opq-cancel-btn",
+                    Nui::Attributes::title = language->get("operationQueue", "discardKept"),
+                    "aria-label"_attr = language->get("operationQueue", "discardKept"),
+                    onClick = [this](){
+                        if (partialFileHandlers_.discardPartialFiles)
+                            partialFileHandlers_.discardPartialFiles();
+                    }
+                }(Ui5Icons::delete_())
+            );
+        }
+        if (!isCompletedState() && deletesPartialFilesOnCancel_.value().value_or(false))
+        {
+            return div{
+                class_ = "opq-cancel-split"
+            }(
+                button{
+                    class_ = "opq-btn opq-cancel-btn",
+                    Nui::Attributes::title = language->get("operationQueue", "cancelDeletingPartialFiles"),
+                    onClick = [this](){
+                        cancel();
+                    }
+                }("X"),
+                button{
+                    class_ = "opq-btn opq-cancel-more",
+                    id = cancelMenuAnchorId(),
+                    Nui::Attributes::title = language->get("operationQueue", "moreCancelOptions"),
+                    "aria-label"_attr = language->get("operationQueue", "moreCancelOptions"),
+                    onClick = [this](Nui::val event){
+                        event.call<void>("stopPropagation");
+                        if (partialFileHandlers_.openCancelMenu)
+                            partialFileHandlers_.openCancelMenu(cancelMenuAnchorId());
+                    }
+                }(Ui5Icons::slim_arrow_down())
+            );
+        }
+        return button{
+            class_ = "opq-btn opq-cancel-btn",
+            Nui::Attributes::title = !isCompletedState() && deletesPartialFilesOnCancel_.value() == false
+                ? language->get("operationQueue", "cancelKeepsPartialFiles")
+                : std::string{},
+            onClick = [this](){
+                cancel();
+            }
+        }("X");
+        // clang-format on
+    }
+
   protected:
     mutable std::weak_ptr<Nui::Dom::BasicElement> cardElement_;
     std::chrono::steady_clock::time_point startTime_{std::chrono::steady_clock::now()};
@@ -377,4 +481,7 @@ class OperationCard : public OperationCardInterface
     std::function<void()> onCompleteAction_;
     Nui::Observed<std::vector<std::pair<std::string, SharedData::OperationError>>> failedEntries_;
     std::function<void()> kickToTopHandler_;
+    PartialFileHandlers partialFileHandlers_{};
+    Nui::Observed<std::optional<bool>> deletesPartialFilesOnCancel_{std::nullopt};
+    Nui::Observed<bool> keptPartialFiles_{false};
 };

@@ -130,6 +130,25 @@ class FileEngine
     /** @brief Releases backend-side memory for @p syncSessionId. */
     void closeSyncSession(Ids::SyncSessionId syncSessionId);
 
+    /**
+     * @brief Goes on with the transfer @p operationId a cancel stopped keeping its partial files, see
+     *        OperationQueue::continueKept in the backend.
+     * @param onDone Whether the backend queued it again under its id, nothing when the request failed. A single
+     *        transfer is not queued again, its owner queues it anew.
+     */
+    void continueKept(
+        Ids::OperationId const& operationId,
+        std::function<void(std::optional<bool> requeued, std::string const& info)> onDone
+    );
+
+    /**
+     * @brief Deletes the partial files the transfer @p operationId kept when it was canceled.
+     */
+    void discardKept(
+        Ids::OperationId const& operationId,
+        std::function<void(bool success, std::string const& info)> onDone
+    );
+
     void addDownload(
         Paths::RemotePath const& source,
         Paths::LocalPath const& destination,
