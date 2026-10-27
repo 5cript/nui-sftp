@@ -253,8 +253,9 @@ class Session
     void registerRpcSftpAddBulkDeleteOperation();
 
     /**
-     * @brief Handles "Session::{id}::sftp::continueKept" and "Session::{id}::sftp::discardKept" (channel id, operation
-     *        id): goes on with or deletes the partial files of a transfer the user canceled keeping them, see
+     * @brief Handles "Session::{id}::sftp::continueKept" (channel id, operation id) and
+     *        "Session::{id}::sftp::discardKept" (channel id, operation ids): goes on with a transfer the user canceled
+     *        keeping its partial files, or deletes the partial files of such transfers, see
      *        OperationQueue::continueKept and OperationQueue::discardKept.
      */
     void registerRpcSftpKeptTransfers();

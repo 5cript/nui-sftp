@@ -45,6 +45,7 @@
 #include <memory>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -221,6 +222,28 @@ struct OperationQueue::Implementation
         }
         if (historyChanged)
             recomputePageCount();
+    }
+
+    /**
+     * @brief The cards of transfers canceled keeping their partial files.
+     */
+    std::unordered_set<Ids::OperationId, Ids::IdHash> keptOperationIds()
+    {
+        std::unordered_set<Ids::OperationId, Ids::IdHash> kept{};
+        for (auto* cards : {&operations, &priorityOperations})
+        {
+            for (auto const& operation : cards->observedValues().value())
+            {
+                if (operation->keptPartialFiles())
+                    kept.insert(operation->key());
+            }
+        }
+        for (auto const& entry : history)
+        {
+            if (entry->keptPartialFiles())
+                kept.insert(entry->key());
+        }
+        return kept;
     }
 
     /**
@@ -443,11 +466,10 @@ OperationQueue::~OperationQueue()
 void OperationQueue::cancelAll()
 {
     LocalOperationRouter::instance().cancelHostedBy(*this);
-    // A card that kept its partial files waits for the user to continue or discard them.
     impl_->eraseOperationsIf(
-        [](DisplayedOperation& operation)
+        [](DisplayedOperation&)
         {
-            return !operation.keptPartialFiles();
+            return true;
         }
     );
     Nui::globalEventContext.executeActiveEventsImmediately();
@@ -2016,15 +2038,16 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
         cancelAll();
         return;
     }
+    // Taken now: a completion of this cancel may turn more cards into kept ones before the reply.
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         lifetime_.guarded(
-            [this, keepPartialFiles](SharedData::ErrorOrSuccess<> const& result)
+            [this, keepPartialFiles, keptBefore = impl_->keptOperationIds()](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (result)
                 {
                     Log::info("Operation queue all was canceled");
-                    removeCardsCanceledByAll(keepPartialFiles);
+                    removeCardsCanceledByAll(keepPartialFiles, keptBefore);
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 }
                 else
@@ -2035,15 +2058,30 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
     );
 }
 
-void OperationQueue::removeCardsCanceledByAll(bool keepPartialFiles)
+void OperationQueue::removeCardsCanceledByAll(
+    bool keepPartialFiles,
+    std::unordered_set<Ids::OperationId, Ids::IdHash> const& keptBefore
+)
 {
     LocalOperationRouter::instance().cancelHostedBy(*this);
     impl_->eraseOperationsIf(
-        [keepPartialFiles](DisplayedOperation& operation)
+        [&](DisplayedOperation& operation)
         {
+            if (keptBefore.contains(operation.key()))
+                return true;
             if (operation.isCompletedState())
                 return !operation.keptPartialFiles();
             return !operation.card().keepsPartialFilesOnCancel(keepPartialFiles);
+        }
+    );
+    if (keepPartialFiles || keptBefore.empty() || !impl_->fileEngine)
+        return;
+    impl_->fileEngine->discardKept(
+        std::vector<Ids::OperationId>{keptBefore.begin(), keptBefore.end()},
+        [count = keptBefore.size()](bool success, std::string const& info)
+        {
+            if (!success)
+                Log::error("Cannot delete the partial files of {} canceled transfer(s): {}", count, info);
         }
     );
 }
@@ -2096,7 +2134,7 @@ void OperationQueue::discardKept(Ids::OperationId const& operationId)
     if (!impl_->fileEngine)
         return;
     impl_->fileEngine->discardKept(
-        operationId,
+        {operationId},
         lifetime_.guarded(
             [this, operationId](bool success, std::string const& info)
             {
