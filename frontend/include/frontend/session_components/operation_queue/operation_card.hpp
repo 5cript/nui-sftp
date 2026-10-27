@@ -14,6 +14,8 @@
 #include <frontend/components/svg/scan.hpp>
 #include <frontend/components/svg/pause.hpp>
 #include <frontend/components/svg/play.hpp>
+#include <frontend/components/svg/stop.hpp>
+#include <frontend/components/svg/dismiss.hpp>
 #include <frontend/components/svg/scan_animated.hpp>
 #include <frontend/components/icon_panel.hpp>
 
@@ -393,8 +395,9 @@ class OperationCard : public OperationCardInterface
     }
 
     /**
-     * @brief The buttons at the end of the card: continue and discard for a transfer that kept its partial files,
-     *        cancel with the cancel menu next to it for one that deletes them, a plain cancel or remove otherwise.
+     * @brief The buttons at the end of the card: continue and discard for a transfer that kept its partial files, a
+     *        quiet remove for an ended operation, stop otherwise, with the stop menu next to it for a transfer that
+     *        deletes its partial files. The label of stop hides in a narrow queue, see operation_queue.css.
      */
     Nui::ElementRenderer actions() const
     {
@@ -402,6 +405,13 @@ class OperationCard : public OperationCardInterface
         using namespace Nui::Attributes;
         using Nui::Elements::div;
         using Nui::Elements::span;
+
+        const auto stopContent = [](){
+            return fragment(
+                Svgs::stop(),
+                span{class_ = "opq-stop-label"}(language->get("operationQueue", "stop"))
+            );
+        };
 
         // clang-format off
         if (state_.value() == SharedData::OperationState::Canceled && keptPartialFiles_.value())
@@ -420,7 +430,7 @@ class OperationCard : public OperationCardInterface
                     span{}(language->get("operationQueue", "continueKept"))
                 ),
                 button{
-                    class_ = "opq-btn opq-cancel-btn",
+                    class_ = "opq-btn opq-discard-btn",
                     Nui::Attributes::title = language->get("operationQueue", "discardKept"),
                     "aria-label"_attr = language->get("operationQueue", "discardKept"),
                     onClick = [this](){
@@ -430,20 +440,31 @@ class OperationCard : public OperationCardInterface
                 }(Ui5Icons::delete_())
             );
         }
-        if (!isCompletedState() && deletesPartialFilesOnCancel_.value().value_or(false))
+        if (isCompletedState())
+        {
+            return button{
+                class_ = "opq-dismiss-btn",
+                Nui::Attributes::title = language->get("operationQueue", "removeFromList"),
+                "aria-label"_attr = language->get("operationQueue", "removeFromList"),
+                onClick = [this](){
+                    cancel();
+                }
+            }(Svgs::dismiss());
+        }
+        if (deletesPartialFilesOnCancel_.value().value_or(false))
         {
             return div{
-                class_ = "opq-cancel-split"
+                class_ = "opq-stop-split"
             }(
                 button{
-                    class_ = "opq-btn opq-cancel-btn",
+                    class_ = "opq-stop-btn",
                     Nui::Attributes::title = language->get("operationQueue", "cancelDeletingPartialFiles"),
                     onClick = [this](){
                         cancel();
                     }
-                }("X"),
+                }(stopContent()),
                 button{
-                    class_ = "opq-btn opq-cancel-more",
+                    class_ = "opq-stop-more",
                     id = cancelMenuAnchorId(),
                     Nui::Attributes::title = language->get("operationQueue", "moreCancelOptions"),
                     "aria-label"_attr = language->get("operationQueue", "moreCancelOptions"),
@@ -456,14 +477,14 @@ class OperationCard : public OperationCardInterface
             );
         }
         return button{
-            class_ = "opq-btn opq-cancel-btn",
-            Nui::Attributes::title = !isCompletedState() && deletesPartialFilesOnCancel_.value() == false
+            class_ = "opq-stop-btn opq-stop-single",
+            Nui::Attributes::title = deletesPartialFilesOnCancel_.value() == false
                 ? language->get("operationQueue", "cancelKeepsPartialFiles")
-                : std::string{},
+                : language->get("operationQueue", "stop"),
             onClick = [this](){
                 cancel();
             }
-        }("X");
+        }(stopContent());
         // clang-format on
     }
 

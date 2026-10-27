@@ -36,7 +36,6 @@
 
 #include <ui5-sap-icons/icons/synchronize.hpp>
 #include <ui5-sap-icons/icons/delete.hpp>
-#include <ui5-sap-icons/icons/stop.hpp>
 #include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 
 #include <algorithm>
@@ -2029,7 +2028,7 @@ void OperationQueue::openCancelMenu(
         ),
         Snc::PopupMenu::item(
             language->get("operationQueue", forAll ? "cancelAllKeepingPartialFiles" : "cancelKeepingPartialFiles"),
-            Ui5Icons::stop(),
+            Svgs::stop(),
             [onChoice]()
             {
                 onChoice(true);
@@ -2394,6 +2393,7 @@ Nui::ElementRenderer OperationQueue::operator()()
                     namespace Snc = ScriptNuiComponents;
                     auto cancelAllButton = Snc::button({
                         .text = language->getObserved("operationQueue", "cancelAll"),
+                        .icon = Svgs::stop(),
                         .attributes = {
                             onClick = [this](){
                                 askBackendToCancelAll();
