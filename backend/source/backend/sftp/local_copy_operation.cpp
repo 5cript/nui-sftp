@@ -1,6 +1,7 @@
 #include <backend/sftp/local_copy_operation.hpp>
 #include <paths/native.hpp>
 #include <utility/error_message.hpp>
+#include <utility/extended_length_path.hpp>
 
 #include <fmt/format.h>
 
@@ -12,10 +13,19 @@ namespace
 {
     std::filesystem::path withoutTrailingSeparator(std::filesystem::path const& path)
     {
-        auto normal = path.lexically_normal();
+        // An extended-length path is normal already and must not be normalized again.
+        auto normal = Utility::isExtendedLengthPath(path) ? path : path.lexically_normal();
         if (!normal.has_filename() && normal.has_relative_path())
             return normal.parent_path();
         return normal;
+    }
+
+    /**
+     * @brief @p path as the user knows it, for progress, failures and logs.
+     */
+    std::string shownPath(std::filesystem::path const& path)
+    {
+        return Paths::nativeToUtf8(Utility::withoutExtendedLengthPrefix(path));
     }
 
     /**
@@ -181,8 +191,9 @@ bool LocalCopyOperation::workPrepare(std::chrono::steady_clock::time_point)
 void LocalCopyOperation::prepare(SharedData::LocalCopyEntry const& entry)
 {
     PreparedEntry prepared{
-        .source = withoutTrailingSeparator(entry.source.native()),
-        .destination = withoutTrailingSeparator(entry.destination.native()),
+        // Past MAX_PATH only the extended-length form reaches the items on Windows.
+        .source = Utility::extendedLengthPath(withoutTrailingSeparator(entry.source.native())),
+        .destination = Utility::extendedLengthPath(withoutTrailingSeparator(entry.destination.native())),
         .mayOverwrite = entry.mayOverwrite,
     };
     const auto settle = [this, &prepared]()
@@ -200,7 +211,7 @@ void LocalCopyOperation::prepare(SharedData::LocalCopyEntry const& entry)
 
     std::error_code error{};
     prepared.kind = Utility::noFollowKindOf(prepared.source, error);
-    lastItem_ = Paths::nativeToUtf8(prepared.source);
+    lastItem_ = shownPath(prepared.source);
     if (error)
     {
         recordFailure(prepared.source, ErrorType::FileStatFailed, error);
@@ -372,7 +383,7 @@ bool LocalCopyOperation::renameItem(
     std::filesystem::rename(source, destination, error);
     if (error)
         return false;
-    lastItem_ = Paths::nativeToUtf8(source);
+    lastItem_ = shownPath(source);
     ++entriesDone_;
     bytesDone_ += bytes;
     return true;
@@ -406,7 +417,7 @@ void LocalCopyOperation::finishEntryCopy()
         if (options_.move)
             Log::warn(
                 "LocalCopyOperation: '{}' is kept, not all of it could be moved.",
-                Paths::nativeToUtf8(prepared_[entryIndex_].source)
+                shownPath(prepared_[entryIndex_].source)
             );
         ++entryIndex_;
         return;
@@ -430,7 +441,7 @@ void LocalCopyOperation::copyItem(
 {
     using Utility::NoFollowKind;
 
-    lastItem_ = Paths::nativeToUtf8(source);
+    lastItem_ = shownPath(source);
     std::error_code error{};
     const auto destinationKind = Utility::noFollowKindOf(destination, error);
     if (error)
@@ -579,7 +590,7 @@ void LocalCopyOperation::finishFile()
     if (error)
         Log::warn(
             "LocalCopyOperation: The permissions of '{}' were not copied: {}",
-            Paths::nativeToUtf8(file_->destination),
+            shownPath(file_->destination),
             Utility::errorMessage(error)
         );
     const auto modified = std::filesystem::last_write_time(file_->source, error);
@@ -588,7 +599,7 @@ void LocalCopyOperation::finishFile()
     if (error)
         Log::warn(
             "LocalCopyOperation: The modification time of '{}' was not copied: {}",
-            Paths::nativeToUtf8(file_->destination),
+            shownPath(file_->destination),
             Utility::errorMessage(error)
         );
 
@@ -631,7 +642,7 @@ void LocalCopyOperation::leaveDirectory()
     if (error)
         Log::warn(
             "LocalCopyOperation: The permissions of '{}' were not copied: {}",
-            Paths::nativeToUtf8(frame.destination),
+            shownPath(frame.destination),
             Utility::errorMessage(error)
         );
 }
@@ -647,7 +658,7 @@ void LocalCopyOperation::recordFailure(std::filesystem::path const& path, Error 
     ++failureCount_;
     if (failedEntries_.size() >= maximumListedFailures)
         return;
-    const auto pathText = Paths::nativeToUtf8(path);
+    const auto pathText = shownPath(path);
     Log::error("LocalCopyOperation: '{}' failed: {}", pathText, error.toString());
     failedEntries_.emplace_back(pathText, std::move(error));
     if (failedEntries_.size() == maximumListedFailures)
@@ -672,7 +683,7 @@ void LocalCopyOperation::reportProgress(bool final)
         .entriesTotal = std::max(countedEntries_, entriesDone_),
         .bytesDone = bytesDone_,
         .bytesTotal = std::max(countedBytes_, bytesDone_),
-        .currentFile = file_ ? std::optional{Paths::nativeToUtf8(file_->destination)} : std::nullopt,
+        .currentFile = file_ ? std::optional{shownPath(file_->destination)} : std::nullopt,
         .fileBytesDone = file_ ? file_->copied : 0u,
         .fileBytesTotal = file_ ? file_->total : 0u,
     });
