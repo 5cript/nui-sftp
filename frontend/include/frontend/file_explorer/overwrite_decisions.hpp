@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -19,7 +20,7 @@ namespace FileExplorer
         All,
         /** @brief Skip this and every later candidate whose destination exists. */
         None,
-        /** @brief Stop asking, only what was accepted so far is transferred. */
+        /** @brief Stop asking and transfer nothing, not even what was accepted before. */
         Cancel,
     };
 
@@ -38,7 +39,7 @@ namespace FileExplorer
      *
      * A candidate whose destination did not exist when probed is accepted without consent to overwrite, so one that
      * appears before the transfer runs fails instead of being replaced. Only candidates the user approved (Yes, All)
-     * may replace their destination.
+     * may replace their destination. Cancel drops the whole transfer.
      */
     template <typename EntryT>
     class OverwriteDecisions
@@ -98,15 +99,20 @@ namespace FileExplorer
                     return;
                 case OverwriteAnswer::Cancel:
                     next_ = candidates_.size();
+                    cancelled_ = true;
+                    accepted_.clear();
                     return;
             }
         }
 
         /**
-         * @brief The accepted candidates in their order, taken out of this object.
+         * @brief The accepted candidates in their order, taken out of this object. Nullopt when the user cancelled,
+         *        then nothing is transferred.
          */
-        std::vector<EntryT> takeAccepted()
+        std::optional<std::vector<EntryT>> takeAccepted()
         {
+            if (cancelled_)
+                return std::nullopt;
             return std::exchange(accepted_, {});
         }
 
@@ -123,5 +129,6 @@ namespace FileExplorer
         std::size_t next_{0};
         bool overwriteAll_{false};
         bool skipAll_{false};
+        bool cancelled_{false};
     };
 }
