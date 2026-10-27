@@ -2099,7 +2099,7 @@ void OperationQueue::removeCardsCanceledByAll(
         [&](DisplayedOperation& operation)
         {
             if (keptBefore.contains(operation.key()))
-                return true;
+                return !keepPartialFiles;
             if (operation.isCompletedState())
                 return !operation.keptPartialFiles();
             return !operation.card().keepsPartialFilesOnCancel(keepPartialFiles);

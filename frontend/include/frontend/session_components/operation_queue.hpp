@@ -382,8 +382,8 @@ class OperationQueue
 
     /**
      * @brief Removes the cards Cancel All canceled. A transfer this cancel keeps the partial files of stays, its
-     *        completion turns it into a card to continue or discard them. The cards @p keptBefore go, their partial
-     *        files with them unless @p keepPartialFiles is set.
+     *        completion turns it into a card to continue or discard them. The cards @p keptBefore stay as well when
+     *        @p keepPartialFiles is set, otherwise they go with their partial files.
      */
     void removeCardsCanceledByAll(
         bool keepPartialFiles,
