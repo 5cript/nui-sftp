@@ -251,6 +251,13 @@ class Session
     void registerRpcSftpAddBulkDeleteOperation();
 
     /**
+     * @brief Handles "Session::{id}::sftp::continueKept" and "Session::{id}::sftp::discardKept" (channel id, operation
+     *        id): goes on with or deletes the partial files of a transfer the user canceled keeping them, see
+     *        OperationQueue::continueKept and OperationQueue::discardKept.
+     */
+    void registerRpcSftpKeptTransfers();
+
+    /**
      * @brief Handles "Session::{id}::addLocalDelete" (operation id, local paths): queues the recursive delete of the
      *        local items in the local operation queue, held while the queue of this session is paused, see
      *        LocalOperationQueue::addExplorerDelete.

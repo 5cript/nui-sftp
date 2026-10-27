@@ -137,6 +137,7 @@ void Session::start()
             self->registerRpcSftpAddBulkDownloadOperation();
             self->registerRpcSftpAddBulkUploadOperation();
             self->registerRpcSftpAddBulkDeleteOperation();
+            self->registerRpcSftpKeptTransfers();
             self->registerRpcAddLocalDeleteOperation();
             self->registerRpcAddLocalCopyOperation();
             self->registerRpcSftpExistsBatch();
@@ -1703,6 +1704,60 @@ void Session::registerRpcSftpRename()
                         reply({{"success", true}});
                     },
                     std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpKeptTransfers()
+{
+    on(fmt::format("Session::{}::sftp::continueKept", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, std::string const& operationIdString
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->queueOnChannel(
+                    std::move(reply),
+                    Ids::makeChannelId(channelIdString),
+                    fmt::format("the continuation of '{}'", operationIdString),
+                    [operationId = Ids::makeOperationId(operationIdString)](
+                        OperationQueue& queue, SecureShell::SftpSession& channel
+                    ) -> std::expected<nlohmann::json, std::string>
+                    {
+                        return nlohmann::json{
+                            {"success", true}, {"requeued", queue.continueKept(channel, operationId)}
+                        };
+                    }
+                );
+            }
+        );
+
+    on(fmt::format("Session::{}::sftp::discardKept", id_.value()))
+        .perform(
+            [weak = weak_from_this()](
+                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, std::string const& operationIdString
+            )
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->queueOnChannel(
+                    std::move(reply),
+                    Ids::makeChannelId(channelIdString),
+                    fmt::format("the discard of the partial files of '{}'", operationIdString),
+                    [operationId = Ids::makeOperationId(operationIdString)](
+                        OperationQueue& queue, SecureShell::SftpSession& channel
+                    ) -> std::expected<nlohmann::json, std::string>
+                    {
+                        queue.discardKept(channel, operationId);
+                        return nlohmann::json{{"success", true}};
+                    }
                 );
             }
         );

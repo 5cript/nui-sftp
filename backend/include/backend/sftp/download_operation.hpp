@@ -125,6 +125,8 @@ class DownloadOperation : public Operation
     std::expected<void, DownloadOperation::Error> cancel(bool adoptCancelState) override;
 
     void pause(bool doPause) override;
+    void keepPartialFiles() override;
+    std::optional<KeptPartialFiles> keptPartialFiles() const override;
 
     std::expected<void, Error> prepare();
     std::expected<void, Error> finalize();

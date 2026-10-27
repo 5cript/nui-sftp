@@ -354,11 +354,15 @@ class OperationQueue
   private:
     friend class LocalOperationRouter;
 
+    /**
+     * @brief Cancels the transfer of @p operation, or removes its card once it ended. A transfer keeps its partial
+     *        files when @p keepPartialFiles is set, otherwise as its doCleanup option says.
+     */
     template <typename OperationCard>
-    void cancelOperation(OperationCard const& operation);
+    void cancelOperation(OperationCard const& operation, bool keepPartialFiles = false);
     void cancelAll();
     void togglePause();
-    void askBackendToCancelAll();
+    void askBackendToCancelAll(bool keepPartialFiles = false);
     void changeAutoClean(bool doClean);
 
     /**

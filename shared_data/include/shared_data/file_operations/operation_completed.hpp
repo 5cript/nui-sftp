@@ -46,10 +46,20 @@ namespace SharedData
         std::vector<std::pair<std::string, OperationError>> failedEntries{};
         /** @brief The skipped entries of a prescanned bulk up- or download by their index. */
         std::vector<IndexedFailure> indexedFailures{};
+        /** @brief A canceled transfer kept its partial files, it can continue or discard them. */
+        bool keptPartialFiles{false};
     };
     BOOST_DESCRIBE_STRUCT(
         OperationCompleted,
         (),
-        (reason, operationId, completionTime, localPath, remotePath, error, failedEntries, indexedFailures)
+        (reason,
+         operationId,
+         completionTime,
+         localPath,
+         remotePath,
+         error,
+         failedEntries,
+         indexedFailures,
+         keptPartialFiles)
     )
 }

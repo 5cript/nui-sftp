@@ -254,3 +254,28 @@ BulkUploadOperation::resumeRequest(SharedData::BulkUploadRequest request) const
     request.localRoot = common().localPath;
     return request;
 }
+
+void BulkUploadOperation::keepPartialFiles()
+{
+    individualOptions_.doCleanup = false;
+    BulkTransferOperation::keepPartialFiles();
+}
+
+std::optional<Operation::KeptPartialFiles> BulkUploadOperation::keptPartialFiles() const
+{
+    if (individualOptions_.doCleanup)
+        return std::nullopt;
+    const auto suffix = Persistence::effectiveTempFileSuffix(individualOptions_.tempFileSuffix);
+    KeptPartialFiles kept{};
+    for (const auto index : unfinishedEntryIndices())
+    {
+        if (!entries()[index].isRegularFile())
+            continue;
+        const auto paths = entryPaths(index);
+        if (!paths)
+            continue;
+        if (auto temporary = paths->remote.withFilenameSuffix(suffix); temporary)
+            kept.remote.push_back(*std::move(temporary));
+    }
+    return kept;
+}

@@ -68,9 +68,19 @@ class OperationQueue
     );
 
     /**
+     * @brief What a cancel of the user's does with the partial files of a transfer.
+     */
+    enum class PartialFilesOnCancel
+    {
+        /** @brief Deleted when the transfer's doCleanup option says so. */
+        AsConfigured,
+        Kept,
+    };
+
+    /**
      * @brief Cancels every queued operation, each completes as cancelled.
      */
-    void cancelAll();
+    void cancelAll(PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
 
     /**
      * @brief Drops every queued operation without completing any, for a session that goes: a reconnect may adopt
@@ -79,9 +89,22 @@ class OperationQueue
     void dropAll();
 
     /**
-     * @brief Cancels the operation @p id, it completes as cancelled.
+     * @brief Cancels the operation @p id, it completes as cancelled. A transfer that keeps its partial files can
+     *        continue later, see continueKept and discardKept.
      */
-    void cancel(Ids::OperationId id);
+    void cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
+
+    /**
+     * @brief Goes on with the transfer @p id a cancel stopped with its partial files. A bulk is queued again under
+     *        its id on @p sftp, without what it finished.
+     * @return Whether it was queued, the owner of a single transfer queues it anew.
+     */
+    bool continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id);
+
+    /**
+     * @brief Deletes the partial files the transfer @p id kept when it was canceled, remote ones on @p sftp.
+     */
+    void discardKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id);
 
     /**
      * @brief Cancels the upload @p id like cancel(), the temporary file it wrote to stays for a later upload or goes,
@@ -526,6 +549,18 @@ class OperationQueue
     void completeCancelled(Ids::OperationId const& id, Operation& operation);
 
     /**
+     * @brief Cancels @p operation for the user like completeCancelled, its partial files as @p partialFiles says.
+     *        The kept ones are remembered for continueKept and discardKept.
+     */
+    void completeCancelledByUser(Ids::OperationId const& id, Operation& operation, PartialFilesOnCancel partialFiles);
+
+    /**
+     * @brief Remembers the partial files the canceled @p operation kept, with what is left of its bulk backup.
+     * @return Whether it kept them.
+     */
+    bool rememberKeptPartialFiles(Ids::OperationId const& id, Operation const& operation);
+
+    /**
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
      */
     void deliverSyncScan(Ids::OperationId const& id, Operation& operation);
@@ -593,6 +628,17 @@ class OperationQueue
     // op and erased once the op completes (success or failure).  Keyed by
     // the bulk's OperationId.  Read by dumpBulkResumes() during teardown.
     std::unordered_map<Ids::OperationId, BulkResumeEntry, Ids::IdHash> bulkResumeStash_{};
+
+    /**
+     * @brief A transfer the user canceled that kept its partial files.
+     */
+    struct KeptTransfer
+    {
+        Operation::KeptPartialFiles partialFiles{};
+        /** @brief What is left of a bulk, queued again by continueKept. A single transfer has none. */
+        std::optional<BulkResumeEntry> resume{};
+    };
+    std::unordered_map<Ids::OperationId, KeptTransfer, Ids::IdHash> keptTransfers_{};
 
     /** @brief The canonical home directory of the server, asked once for the delete guards. */
     std::optional<Paths::RemotePath> remoteHome_{};

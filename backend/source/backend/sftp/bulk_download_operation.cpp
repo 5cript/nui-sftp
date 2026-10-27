@@ -264,3 +264,29 @@ BulkDownloadOperation::resumeRequest(SharedData::BulkDownloadRequest request) co
     request.localRoot = common().localPath;
     return request;
 }
+
+void BulkDownloadOperation::keepPartialFiles()
+{
+    individualOptions_.doCleanup = false;
+    BulkTransferOperation::keepPartialFiles();
+}
+
+std::optional<Operation::KeptPartialFiles> BulkDownloadOperation::keptPartialFiles() const
+{
+    if (individualOptions_.doCleanup)
+        return std::nullopt;
+    const auto suffix = Persistence::effectiveTempFileSuffix(individualOptions_.tempFileSuffix);
+    KeptPartialFiles kept{};
+    for (const auto index : unfinishedEntryIndices())
+    {
+        if (!entries()[index].isRegularFile())
+            continue;
+        if (const auto paths = entryPaths(index); paths)
+        {
+            auto temporary = paths->local.native();
+            temporary += suffix;
+            kept.local.push_back(std::move(temporary));
+        }
+    }
+    return kept;
+}
