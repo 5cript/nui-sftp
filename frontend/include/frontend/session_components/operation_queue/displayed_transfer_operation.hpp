@@ -102,7 +102,8 @@ class DisplayedTransferOperation
                     }
                 )
             ),
-            progressBar_()
+            progressBar_(),
+            cancelNote(progressBar_)
         );
         // clang-format on
     }
@@ -128,7 +129,9 @@ class DisplayedTransferOperation
         if (isCompletedState())
         {
             progressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
-            progressBar_.setZeroAsComplete();
+            // A cancelled bar stays where it stopped, one that never started stays empty.
+            if (newState != SharedData::OperationState::Canceled)
+                progressBar_.setZeroAsComplete();
         }
     }
 

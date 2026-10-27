@@ -18,6 +18,7 @@
 #include <frontend/components/svg/delete.hpp>
 #include <frontend/components/svg/scan_animated.hpp>
 #include <frontend/components/icon_panel.hpp>
+#include <script-nui-components/progress_bar.hpp>
 
 #include <ui5-sap-icons/icons/download.hpp>
 #include <ui5-sap-icons/icons/upload.hpp>
@@ -419,7 +420,6 @@ class OperationCard : public OperationCardInterface
         if (state_.value() == SharedData::OperationState::Canceled && keptPartialFiles_.value())
         {
             return fragment(
-                span{class_ = "opq-kept-note"}(language->get("operationQueue", "partialFilesKept")),
                 button{
                     class_ = "opq-btn opq-continue-btn",
                     Nui::Attributes::title = language->get("operationQueue", "continueKeptTitle"),
@@ -491,6 +491,37 @@ class OperationCard : public OperationCardInterface
     }
 
   protected:
+    /**
+     * @brief The line under @p bar of a cancelled transfer: how far it got and what became of its partial files.
+     *        Empty, and so hidden, while the operation was not cancelled.
+     */
+    Nui::ElementRenderer cancelNote(ScriptNuiComponents::ProgressBar const& bar) const
+    {
+        using namespace Nui::Elements;
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+
+        // clang-format off
+        return div{
+            class_ = "opq-cancel-note"
+        }(
+            observe(state_, keptPartialFiles_, deletesPartialFilesOnCancel_).generate([this, &bar]() -> std::string {
+                if (state_.value() != SharedData::OperationState::Canceled)
+                    return {};
+                const auto percent = bar.maximum() > 0
+                    ? 100.0 * static_cast<double>(bar.progress()) / static_cast<double>(bar.maximum())
+                    : 0.0;
+                const auto text = keptPartialFiles_.value()
+                    ? language->get("operationQueue", "cancelledAtKept")
+                    : deletesPartialFilesOnCancel_.value().value_or(false)
+                        ? language->get("operationQueue", "cancelledAtDeleted")
+                        : language->get("operationQueue", "cancelledAt");
+                return fmt::format(fmt::runtime(text), percent);
+            })
+        );
+        // clang-format on
+    }
+
     mutable std::weak_ptr<Nui::Dom::BasicElement> cardElement_;
     std::chrono::steady_clock::time_point startTime_{std::chrono::steady_clock::now()};
     Nui::Observed<std::chrono::steady_clock::time_point> completionTime_{};

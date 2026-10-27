@@ -433,8 +433,45 @@ header.opq-controls {
     display: none;
 }
 
-.opq-kept-note {
-    font-size: 12px;
+/* A cancelled bar stays where it stopped, hatched, with a mark at its end and a line under it. */
+.opq-card.opq-canceled {
+    .script-nui-progress-bar-fill {
+        background-image: repeating-linear-gradient(135deg, #5c5c5c 0 5px, #3d3d3d 5px 10px);
+
+        &::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 2px;
+            height: 100%;
+            background: var(--color);
+        }
+    }
+
+    .opq-transfer-route {
+        opacity: 0.6;
+    }
+
+    .opq-bytes-per-second {
+        visibility: hidden;
+    }
+}
+
+.opq-card.opq-canceled.opq-kept .script-nui-progress-bar-fill {
+    background-image: repeating-linear-gradient(135deg, #9a7637 0 5px, #5e4a26 5px 10px);
+}
+
+.opq-cancel-note {
+    font-size: 11px;
+    color: var(--opq-muted);
+
+    &:empty {
+        display: none;
+    }
+}
+
+.opq-card.opq-kept .opq-cancel-note {
     color: var(--opq-warn);
 }
 
