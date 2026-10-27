@@ -166,6 +166,14 @@ namespace NuiFileExplorer
         std::vector<std::filesystem::path> selectedPaths() const;
 
         /**
+         * @brief Overlays the shown items at @p fullPaths with a trash icon until the next listing replaces them.
+         *        Syncing the change is left to the caller.
+         *
+         * @param fullPaths The full paths of the items whose delete is queued.
+         */
+        void markPendingDelete(std::vector<std::filesystem::path> const& fullPaths);
+
+        /**
          * @brief Closes the path suggestions.
          */
         void closePathSuggestions(bool otherSideToo = false) const;

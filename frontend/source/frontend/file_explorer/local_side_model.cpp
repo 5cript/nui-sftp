@@ -419,10 +419,22 @@ void LocalSideModel::onDelete(std::vector<NuiFileExplorer::Item> const& items)
                 operationQueue_->enqueueLocalDelete(
                     targets,
                     lifetime_.guarded(
-                        [this](std::optional<std::string> const& error)
+                        [this, targets](std::optional<std::string> const& error)
                         {
                             if (!error)
-                                return;
+                            {
+                                std::vector<std::string> texts;
+                                texts.reserve(targets.size());
+                                std::ranges::transform(
+                                    targets,
+                                    std::back_inserter(texts),
+                                    [](Paths::LocalPath const& target)
+                                    {
+                                        return target.toUtf8();
+                                    }
+                                );
+                                return markPendingDelete(texts);
+                            }
                             const auto reason = language->translate(*error);
                             Log::error("Failed to queue the delete of local items: {}", reason);
                             showDeleteFailed(reason);

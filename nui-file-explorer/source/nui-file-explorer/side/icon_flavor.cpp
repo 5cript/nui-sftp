@@ -311,10 +311,11 @@ namespace NuiFileExplorer
                         class_ = item.observeClassRelevant([&item](){
                             auto searchHighlight = item.searchHighlight();
 
-                            return fmt::format("nui-file-grid-item-icons {} {} {}", item.isSelected() ? "selected" : "",
+                            return fmt::format("nui-file-grid-item-icons {} {} {} {}", item.isSelected() ? "selected" : "",
                                 searchHighlight == ItemWithInternals::SearchHighlight::Highlight ? "is-highlighted"
                                 : searchHighlight == ItemWithInternals::SearchHighlight::Muted ? "is-muted"
-                                : "", item.isDropHovered() ? "drop-hovered" : "");
+                                : "", item.isDropHovered() ? "drop-hovered" : "",
+                                item.isPendingDelete() ? "pending-delete" : "");
                         }),
                         onDblClick = [this, &item](Nui::val event){
                             event.call<void>("stopPropagation");
@@ -342,7 +343,9 @@ namespace NuiFileExplorer
                             src = item.item.icon,
                             draggable = "false",
                             alt = "???",
-                            style = item.item.type == Item::Type::Directory ? "filter: hue-rotate(120deg)" : "filter: invert(100%) brightness(2)",
+                            style = item.item.type == Item::Type::Directory
+                                ? "--nui-file-grid-icon-filter: hue-rotate(120deg)"
+                                : "--nui-file-grid-icon-filter: invert(100%) brightness(2)",
                         }(),
                         div{
                         }(item.displayFilename)
