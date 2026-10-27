@@ -349,21 +349,22 @@ OperationQueue::OperationQueue(
 
                 auto cleanFront = [&](auto& queue)
                 {
-                    for (auto* front = queue.front(); front != nullptr; front = queue.front())
+                    // The ended cards at the front whose time is up go. A card that kept its partial files waits for
+                    // the user to continue or discard them, without holding up the ones behind it.
+                    std::vector<Ids::OperationId> expired;
+                    for (auto const& entry : queue.observedValues().value())
                     {
-                        // A card that kept its partial files waits for the user to continue or discard them.
-                        if (front->isCompletedState() && !front->keptPartialFiles())
-                        {
-                            auto duration = now - front->completionTime();
-                            if (duration >= autoRemoveTime)
-                            {
-                                queue.pop_front();
-                                anyRemoved = true;
-                                continue;
-                            }
-                        }
-                        break;
+                        if (!entry->isCompletedState())
+                            break;
+                        if (entry->keptPartialFiles())
+                            continue;
+                        if (now - entry->completionTime() < autoRemoveTime)
+                            break;
+                        expired.push_back(entry->key());
                     }
+                    for (auto const& operationId : expired)
+                        queue.erase(operationId);
+                    anyRemoved = anyRemoved || !expired.empty();
                 };
 
                 cleanFront(impl_->priorityOperations);
