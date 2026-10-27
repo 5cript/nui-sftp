@@ -1,6 +1,7 @@
 #include "test_attention_state.hpp"
 #include "test_drop_text.hpp"
 #include "test_file_tracking_texts.hpp"
+#include "test_in_flight_row_list.hpp"
 #include "test_in_flight_rows.hpp"
 #include "test_item_names.hpp"
 #include "test_item_order.hpp"
