@@ -1,5 +1,6 @@
 #pragma once
 
+#include <frontend/session_components/operation_queue/in_flight_row_list.hpp>
 #include <frontend/session_components/operation_queue/operation_card.hpp>
 #include <frontend/session_components/operation_queue/scan_phase_status.hpp>
 #include <frontend/components/svg/arrow_right.hpp>
@@ -9,8 +10,7 @@
 #include <utility/format_bytes.hpp>
 
 #include <algorithm>
-#include <iterator>
-#include <memory>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -57,39 +57,32 @@ struct DisplayedBulkOperation
     void setProgress(SharedData::BulkProgress const& progress)
     {
         scanPhase_.end();
-        // A row keeps its file until that file leaves the in-flight set; new files take the
-        // first free row, so nothing shifts when an earlier file finishes.
-        const auto inFlight = [&progress](std::uint64_t entryIndex)
-        {
-            return std::ranges::any_of(
-                progress.inFlight,
-                [entryIndex](SharedData::BulkFileProgress const& file)
-                {
-                    return file.entryIndex == entryIndex;
-                }
-            );
-        };
-        for (auto const& row : inFlightRows_.value())
-        {
-            if (row->entryIndex.has_value() && !inFlight(*row->entryIndex))
-            {
-                // Blank it: a freed row that kept its file would look like a stalled transfer.
-                row->entryIndex.reset();
-                row->name = "";
-                row->bar.setProgress(0);
-            }
-        }
+        std::vector<std::uint64_t> entryIndices{};
+        entryIndices.reserve(progress.inFlight.size());
         for (auto const& file : progress.inFlight)
-        {
-            auto row = rowFor(file.entryIndex);
-            if (!row)
-                row = claimFreeRow(file.entryIndex);
-            if (row->name.value() != file.file)
-                row->name = file.file;
-            row->bar.setMaximum(static_cast<long long>(file.totalBytes));
-            row->bar.setProgress(static_cast<long long>(file.bytes));
-        }
-        trimFreeTailRows();
+            entryIndices.push_back(file.entryIndex);
+        inFlightRows_.update(
+            entryIndices,
+            [&progress](InFlightRow& row, std::optional<std::uint64_t> const& entryIndex)
+            {
+                if (!entryIndex)
+                {
+                    // Blank it: a freed row that kept its file would look like a stalled transfer.
+                    if (!row.name.value().empty())
+                        row.name = "";
+                    row.bar.setProgress(0);
+                    return;
+                }
+                const auto file =
+                    std::ranges::find(progress.inFlight, *entryIndex, &SharedData::BulkFileProgress::entryIndex);
+                if (file == progress.inFlight.end())
+                    return;
+                if (row.name.value() != file->file)
+                    row.name = file->file;
+                row.bar.setMaximum(static_cast<long long>(file->totalBytes));
+                row.bar.setProgress(static_cast<long long>(file->bytes));
+            }
+        );
 
         // Without a byte total (empty files, unknown sizes) the byte bar would sit at 0 B
         // forever; fall back to counting entries so the bar still moves.
@@ -184,7 +177,7 @@ struct DisplayedBulkOperation
             div{
                 class_ = "opq-bulk-files"
             }(
-                Nui::range(inFlightRows_),
+                Nui::range(inFlightRows_.rows()),
                 [](long long, auto const& row) -> Nui::ElementRenderer {
                     return row->render();
                 }
@@ -211,7 +204,7 @@ struct DisplayedBulkOperation
             if (totalProgressBar_.textMode() == ScriptNuiComponents::ProgressBarTextMode::Percent)
                 totalProgressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
             totalProgressBar_.setZeroAsComplete();
-            resizeInFlightRows(0);
+            inFlightRows_.clear();
         }
     }
 
@@ -225,7 +218,6 @@ struct DisplayedBulkOperation
   private:
     struct InFlightRow
     {
-        std::optional<std::uint64_t> entryIndex{};
         Nui::Observed<std::string> name{""};
         ScriptNuiComponents::ProgressBar bar{{
             .height = std::string{progressHeight},
@@ -260,77 +252,6 @@ struct DisplayedBulkOperation
         }
     };
 
-    std::shared_ptr<InFlightRow> rowFor(std::uint64_t entryIndex) const
-    {
-        auto const& rows = inFlightRows_.value();
-        const auto found = std::ranges::find_if(
-            rows,
-            [entryIndex](std::shared_ptr<InFlightRow> const& row)
-            {
-                return row->entryIndex == entryIndex;
-            }
-        );
-        return found == rows.end() ? nullptr : *found;
-    }
-
-    /**
-     * @brief Hands out the first row without a file, appending one when all are taken.
-     */
-    std::shared_ptr<InFlightRow> claimFreeRow(std::uint64_t entryIndex)
-    {
-        auto const& rows = inFlightRows_.value();
-        auto found = std::ranges::find_if(
-            rows,
-            [](std::shared_ptr<InFlightRow> const& row)
-            {
-                return !row->entryIndex.has_value();
-            }
-        );
-        if (found == rows.end())
-        {
-            resizeInFlightRows(rows.size() + 1);
-            found = std::prev(inFlightRows_.value().end());
-        }
-        (*found)->entryIndex = entryIndex;
-        return *found;
-    }
-
-    /**
-     * @brief Drops free rows from the end so the list shrinks once files finish.
-     */
-    void trimFreeTailRows()
-    {
-        auto const& rows = inFlightRows_.value();
-        auto keep = rows.size();
-        while (keep > 0 && !rows[keep - 1]->entryIndex.has_value())
-            --keep;
-        resizeInFlightRows(keep);
-    }
-
-    /**
-     * @brief Grows or shrinks the row list to @p wanted entries in a single insert or erase.
-     */
-    void resizeInFlightRows(std::size_t wanted)
-    {
-        auto const& rows = inFlightRows_.value();
-        if (wanted > rows.size())
-        {
-            std::vector<std::shared_ptr<InFlightRow>> fresh(wanted - rows.size());
-            std::ranges::generate(
-                fresh,
-                []
-                {
-                    return std::make_shared<InFlightRow>();
-                }
-            );
-            inFlightRows_.insert(rows.end(), fresh.begin(), fresh.end());
-        }
-        else if (wanted < rows.size())
-        {
-            inFlightRows_.erase(rows.begin() + static_cast<std::ptrdiff_t>(wanted), rows.end());
-        }
-    }
-
   private:
     /** @brief Where the items come from, as the route of the card shows it. */
     std::string sourceText_;
@@ -342,5 +263,5 @@ struct DisplayedBulkOperation
     /** @brief Shows "0%" until the first progress or the end, then bytes, or counts without a byte total. */
     ScriptNuiComponents::ProgressBar totalProgressBar_;
     // Mutable because Nui::range only binds to a non-const Observed and body() is const.
-    mutable Nui::Observed<std::vector<std::shared_ptr<InFlightRow>>> inFlightRows_{};
+    mutable InFlightRowList<InFlightRow> inFlightRows_{};
 };
