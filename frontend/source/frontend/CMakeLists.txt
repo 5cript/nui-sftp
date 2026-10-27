@@ -274,6 +274,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/source/content_panels/terminal.ts"
         "${CMAKE_SOURCE_DIR}/static/source/content_panel_manager.ts"
         "${CMAKE_SOURCE_DIR}/static/source/index.js"
+        "${CMAKE_SOURCE_DIR}/static/source/wasm_trap_handler.js"
         "${CMAKE_SOURCE_DIR}/static/styles/icon_panel.css"
         "${CMAKE_SOURCE_DIR}/static/styles/main_page.css"
         "${CMAKE_SOURCE_DIR}/static/styles/main.css"

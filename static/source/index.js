@@ -2,6 +2,7 @@ import { ContentPanelManager } from "./content_panel_manager.ts";
 import "./addressable_setting.ts";
 import "./code_editor.ts";
 import "./automation.js";
+import "./wasm_trap_handler.js";
 
 (() => {
     globalThis.generateId = () => {
