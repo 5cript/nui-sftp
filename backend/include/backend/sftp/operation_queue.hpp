@@ -3,6 +3,7 @@
 #include <backend/sftp/all_operations.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/sftp/kept_transfer_registry.hpp>
 #include <backend/sftp/remote_delete_guard.hpp>
 #include <backend/sftp/unsafe_fast_mode.hpp>
 #include <backend/sync/sync_session.hpp>
@@ -29,6 +30,7 @@
 #include <shared_data/sync/sync_execution.hpp>
 
 #include <deque>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -64,6 +66,7 @@ class OperationQueue
         Nui::RpcHub& hub,
         Persistence::SftpOptions sftpOpts,
         Ids::SessionId sessionId,
+        std::shared_ptr<KeptTransferRegistry> keptTransfers,
         int parallelism = 1
     );
 
@@ -95,11 +98,12 @@ class OperationQueue
     void cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
 
     /**
-     * @brief Goes on with the transfer @p id a cancel stopped with its partial files. A bulk is queued again under
-     *        its id on @p sftp, without what it finished.
-     * @return Whether it was queued, the owner of a single transfer queues it anew.
+     * @brief Goes on with the transfer @p id a cancel stopped with its partial files: queues it again under its id on
+     *        @p sftp, a bulk without what it finished. It continues its partial files whatever tryContinue says.
+     * @return Why it was not queued: nothing kept under @p id, or it cannot continue. What it kept stays then, for
+     *         discardKept.
      */
-    bool continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id);
+    std::expected<void, std::string> continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id);
 
     /**
      * @brief Deletes the partial files the transfer @p id kept when it was canceled, remote ones on @p sftp.
@@ -461,8 +465,9 @@ class OperationQueue
      *        stays attached. Refuses a backup of more than one directory, or of a directory and other entries,
      *        which would complete the card more than once. Called from Session::adoptBulkResumes after pulling
      *        @p entry out of the registry.
+     * @return Whether it was queued.
      */
-    void adoptBulkResume(SecureShell::SftpSession& sftp, Ids::OperationId const& operationId, BulkResumeEntry entry);
+    bool adoptBulkResume(SecureShell::SftpSession& sftp, Ids::OperationId const& operationId, BulkResumeEntry entry);
 
   private:
     void completeOperation(OperationCompleted&& operationCompleted);
@@ -555,10 +560,21 @@ class OperationQueue
     void completeCancelledByUser(Ids::OperationId const& id, Operation& operation, PartialFilesOnCancel partialFiles);
 
     /**
-     * @brief Remembers the partial files the canceled @p operation kept, with what is left of its bulk backup.
+     * @brief Remembers the partial files the canceled @p operation kept, with how to continue it: what is left of its
+     *        bulk backup, or the transfer of a single file.
      * @return Whether it kept them.
      */
     bool rememberKeptPartialFiles(Ids::OperationId const& id, Operation const& operation);
+
+    /**
+     * @brief Queues @p continuation under @p id with tryContinue on, whatever the options say.
+     * @return Why it was not queued.
+     */
+    std::expected<void, std::string> queueContinuation(
+        SecureShell::SftpSession& sftp,
+        Ids::OperationId const& id,
+        KeptContinuation continuation
+    );
 
     /**
      * @brief Hands the tree of a completed standalone scan to the sync session registered for its id.
@@ -629,16 +645,8 @@ class OperationQueue
     // the bulk's OperationId.  Read by dumpBulkResumes() during teardown.
     std::unordered_map<Ids::OperationId, BulkResumeEntry, Ids::IdHash> bulkResumeStash_{};
 
-    /**
-     * @brief A transfer the user canceled that kept its partial files.
-     */
-    struct KeptTransfer
-    {
-        Operation::KeptPartialFiles partialFiles{};
-        /** @brief What is left of a bulk, queued again by continueKept. A single transfer has none. */
-        std::optional<BulkResumeEntry> resume{};
-    };
-    std::unordered_map<Ids::OperationId, KeptTransfer, Ids::IdHash> keptTransfers_{};
+    /** @brief Shared with the queues of the other sessions, see KeptTransferRegistry. */
+    std::shared_ptr<KeptTransferRegistry> keptTransfers_;
 
     /** @brief The canonical home directory of the server, asked once for the delete guards. */
     std::optional<Paths::RemotePath> remoteHome_{};

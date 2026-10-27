@@ -7,6 +7,7 @@
 #include <backend/password/password_provider.hpp>
 #include <backend/password/password_request.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/sftp/kept_transfer_registry.hpp>
 #include <log/toast.hpp>
 #include <persistence/state/file_tracking_options.hpp>
 #include <persistence/state/session_options.hpp>
@@ -177,6 +178,8 @@ class SessionManager
     /// Backups of bulk operations interrupted by lost connection; consumed
     /// by adoptBulkResume on reconnect or evicted via TTL.
     BulkResumeRegistry bulkResumeRegistry_{};
+    /** @brief Shared with the queue of every session, so a kept transfer outlives a reconnect. */
+    std::shared_ptr<KeptTransferRegistry> keptTransferRegistry_{std::make_shared<KeptTransferRegistry>()};
 };
 
 int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);

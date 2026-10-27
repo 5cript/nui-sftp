@@ -224,6 +224,37 @@ struct OperationQueue::Implementation
     }
 
     /**
+     * @brief Removes the live and history cards @p removes picks. The failed list stays, it is a retrospective review
+     *        tool that users clear explicitly.
+     */
+    template <typename PredicateT>
+    void eraseOperationsIf(PredicateT const& removes)
+    {
+        for (auto* cards : {&operations, &priorityOperations})
+        {
+            std::vector<Ids::OperationId> removed;
+            for (auto const& operation : cards->observedValues().value())
+            {
+                if (removes(*operation))
+                    removed.push_back(operation->key());
+            }
+            for (auto const& operationId : removed)
+                cards->erase(operationId);
+        }
+        std::erase_if(
+            history,
+            [&](auto const& entry)
+            {
+                if (!removes(*entry))
+                    return false;
+                historyIndex.erase(entry->key().value());
+                return true;
+            }
+        );
+        recomputePageCount();
+    }
+
+    /**
      * @brief Snapshot an operation into the Failed tab. Uses shared ownership
      *        so the same card continues to render correctly in the Queue tab
      *        (live or history) without requiring a deep copy of the card.
@@ -412,13 +443,13 @@ OperationQueue::~OperationQueue()
 void OperationQueue::cancelAll()
 {
     LocalOperationRouter::instance().cancelHostedBy(*this);
-    impl_->operations.clear();
-    impl_->priorityOperations.clear();
-    impl_->history.clear();
-    impl_->historyIndex.clear();
-    // Failed list survives "Cancel All": it's a retrospective review tool,
-    // not a live-state container. Users can still clear it explicitly.
-    impl_->recomputePageCount();
+    // A card that kept its partial files waits for the user to continue or discard them.
+    impl_->eraseOperationsIf(
+        [](DisplayedOperation& operation)
+        {
+            return !operation.keptPartialFiles();
+        }
+    );
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
@@ -439,7 +470,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation, bool keepPa
                         keepPartialFiles]()
     {
         auto onCanceled = lifetime_.guarded(
-            [this, operationId](SharedData::ErrorOrSuccess<> const& result)
+            [this, operationId, keepPartialFiles](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (!result)
                 {
@@ -448,9 +479,16 @@ void OperationQueue::cancelOperation(OperationCard const& operation, bool keepPa
                     );
                 }
 
+                // A completion that came first said what became of it.
                 auto* operation = impl_->findOperation(operationId);
-                if (operation)
+                if (operation && !operation->isCompletedState())
+                {
+                    // What the completion will say, so the card does not show the other outcome until then.
+                    operation->card().keptPartialFiles(
+                        operation->card().keepsPartialFilesOnCancel(keepPartialFiles)
+                    );
                     operation->state(SharedData::OperationState::Canceled);
+                }
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
@@ -466,7 +504,7 @@ void OperationQueue::cancelOperation(OperationCard const& operation, bool keepPa
     };
 
     // Keeping the partial files loses nothing that a confirmation would protect.
-    if (!keepPartialFiles && operation.deletesPartialFilesOnCancel() != false && operation.warrantsCancelConfirm())
+    if (!operation.keepsPartialFilesOnCancel(keepPartialFiles) && operation.warrantsCancelConfirm())
     {
         impl_->confirmDialog->open({
             .headerText = language->get("operationQueue", "cancelOperationHeader"),
@@ -1042,7 +1080,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         );
     }
     card->deletesPartialFilesOnCancel(added.deletesPartialFilesOnCancel);
-    if (added.deletesPartialFilesOnCancel.value_or(false) && !SharedData::isArchiveTransfer(added.type))
+    if (card->offersToKeepPartialFiles())
         impl_->offersToKeepPartialFiles = true;
     card->setPartialFileHandlers({
         .openCancelMenu =
@@ -1070,17 +1108,20 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             discardKept(opId);
         },
     });
+    // A continuation comes back under the id of the card that kept its partial files and takes its place.
+    if (auto* kept = impl_->findOperation(added.operationId); kept && kept->keptPartialFiles())
+        impl_->eraseOperation(added.operationId);
     Log::info("Inserting operation id: {} into operation queue", added.operationId.value());
     try
     {
         if (added.mode == SharedData::OperationMode::PriorityQueued)
             impl_->priorityOperations.insert(
-                added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)}
+                added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card), added}
             );
         else
         {
             impl_->operations.insert(
-                added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card)}
+                added.operationId, DisplayedOperation{added.operationId, added.type, std::move(card), added}
             );
             impl_->enforceLivePageSize();
         }
@@ -1603,12 +1644,20 @@ std::vector<ResumableOp> OperationQueue::snapshotInFlight()
             auto descriptor = entry->resumableDescriptor();
             if (descriptor)
                 out.push_back(std::move(*descriptor));
+            else if (auto kept = entry->keptDescriptor(); kept)
+                out.push_back(*std::move(kept));
             else
                 ++skippedCompleted;
         }
     };
     harvest(impl_->priorityOperations);
     harvest(impl_->operations);
+    // A card that kept its partial files may have moved on to the history.
+    for (auto const& entry : impl_->history)
+    {
+        if (auto kept = entry->keptDescriptor(); kept)
+            out.push_back(*std::move(kept));
+    }
     Log::info(
         "OperationQueue::snapshotInFlight: priority={} normal={} scanned={} skippedCompleted={} captured={}",
         impl_->priorityOperations.observedValues().value().size(),
@@ -1988,38 +2037,15 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
 
 void OperationQueue::removeCardsCanceledByAll(bool keepPartialFiles)
 {
-    const auto keepsCard = [keepPartialFiles](DisplayedOperation& operation)
-    {
-        if (operation.isCompletedState())
-            return operation.keptPartialFiles();
-        const auto deletes = operation.card().deletesPartialFilesOnCancel();
-        return deletes.has_value() && !SharedData::isArchiveTransfer(operation.type()) &&
-            (keepPartialFiles || !*deletes);
-    };
     LocalOperationRouter::instance().cancelHostedBy(*this);
-    for (auto* cards : {&impl_->operations, &impl_->priorityOperations})
-    {
-        std::vector<Ids::OperationId> removed;
-        for (auto const& operation : cards->observedValues().value())
+    impl_->eraseOperationsIf(
+        [keepPartialFiles](DisplayedOperation& operation)
         {
-            if (!keepsCard(*operation))
-                removed.push_back(operation->key());
-        }
-        for (auto const& operationId : removed)
-            cards->erase(operationId);
-    }
-    std::erase_if(
-        impl_->history,
-        [&](auto const& entry)
-        {
-            if (keepsCard(*entry))
-                return false;
-            impl_->historyIndex.erase(entry->key().value());
-            return true;
+            if (operation.isCompletedState())
+                return !operation.keptPartialFiles();
+            return !operation.card().keepsPartialFilesOnCancel(keepPartialFiles);
         }
     );
-    // The failed list survives Cancel All, as in cancelAll().
-    impl_->recomputePageCount();
 }
 
 void OperationQueue::openCancelMenu(
@@ -2050,30 +2076,22 @@ void OperationQueue::openCancelMenu(
     impl_->cancelMenu.openNextTo(anchorId);
 }
 
-void OperationQueue::continueKept(Ids::OperationId operationId)
+void OperationQueue::continueKept(Ids::OperationId const& operationId)
 {
-    auto* operation = impl_->findOperation(operationId);
-    if (!operation || !impl_->fileEngine)
+    if (!impl_->fileEngine)
         return;
-    const auto descriptor = operation->continuationDescriptor();
-    // A bulk comes back under its id, before the reply, so its card has to be gone by then.
-    impl_->eraseOperation(operationId);
-    Nui::globalEventContext.executeActiveEventsImmediately();
+    // The transfer comes back under its id and replaces the card, see onOperationAdded. A failure leaves the card.
     impl_->fileEngine->continueKept(
         operationId,
-        lifetime_.guarded(
-            [this, operationId, descriptor](std::optional<bool> requeued, std::string const& info)
-            {
-                if (!requeued)
-                    return Log::error("Cannot continue the transfer {}: {}", operationId.value(), info);
-                if (!*requeued && descriptor)
-                    enqueueResumable(*descriptor);
-            }
-        )
+        [operationId](bool success, std::string const& info)
+        {
+            if (!success)
+                Log::error("Cannot continue the transfer {}: {}", operationId.value(), info);
+        }
     );
 }
 
-void OperationQueue::discardKept(Ids::OperationId operationId)
+void OperationQueue::discardKept(Ids::OperationId const& operationId)
 {
     if (!impl_->fileEngine)
         return;
@@ -2104,7 +2122,8 @@ void OperationQueue::changeAutoClean(bool doClean)
             impl_->history,
             [&](auto const& entry)
             {
-                if (!entry->isCompletedState())
+                // A card that kept its partial files waits for the user to continue or discard them.
+                if (!entry->isCompletedState() || entry->keptPartialFiles())
                     return false;
                 impl_->historyIndex.erase(entry->key().value());
                 return true;
@@ -2990,9 +3009,25 @@ void OperationQueue::enqueueResumable(ResumableOp const& op)
             {
                 // Bulks are adopted through SessionManager::adoptBulkResume, see SessionSnapshotManager::apply.
             },
+            [&](Resumable::Kept const& kept)
+            {
+                restoreKept(kept);
+            },
         },
         op
     );
+}
+
+void OperationQueue::restoreKept(Resumable::Kept const& kept)
+{
+    onOperationAdded(kept.added);
+    auto* operation = impl_->findOperation(kept.added.operationId);
+    if (!operation)
+        return;
+    operation->card().barPosition(kept.progress, kept.maximum);
+    operation->card().keptPartialFiles(true);
+    operation->state(SharedData::OperationState::Canceled);
+    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 void OperationQueue::enqueueBulkDelete(

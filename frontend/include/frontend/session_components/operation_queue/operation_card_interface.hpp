@@ -19,9 +19,11 @@
 #include <nui/frontend/element_renderer.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
 class OperationCardInterface
 {
@@ -60,18 +62,36 @@ class OperationCardInterface
     virtual std::optional<bool> deletesPartialFilesOnCancel() const = 0;
 
     /**
+     * @brief A cancel deletes the partial files of the transfer and can keep them instead: it is no archive, which
+     *        nothing continues.
+     */
+    virtual bool offersToKeepPartialFiles() const = 0;
+
+    /**
+     * @brief Whether a cancel keeps the partial files, asked to keep them when @p keepRequested is set.
+     */
+    virtual bool keepsPartialFilesOnCancel(bool keepRequested) const = 0;
+
+    /**
      * @brief The transfer was canceled keeping its partial files, the card offers to continue or discard them.
      */
     virtual void keptPartialFiles(bool kept) = 0;
     virtual bool keptPartialFiles() const = 0;
 
     /**
-     * @brief The transfer as its owner queues it anew to continue its kept partial file, whatever its state. Nothing
-     *        for a bulk, which the backend queues again under its id.
+     * @brief The progress and the maximum of the bar of a transfer.
      */
-    virtual std::optional<ResumableOp> continuationDescriptor() const
+    virtual std::pair<std::int64_t, std::int64_t> barPosition() const
     {
-        return std::nullopt;
+        return {0, 0};
+    }
+
+    /**
+     * @brief Puts the bar of a transfer where the card it replaces stopped.
+     */
+    virtual void barPosition(std::int64_t /*progress*/, std::int64_t /*maximum*/)
+    {
+        /* noop */
     }
 
     /**

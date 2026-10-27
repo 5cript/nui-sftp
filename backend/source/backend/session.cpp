@@ -72,6 +72,7 @@ Session::Session(
     Nui::RpcHub& hub,
     Persistence::SftpOptions const& sftpOptions,
     BulkResumeRegistry* bulkResumeRegistry,
+    std::shared_ptr<KeptTransferRegistry> keptTransferRegistry,
     std::shared_ptr<LocalOperationQueue> localOperationQueue,
     FileTracking::TrackerServices fileTracking
 )
@@ -85,6 +86,7 @@ Session::Session(
           hub,
           sftpOptions,
           id_,
+          std::move(keptTransferRegistry),
           sftpOptions.concurrency.value_or(Persistence::defaultSftpConcurrency)
       )}
     , bulkResumeRegistry_{bulkResumeRegistry}
@@ -1729,9 +1731,13 @@ void Session::registerRpcSftpKeptTransfers()
                         OperationQueue& queue, SecureShell::SftpSession& channel
                     ) -> std::expected<nlohmann::json, std::string>
                     {
-                        return nlohmann::json{
-                            {"success", true}, {"requeued", queue.continueKept(channel, operationId)}
-                        };
+                        return queue.continueKept(channel, operationId)
+                            .transform(
+                                []()
+                                {
+                                    return nlohmann::json{{"success", true}};
+                                }
+                            );
                     }
                 );
             }

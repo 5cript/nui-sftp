@@ -115,6 +115,16 @@ class DownloadOperation : public Operation
         return options_.localPath;
     }
 
+    bool mayOverwrite() const
+    {
+        return options_.mayOverwrite;
+    }
+
+    bool createsMissingDirectories() const
+    {
+        return options_.createMissingDirectories;
+    }
+
     std::uint64_t totalSize() const
     {
         if (options_.entry)

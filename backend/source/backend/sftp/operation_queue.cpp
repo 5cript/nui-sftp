@@ -5,6 +5,7 @@
 #include <backend/rpc_helper.hpp>
 #include <paths/common_parent.hpp>
 #include <paths/native.hpp>
+#include <nui/utility/scope_exit.hpp>
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>
@@ -173,6 +174,36 @@ namespace
                                 : OperationQueue::PartialFilesOnCancel::AsConfigured;
     }
 
+    void forceTryContinue(Persistence::SftpOptions& options)
+    {
+        options.downloadOptions = options.downloadOptions.value_or(Persistence::DownloadOptions{});
+        options.downloadOptions->tryContinue = true;
+        options.uploadOptions = options.uploadOptions.value_or(Persistence::UploadOptions{});
+        options.uploadOptions->tryContinue = true;
+    }
+
+    /**
+     * @brief The single file transfer a continuation of @p operation queues anew, nothing for other operations.
+     */
+    std::optional<KeptSingleTransfer> singleTransferOf(Operation const& operation)
+    {
+        const auto describe = [&operation](auto const& transfer)
+        {
+            return KeptSingleTransfer{
+                .type = operation.type(),
+                .localPath = transfer.localPath(),
+                .remotePath = transfer.remotePath(),
+                .allowOverwrite = transfer.mayOverwrite(),
+                .createMissingDirectories = transfer.createsMissingDirectories(),
+            };
+        };
+        if (operation.type() == SharedData::OperationType::Download)
+            return describe(static_cast<DownloadOperation const&>(operation));
+        if (operation.type() == SharedData::OperationType::Upload)
+            return describe(static_cast<UploadOperation const&>(operation));
+        return std::nullopt;
+    }
+
     OperationQueue::OperationCompleted makeCompletedOperation(
         OperationQueue::CompletionReason reason,
         Ids::OperationId operationId,
@@ -327,6 +358,7 @@ OperationQueue::OperationQueue(
     Nui::RpcHub& hub,
     Persistence::SftpOptions sftpOpts,
     Ids::SessionId sessionId,
+    std::shared_ptr<KeptTransferRegistry> keptTransfers,
     int parallelism
 )
     : RpcHelper::StrandRpc{executor, strand, wnd, hub}
@@ -338,6 +370,7 @@ OperationQueue::OperationQueue(
           1,
           std::max(1, parallelism_ - 1)
       )}
+    , keptTransfers_{std::move(keptTransfers)}
 {}
 
 std::string OperationQueue::rpcName(std::string_view event) const
@@ -490,21 +523,83 @@ void OperationQueue::cancel(Ids::OperationId id, PartialFilesOnCancel partialFil
     );
 }
 
-bool OperationQueue::continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
+std::expected<void, std::string> OperationQueue::continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
 {
-    auto kept = keptTransfers_.extract(id);
-    if (kept.empty() || !kept.mapped().resume)
-        return false;
-    adoptBulkResume(sftp, id, *std::move(kept.mapped().resume));
-    return true;
+    auto kept = keptTransfers_->take(id);
+    if (!kept)
+        return std::unexpected(fmt::format("nothing kept for '{}'", id.value()));
+    if (!kept->continuation)
+    {
+        keptTransfers_->store(id, *std::move(kept));
+        return std::unexpected(fmt::format("'{}' cannot continue", id.value()));
+    }
+    // A failed continuation queued nothing, so the files it kept stay for another try or a discard.
+    auto continuation = *kept->continuation;
+    auto queued = queueContinuation(sftp, id, std::move(continuation));
+    if (!queued)
+        keptTransfers_->store(id, *std::move(kept));
+    return queued;
+}
+
+std::expected<void, std::string> OperationQueue::queueContinuation(
+    SecureShell::SftpSession& sftp,
+    Ids::OperationId const& id,
+    KeptContinuation continuation
+)
+{
+    // The options are read while an operation is added, so this covers everything added below.
+    const auto configured = sftpOpts_;
+    const Nui::ScopeExit restoreOptions{[this, &configured]() noexcept {
+        sftpOpts_ = configured;
+    }};
+    forceTryContinue(sftpOpts_);
+    return std::visit(
+        Utility::overloaded{
+            [&](BulkResumeEntry& bulk) -> std::expected<void, std::string>
+            {
+                if (!adoptBulkResume(sftp, id, std::move(bulk)))
+                    return std::unexpected(fmt::format("the backup of '{}' was refused", id.value()));
+                return {};
+            },
+            [&](KeptSingleTransfer const& single) -> std::expected<void, std::string>
+            {
+                // The big-file path, the small-file path does not continue a partial file.
+                const auto added = single.type == SharedData::OperationType::Download
+                    ? addDownloadOperation(
+                          sftp,
+                          id,
+                          single.localPath,
+                          single.remotePath,
+                          single.allowOverwrite,
+                          /*isBigFile=*/true,
+                          /*insertRefresh=*/true,
+                          single.createMissingDirectories
+                      )
+                    : addUploadOperation(
+                          sftp,
+                          id,
+                          single.localPath,
+                          single.remotePath,
+                          single.allowOverwrite,
+                          /*isBigFile=*/true,
+                          /*insertRefresh=*/true,
+                          single.createMissingDirectories
+                      );
+                if (!added)
+                    return std::unexpected(added.error().toString());
+                return {};
+            },
+        },
+        continuation
+    );
 }
 
 void OperationQueue::discardKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
 {
-    auto kept = keptTransfers_.extract(id);
-    if (kept.empty())
+    auto kept = keptTransfers_->take(id);
+    if (!kept)
         return;
-    auto& partialFiles = kept.mapped().partialFiles;
+    auto& partialFiles = kept->partialFiles;
     for (auto const& path : partialFiles.local)
     {
         std::error_code removeError{};
@@ -627,13 +722,13 @@ bool OperationQueue::rememberKeptPartialFiles(Ids::OperationId const& id, Operat
     auto partialFiles = operation.keptPartialFiles();
     if (!partialFiles)
         return false;
-    KeptTransfer kept{.partialFiles = *std::move(partialFiles)};
+    KeptTransfer kept{.partialFiles = *std::move(partialFiles), .continuation = singleTransferOf(operation)};
     if (auto backup = bulkResumeStash_.extract(id); !backup.empty())
     {
         leaveOutFinished(operation, backup.mapped());
-        kept.resume = std::move(backup.mapped());
+        kept.continuation = std::move(backup.mapped());
     }
-    keptTransfers_.insert_or_assign(id, std::move(kept));
+    keptTransfers_->store(id, std::move(kept));
     return true;
 }
 
@@ -860,7 +955,7 @@ void OperationQueue::leaveOutFinished(Operation const& operation, BulkResumeEntr
     );
 }
 
-void OperationQueue::adoptBulkResume(
+bool OperationQueue::adoptBulkResume(
     SecureShell::SftpSession& sftp,
     Ids::OperationId const& operationId,
     BulkResumeEntry entry
@@ -896,7 +991,7 @@ void OperationQueue::adoptBulkResume(
             directoriesWithContent,
             entryCount
         );
-        return;
+        return false;
     }
     Log::info(
         "OperationQueue::adoptBulkResume: re-issuing bulk operation '{}' ({} entries)", operationId.value(), entryCount
@@ -929,6 +1024,7 @@ void OperationQueue::adoptBulkResume(
         (adopted->type() == SharedData::OperationType::BulkDownload ||
             adopted->type() == SharedData::OperationType::BulkUpload))
         static_cast<BulkTransferOperation&>(*adopted).countEarlierProgress(entry.finished);
+    return adopted != nullptr;
 }
 
 void OperationQueue::deepPause(bool pause)

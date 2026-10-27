@@ -6,6 +6,7 @@
 #include <backend/sftp/operation_queue.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
+#include <backend/sftp/kept_transfer_registry.hpp>
 #include <backend/file_tracking/tracker.hpp>
 #include <backend/rpc_helper.hpp>
 #include <persistence/state_holder.hpp>
@@ -41,6 +42,7 @@ class Session
         Nui::RpcHub& hub,
         Persistence::SftpOptions const& sftpOptions,
         BulkResumeRegistry* bulkResumeRegistry,
+        std::shared_ptr<KeptTransferRegistry> keptTransferRegistry,
         std::shared_ptr<LocalOperationQueue> localOperationQueue,
         FileTracking::TrackerServices fileTracking = {}
     );
