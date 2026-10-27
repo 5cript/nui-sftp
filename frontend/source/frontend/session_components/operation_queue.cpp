@@ -2481,7 +2481,9 @@ Nui::ElementRenderer OperationQueue::operator()()
                             id = anchorId,
                             Nui::Attributes::title = language->get("operationQueue", "moreCancelOptions"),
                             "aria-label"_attr = language->get("operationQueue", "moreCancelOptions"),
-                            onClick = [this, anchorId](){
+                            onClick = [this, anchorId](Nui::val event){
+                                // The outside click listener of the menu opened before would close this one at once.
+                                event.call<void>("stopPropagation");
                                 openCancelMenu(anchorId, true, [this](bool keepPartialFiles) {
                                     askBackendToCancelAll(keepPartialFiles);
                                 });
