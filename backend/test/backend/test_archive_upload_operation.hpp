@@ -267,6 +267,33 @@ namespace Test
         EXPECT_EQ(entries[0].contents, "alpha payload");
     }
 
+    TEST_F(ArchiveUploadOperationTests, ACancelFromOffTheProcessingThreadWritesNothingMore)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        writeFile(srcDir_.path() / "large.bin", std::string(4 * 1024 * 1024, 'x'));
+        const std::filesystem::path remoteArchive = "/home/test/large.tar.zst";
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(srcDir_.path() / "large.bin")},
+                .remoteArchivePath = remote(remoteArchive.generic_string()),
+                .mayOverwrite = true,
+            }
+        };
+        for (int step = 0; step < 3; ++step)
+        {
+            const auto worked = operation.work();
+            ASSERT_TRUE(worked.has_value());
+            ASSERT_NE(worked.value(), ArchiveUploadOperation::WorkStatus::Complete) << "the file is too small";
+        }
+
+        // The writer and the codec flush when they go, which wrote to the server off its processing thread.
+        ASSERT_TRUE(operation.cancel(true).has_value());
+        EXPECT_EQ(operation.state(), SharedData::OperationState::Canceled);
+    }
+
     TEST_F(ArchiveUploadOperationTests, MultipleLocalFilesInOneArchive)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
