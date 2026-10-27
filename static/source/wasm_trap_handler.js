@@ -4,9 +4,18 @@
     const errorLevel = 4;
     let handled = false;
 
+    // Chromium and WebKit both name WASM frames "wasm-function[index]".
     const comesFromWasm = (error) =>
         error instanceof WebAssembly.RuntimeError ||
-        (typeof error?.stack === "string" && error.stack.includes("wasm://"));
+        (typeof error?.stack === "string" && error.stack.includes("wasm-function["));
+
+    // WebKit stacks leave out the message.
+    const describe = (error) => {
+        const message = String(error);
+        if (typeof error.stack !== "string")
+            return message;
+        return error.stack.startsWith(message) ? error.stack : `${message}\n${error.stack}`;
+    };
 
     const callBackend = (name, ...args) => {
         const callable = globalThis.nui_rpc?.backend?.[name];
@@ -18,8 +27,7 @@
         if (handled || !comesFromWasm(error))
             return;
         handled = true;
-        const description = typeof error.stack === "string" ? error.stack : String(error);
-        callBackend("log", errorLevel, `Uncaught WebAssembly error, quitting:\n${description}`);
+        callBackend("log", errorLevel, `Uncaught WebAssembly error, quitting:\n${describe(error)}`);
         callBackend("Nui::terminate");
     };
 
