@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -175,6 +176,31 @@ namespace Test
         EXPECT_EQ(std::filesystem::read_symlink(copy / "fileLink"), outside / "file.txt");
         EXPECT_EQ(countEntries(outside), 1u) << "nothing is written through a link";
     }
+
+#ifdef _WIN32
+    TEST_F(LocalCopyOperationTests, AJunctionIsCopiedAsAJunction)
+    {
+        const auto outside = root_.path() / "outside";
+        write(outside / "file.txt", "outside");
+        const auto source = root_.path() / "source";
+        write(source / "plain.txt", "plain");
+        const auto command =
+            "cmd /c mklink /J \"" + (source / "junction").string() + "\" \"" + outside.string() + "\" >nul";
+        ASSERT_EQ(std::system(command.c_str()), 0);
+
+        LocalCopyOperation operation{options({entry(source, root_.path() / "copy")}, false)};
+        const auto result = workToEnd(operation);
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(operation.getFailed().empty());
+
+        const auto copy = root_.path() / "copy";
+        std::error_code error{};
+        EXPECT_EQ(Utility::noFollowKindOf(copy / "junction", error), Utility::NoFollowKind::Link);
+        EXPECT_TRUE(std::filesystem::equivalent(copy / "junction", outside));
+        EXPECT_EQ(read(copy / "plain.txt"), "plain");
+        EXPECT_EQ(countEntries(outside), 1u) << "nothing is written through the junction";
+    }
+#endif
 
     TEST_F(LocalCopyOperationTests, ACopyOntoItselfTakesAFreeName)
     {
