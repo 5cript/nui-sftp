@@ -53,6 +53,12 @@ namespace TarArchive::Detail
                 return pump(BZ_RUN);
             }
 
+            void discard() noexcept override
+            {
+                finished_ = true;
+                output_->discard();
+            }
+
             std::expected<void, TarError> finish() override
             {
                 if (finished_)

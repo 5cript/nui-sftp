@@ -94,6 +94,13 @@ namespace TarArchive
          * perform a best-effort finish but cannot surface errors.
          */
         virtual std::expected<void, TarError> finish() = 0;
+
+        /**
+         * @brief Drop the output: pending bytes are thrown away and neither this sink nor its destruction writes
+         * anything more downstream.
+         */
+        virtual void discard() noexcept
+        {}
     };
 
     /**
