@@ -1,13 +1,16 @@
 #pragma once
 
 #include <tar_archive/archive.hpp>
+#include <tar_archive/writer.hpp>
 #include <shared_data/directory_entry.hpp>
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <string>
 
@@ -34,6 +37,35 @@ namespace TarArchive::Test
             entry.permissions = static_cast<std::filesystem::perms>(0644u);
             return entry;
         }
+
+        struct SinkRecord
+        {
+            std::size_t bytes{0u};
+            bool finished{false};
+        };
+
+        class RecordingSink final : public ByteSink
+        {
+          public:
+            explicit RecordingSink(std::shared_ptr<SinkRecord> record)
+                : record_{std::move(record)}
+            {}
+
+            std::expected<void, TarError> write(std::span<std::byte const> bytes) override
+            {
+                record_->bytes += bytes.size();
+                return {};
+            }
+
+            std::expected<void, TarError> finish() override
+            {
+                record_->finished = true;
+                return {};
+            }
+
+          private:
+            std::shared_ptr<SinkRecord> record_;
+        };
 
         std::array<std::byte, 8u> eightBytes()
         {
@@ -190,5 +222,32 @@ namespace TarArchive::Test
         const auto entry = writer->beginEntry(smallRegular(0u));
         ASSERT_FALSE(entry.has_value());
         EXPECT_EQ(entry.error().code, TarErrorCode::WriteAfterFinalize);
+    }
+
+    TEST(TarMisuse, DiscardWritesNothingMoreForAnOpenEntry)
+    {
+        for (const auto codec :
+             {Compression::None, Compression::Gzip, Compression::Bzip2, Compression::Zstd, Compression::Xz})
+        {
+            const auto record = std::make_shared<SinkRecord>();
+            auto sink = wrapSinkWithCodec(std::make_unique<RecordingSink>(record), codec);
+            ASSERT_TRUE(sink.has_value());
+            auto writer = Writer::makeFromSink(std::move(*sink));
+            std::size_t before = 0u;
+            {
+                auto entry = writer.beginEntry(smallRegular(1024u * 1024u));
+                ASSERT_TRUE(entry.has_value());
+                const auto bytes = eightBytes();
+                ASSERT_TRUE(entry->write(bytes).has_value());
+                before = record->bytes;
+                writer.discard();
+                EXPECT_FALSE(entry->write(bytes).has_value());
+            }
+            const auto beginAfterDiscard = writer.beginEntry(smallRegular(0u));
+            ASSERT_FALSE(beginAfterDiscard.has_value());
+            EXPECT_EQ(beginAfterDiscard.error().code, TarErrorCode::WriteAfterFinalize);
+            EXPECT_EQ(record->bytes, before) << static_cast<int>(codec);
+            EXPECT_FALSE(record->finished) << static_cast<int>(codec);
+        }
     }
 }

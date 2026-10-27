@@ -48,6 +48,12 @@ namespace TarArchive
          */
         std::expected<void, TarError> finalize();
 
+        /**
+         * @brief Abandon the archive without writing anything more: no padding for an open entry, no trailer, no
+         * codec flush and no finish of the sink. The Writer and any open EntryWriter are inert afterwards.
+         */
+        void discard() noexcept;
+
         /** @brief True once finalize() has been called successfully. */
         bool isFinalized() const noexcept;
 

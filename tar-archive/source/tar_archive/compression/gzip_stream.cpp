@@ -62,6 +62,12 @@ namespace TarArchive::Detail
                 return pump(Z_NO_FLUSH);
             }
 
+            void discard() noexcept override
+            {
+                finished_ = true;
+                output_->discard();
+            }
+
             std::expected<void, TarError> finish() override
             {
                 if (finished_)

@@ -20,7 +20,8 @@ namespace TarArchive
      *
      * If the handle is destroyed without a successful close(), the entry is marked as
      * aborted: its 512-byte alignment padding is still written so the archive remains
-     * navigable, but the caller cannot observe a close error in that path.
+     * navigable, but the caller cannot observe a close error in that path. After
+     * Writer::discard() nothing is written.
      */
     class EntryWriter
     {

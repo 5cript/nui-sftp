@@ -74,6 +74,14 @@ namespace TarArchive
             (void)finalize();
     }
 
+    void Writer::discard() noexcept
+    {
+        if (impl_ == nullptr)
+            return;
+        impl_->sink->discard();
+        impl_.reset();
+    }
+
     bool Writer::isFinalized() const noexcept
     {
         return impl_ == nullptr || impl_->finalized;

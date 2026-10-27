@@ -85,6 +85,12 @@ namespace TarArchive::Detail
                 return {};
             }
 
+            void discard() noexcept override
+            {
+                finished_ = true;
+                output_->discard();
+            }
+
             std::expected<void, TarError> finish() override
             {
                 if (finished_)
