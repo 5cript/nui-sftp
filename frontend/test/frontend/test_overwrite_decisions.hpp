@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,12 +27,14 @@ namespace FileExplorer::Test
         }
 
         /**
-         * @brief Each accepted name with "!" appended when it may overwrite.
+         * @brief Each accepted name with "!" appended when it may overwrite, "cancelled" alone when cancelled.
          */
-        inline std::vector<std::string> describe(std::vector<Entry> const& accepted)
+        inline std::vector<std::string> describe(std::optional<std::vector<Entry>> const& accepted)
         {
             std::vector<std::string> result;
-            for (auto const& entry : accepted)
+            if (!accepted)
+                return {"cancelled"};
+            for (auto const& entry : *accepted)
                 result.push_back(entry.mayOverwrite ? entry.name + "!" : entry.name);
             return result;
         }
@@ -91,7 +94,7 @@ namespace FileExplorer::Test
         EXPECT_EQ(describe(decisions.takeAccepted()), (std::vector<std::string>{"b"}));
     }
 
-    TEST(OverwriteDecisionsTests, CancelKeepsOnlyWhatWasAcceptedBefore)
+    TEST(OverwriteDecisionsTests, CancelDropsWhatWasApprovedBefore)
     {
         using namespace OverwriteDecisionsTestDetail;
         OverwriteDecisions decisions{entries({"a", "b", "c", "d"}), {false, true, true, false}};
@@ -100,7 +103,28 @@ namespace FileExplorer::Test
         ASSERT_NE(decisions.nextQuestion(), nullptr);
         decisions.answer(OverwriteAnswer::Cancel);
         EXPECT_EQ(decisions.nextQuestion(), nullptr);
-        EXPECT_EQ(describe(decisions.takeAccepted()), (std::vector<std::string>{"a", "b!"}));
+        EXPECT_EQ(describe(decisions.takeAccepted()), (std::vector<std::string>{"cancelled"}));
+    }
+
+    TEST(OverwriteDecisionsTests, CancelAtTheFirstQuestionTransfersNothing)
+    {
+        using namespace OverwriteDecisionsTestDetail;
+        OverwriteDecisions decisions{entries({"a", "b"}), {true, false}};
+        ASSERT_NE(decisions.nextQuestion(), nullptr);
+        decisions.answer(OverwriteAnswer::Cancel);
+        EXPECT_EQ(decisions.nextQuestion(), nullptr);
+        EXPECT_EQ(describe(decisions.takeAccepted()), (std::vector<std::string>{"cancelled"}));
+    }
+
+    TEST(OverwriteDecisionsTests, AnAnswerAfterCancelChangesNothing)
+    {
+        using namespace OverwriteDecisionsTestDetail;
+        OverwriteDecisions decisions{entries({"a", "b"}), {true, true}};
+        ASSERT_NE(decisions.nextQuestion(), nullptr);
+        decisions.answer(OverwriteAnswer::Cancel);
+        decisions.answer(OverwriteAnswer::All);
+        EXPECT_EQ(decisions.nextQuestion(), nullptr);
+        EXPECT_EQ(describe(decisions.takeAccepted()), (std::vector<std::string>{"cancelled"}));
     }
 
     TEST(OverwriteDecisionsTests, AMissingAnswerCountsAsExisting)

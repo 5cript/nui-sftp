@@ -466,7 +466,7 @@ class SideModel
     /**
      * @brief Checks which destinations of @p candidates exist, asks about each existing one with the overwrite texts
      *        of @p prompt and hands the accepted entries to @p onAccepted, also when none were accepted. Nothing is
-     *        accepted and @p onAccepted is not called when the check fails.
+     *        accepted and @p onAccepted is not called when the check fails or the user cancels a question.
      */
     template <typename EntryT>
     void checkDestinations(
@@ -514,7 +514,12 @@ class SideModel
     {
         const auto* question = decisions->nextQuestion();
         if (question == nullptr)
-            return onAccepted(decisions->takeAccepted());
+        {
+            auto accepted = decisions->takeAccepted();
+            if (!accepted)
+                return Log::info("The overwrite question was cancelled, nothing is transferred.");
+            return onAccepted(*std::move(accepted));
+        }
 
         const auto destination = FileExplorer::pathText(question->destination);
         Log::info("The destination '{}' exists, asking whether to overwrite it.", destination);
@@ -544,7 +549,8 @@ class SideModel
     std::string iconOf(SharedData::DirectoryEntry const& entry) const;
 
     /**
-     * @brief The answer a button of the overwrite question stands for, closing the dialog cancels.
+     * @brief The answer a button of the overwrite question stands for. Closing the dialog without a button (Escape,
+     *        another dialog replacing it) cancels.
      */
     static FileExplorer::OverwriteAnswer overwriteAnswerOf(std::optional<ConfirmDialog::Button> button);
 
