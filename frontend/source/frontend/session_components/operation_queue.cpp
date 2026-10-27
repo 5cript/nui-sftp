@@ -1041,7 +1041,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
         );
     }
     card->deletesPartialFilesOnCancel(added.deletesPartialFilesOnCancel);
-    if (added.deletesPartialFilesOnCancel.value_or(false))
+    if (added.deletesPartialFilesOnCancel.value_or(false) && !SharedData::isArchiveTransfer(added.type))
         impl_->offersToKeepPartialFiles = true;
     card->setPartialFileHandlers({
         .openCancelMenu =
@@ -1992,7 +1992,8 @@ void OperationQueue::removeCardsCanceledByAll(bool keepPartialFiles)
         if (operation.isCompletedState())
             return operation.keptPartialFiles();
         const auto deletes = operation.card().deletesPartialFilesOnCancel();
-        return deletes.has_value() && (keepPartialFiles || !*deletes);
+        return deletes.has_value() && !SharedData::isArchiveTransfer(operation.type()) &&
+            (keepPartialFiles || !*deletes);
     };
     LocalOperationRouter::instance().cancelHostedBy(*this);
     for (auto* cards : {&impl_->operations, &impl_->priorityOperations})

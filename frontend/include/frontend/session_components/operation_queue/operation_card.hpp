@@ -453,7 +453,8 @@ class OperationCard : public OperationCardInterface
                 }
             }(Svgs::deleteIcon());
         }
-        if (deletesPartialFilesOnCancel_.value().value_or(false))
+        // An archive has nothing to keep, its partial file cannot continue.
+        if (deletesPartialFilesOnCancel_.value().value_or(false) && !SharedData::isArchiveTransfer(type_))
         {
             return div{
                 class_ = "opq-cancel-split"
@@ -482,7 +483,9 @@ class OperationCard : public OperationCardInterface
             class_ = "opq-cancel-main",
             Nui::Attributes::title = deletesPartialFilesOnCancel_.value() == false
                 ? language->get("operationQueue", "cancelKeepsPartialFiles")
-                : language->get("operationQueue", "cancel"),
+                : SharedData::isArchiveTransfer(type_)
+                    ? language->get("operationQueue", "cancelDeletesPartialArchive")
+                    : language->get("operationQueue", "cancel"),
             onClick = [this](){
                 cancel();
             }
