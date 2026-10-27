@@ -2,7 +2,10 @@
 
 #include <backend/sftp/local_copy_operation.hpp>
 #include <paths/native.hpp>
+#include <utility/extended_length_path.hpp>
 #include <utility/temporary_directory.hpp>
+
+#include <nui/utility/scope_exit.hpp>
 
 #include <gtest/gtest.h>
 
@@ -14,6 +17,13 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    include <windows.h>
+#endif
 
 extern std::filesystem::path temporaryRoot;
 
@@ -435,4 +445,45 @@ namespace Test
         EXPECT_EQ(countEntries(root_.path() / "target"), 0u);
         EXPECT_EQ(operation.work().error().type, Operation::ErrorType::CannotWorkCanceledOperation);
     }
+
+#ifdef _WIN32
+    TEST_F(LocalCopyOperationTests, ATreePastMaxPathIsCopiedAndMoved)
+    {
+        // Without long path support std::filesystem reaches these only in the extended-length form.
+        const std::wstring segment(48, L's');
+        std::filesystem::path below{};
+        for (int level = 0; level < 6; ++level)
+            below /= segment;
+        below /= "bottom.txt";
+        const auto extended = [this](std::filesystem::path const& relative)
+        {
+            return Utility::extendedLengthPath(root_.path() / relative);
+        };
+        auto removeTrees = Nui::ScopeExit{[&]() noexcept {
+            std::error_code removeError;
+            for (auto const* name : {"tree", "copy", "moved"})
+                std::filesystem::remove_all(extended(name), removeError);
+        }};
+        std::filesystem::create_directories(extended(("tree" / below).parent_path()));
+        std::ofstream{extended("tree" / below), std::ios::binary} << "bottom";
+        ASSERT_GE((root_.path() / "tree" / below).native().size(), std::size_t{MAX_PATH});
+
+        LocalCopyOperation copy{options({entry(root_.path() / "tree", root_.path() / "copy")}, false)};
+        const auto copied = workToEnd(copy);
+        ASSERT_TRUE(copied.has_value()) << copied.error().toString();
+        EXPECT_TRUE(copy.getFailed().empty());
+        EXPECT_EQ(read(extended("copy" / below)), "bottom");
+        ASSERT_FALSE(progress_.empty());
+        EXPECT_FALSE(progress_.back().currentItem.starts_with(R"(\\?\)")) << "progress shows the path as users know it";
+
+        // Into an existing directory a move takes each item on its own.
+        std::filesystem::create_directories(extended("moved/tree"));
+        LocalCopyOperation move{options({entry(root_.path() / "copy", root_.path() / "moved" / "tree", true)}, true)};
+        const auto moved = workToEnd(move);
+        ASSERT_TRUE(moved.has_value()) << moved.error().toString();
+        EXPECT_TRUE(move.getFailed().empty());
+        EXPECT_EQ(read(extended("moved/tree" / below)), "bottom");
+        EXPECT_FALSE(std::filesystem::exists(extended("copy")));
+    }
+#endif
 }

@@ -1,6 +1,5 @@
 #include <utility/checked_symlink_status.hpp>
-
-#include <string>
+#include <utility/extended_length_path.hpp>
 
 #ifdef _WIN32
 #    ifndef WIN32_LEAN_AND_MEAN
@@ -17,23 +16,6 @@ namespace Utility
         std::error_code systemError(DWORD code)
         {
             return std::error_code{static_cast<int>(code), std::system_category()};
-        }
-
-        /**
-         * @brief @p path as an extended-length path (\\?\C:\x or \\?\UNC\server\share\x), which MAX_PATH does not
-         *        limit. Nothing for a relative path and for one in the device namespace already.
-         */
-        std::optional<std::wstring> extendedLengthPathOf(std::filesystem::path const& path)
-        {
-            // The extended-length form skips the normalization of separators, "." and "..".
-            const std::wstring native = path.lexically_normal().make_preferred().native();
-            if (native.starts_with(LR"(\\?\)") || native.starts_with(LR"(\\.\)"))
-                return std::nullopt;
-            if (native.starts_with(LR"(\\)"))
-                return LR"(\\?\UNC\)" + native.substr(2);
-            if (native.size() >= 3 && native[1] == L':' && native[2] == L'\\')
-                return LR"(\\?\)" + native;
-            return std::nullopt;
         }
 
         using NtStatusReader = LONG(WINAPI*)();
@@ -82,8 +64,7 @@ namespace Utility
         )
         {
             const auto readNtStatus = ntStatusReader();
-            const auto extended = extendedLengthPathOf(path);
-            const auto attributes = ::GetFileAttributesW(extended ? extended->c_str() : path.c_str());
+            const auto attributes = ::GetFileAttributesW(extendedLengthPath(path).c_str());
             if (attributes != INVALID_FILE_ATTRIBUTES)
             {
                 if (failure)

@@ -6,6 +6,7 @@
 #include "test_download_mark.hpp"
 #include "test_echo_suppressor.hpp"
 #include "test_error_message.hpp"
+#include "test_extended_length_path.hpp"
 #include "test_fuzzy_search.hpp"
 #include "test_json_utf8.hpp"
 #include "test_keyed_diff.hpp"

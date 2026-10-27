@@ -23,6 +23,7 @@ else()
         node/node.cpp
         checked_symlink_status.cpp
         error_message.cpp
+        extended_length_path.cpp
         permissions.cpp
         rename.cpp
         shared_input_file_stream.cpp
