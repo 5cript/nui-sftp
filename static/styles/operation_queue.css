@@ -1,4 +1,5 @@
 .operation-queue {
+    container: operation-queue / inline-size;
     margin: auto auto;
     width: 100%;
     height: 100%;
@@ -311,71 +312,132 @@ header.opq-controls {
 
 .opq-actions {
     display: flex;
-    gap: 8px;
-    align-items: center
-}
-
-.opq-btn {
-    padding: 3px 5px;
-    border-radius: 8px;
-    border: 1px solid var(--opq-border-faint);
-    background: transparent;
-    color: var(--opq-muted);
-    cursor: pointer;
-    font-size: 13px
-}
-
-.opq-btn[aria-pressed="true"] {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--opq-accent)
-}
-
-.opq-clock {
-    margin: 0;
-    display: flex;
-    align-items: center;
-}
-
-.opq-cancel-btn {
-    color: #ffb3b3;
-    margin-left: 4px;
-}
-
-.opq-actions {
-    display: flex;
     align-items: center;
     gap: 4px;
     margin-left: 4px;
     white-space: nowrap;
+
+    svg {
+        width: 11px;
+        height: 11px;
+        flex-shrink: 0;
+    }
 }
 
-.opq-actions .opq-cancel-btn {
-    margin-left: 0;
-}
-
-/* Cancel and the menu of the other cancel options as one control. */
-.opq-cancel-split {
-    display: inline-flex;
+/* Stop, grey until hovered, with the menu of the other stop options next to it as one control. */
+.opq-stop-split,
+.opq-stop-btn.opq-stop-single {
     border: 1px solid var(--opq-border-faint);
     border-radius: 8px;
-    overflow: hidden;
+}
 
-    .opq-btn {
-        border: 0;
-        border-radius: 0;
+.opq-stop-split {
+    display: inline-flex;
+    overflow: hidden;
+}
+
+.opq-stop-btn,
+.opq-stop-more {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: var(--color);
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+        background: rgba(255, 107, 107, 0.16);
+        color: #ff9a9a;
+    }
+}
+
+.opq-stop-more {
+    padding: 0 4px;
+    border-left: 1px solid var(--opq-border-faint);
+    color: var(--opq-muted);
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--color);
     }
 
-    .opq-cancel-more {
-        border-left: 1px solid var(--opq-border-faint);
-        padding: 3px 3px;
-        display: inline-flex;
-        align-items: center;
+    svg {
+        width: 10px;
+        height: 10px;
+        fill: currentColor;
+    }
+}
 
-        svg {
-            width: 10px;
-            height: 10px;
-            fill: currentColor;
-        }
+/* An ended card is only removed from the list, which needs no warning colour. */
+.opq-dismiss-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--opq-muted);
+    cursor: pointer;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--color);
+    }
+}
+
+.opq-discard-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--opq-border-faint);
+    border-radius: 8px;
+    background: transparent;
+    color: #ffb3b3;
+    cursor: pointer;
+
+    svg {
+        width: 12px;
+        height: 12px;
+        fill: currentColor;
+    }
+}
+
+/* Below this width the queue shows stop as its icon alone. */
+@container operation-queue (max-width: 640px) {
+    .opq-stop-label {
+        display: none;
+    }
+
+    .opq-stop-btn {
+        padding: 0 7px;
+    }
+}
+
+.opq-kept-note {
+    font-size: 12px;
+    color: var(--opq-warn);
+}
+
+.opq-continue-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--theme-color);
+
+    svg {
+        width: 10px;
+        height: 10px;
+        fill: currentColor;
     }
 }
 
@@ -404,30 +466,6 @@ header.opq-controls {
             fill: currentColor;
         }
     }
-}
-
-.opq-kept-note {
-    font-size: 12px;
-    color: var(--opq-warn);
-}
-
-.opq-continue-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--theme-color);
-
-    svg {
-        width: 10px;
-        height: 10px;
-        fill: currentColor;
-    }
-}
-
-.opq-actions .opq-cancel-btn svg {
-    width: 12px;
-    height: 12px;
-    fill: currentColor;
 }
 
 /* dynamic content area */
