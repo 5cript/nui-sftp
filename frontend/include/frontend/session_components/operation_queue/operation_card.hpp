@@ -19,6 +19,7 @@
 #include <frontend/components/svg/scan_animated.hpp>
 #include <frontend/components/icon_panel.hpp>
 #include <script-nui-components/progress_bar.hpp>
+#include <script-nui-components/button.hpp>
 
 #include <ui5-sap-icons/icons/download.hpp>
 #include <ui5-sap-icons/icons/upload.hpp>
@@ -420,17 +421,19 @@ class OperationCard : public OperationCardInterface
         if (state_.value() == SharedData::OperationState::Canceled && keptPartialFiles_.value())
         {
             return fragment(
-                button{
-                    class_ = "opq-btn opq-continue-btn",
-                    Nui::Attributes::title = language->get("operationQueue", "continueKeptTitle"),
-                    onClick = [this](){
-                        if (partialFileHandlers_.continueTransfer)
-                            partialFileHandlers_.continueTransfer();
-                    }
-                }(
-                    Ui5Icons::media_play(),
-                    span{}(language->get("operationQueue", "continueKept"))
-                ),
+                // Sized by the queue's stylesheet, a class here would replace the one of the component.
+                ScriptNuiComponents::button({
+                    .text = language->get("operationQueue", "continueKept"),
+                    .icon = Ui5Icons::media_play(),
+                    .attributes = {
+                        Nui::Attributes::title = language->get("operationQueue", "continueKeptTitle"),
+                        onClick = [this](){
+                            if (partialFileHandlers_.continueTransfer)
+                                partialFileHandlers_.continueTransfer();
+                        }
+                    },
+                    .styleVariant = ScriptNuiComponents::StyleVariant::Success,
+                }),
                 button{
                     class_ = "opq-btn opq-discard-btn",
                     Nui::Attributes::title = language->get("operationQueue", "discardKept"),
