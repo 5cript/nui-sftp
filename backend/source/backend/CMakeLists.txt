@@ -52,6 +52,7 @@ add_library(
         sftp/bulk_download_operation.cpp
         sftp/bulk_upload_operation.cpp
         sftp/bulk_resume_registry.cpp
+        sftp/kept_transfer_registry.cpp
         sftp/compared_state_check.cpp
         sftp/delete_operation.cpp
         sftp/local_file_problem.cpp

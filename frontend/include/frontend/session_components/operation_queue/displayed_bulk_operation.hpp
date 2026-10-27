@@ -211,6 +211,19 @@ struct DisplayedBulkOperation
         }
     }
 
+    std::pair<std::int64_t, std::int64_t> barPosition() const override
+    {
+        return {totalProgressBar_.progress(), totalProgressBar_.maximum()};
+    }
+
+    void barPosition(std::int64_t progress, std::int64_t maximum) override
+    {
+        scanPhase_.end();
+        totalProgressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
+        totalProgressBar_.setMaximum(maximum);
+        totalProgressBar_.setProgress(progress);
+    }
+
     std::optional<ResumableOp> resumableDescriptor() const override
     {
         if (isCompletedState() || SharedData::isLocalOperation(type_))

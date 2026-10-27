@@ -131,14 +131,12 @@ class FileEngine
     void closeSyncSession(Ids::SyncSessionId syncSessionId);
 
     /**
-     * @brief Goes on with the transfer @p operationId a cancel stopped keeping its partial files, see
-     *        OperationQueue::continueKept in the backend.
-     * @param onDone Whether the backend queued it again under its id, nothing when the request failed. A single
-     *        transfer is not queued again, its owner queues it anew.
+     * @brief Goes on with the transfer @p operationId a cancel stopped keeping its partial files, the backend queues it
+     *        again under its id, see OperationQueue::continueKept in the backend.
      */
     void continueKept(
         Ids::OperationId const& operationId,
-        std::function<void(std::optional<bool> requeued, std::string const& info)> onDone
+        std::function<void(bool success, std::string const& info)> onDone
     );
 
     /**

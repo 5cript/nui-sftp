@@ -288,6 +288,7 @@ void SessionManager::addSession(
                     *hub_,
                     sessionOptions.sftpOptions.value(),
                     &bulkResumeRegistry_,
+                    keptTransferRegistry_,
                     localOperationQueue_,
                     FileTracking::TrackerServices{
                         .instances = temporaryInstances_.get(),

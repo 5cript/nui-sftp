@@ -325,6 +325,16 @@ class OperationCard : public OperationCardInterface
         return deletesPartialFilesOnCancel_.value();
     }
 
+    bool offersToKeepPartialFiles() const override
+    {
+        return canKeepPartialFiles() && *deletesPartialFilesOnCancel_.value();
+    }
+
+    bool keepsPartialFilesOnCancel(bool keepRequested) const override
+    {
+        return canKeepPartialFiles() && (keepRequested || !*deletesPartialFilesOnCancel_.value());
+    }
+
     void keptPartialFiles(bool kept) override
     {
         keptPartialFiles_ = kept;
@@ -394,6 +404,14 @@ class OperationCard : public OperationCardInterface
     }
 
   private:
+    /**
+     * @brief A transfer other than an archive.
+     */
+    bool canKeepPartialFiles() const
+    {
+        return deletesPartialFilesOnCancel_.value().has_value() && !SharedData::isArchiveTransfer(type_);
+    }
+
     std::string cancelMenuAnchorId() const
     {
         return fmt::format("opq-cancel-more-{}", operationId_.value());
@@ -457,8 +475,7 @@ class OperationCard : public OperationCardInterface
                 }
             }(Svgs::deleteIcon());
         }
-        // An archive has nothing to keep, its partial file cannot continue.
-        if (deletesPartialFilesOnCancel_.value().value_or(false) && !SharedData::isArchiveTransfer(type_))
+        if (offersToKeepPartialFiles())
         {
             return div{
                 class_ = "opq-cancel-split"

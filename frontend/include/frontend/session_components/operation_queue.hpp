@@ -331,7 +331,8 @@ class OperationQueue
      *        (not yet completed) card in both the priority and normal queues.
      *        Used by Session::captureSnapshot to carry interrupted transfers
      *        across a seamless reconnect; the replacement Session re-enqueues
-     *        each returned ResumableOp with tryContinue=true.
+     *        each returned ResumableOp with tryContinue=true. Also every card of a canceled transfer that kept its
+     *        partial files, the replacement shows it again, see restoreKept.
      */
     std::vector<ResumableOp> snapshotInFlight();
 
@@ -348,6 +349,11 @@ class OperationQueue
      *        paths are idempotent against the live filesystem state.
      */
     void enqueueResumable(ResumableOp const& op);
+
+    /**
+     * @brief Shows the card @p kept of a transfer canceled keeping its partial files again, after a reconnect.
+     */
+    void restoreKept(Resumable::Kept const& kept);
 
     Nui::ElementRenderer operator()();
 
@@ -377,15 +383,15 @@ class OperationQueue
     void openCancelMenu(std::string const& anchorId, bool forAll, std::function<void(bool keepPartialFiles)> onChoice);
 
     /**
-     * @brief Goes on with the transfer of the card @p operationId that a cancel stopped keeping its partial files.
-     *        Takes the id by value: the card, whose handler may hold the id, goes first.
+     * @brief Goes on with the transfer of the card @p operationId that a cancel stopped keeping its partial files. The
+     *        backend queues it again under its id, which replaces the card.
      */
-    void continueKept(Ids::OperationId operationId);
+    void continueKept(Ids::OperationId const& operationId);
 
     /**
      * @brief Deletes the partial files the card @p operationId kept, and the card.
      */
-    void discardKept(Ids::OperationId operationId);
+    void discardKept(Ids::OperationId const& operationId);
     void changeAutoClean(bool doClean);
 
     /**

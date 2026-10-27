@@ -3,6 +3,9 @@
 #include <frontend/session_components/operation_queue/operation_card_interface.hpp>
 
 #include <ids/ids.hpp>
+#include <shared_data/file_operations/operation_added.hpp>
+
+#include <optional>
 
 struct DisplayedOperation
 {
@@ -10,11 +13,13 @@ struct DisplayedOperation
     DisplayedOperation(
         Ids::OperationId operationId,
         SharedData::OperationType type,
-        std::unique_ptr<OperationCardInterface> card
+        std::unique_ptr<OperationCardInterface> card,
+        std::optional<SharedData::OperationAdded> added = std::nullopt
     )
         : operationId_{std::move(operationId)}
         , type_{type}
         , card_{std::move(card)}
+        , added_{std::move(added)}
     {}
 
     Nui::ElementRenderer operator()()
@@ -77,14 +82,20 @@ struct DisplayedOperation
         return card_->resumableDescriptor();
     }
 
-    std::optional<ResumableOp> continuationDescriptor() const
-    {
-        return card_->continuationDescriptor();
-    }
-
     bool keptPartialFiles() const
     {
         return card_->keptPartialFiles();
+    }
+
+    /**
+     * @brief The card for the snapshot of a reconnect while it waits to continue or discard its kept partial files.
+     */
+    std::optional<Resumable::Kept> keptDescriptor() const
+    {
+        if (!added_ || !card_->keptPartialFiles())
+            return std::nullopt;
+        const auto [progress, maximum] = card_->barPosition();
+        return Resumable::Kept{.added = *added_, .progress = progress, .maximum = maximum};
     }
 
     OperationCardInterface& card()
@@ -96,4 +107,6 @@ struct DisplayedOperation
     Ids::OperationId operationId_;
     SharedData::OperationType type_;
     std::unique_ptr<OperationCardInterface> card_;
+    /** @brief What the card was made from, so a reconnect can make it again. */
+    std::optional<SharedData::OperationAdded> added_;
 };

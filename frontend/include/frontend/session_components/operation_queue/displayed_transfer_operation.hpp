@@ -118,6 +118,19 @@ class DisplayedTransferOperation
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
 
+    std::pair<std::int64_t, std::int64_t> barPosition() const override
+    {
+        return {progressBar_.progress(), progressBar_.maximum()};
+    }
+
+    void barPosition(std::int64_t progress, std::int64_t maximum) override
+    {
+        scanPhase_.end();
+        progressBar_.setTextMode(ScriptNuiComponents::ProgressBarTextMode::Bytes);
+        progressBar_.setMaximum(maximum);
+        progressBar_.setProgress(progress);
+    }
+
     bool warrantsCancelConfirm() const override
     {
         return !isCompletedState() && progressBar_.maximum() > 10'000'000; // 10 MB
@@ -147,11 +160,6 @@ class DisplayedTransferOperation
     {
         if (isCompletedState())
             return std::nullopt;
-        return continuationDescriptor();
-    }
-
-    std::optional<ResumableOp> continuationDescriptor() const override
-    {
         if (type_ == SharedData::OperationType::Download)
             return Resumable::Download{
                 .source = remotePath_, .destination = localPath_, .allowOverwrite = allowOverwrite_
