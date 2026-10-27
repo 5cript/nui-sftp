@@ -185,6 +185,10 @@ void setupLogger(std::shared_ptr<Nui::TimerHandle> setupWait)
 
 extern "C" void frontendMain()
 {
+#ifndef NDEBUG
+    // C++ catch cannot catch WASM traps, they reach JS at the entry points, see static/source/wasm_trap_handler.js.
+    Nui::val::global("installWasmTrapHandler")();
+#endif
     Nui::RpcClient::awaitRpcAvailable(
         [](bool timeout)
         {
