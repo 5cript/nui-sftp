@@ -6,7 +6,7 @@
 
 namespace Components::Svg
 {
-    inline Nui::ElementRenderer stop()
+    inline Nui::ElementRenderer cancel()
     {
         namespace svg = Nui::Elements::Svg;
         namespace svga = Nui::Attributes::Svg;
@@ -17,8 +17,10 @@ namespace Components::Svg
             svga::fill = "none",
         }(
             svg::path {
-                svga::d = "M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
-                svga::fill = "currentColor"
+                svga::d = "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M9 9l6 6M15 9l-6 6",
+                svga::stroke = "currentColor",
+                svga::strokeWidth = "1.8",
+                svga::strokeLinecap = "round"
             }()
         );
         // clang-format on

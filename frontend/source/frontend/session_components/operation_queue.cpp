@@ -35,7 +35,6 @@
 #include <script-nui-components/popup_menu.hpp>
 
 #include <ui5-sap-icons/icons/synchronize.hpp>
-#include <ui5-sap-icons/icons/delete.hpp>
 #include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 
 #include <algorithm>
@@ -169,6 +168,17 @@ struct OperationQueue::Implementation
         if (auto it = failedIndex.find(id.value()); it != failedIndex.end())
             return it->second.get();
         return nullptr;
+    }
+
+    /**
+     * @brief The card of @p id, marked running once its progress arrives: a card hears of its start no other way.
+     */
+    DisplayedOperation* findProgressing(Ids::OperationId const& id)
+    {
+        auto* operation = findOperation(id);
+        if (operation && operation->state() == SharedData::OperationState::NotStarted)
+            operation->state(SharedData::OperationState::Running);
+        return operation;
     }
 
     /**
@@ -1086,7 +1096,7 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
 {
     // Log::debug("Received delete progress for operation id: {}.", progress.operationId.value());
 
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received delete progress for unknown operation id: {}", progress.operationId.value());
@@ -1114,7 +1124,7 @@ void OperationQueue::onDeleteProgress(SharedData::BulkDeleteProgress const& prog
 
 void OperationQueue::onLocalCopyProgress(SharedData::BulkProgress const& progress)
 {
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received local copy progress for unknown operation id: {}", progress.operationId.value());
@@ -1133,7 +1143,7 @@ void OperationQueue::onLocalCopyProgress(SharedData::BulkProgress const& progres
 
 void OperationQueue::onDownloadProgress(SharedData::TransferProgress const& progress)
 {
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received download progress for unknown operation id: {}", progress.operationId.value());
@@ -1172,7 +1182,7 @@ void OperationQueue::onScanProgress(SharedData::ScanProgress const& progress)
             cbIt->second(progress);
     }
 
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
         return; // Scan-only operations (for sync) may not be in the display map — that is fine.
 
@@ -1219,7 +1229,7 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& prog
 {
     // Log::debug("Received bulk download progress for operation id: {}.", progress.operationId.value());
 
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received bulk download progress for unknown operation id: {}", progress.operationId.value());
@@ -1252,7 +1262,7 @@ void OperationQueue::onBulkDownloadProgress(SharedData::BulkProgress const& prog
 
 void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progress)
 {
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received upload progress for unknown operation id: {}", progress.operationId.value());
@@ -1283,7 +1293,7 @@ void OperationQueue::onUploadProgress(SharedData::TransferProgress const& progre
 
 void OperationQueue::onArchiveDownloadProgress(SharedData::TransferProgress const& progress)
 {
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received archive download progress for unknown operation id: {}", progress.operationId.value());
@@ -1316,7 +1326,7 @@ void OperationQueue::onArchiveDownloadProgress(SharedData::TransferProgress cons
 
 void OperationQueue::onArchiveUploadProgress(SharedData::TransferProgress const& progress)
 {
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received archive upload progress for unknown operation id: {}", progress.operationId.value());
@@ -1351,7 +1361,7 @@ void OperationQueue::onBulkUploadProgress(SharedData::BulkProgress const& progre
 {
     // Log::debug("Received bulk upload progress for operation id: {}.", progress.operationId.value());
 
-    auto* operation = impl_->findOperation(progress.operationId);
+    auto* operation = impl_->findProgressing(progress.operationId);
     if (!operation)
     {
         Log::error("Received bulk upload progress for unknown operation id: {}", progress.operationId.value());
@@ -2020,7 +2030,7 @@ void OperationQueue::openCancelMenu(
     impl_->cancelMenu.setItems({
         Snc::PopupMenu::item(
             language->get("operationQueue", forAll ? "cancelAllDeletingPartialFiles" : "cancelDeletingPartialFiles"),
-            Ui5Icons::delete_(),
+            Svgs::deleteIcon(),
             [onChoice]()
             {
                 onChoice(false);
@@ -2028,7 +2038,7 @@ void OperationQueue::openCancelMenu(
         ),
         Snc::PopupMenu::item(
             language->get("operationQueue", forAll ? "cancelAllKeepingPartialFiles" : "cancelKeepingPartialFiles"),
-            Svgs::stop(),
+            Svgs::pause(),
             [onChoice]()
             {
                 onChoice(true);
@@ -2393,7 +2403,6 @@ Nui::ElementRenderer OperationQueue::operator()()
                     namespace Snc = ScriptNuiComponents;
                     auto cancelAllButton = Snc::button({
                         .text = language->getObserved("operationQueue", "cancelAll"),
-                        .icon = Svgs::stop(),
                         .attributes = {
                             onClick = [this](){
                                 askBackendToCancelAll();
