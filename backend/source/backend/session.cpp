@@ -1746,7 +1746,9 @@ void Session::registerRpcSftpKeptTransfers()
     on(fmt::format("Session::{}::sftp::discardKept", id_.value()))
         .perform(
             [weak = weak_from_this()](
-                RpcHelper::RpcOnce&& reply, std::string const& channelIdString, std::string const& operationIdString
+                RpcHelper::RpcOnce&& reply,
+                std::string const& channelIdString,
+                std::vector<std::string> const& operationIdStrings
             )
             {
                 auto self = weak.lock();
@@ -1756,12 +1758,13 @@ void Session::registerRpcSftpKeptTransfers()
                 self->queueOnChannel(
                     std::move(reply),
                     Ids::makeChannelId(channelIdString),
-                    fmt::format("the discard of the partial files of '{}'", operationIdString),
-                    [operationId = Ids::makeOperationId(operationIdString)](
+                    fmt::format("the discard of the partial files of {} transfer(s)", operationIdStrings.size()),
+                    [operationIdStrings](
                         OperationQueue& queue, SecureShell::SftpSession& channel
                     ) -> std::expected<nlohmann::json, std::string>
                     {
-                        queue.discardKept(channel, operationId);
+                        for (auto const& operationIdString : operationIdStrings)
+                            queue.discardKept(channel, Ids::makeOperationId(operationIdString));
                         return nlohmann::json{{"success", true}};
                     }
                 );

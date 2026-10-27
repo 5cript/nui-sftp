@@ -38,6 +38,7 @@
 #include <roar/detail/pimpl_special_functions.hpp>
 
 #include <chrono>
+#include <unordered_set>
 
 class LocalSideModel;
 class RemoteSideModel;
@@ -371,10 +372,14 @@ class OperationQueue
     void askBackendToCancelAll(bool keepPartialFiles = false);
 
     /**
-     * @brief Removes the cards Cancel All canceled. A transfer that keeps its partial files stays, its completion
-     *        turns it into a card to continue or discard them.
+     * @brief Removes the cards Cancel All canceled. A transfer this cancel keeps the partial files of stays, its
+     *        completion turns it into a card to continue or discard them. The cards @p keptBefore go, their partial
+     *        files with them unless @p keepPartialFiles is set.
      */
-    void removeCardsCanceledByAll(bool keepPartialFiles);
+    void removeCardsCanceledByAll(
+        bool keepPartialFiles,
+        std::unordered_set<Ids::OperationId, Ids::IdHash> const& keptBefore
+    );
 
     /**
      * @brief Opens the cancel menu next to the element @p anchorId: cancel deleting the partial files or keeping them,

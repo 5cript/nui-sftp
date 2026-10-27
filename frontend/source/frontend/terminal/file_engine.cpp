@@ -550,12 +550,18 @@ void FileEngine::continueKept(
 }
 
 void FileEngine::discardKept(
-    Ids::OperationId const& operationId,
+    std::vector<Ids::OperationId> const& operationIds,
     std::function<void(bool success, std::string const& info)> onDone
 )
 {
+    std::vector<std::string> operationIdStrings{};
+    operationIdStrings.reserve(operationIds.size());
+    for (auto const& operationId : operationIds)
+        operationIdStrings.push_back(operationId.value());
     lazyOpen(
-        [this, operationId, onDone = std::move(onDone)](auto const& channelId, std::string const& info)
+        [this, operationIdStrings = std::move(operationIdStrings), onDone = std::move(onDone)](
+            auto const& channelId, std::string const& info
+        )
         {
             if (!channelId)
                 return onDone(false, info);
@@ -568,7 +574,7 @@ void FileEngine::discardKept(
                     onDone(true, "Success");
                 },
                 channelId.value().value(),
-                operationId.value()
+                operationIdStrings
             );
         }
     );

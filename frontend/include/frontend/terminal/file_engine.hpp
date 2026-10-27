@@ -140,10 +140,10 @@ class FileEngine
     );
 
     /**
-     * @brief Deletes the partial files the transfer @p operationId kept when it was canceled.
+     * @brief Deletes the partial files the transfers @p operationIds kept when they were canceled.
      */
     void discardKept(
-        Ids::OperationId const& operationId,
+        std::vector<Ids::OperationId> const& operationIds,
         std::function<void(bool success, std::string const& info)> onDone
     );
 
