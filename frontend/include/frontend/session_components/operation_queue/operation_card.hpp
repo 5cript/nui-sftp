@@ -213,8 +213,9 @@ class OperationCard : public OperationCardInterface
             div{
                 class_ = "opq-clock"
             }(
-                observe(completionTime_, doDeletionCountdown_).generate([this]() -> Nui::ElementRenderer {
-                    if (isCompletedState() && *doDeletionCountdown_)
+                observe(completionTime_, doDeletionCountdown_, keptPartialFiles_).generate([this]() -> Nui::ElementRenderer {
+                    // A card that kept its partial files waits for continue or discard, auto clean leaves it.
+                    if (isCompletedState() && *doDeletionCountdown_ && !keptPartialFiles_.value())
                     {
                         constexpr auto radius = 10;
                         constexpr auto circumference = 2 * 3.14159 * radius;
