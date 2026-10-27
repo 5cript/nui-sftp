@@ -77,6 +77,21 @@ struct DisplayedOperation
         return card_->resumableDescriptor();
     }
 
+    std::optional<ResumableOp> continuationDescriptor() const
+    {
+        return card_->continuationDescriptor();
+    }
+
+    bool keptPartialFiles() const
+    {
+        return card_->keptPartialFiles();
+    }
+
+    OperationCardInterface& card()
+    {
+        return *card_;
+    }
+
   private:
     Ids::OperationId operationId_;
     SharedData::OperationType type_;
