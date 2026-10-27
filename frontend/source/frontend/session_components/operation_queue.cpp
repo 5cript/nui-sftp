@@ -4,6 +4,7 @@
 #include <frontend/file_explorer/local_side_model.hpp>
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/state_holder_with_dialog.hpp>
+#include <frontend/dialog/localized_button_labels.hpp>
 
 #include <frontend/session_components/operation_queue/displayed_transfer_operation.hpp>
 #include <frontend/session_components/operation_queue/displayed_scan_operation.hpp>
@@ -2038,6 +2039,36 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
         cancelAll();
         return;
     }
+    const auto kept = impl_->keptOperationIds();
+    if (keepPartialFiles || kept.empty())
+    {
+        cancelAllInBackend(keepPartialFiles);
+        return;
+    }
+    auto buttonLabels = localizedButtonLabels();
+    buttonLabels.all = language->get("operationQueue", "cancelAllDeleteKept");
+    buttonLabels.no = language->get("operationQueue", "cancelAllKeepKept");
+    impl_->confirmDialog->open({
+        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+        .headerText = language->get("operationQueue", "cancelAllKeptHeader"),
+        .text = fmt::format(fmt::runtime(language->get("operationQueue", "cancelAllKeptText")), kept.size()),
+        .buttons = ConfirmDialog::Button::All | ConfirmDialog::Button::No,
+        .focusButton = ConfirmDialog::Button::No,
+        .buttonLabels = std::move(buttonLabels),
+        .onClose = lifetime_.guarded(
+            [this](std::optional<ConfirmDialog::Button> button)
+            {
+                if (button == ConfirmDialog::Button::All)
+                    cancelAllInBackend(false);
+                else if (button == ConfirmDialog::Button::No)
+                    cancelAllInBackend(true);
+            }
+        ),
+    });
+}
+
+void OperationQueue::cancelAllInBackend(bool keepPartialFiles)
+{
     // Taken now: a completion of this cancel may turn more cards into kept ones before the reply.
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
