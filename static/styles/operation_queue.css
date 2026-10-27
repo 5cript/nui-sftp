@@ -475,16 +475,16 @@ header.opq-controls {
     color: var(--opq-warn);
 }
 
-.opq-continue-btn {
-    display: inline-flex;
-    align-items: center;
+/* Continue is a button of the component library, sized to the other buttons of a card. */
+.opq-actions .script-nui-button {
+    height: 24px;
+    padding: 0 8px;
     gap: 4px;
-    color: var(--theme-color);
+    font-size: 12px;
 
-    svg {
+    & > svg {
         width: 10px;
         height: 10px;
-        fill: currentColor;
     }
 }
 
