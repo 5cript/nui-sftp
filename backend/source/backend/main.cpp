@@ -52,6 +52,7 @@
 #include <algorithm>
 #include <ranges>
 #include <span>
+#include <optional>
 #include <unordered_map>
 #include <cstdlib>
 
@@ -85,6 +86,19 @@ namespace
         return gtkPortalParentWindow(window.getNativeWindow());
 #else
         return {};
+#endif
+    }
+
+    /**
+     * @brief Browser switches of the window. Debug builds make WASM out-of-bounds accesses throw a RuntimeError,
+     *        without a crash handler in the renderer they crash it silently.
+     */
+    std::optional<std::string> browserArguments()
+    {
+#ifndef NDEBUG
+        return "--js-flags=--wasm-enforce-bounds-checks"s;
+#else
+        return std::nullopt;
 #endif
     }
 
@@ -238,6 +252,7 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
               .title = "NuiSftp"s,
               .debug = options.enableDevTools,
               .customSchemes = {createFolderMapping(programDir_, "nui")},
+              .browserArguments = browserArguments(),
               .onRpcAliveMessage = [this]() {
                   onRpcAlive();
               }
