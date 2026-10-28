@@ -827,23 +827,47 @@ void Settings::save()
     impl_->stateHolder->save(
         [this](std::optional<std::string> const& error)
         {
-            if (error)
-            {
-                impl_->confirmDialog->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("settings", "errorSavingSettingsHeader"),
-                    .text =
-                        fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)),
-                    .buttons = ConfirmDialog::Button::Ok,
-                    .neverShowAgainId = "errorSavingSettings",
-                });
-            }
-
-            impl_->saveInProgress = false;
-            impl_->events->onSettingsChanged.modify();
-            Nui::globalEventContext.executeActiveEventsImmediately();
+            onSaveComplete(error);
         }
     );
+}
+
+void Settings::saveSession(std::string const& sessionId)
+{
+    applySessionToState(sessionId);
+    auto const& sessions = impl_->stateHolder->stateCache().sessions;
+    const auto session = sessions.find(sessionId);
+    if (session == sessions.end())
+        return;
+    impl_->stateHolder->loadModifySave(
+        [sessionId, edited = session->second](Persistence::State& state)
+        {
+            state.sessions[sessionId] = edited;
+        },
+        [this](std::optional<std::string> const& error)
+        {
+            onSaveComplete(error);
+        }
+    );
+}
+
+void Settings::onSaveComplete(std::optional<std::string> const& error)
+{
+    if (error)
+    {
+        impl_->confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = language->get("settings", "errorSavingSettingsHeader"),
+            .text =
+                fmt::format(fmt::runtime(language->get("settings", "errorSavingSettings") + ": {}"), language->translate(*error)),
+            .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "errorSavingSettings",
+        });
+    }
+
+    impl_->saveInProgress = false;
+    impl_->events->onSettingsChanged.modify();
+    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 void Settings::onChange()
@@ -1077,10 +1101,14 @@ void Settings::addNewSession()
             const auto engineType = result.sessionType == NewSessionDialog::SessionType::ssh
                 ? Persistence::TerminalEngineType::ssh
                 : Persistence::TerminalEngineType::shell;
-            impl_->stateHolder->stateCache().sessions[result.sessionName] =
-                Persistence::SessionOptions::create(result.iconName, engineType);
+            const auto session = Persistence::SessionOptions::create(result.iconName, engineType);
+            impl_->stateHolder->stateCache().sessions[result.sessionName] = session;
 
-            impl_->stateHolder->save(
+            impl_->stateHolder->loadModifySave(
+                [sessionName = result.sessionName, session](Persistence::State& state)
+                {
+                    state.sessions[sessionName] = session;
+                },
                 [this, result, engineType](std::optional<std::string> const& error)
                 {
                     if (error)
@@ -1127,10 +1155,7 @@ void Settings::addNewSession()
 void Settings::activateSection(Section section)
 {
     if (impl_->activeSession.value())
-    {
-        applySessionToState(*impl_->activeSession.value());
-        save();
-    }
+        saveSession(*impl_->activeSession.value());
     impl_->activeSection = section;
     impl_->activeSession = std::nullopt;
 }
@@ -1138,10 +1163,7 @@ void Settings::activateSection(Section section)
 void Settings::activateSession(std::string const& sessionId)
 {
     if (impl_->activeSession.value())
-    {
-        applySessionToState(*impl_->activeSession.value());
-        save();
-    }
+        saveSession(*impl_->activeSession.value());
     impl_->activeSection = Section::Session;
     impl_->activeSession = sessionId;
     loadSessionFromState(sessionId);
@@ -1461,7 +1483,11 @@ void Settings::deleteActiveSession()
                     return;
 
                 impl_->stateHolder->stateCache().sessions.erase(sessionId);
-                impl_->stateHolder->save(
+                impl_->stateHolder->loadModifySave(
+                    [sessionId](Persistence::State& state)
+                    {
+                        state.sessions.erase(sessionId);
+                    },
                     [this](std::optional<std::string> const& error)
                     {
                         if (error)
@@ -1532,7 +1558,12 @@ void Settings::renameActiveSession()
             nodeHandle.key() = newSessionId;
             sessions.insert(std::move(nodeHandle));
 
-            impl_->stateHolder->save(
+            impl_->stateHolder->loadModifySave(
+                [oldSessionId, newSessionId, renamed = sessions.at(newSessionId)](Persistence::State& state)
+                {
+                    state.sessions.erase(oldSessionId);
+                    state.sessions[newSessionId] = renamed;
+                },
                 [this](std::optional<std::string> const& error)
                 {
                     if (error)
@@ -1601,7 +1632,15 @@ void Settings::copyActiveSession()
             sessions[newSessionId] = sessions.at(sourceSessionId);
             sessions[newSessionId].icon = result.iconName;
 
-            impl_->stateHolder->save(
+            impl_->stateHolder->loadModifySave(
+                [sourceSessionId,
+                    source = sessions.at(sourceSessionId),
+                    newSessionId,
+                    copy = sessions.at(newSessionId)](Persistence::State& state)
+                {
+                    state.sessions[sourceSessionId] = source;
+                    state.sessions[newSessionId] = copy;
+                },
                 [this](std::optional<std::string> const& error)
                 {
                     if (error)
@@ -1973,10 +2012,7 @@ void Settings::onChangeGroup(
     else if (inheritanceBehavior == SettingGroupParameters::InheritanceBehavior::Inheriting)
     {
         if (*impl_->activeSession)
-        {
-            applySessionToState(**impl_->activeSession);
-            save();
-        }
+            saveSession(**impl_->activeSession);
         reloadInheritance();
     }
 }

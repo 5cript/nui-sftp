@@ -78,6 +78,12 @@ class Settings
 
     void onChange();
     void save();
+
+    /**
+     * @brief Applies the edits of the session to the cache and writes the session into a freshly loaded state.
+     */
+    void saveSession(std::string const& sessionId);
+    void onSaveComplete(std::optional<std::string> const& error);
     void applySettingsToState(Persistence::State& state);
 
     void loadTermiosSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
