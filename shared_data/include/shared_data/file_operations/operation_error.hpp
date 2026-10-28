@@ -17,7 +17,8 @@ namespace SecureShell
         TaskPushFailed,
         BufferUnavailable,
         UnexpectedEndOfFile,
-        LocalIoFailure
+        LocalIoFailure,
+        InvalidPath
     )
     BOOST_DESCRIBE_STRUCT(SftpError, (), (message, sshError, sftpError, wrapperError))
 
@@ -76,5 +77,5 @@ namespace SharedData
             return enumString;
         }
     };
-    BOOST_DESCRIBE_STRUCT(OperationError, (), (type, sftpError, localProblem))
+    BOOST_DESCRIBE_STRUCT(OperationError, (), (type, sftpError, extraInfo, localProblem))
 }

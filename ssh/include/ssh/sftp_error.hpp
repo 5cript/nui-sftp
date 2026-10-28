@@ -6,6 +6,8 @@
 
 namespace SecureShell
 {
+    // New values also go into BOOST_DESCRIBE_ENUM in shared_data/file_operations/operation_error.hpp, or converting an
+    // error that carries them to json throws.
     enum class WrapperErrors
     {
         None,
@@ -55,6 +57,53 @@ namespace SecureShell
                     return "Connection lost";
                 case 8:
                     return "Operation unsupported";
+                // Codes of SFTP versions 4 to 6 (draft-ietf-secsh-filexfer-13, 9.1), some servers send them anyway.
+                case 9:
+                    return "Invalid handle";
+                case 10:
+                    return "No such path";
+                case 11:
+                    return "File already exists";
+                case 12:
+                    return "Write protected";
+                case 13:
+                    return "No media";
+                case 14:
+                    return "No space on file system";
+                case 15:
+                    return "Quota exceeded";
+                case 16:
+                    return "Unknown principal";
+                case 17:
+                    return "Lock conflict";
+                case 18:
+                    return "Directory not empty";
+                case 19:
+                    return "Not a directory";
+                case 20:
+                    return "Invalid file name";
+                case 21:
+                    return "Link loop";
+                case 22:
+                    return "Cannot delete";
+                case 23:
+                    return "Invalid parameter";
+                case 24:
+                    return "File is a directory";
+                case 25:
+                    return "Byte range lock conflict";
+                case 26:
+                    return "Byte range lock refused";
+                case 27:
+                    return "Delete pending";
+                case 28:
+                    return "File corrupt";
+                case 29:
+                    return "Owner invalid";
+                case 30:
+                    return "Group invalid";
+                case 31:
+                    return "No matching byte range lock";
                 default:
                     return fmt::format("Unknown error code: {}", sftpError);
             }
