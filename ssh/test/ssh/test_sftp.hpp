@@ -12,8 +12,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <expected>
+#include <future>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 using namespace std::chrono_literals;
@@ -81,6 +84,49 @@ namespace SecureShell::Test
         ASSERT_TRUE(sftpFuture.wait_for(10s) == std::future_status::ready);
         auto sftp = sftpFuture.get();
         EXPECT_TRUE(sftp.has_value());
+    }
+
+    TEST_F(SftpTests, SftpSessionAndSessionCloseAfterATaskOnTheirThreadThrew)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        auto opened =
+            sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
+        ASSERT_TRUE(opened.get().has_value());
+
+        sftp->perform(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        // Once the loop ended, promise tasks complete with an error at once.
+        bool refused = false;
+        const auto deadline = std::chrono::steady_clock::now() + replyTimeout;
+        while (!refused && std::chrono::steady_clock::now() < deadline)
+        {
+            auto probe = sftp->performPromise(
+                []() -> std::expected<void, SftpError>
+                {
+                    return {};
+                }
+            );
+            refused = probe.wait_for(replyTimeout) == std::future_status::ready && !probe.get().has_value();
+        }
+        ASSERT_TRUE(refused);
+
+        auto closing = std::async(
+            std::launch::async,
+            [&session, &sftp]
+            {
+                const auto closed = sftp->close();
+                session.reset();
+                return closed;
+            }
+        );
+        ASSERT_EQ(closing.wait_for(10s), std::future_status::ready);
+        EXPECT_TRUE(closing.get());
     }
 
     TEST_F(SftpTests, CanListDirectory)

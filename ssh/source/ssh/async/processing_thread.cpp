@@ -7,6 +7,33 @@
 
 namespace SecureShell
 {
+    namespace
+    {
+        /**
+         * @brief Makes the calling thread act as the processing thread until destroyed, for tasks run outside the loop.
+         */
+        class ActingProcessingThread
+        {
+          public:
+            explicit ActingProcessingThread(std::atomic<std::thread::id>& processingThreadId)
+                : processingThreadId_{processingThreadId}
+                , previous_{processingThreadId.exchange(std::this_thread::get_id())}
+            {}
+            ~ActingProcessingThread()
+            {
+                processingThreadId_.store(previous_);
+            }
+            ActingProcessingThread(ActingProcessingThread const&) = delete;
+            ActingProcessingThread& operator=(ActingProcessingThread const&) = delete;
+            ActingProcessingThread(ActingProcessingThread&&) = delete;
+            ActingProcessingThread& operator=(ActingProcessingThread&&) = delete;
+
+          private:
+            std::atomic<std::thread::id>& processingThreadId_;
+            std::thread::id previous_;
+        };
+    }
+
     ProcessingThread::ProcessingThread()
     {}
     ProcessingThread::~ProcessingThread()
@@ -24,9 +51,10 @@ namespace SecureShell
                 "ProcessingThread::start called while a previous thread is still joinable; call stop() first."
             );
         {
+            std::lock_guard cleanupLock{cleanupMutex_};
             std::lock_guard lock{taskMutex_};
             running_ = true;
-            shuttingDown_ = false;
+            intake_ = Intake::Open;
         }
         std::promise<void> awaitThreadStart{};
         thread_ = std::thread(
@@ -43,8 +71,10 @@ namespace SecureShell
     {
         bool interruptSocketWait = false;
         {
+            // Waits for cleanup tasks that run on a caller, the drain must not run alongside them.
+            std::lock_guard cleanupLock{cleanupMutex_};
             std::lock_guard lock{taskMutex_};
-            shuttingDown_ = true;
+            intake_ = Intake::Draining;
             running_ = false;
             wakeRequested_ = true;
             interruptSocketWait = waitingOnSocket_;
@@ -52,18 +82,22 @@ namespace SecureShell
         notifyWake(interruptSocketWait);
         if (thread_.joinable())
             thread_.join();
+        // The id of a joined thread may be reused.
+        processingThreadId_.store({});
 
         // execute all pending tasks in FIFO order, matching the run loop, and outside the lock so pushes meanwhile are
         // refused instead of waiting for the drain:
+        const ActingProcessingThread acting{processingThreadId_};
         std::unique_lock lock{taskMutex_};
         while (!tasks_.empty())
         {
-            auto task = std::move(tasks_.front());
+            auto task = std::move(tasks_.front().run);
             tasks_.pop_front();
             lock.unlock();
             task();
             lock.lock();
         }
+        intake_ = Intake::Closed;
     }
     bool ProcessingThread::pushTask(std::function<void()> task)
     {
@@ -75,16 +109,45 @@ namespace SecureShell
         bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
-            if (shuttingDown_)
+            if (intake_ != Intake::Open)
             {
                 return false;
             }
-            tasks_.push_back(std::move(task));
+            tasks_.push_back({.run = std::move(task)});
             wakeRequested_ = true;
             interruptSocketWait = waitingOnSocket_;
         }
         notifyWake(interruptSocketWait);
         return true;
+    }
+    void ProcessingThread::pushCleanupTask(std::function<void()> task)
+    {
+        if (!task)
+        {
+            throw std::invalid_argument("Task must not be empty.");
+        }
+
+        // Held while the task runs here, so cleanup tasks run one at a time and never alongside a restarted thread.
+        std::lock_guard cleanupLock{cleanupMutex_};
+        bool queued = false;
+        bool interruptSocketWait = false;
+        {
+            std::lock_guard lock{taskMutex_};
+            if (intake_ != Intake::Closed)
+            {
+                tasks_.push_back({.run = std::move(task), .cleanup = true});
+                wakeRequested_ = true;
+                interruptSocketWait = waitingOnSocket_;
+                queued = true;
+            }
+        }
+        if (queued)
+        {
+            notifyWake(interruptSocketWait);
+            return;
+        }
+        const ActingProcessingThread acting{processingThreadId_};
+        task();
     }
     void ProcessingThread::wake()
     {
@@ -153,7 +216,7 @@ namespace SecureShell
         bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
-            if (shuttingDown_)
+            if (intake_ != Intake::Open)
             {
                 return {false, PermanentTaskId{-1}};
             }
@@ -288,7 +351,7 @@ namespace SecureShell
                             needs.awaitsInput = true;
                             needs.inputFallback = std::min(needs.inputFallback, lookAgain);
                         }
-                        return running_ && !shuttingDown_;
+                        return running_.load();
                     };
                     bool keepGoing = true;
                     for (auto task = rotatedBegin; keepGoing && task != permaTasksMoved.end(); ++task)
@@ -329,7 +392,7 @@ namespace SecureShell
                 }
 
                 {
-                    std::vector<std::function<void()>> tasks{};
+                    std::vector<QueuedTask> tasks{};
                     {
                         std::lock_guard lock(taskMutex_);
                         tasks.reserve(std::min(tasks_.size(), maximumTasksProcessableAtOnce));
@@ -347,14 +410,14 @@ namespace SecureShell
                     {
                         // Task is checked before adding, shouldnt possibly be empty:
 #ifndef NDEBUG
-                        if (!task)
+                        if (!task.run)
                         {
                             throw std::runtime_error("Task must not be empty.");
                         }
 #endif
                         try
                         {
-                            task();
+                            task.run();
                         }
                         catch (...)
                         {
@@ -372,8 +435,30 @@ namespace SecureShell
         }
         catch (...)
         {
-            std::lock_guard lock{taskMutex_};
-            running_ = false;
+            // Cleanup tasks pushed from now on run on their caller, after the queued ones ran here.
+            std::lock_guard cleanupLock{cleanupMutex_};
+            std::deque<QueuedTask> pending{};
+            {
+                std::lock_guard lock{taskMutex_};
+                running_ = false;
+                intake_ = Intake::Closed;
+                pending = std::exchange(tasks_, {});
+            }
+            // Queued tasks would run only when stop() drains, which the threads waiting for them may never reach.
+            // Dropped promise tasks complete with their unfinished result, cleanup tasks still run.
+            for (auto& task : pending)
+            {
+                if (!task.cleanup)
+                    continue;
+                try
+                {
+                    task.run();
+                }
+                catch (...)
+                {
+                    // The loop already ended on an exception.
+                }
+            }
         }
     }
     void ProcessingThread::waitForWork(CycleNeeds const& needs)

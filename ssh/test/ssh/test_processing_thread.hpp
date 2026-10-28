@@ -1394,6 +1394,185 @@ namespace SecureShell::Test
         ));
     }
 
+    TEST_F(ProcessingThreadTest, PushesAfterATaskThrewAreRefusedAndQueuedTasksFail)
+    {
+        std::atomic_int ran = 0;
+        std::future<bool> queuedBehind{};
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        // Queued from within, the task waits for the next cycle the loop does not reach.
+        processingThread.pushTask(
+            [&processingThread, &queuedBehind, &ran]
+            {
+                queuedBehind = processingThread.pushPromiseTask(
+                    [&ran]
+                    {
+                        ++ran;
+                        return true;
+                    }
+                );
+                throw std::runtime_error("boom");
+            }
+        );
+        ASSERT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                return !processingThread.isRunning();
+            }
+        ));
+        ASSERT_EQ(queuedBehind.wait_for(5s), std::future_status::ready);
+        EXPECT_FALSE(queuedBehind.get());
+
+        EXPECT_FALSE(processingThread.pushTask(
+            [&ran]
+            {
+                ++ran;
+            }
+        ));
+        EXPECT_FALSE(processingThread
+                         .pushPermanentTask(
+                             [](auto)
+                             {
+                                 return true;
+                             }
+                         )
+                         .first);
+        auto refused = processingThread.pushPromiseTask(
+            [&ran]
+            {
+                ++ran;
+                return true;
+            }
+        );
+        ASSERT_EQ(refused.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(refused.get());
+        processingThread.stop();
+        EXPECT_EQ(ran.load(), 0);
+    }
+
+    TEST_F(ProcessingThreadTest, CleanupTasksStillRunAfterATaskThrew)
+    {
+        std::atomic_bool queuedRanOnTheThread = false;
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        processingThread.pushTask(
+            [&processingThread, &queuedRanOnTheThread]
+            {
+                processingThread.pushCleanupTask(
+                    [&processingThread, &queuedRanOnTheThread]
+                    {
+                        queuedRanOnTheThread = processingThread.withinProcessingThread();
+                    }
+                );
+                throw std::runtime_error("boom");
+            }
+        );
+        ASSERT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                return !processingThread.isRunning();
+            }
+        ));
+
+        // Nothing else runs it now, so it runs here before the push returns, acting as the processing thread.
+        auto later = processingThread.pushCleanupPromiseTask(
+            [&processingThread]
+            {
+                return processingThread.withinProcessingThread();
+            }
+        );
+        ASSERT_EQ(later.wait_for(0s), std::future_status::ready);
+        EXPECT_TRUE(later.get());
+        EXPECT_FALSE(processingThread.withinProcessingThread());
+        EXPECT_TRUE(queuedRanOnTheThread.load());
+    }
+
+    TEST_F(ProcessingThreadTest, FinalTaskAfterStopRunsOnTheCallerAndMayDestroyItsStrand)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        auto* const finalizing = strand.get();
+        processingThread.stop();
+
+        auto closed = finalizing->pushFinalPromiseTask(
+            [&strand, &processingThread]
+            {
+                const auto within = processingThread.withinProcessingThread();
+                strand.reset();
+                return within;
+            }
+        );
+        ASSERT_EQ(closed.wait_for(0s), std::future_status::ready);
+        EXPECT_TRUE(closed.get());
+        EXPECT_EQ(strand, nullptr);
+        EXPECT_FALSE(processingThread.withinProcessingThread());
+    }
+
+    TEST_F(ProcessingThreadTest, NoTaskRunsWhileItsOwnerIsDestroyed)
+    {
+        // Members after the thread are destroyed before it, like the libssh session and channels of a Session.
+        struct Owner
+        {
+            ProcessingThread processingThread{};
+            std::vector<int> touched{};
+            std::function<void()> afterStop{};
+
+            ~Owner()
+            {
+                processingThread.stop();
+                afterStop();
+            }
+        };
+
+        std::atomic_bool stopped = false;
+        std::atomic_bool keepPushing = true;
+        std::atomic_int pushedAfterStop = 0;
+        std::atomic_int acceptedAfterStop = 0;
+        std::atomic_int ranAfterStop = 0;
+        auto owner = std::make_unique<Owner>();
+        auto* const raw = owner.get();
+        raw->processingThread.start(std::chrono::milliseconds{1});
+        std::thread pusher{[&]
+            {
+                while (keepPushing)
+                {
+                    const auto afterStop = stopped.load();
+                    const auto accepted = raw->processingThread.pushTask(
+                        [raw, &stopped, &ranAfterStop]
+                        {
+                            if (stopped)
+                                ++ranAfterStop;
+                            raw->touched.push_back(1);
+                        }
+                    );
+                    if (afterStop)
+                    {
+                        ++pushedAfterStop;
+                        if (accepted)
+                            ++acceptedAfterStop;
+                    }
+                }
+            }};
+        raw->afterStop = [&]
+        {
+            stopped = true;
+            waitUntil(
+                [&pushedAfterStop]
+                {
+                    return pushedAfterStop.load() >= 100;
+                }
+            );
+            keepPushing = false;
+            pusher.join();
+        };
+
+        owner.reset();
+        EXPECT_GE(pushedAfterStop.load(), 100);
+        EXPECT_EQ(acceptedAfterStop.load(), 0);
+        EXPECT_EQ(ranAfterStop.load(), 0);
+    }
+
     TEST_F(ProcessingThreadTest, StrandWakeRunsAnIdleTaskAgain)
     {
         std::atomic_int turns = 0;
