@@ -59,6 +59,49 @@ namespace SecureShell::Test
             return std::make_pair(std::move(session).value(), sftpFuture.get().value().lock());
         }
 
+        /**
+         * @brief Ends the processing loop of @p sftp with a throwing task, then waits until promise tasks come back
+         *        with an error at once.
+         */
+        ::testing::AssertionResult endProcessingLoop(SftpSession& sftp)
+        {
+            sftp.perform(
+                []
+                {
+                    throw std::runtime_error("boom");
+                }
+            );
+            const auto deadline = std::chrono::steady_clock::now() + replyTimeout;
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                auto probe = sftp.performPromise(
+                    []() -> std::expected<void, SftpError>
+                    {
+                        return {};
+                    }
+                );
+                if (probe.wait_for(replyTimeout) == std::future_status::ready && !probe.get().has_value())
+                    return ::testing::AssertionSuccess();
+            }
+            return ::testing::AssertionFailure() << "the processing loop kept running tasks";
+        }
+
+        /**
+         * @brief Opens a new remote file for writing.
+         */
+        std::shared_ptr<FileStream> openForWriting(SftpSession& sftp, std::string_view path)
+        {
+            auto opened = sftp.openFile(
+                remote(path),
+                SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
+                std::filesystem::perms{0644u}
+            );
+            if (opened.wait_for(replyTimeout) != std::future_status::ready)
+                return nullptr;
+            auto result = opened.get();
+            return result.has_value() ? result.value().lock() : nullptr;
+        }
+
         std::string createAlphabetString(std::size_t length)
         {
             std::string result;
@@ -96,26 +139,7 @@ namespace SecureShell::Test
         ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
         ASSERT_TRUE(opened.get().has_value());
 
-        sftp->perform(
-            []
-            {
-                throw std::runtime_error("boom");
-            }
-        );
-        // Once the loop ended, promise tasks complete with an error at once.
-        bool refused = false;
-        const auto deadline = std::chrono::steady_clock::now() + replyTimeout;
-        while (!refused && std::chrono::steady_clock::now() < deadline)
-        {
-            auto probe = sftp->performPromise(
-                []() -> std::expected<void, SftpError>
-                {
-                    return {};
-                }
-            );
-            refused = probe.wait_for(replyTimeout) == std::future_status::ready && !probe.get().has_value();
-        }
-        ASSERT_TRUE(refused);
+        ASSERT_TRUE(endProcessingLoop(*sftp));
         auto another = session->createSftpSession();
         ASSERT_EQ(another.wait_for(0s), std::future_status::ready);
         EXPECT_FALSE(another.get().has_value());
@@ -131,6 +155,71 @@ namespace SecureShell::Test
         );
         ASSERT_EQ(closing.wait_for(10s), std::future_status::ready);
         EXPECT_TRUE(closing.get());
+    }
+
+    TEST_F(SftpTests, LargeWriteIsWrittenInChunks)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto file = openForWriting(*sftp, "/home/test/uploaded.bin");
+        ASSERT_TRUE(file);
+        const std::string content(file->writeLengthLimit() * 3u + 17u, 'w');
+
+        auto written = file->write(content);
+        ASSERT_EQ(written.wait_for(replyTimeout), std::future_status::ready);
+        EXPECT_TRUE(written.get().has_value());
+        file->close();
+
+        auto information = sftp->stat(remote("/home/test/uploaded.bin"));
+        ASSERT_EQ(information.wait_for(replyTimeout), std::future_status::ready);
+        auto stated = information.get();
+        ASSERT_TRUE(stated.has_value());
+        EXPECT_EQ(stated->size, content.size());
+    }
+
+    TEST_F(SftpTests, LargeWriteToAClosedFileFailsWithFileNull)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto file = openForWriting(*sftp, "/home/test/uploaded.bin");
+        ASSERT_TRUE(file);
+        file->close();
+
+        auto written = file->write(std::string(file->writeLengthLimit() * 2u, 'w'));
+        ASSERT_EQ(written.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = written.get();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().wrapperError, WrapperErrors::FileNull);
+    }
+
+    TEST_F(SftpTests, LargeWriteAfterTheSftpSessionClosedFailsAtOnce)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto file = openForWriting(*sftp, "/home/test/uploaded.bin");
+        ASSERT_TRUE(file);
+        ASSERT_TRUE(sftp->close());
+
+        auto written = file->write(std::string(file->writeLengthLimit() * 2u, 'w'));
+        ASSERT_EQ(written.wait_for(0s), std::future_status::ready);
+        const auto result = written.get();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().wrapperError, WrapperErrors::TaskPushFailed);
+    }
+
+    TEST_F(SftpTests, LargeWriteAfterATaskOnTheThreadThrewFailsAtOnce)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto file = openForWriting(*sftp, "/home/test/uploaded.bin");
+        ASSERT_TRUE(file);
+        ASSERT_TRUE(endProcessingLoop(*sftp));
+
+        auto written = file->write(std::string(file->writeLengthLimit() * 2u, 'w'));
+        ASSERT_EQ(written.wait_for(0s), std::future_status::ready);
+        const auto result = written.get();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().wrapperError, WrapperErrors::TaskPushFailed);
     }
 
     TEST_F(SftpTests, CanListDirectory)

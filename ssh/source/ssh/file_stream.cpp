@@ -681,7 +681,11 @@ namespace SecureShell
             [this, toWrite, onWriteComplete = std::move(onWriteComplete)]()
             {
                 if (!file_)
-                    return;
+                {
+                    return onWriteComplete(
+                        std::unexpected(SftpError{.message = "File is null", .wrapperError = WrapperErrors::FileNull})
+                    );
+                }
 
                 const auto written =
                     sftp_write(file_.get(), toWrite.data(), std::min(toWrite.size(), writeLengthLimit()));
@@ -753,16 +757,24 @@ namespace SecureShell
             );
         }
 
-        // Write in chunks for large data:
-        auto promise = std::make_shared<std::promise<std::expected<void, SftpError>>>();
+        // Write in chunks for large data. A chunk that is refused, never pushed or dropped leaves the unfinished error:
+        using WriteResult = std::expected<void, SftpError>;
+        auto state = std::make_shared<Detail::PromiseTaskState<WriteResult, UnfinishedTaskResult<WriteResult>>>(
+            UnfinishedTaskResult<WriteResult>{}
+        );
+        auto future = state->future();
         writePart(
             data,
-            [promise](std::expected<void, SftpError>&& result)
+            [state](WriteResult&& result)
             {
-                promise->set_value(std::move(result));
+                auto finished = [&result]()
+                {
+                    return std::move(result);
+                };
+                state->run(finished);
             }
         );
-        return promise->get_future();
+        return future;
     }
     sftp_file FileStream::release()
     {
