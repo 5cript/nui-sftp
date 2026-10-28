@@ -212,6 +212,9 @@ namespace SecureShell
          * @brief Pushes a task that has a return value to the processing thread.
          * The return value is then accessible through the returned future.
          *
+         * A push refused while stop() drains completes only once the drain reached it, so the future is still a
+         * barrier for the tasks queued before it.
+         *
          * @param func The function to execute.
          * @param unfinished Makes the future's value when the task does not finish, see UnfinishedTaskResult.
          * @return std::future<std::invoke_result_t<std::decay_t<Func>>> The future that will contain the return value.
@@ -225,7 +228,7 @@ namespace SecureShell
             using ReturnType = std::invoke_result_t<std::decay_t<Func>>;
             auto state = std::make_shared<Detail::PromiseTaskState<ReturnType, UnfinishedFunc>>(std::move(unfinished));
             auto future = state->future();
-            pushTask(Detail::makePromiseTask(std::move(state), std::forward<Func>(func)));
+            queuePromiseTask(Detail::makePromiseTask(std::move(state), std::forward<Func>(func)));
             return future;
         }
 
@@ -328,6 +331,17 @@ namespace SecureShell
         void run(std::chrono::milliseconds const& pollInterval);
 
         /**
+         * @brief Queues a promise task like pushTask. While stop() drains it is queued refused instead: the drain
+         *        drops it in order, so its future completes after the tasks queued before it.
+         */
+        void queuePromiseTask(std::function<void()> task);
+
+        /**
+         * @brief Runs a task outside the loop, where a throwing task must not keep the others from running.
+         */
+        static void runContained(std::function<void()> const& task);
+
+        /**
          * @brief What the permanent tasks of one cycle need from the wait after it.
          */
         struct CycleNeeds
@@ -362,12 +376,21 @@ namespace SecureShell
         };
 
         /**
-         * @brief A queued task. Only cleanup tasks still run when the loop ends on an exception.
+         * @brief What a queued task is.
          */
+        enum class TaskKind
+        {
+            Regular,
+            /** @brief Still runs when the loop ends on an exception. */
+            Cleanup,
+            /** @brief A promise task pushed while stop() drains: dropped, not run, when its turn comes. */
+            Refused,
+        };
+
         struct QueuedTask
         {
             std::function<void()> run;
-            bool cleanup{false};
+            TaskKind kind{TaskKind::Regular};
         };
 
         /**
@@ -377,7 +400,7 @@ namespace SecureShell
         {
             /** @brief Tasks are queued: the thread was constructed or started. */
             Open,
-            /** @brief stop() is running: tasks are refused, cleanup tasks are queued for its drain. */
+            /** @brief stop() is running: tasks are refused, cleanup tasks are queued for its drain to run. */
             Draining,
             /** @brief Stopped, or the loop threw: tasks are refused, cleanup tasks run on the caller. */
             Closed,
@@ -385,7 +408,7 @@ namespace SecureShell
 
       private:
         std::thread thread_{};
-        /** @brief Held while cleanup tasks run outside the loop and while intake_ changes, taken before taskMutex_. */
+        /** @brief Held while cleanup tasks run outside the loop and while intake_ leaves Closed. Taken first. */
         std::recursive_mutex cleanupMutex_{};
         mutable std::recursive_mutex taskMutex_{};
         std::atomic<bool> running_ = false;

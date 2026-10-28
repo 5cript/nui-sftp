@@ -1487,6 +1487,175 @@ namespace SecureShell::Test
         EXPECT_TRUE(queuedRanOnTheThread.load());
     }
 
+    TEST_F(ProcessingThreadTest, CleanupTaskPushedWhileStopDrainsRunsInTheDrain)
+    {
+        Awaiter lastBatchRunning{};
+        std::promise<void> releaseLastBatch{};
+        const auto lastBatchReleased = releaseLastBatch.get_future().share();
+        Awaiter firstCleanupRunning{};
+        std::promise<void> releaseFirstCleanup{};
+        const auto firstCleanupReleased = releaseFirstCleanup.get_future().share();
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        // The last batch throws after stop() began, the cleanup task it queued holds up the rest of stop().
+        processingThread.pushTask(
+            [&processingThread, &lastBatchRunning, &firstCleanupRunning, lastBatchReleased, firstCleanupReleased]
+            {
+                lastBatchRunning.arrive();
+                lastBatchReleased.wait_for(5s);
+                processingThread.pushCleanupTask(
+                    [&firstCleanupRunning, firstCleanupReleased]
+                    {
+                        firstCleanupRunning.arrive();
+                        firstCleanupReleased.wait_for(5s);
+                    }
+                );
+                throw std::runtime_error("boom");
+            }
+        );
+        ASSERT_TRUE(lastBatchRunning.waitFor());
+        std::thread stopper{[&processingThread]
+            {
+                processingThread.stop();
+            }};
+        const auto stopperId = stopper.get_id();
+        ASSERT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                return !processingThread.pushTask([] {});
+            }
+        ));
+        releaseLastBatch.set_value();
+        ASSERT_TRUE(firstCleanupRunning.waitFor());
+
+        // Pushed while stop() is still running, it must not run on its caller beside the rest of stop().
+        std::thread::id ranOn{};
+        bool within = false;
+        std::atomic_bool pushed = false;
+        std::thread pusher{[&]
+            {
+                processingThread.pushCleanupTask(
+                    [&]
+                    {
+                        ranOn = std::this_thread::get_id();
+                        within = processingThread.withinProcessingThread();
+                    }
+                );
+                pushed = true;
+            }};
+        const auto pushedAtOnce = waitUntil(
+            [&pushed]
+            {
+                return pushed.load();
+            },
+            1s
+        );
+        releaseFirstCleanup.set_value();
+        pusher.join();
+        stopper.join();
+
+        EXPECT_TRUE(pushedAtOnce);
+        EXPECT_EQ(ranOn, stopperId);
+        EXPECT_TRUE(within);
+        EXPECT_FALSE(processingThread.withinProcessingThread());
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingTaskInTheDrainOfStopKeepsTheOthersRunning)
+    {
+        std::atomic_int ran = 0;
+        // Never started, so stop() drains what was pushed.
+        ProcessingThread processingThread;
+        auto threw = processingThread.pushPromiseTask(
+            []() -> bool
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        processingThread.pushTask(
+            [&ran]
+            {
+                ++ran;
+            }
+        );
+
+        EXPECT_NO_THROW(processingThread.stop());
+        EXPECT_EQ(ran.load(), 1);
+        ASSERT_EQ(threw.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(threw.get());
+        // The drain finished, so a final task runs here at once.
+        auto strand = processingThread.createStrand();
+        auto finalTask = strand->pushFinalPromiseTask(
+            []
+            {
+                return true;
+            }
+        );
+        ASSERT_EQ(finalTask.wait_for(0s), std::future_status::ready);
+        EXPECT_TRUE(finalTask.get());
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingCleanupTaskAfterStopDoesNotThrowAtItsCaller)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        processingThread.stop();
+
+        std::future<bool> threw{};
+        EXPECT_NO_THROW(
+            threw = processingThread.pushCleanupPromiseTask(
+                []() -> bool
+                {
+                    throw std::runtime_error("boom");
+                }
+            )
+        );
+        ASSERT_TRUE(threw.valid());
+        ASSERT_EQ(threw.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(threw.get());
+        EXPECT_FALSE(processingThread.withinProcessingThread());
+    }
+
+    TEST_F(ProcessingThreadTest, PromiseTaskPushedWhileStopDrainsCompletesAfterTheTasksBeforeIt)
+    {
+        Awaiter drainRunning{};
+        std::promise<void> release{};
+        const auto released = release.get_future().share();
+        std::atomic_bool laterRan = false;
+        // Never started, so stop() drains what was pushed.
+        ProcessingThread processingThread;
+        auto strand = processingThread.createStrand();
+        strand->pushTask(
+            [&drainRunning, released]
+            {
+                drainRunning.arrive();
+                released.wait_for(5s);
+            }
+        );
+        strand->pushTask(
+            [&laterRan]
+            {
+                laterRan = true;
+            }
+        );
+        std::thread stopper{[&processingThread]
+            {
+                processingThread.stop();
+            }};
+        ASSERT_TRUE(drainRunning.waitFor());
+
+        // A barrier like Operation::waitForStrandTasks: refused, but complete only once the drain got to it.
+        auto barrier = strand->pushPromiseTask([] {});
+        const auto readyEarly = barrier.wait_for(0s) == std::future_status::ready;
+        release.set_value();
+        const auto readyLater = barrier.wait_for(5s) == std::future_status::ready;
+        const auto laterRanFirst = laterRan.load();
+        stopper.join();
+
+        EXPECT_FALSE(readyEarly);
+        EXPECT_TRUE(readyLater);
+        EXPECT_TRUE(laterRanFirst);
+    }
+
     TEST_F(ProcessingThreadTest, FinalTaskAfterStopRunsOnTheCallerAndMayDestroyItsStrand)
     {
         ProcessingThread processingThread;
