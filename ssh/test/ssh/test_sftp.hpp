@@ -87,19 +87,41 @@ namespace SecureShell::Test
         }
 
         /**
-         * @brief Opens a new remote file for writing.
+         * @brief Opens a remote file, null when that failed.
          */
-        std::shared_ptr<FileStream> openForWriting(SftpSession& sftp, std::string_view path)
+        std::shared_ptr<FileStream> openStream(
+            SftpSession& sftp,
+            std::string_view path,
+            SftpSession::OpenType openType,
+            std::filesystem::perms permissions
+        )
         {
-            auto opened = sftp.openFile(
-                remote(path),
-                SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
-                std::filesystem::perms{0644u}
-            );
+            auto opened = sftp.openFile(remote(path), openType, permissions);
             if (opened.wait_for(replyTimeout) != std::future_status::ready)
                 return nullptr;
             auto result = opened.get();
             return result.has_value() ? result.value().lock() : nullptr;
+        }
+
+        /**
+         * @brief Opens a new remote file for writing.
+         */
+        std::shared_ptr<FileStream> openForWriting(SftpSession& sftp, std::string_view path)
+        {
+            return openStream(
+                sftp,
+                path,
+                SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
+                std::filesystem::perms{0644u}
+            );
+        }
+
+        /**
+         * @brief Opens a remote file for reading.
+         */
+        std::shared_ptr<FileStream> openForReading(SftpSession& sftp, std::string_view path)
+        {
+            return openStream(sftp, path, SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
         }
 
         std::string createAlphabetString(std::size_t length)
@@ -133,11 +155,7 @@ namespace SecureShell::Test
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [session, sftp] = createSftpSession(serverStartResult->port);
-        auto opened = sftp->openFile(
-            remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
-        );
-        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
-        ASSERT_TRUE(opened.get().has_value());
+        ASSERT_TRUE(openForReading(*sftp, "/home/test/large.txt"));
 
         ASSERT_TRUE(endProcessingLoop(*sftp));
         auto another = session->createSftpSession();
@@ -155,6 +173,46 @@ namespace SecureShell::Test
         );
         ASSERT_EQ(closing.wait_for(10s), std::future_status::ready);
         EXPECT_TRUE(closing.get());
+    }
+
+    TEST_F(SftpTests, ReadAllAfterTheSftpSessionClosedFailsAtOnce)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto file = openForReading(*sftp, "/home/test/large.txt");
+        ASSERT_TRUE(file);
+        ASSERT_TRUE(sftp->close());
+
+        auto read = file->readAll(
+            [](std::string_view)
+            {
+                return true;
+            }
+        );
+        ASSERT_EQ(read.wait_for(0s), std::future_status::ready);
+        const auto result = read.get();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().wrapperError, WrapperErrors::TaskPushFailed);
+    }
+
+    TEST_F(SftpTests, ReadAllAfterATaskOnTheThreadThrewFailsAtOnce)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto file = openForReading(*sftp, "/home/test/large.txt");
+        ASSERT_TRUE(file);
+        ASSERT_TRUE(endProcessingLoop(*sftp));
+
+        auto read = file->readAll(
+            [](std::string_view)
+            {
+                return true;
+            }
+        );
+        ASSERT_EQ(read.wait_for(0s), std::future_status::ready);
+        const auto result = read.get();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().wrapperError, WrapperErrors::TaskPushFailed);
     }
 
     TEST_F(SftpTests, LargeWriteIsWrittenInChunks)
