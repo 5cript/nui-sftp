@@ -22,6 +22,18 @@
 #include <system_error>
 #include <vector>
 
+template <>
+struct SecureShell::UnfinishedTaskResult<SharedData::OperationError>
+{
+    SharedData::OperationError operator()() const
+    {
+        return SharedData::OperationError{
+            .type = SharedData::OperationErrorType::ChannelClosed,
+            .extraInfo = "The task did not finish, the SFTP session is closed or its thread stopped",
+        };
+    }
+};
+
 class Operation
 {
   public:

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ssh/async/socket_wait.hpp>
+#include <ssh/async/unfinished_task_result.hpp>
 
 #include <thread>
 #include <atomic>
@@ -12,11 +13,95 @@
 #include <optional>
 #include <future>
 #include <memory>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace SecureShell
 {
     class ProcessingStrand;
+
+    namespace Detail
+    {
+        /**
+         * @brief The promise of a promise task, shared by the copies of the task. When the last copy is gone and the
+         *        task did not finish, the promise gets the unfinished result.
+         */
+        template <typename ResultT, typename UnfinishedT>
+        class PromiseTaskState
+        {
+          public:
+            explicit PromiseTaskState(UnfinishedT unfinished)
+                : unfinished_{std::move(unfinished)}
+            {}
+            ~PromiseTaskState()
+            {
+                if (!finished_)
+                    complete(promise_, unfinished_);
+            }
+            PromiseTaskState(PromiseTaskState const&) = delete;
+            PromiseTaskState& operator=(PromiseTaskState const&) = delete;
+            PromiseTaskState(PromiseTaskState&&) = delete;
+            PromiseTaskState& operator=(PromiseTaskState&&) = delete;
+
+            std::future<ResultT> future()
+            {
+                return promise_.get_future();
+            }
+
+            template <typename FunctionT>
+            void run(FunctionT& function)
+            {
+                complete(promise_, function);
+                finished_ = true;
+            }
+
+            /**
+             * @brief Sets @p promise to what @p produce returns.
+             */
+            template <typename FunctionT>
+            static void complete(std::promise<ResultT>& promise, FunctionT& produce)
+            {
+                if constexpr (std::is_void_v<ResultT>)
+                {
+                    produce();
+                    promise.set_value();
+                }
+                else
+                {
+                    promise.set_value(produce());
+                }
+            }
+
+          private:
+            std::promise<ResultT> promise_{};
+            UnfinishedT unfinished_;
+            bool finished_{false};
+        };
+
+        /**
+         * @brief Makes a task of @p func that completes the promise of @p state.
+         */
+        template <typename StateT, typename FunctionT>
+        std::function<void()> makePromiseTask(std::shared_ptr<StateT> state, FunctionT&& func)
+        {
+            return [state = std::move(state), func = std::forward<FunctionT>(func)]() mutable
+            {
+                state->run(func);
+            };
+        }
+
+        /**
+         * @brief A future that already holds the unfinished result, for a task refused before it reached a thread.
+         */
+        template <typename ResultT, typename UnfinishedT>
+        std::future<ResultT> unfinishedFuture(UnfinishedT unfinished)
+        {
+            std::promise<ResultT> promise{};
+            PromiseTaskState<ResultT, UnfinishedT>::complete(promise, unfinished);
+            return promise.get_future();
+        }
+    }
 
     /**
      * @brief A processing thread that can be used to execute tasks sequentially in a separate thread.
@@ -118,28 +203,20 @@ namespace SecureShell
          * The return value is then accessible through the returned future.
          *
          * @param func The function to execute.
+         * @param unfinished Makes the future's value when the task does not finish, see UnfinishedTaskResult.
          * @return std::future<std::invoke_result_t<std::decay_t<Func>>> The future that will contain the return value.
          */
-        template <typename Func>
-        auto pushPromiseTask(Func&& func) -> std::future<std::invoke_result_t<std::decay_t<Func>>>
+        template <
+            typename Func,
+            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<Func>>>>
+        auto pushPromiseTask(Func&& func, UnfinishedFunc unfinished = {})
+            -> std::future<std::invoke_result_t<std::decay_t<Func>>>
         {
             using ReturnType = std::invoke_result_t<std::decay_t<Func>>;
-            auto promise = std::make_shared<std::promise<ReturnType>>();
-            pushTask(
-                [promise, func = std::forward<Func>(func)]() mutable
-                {
-                    if constexpr (std::is_void_v<ReturnType>)
-                    {
-                        func();
-                        promise->set_value();
-                    }
-                    else
-                    {
-                        promise->set_value(func());
-                    }
-                }
-            );
-            return promise->get_future();
+            auto state = std::make_shared<Detail::PromiseTaskState<ReturnType, UnfinishedFunc>>(std::move(unfinished));
+            auto future = state->future();
+            pushTask(Detail::makePromiseTask(std::move(state), std::forward<Func>(func)));
+            return future;
         }
 
         /**

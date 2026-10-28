@@ -432,12 +432,13 @@ namespace SecureShell
         }
         if (!withinProcessingThread() && running)
         {
-            return pushPromiseTask(
-                       []()
-                       {
-                           return true;
-                       }
-                   ).wait_for(maxWait) == std::future_status::ready;
+            auto cycled = pushPromiseTask(
+                []()
+                {
+                    return true;
+                }
+            );
+            return cycled.wait_for(maxWait) == std::future_status::ready && cycled.get();
         }
         return false;
     }

@@ -1049,6 +1049,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     // every eligible op's workInStrand() call. Ops that do not use the strand run on the
     // caller afterwards: their work() blocks on that very thread and would deadlock inside it.
     SecureShell::ProcessingStrand* strand = nullptr;
+    std::size_t strandIndex = 0;
     for (const auto& item : eligible)
     {
         auto* operation = queue[item.index].second.get();
@@ -1056,7 +1057,10 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         if (!operation->hasWake())
             operation->setWake(wake_);
         if (operation->usesStrand() && !strand)
+        {
             strand = operation->strand();
+            strandIndex = item.index;
+        }
     }
 
     struct ItemResult
@@ -1103,17 +1107,42 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     std::vector<ItemResult> results;
     if (strand)
     {
-        auto fut = strand->pushPromiseTask(
-            [&runBatch]()
-            {
-                return runBatch(true);
-            }
-        );
-        results = fut.get();
-        if (std::ranges::none_of(results, isTerminal))
+        using Batch = std::optional<std::vector<ItemResult>>;
+        auto batch = strand
+                         ->pushPromiseTask(
+                             [&runBatch]() -> Batch
+                             {
+                                 return runBatch(true);
+                             },
+                             []() -> Batch
+                             {
+                                 return std::nullopt;
+                             }
+                         )
+                         .get();
+        // The processing thread no longer runs tasks, the operations that need it fail one per cycle.
+        if (!batch)
         {
-            auto local = runBatch(false);
-            results.insert(results.end(), std::make_move_iterator(local.begin()), std::make_move_iterator(local.end()));
+            results.push_back(
+                {strandIndex,
+                 std::unexpected(
+                     Operation::Error{
+                         .type = Operation::ErrorType::ChannelClosed,
+                         .extraInfo = "The SFTP processing thread no longer runs tasks",
+                     }
+                 )}
+            );
+        }
+        else
+        {
+            results = std::move(batch).value();
+            if (std::ranges::none_of(results, isTerminal))
+            {
+                auto local = runBatch(false);
+                results.insert(
+                    results.end(), std::make_move_iterator(local.begin()), std::make_move_iterator(local.end())
+                );
+            }
         }
     }
     else

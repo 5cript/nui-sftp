@@ -15,10 +15,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <expected>
 #include <functional>
 #include <future>
 #include <latch>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -209,6 +211,115 @@ namespace SecureShell::Test
         EXPECT_FALSE(permanentPushed);
         EXPECT_FALSE(processingThread.pushTask([] {}));
         EXPECT_EQ(lateRan.load(), accepted);
+    }
+
+    TEST_F(ProcessingThreadTest, RefusedPromiseTaskCompletesWithTheUnfinishedResult)
+    {
+        std::atomic_int ran = 0;
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        processingThread.stop();
+
+        auto refusedBool = processingThread.pushPromiseTask(
+            [&ran]
+            {
+                ++ran;
+                return true;
+            }
+        );
+        auto refusedVoid = processingThread.pushPromiseTask(
+            [&ran]
+            {
+                ++ran;
+            }
+        );
+        auto refusedExpected = processingThread.pushPromiseTask(
+            [&ran]() -> std::expected<int, std::string>
+            {
+                ++ran;
+                return 1;
+            },
+            []() -> std::expected<int, std::string>
+            {
+                return std::unexpected("refused"s);
+            }
+        );
+
+        ASSERT_EQ(refusedBool.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(refusedBool.get());
+        ASSERT_EQ(refusedVoid.wait_for(0s), std::future_status::ready);
+        EXPECT_NO_THROW(refusedVoid.get());
+        ASSERT_EQ(refusedExpected.wait_for(0s), std::future_status::ready);
+        EXPECT_EQ(refusedExpected.get(), std::unexpected("refused"s));
+        EXPECT_FALSE(processingThread.awaitCycle(0ms));
+        EXPECT_EQ(ran.load(), 0);
+    }
+
+    TEST_F(ProcessingThreadTest, PromiseTaskOfAFinalizedStrandCompletesWithTheUnfinishedResult)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        auto finalTask = strand->pushFinalPromiseTask(
+            []
+            {
+                return true;
+            }
+        );
+        ASSERT_EQ(finalTask.wait_for(5s), std::future_status::ready);
+        EXPECT_TRUE(finalTask.get());
+
+        auto afterFinal = strand->pushPromiseTask(
+            []
+            {
+                return true;
+            }
+        );
+        auto secondFinal = strand->pushFinalPromiseTask(
+            []() -> std::expected<int, std::string>
+            {
+                return 1;
+            },
+            []() -> std::expected<int, std::string>
+            {
+                return std::unexpected("finalized"s);
+            }
+        );
+        ASSERT_EQ(afterFinal.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(afterFinal.get());
+        ASSERT_EQ(secondFinal.wait_for(0s), std::future_status::ready);
+        EXPECT_EQ(secondFinal.get(), std::unexpected("finalized"s));
+    }
+
+    TEST_F(ProcessingThreadTest, PromiseTaskOfAStrandOnAStoppedThreadCompletesWithTheUnfinishedResult)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        processingThread.stop();
+
+        auto refused = strand->pushPromiseTask(
+            []
+            {
+                return true;
+            }
+        );
+        ASSERT_EQ(refused.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(refused.get());
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingPromiseTaskCompletesWithTheUnfinishedResult)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto threw = processingThread.pushPromiseTask(
+            []() -> bool
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        ASSERT_EQ(threw.wait_for(5s), std::future_status::ready);
+        EXPECT_FALSE(threw.get());
     }
 
     TEST_F(ProcessingThreadTest, CannotPushTaskWhileStopping)
@@ -1104,6 +1215,10 @@ namespace SecureShell::Test
                                           [&slowTurns, &fastTurns]
                                           {
                                               return std::pair{slowTurns.load(), fastTurns.load()};
+                                          },
+                                          []
+                                          {
+                                              return std::pair{-1, -2};
                                           }
                                       )
                                       .get();
@@ -1146,6 +1261,10 @@ namespace SecureShell::Test
             []
             {
                 return 42;
+            },
+            []
+            {
+                return 0;
             }
         );
         ASSERT_EQ(done.wait_for(5s), std::future_status::ready);
@@ -1444,6 +1563,10 @@ namespace SecureShell::Test
             []
             {
                 return 42;
+            },
+            []
+            {
+                return 0;
             }
         );
         ASSERT_EQ(done.wait_for(5s), std::future_status::ready);
