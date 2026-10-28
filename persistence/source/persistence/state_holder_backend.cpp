@@ -63,6 +63,25 @@ namespace Persistence
                 .arguments = {Paths::nativeToUtf8(makeBackup(path)), Utility::errorMessage(exception)},
             };
         }
+
+        std::optional<LoadWarning> unreadSessionsWarning(State const& state, std::vector<std::string>& reported)
+        {
+            std::vector<std::string> names{};
+            names.reserve(state.unreadSessions.size());
+            for (auto const& [name, session] : state.unreadSessions)
+                names.push_back(name);
+            if (names == reported)
+                return std::nullopt;
+            reported = names;
+            if (names.empty())
+                return std::nullopt;
+
+            Log::info("Keeping sessions this version cannot read: {}", fmt::join(names, ", "));
+            return LoadWarning{
+                .kind = LoadWarningKind::SessionsKeptUnread,
+                .arguments = {fmt::format("- {}", fmt::join(names, "\n- "))},
+            };
+        }
     }
 
     void StateHolder::load(
@@ -122,6 +141,8 @@ namespace Persistence
                 stateCache_ = State{};
                 before.get_to(stateCache_);
                 auto warnings = dataFixer(before, migrated);
+                if (auto unread = unreadSessionsWarning(stateCache_, reportedUnreadSessions_))
+                    warnings.push_back(std::move(*unread));
                 const auto missing = stateCache_.collectMissingMembers(stateCache_);
                 if (!missing.empty())
                 {

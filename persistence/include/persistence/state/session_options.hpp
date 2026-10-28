@@ -27,6 +27,11 @@ namespace Persistence
     BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, ssh);
 
     /**
+     * @brief The engine type with exactly this name, none for a type this version does not know.
+     */
+    std::optional<TerminalEngineType> terminalEngineTypeFromName(std::string const& name);
+
+    /**
      * @brief The shell a local session runs when nothing else is configured: zsh on macOS, bash elsewhere.
      */
     std::filesystem::path defaultShell();
@@ -156,23 +161,10 @@ namespace Persistence
         Referenceable<QueueOptions> queueOptions{};
         Referenceable<HistoryOptions> historyOptions{};
 
-        void variantDecide(nlohmann::json const& j)
-        {
-            if (j.contains("type"))
-            {
-                auto typeStr = j["type"].get<std::string>();
-                if (typeStr == "ssh")
-                    engine = SshSessionOptions{};
-                else if (typeStr == "shell")
-                    engine = ExecutingSessionOptions{};
-                else
-                    throw std::runtime_error("Unknown terminal engine type: " + typeStr);
-            }
-            else
-            {
-                throw std::runtime_error("Terminal engine type not specified");
-            }
-        }
+        /**
+         * @brief Sets the engine to an empty one of the type that @p j names, as terminalEngineTypeFromName reads it.
+         */
+        void variantDecide(nlohmann::json const& j);
 
         static SessionOptions create(
             std::optional<std::string> icon = std::nullopt,

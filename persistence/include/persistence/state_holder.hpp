@@ -94,6 +94,10 @@ namespace Persistence
         LoadWarnings cachedWarnings_{};
 #ifdef NUI_BACKEND
         std::function<void(State const&)> onSaved_{};
+        /**
+         * @brief The unread sessions the last warning named, so that a load warns again only when they change.
+         */
+        std::vector<std::string> reportedUnreadSessions_{};
 #endif
     };
 } // namespace Persistence

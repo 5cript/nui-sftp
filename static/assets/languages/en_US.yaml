@@ -1230,6 +1230,7 @@ persistence:
     addedDefaultQueueOptions: "Added default queue options."
     addedDefaultHistoryOptions: "Added default history options."
     wroteMissingDefaults: "Wrote the missing default settings to the config file."
+    sessionsKeptUnread: "The config contains sessions of a type this version cannot open, probably from a newer version. They are not shown, but stay in the config file:\n{}"
   errorSavingState: "Error saving state"
   saveFailed: "An error occurred while saving the application state: {}."
 rootWarning:

@@ -67,6 +67,12 @@ namespace Persistence
          * @brief The layouts shared by the sessions of a type. Missing until gathered from the servers.
          */
         std::optional<SessionLayouts> sessionLayouts{};
+        /**
+         * @brief The sessions whose engine type this version does not know, or that name none, as written. Not
+         * described: to_json writes them back among the sessions, except where a session of this version has the
+         * same name.
+         */
+        std::map<std::string, nlohmann::json> unreadSessions{};
 
         State fullyResolve() const;
 
@@ -118,4 +124,14 @@ namespace Persistence
             appliedMigrations,
             sessionLayouts)
     )
+
+    /**
+     * @brief Reads the state, setting the sessions this version cannot read aside into State::unreadSessions.
+     */
+    void from_json(nlohmann::json const& j, State& state);
+
+    /**
+     * @brief Writes the state, with State::unreadSessions back among the sessions.
+     */
+    void to_json(nlohmann::json& j, State const& state);
 }

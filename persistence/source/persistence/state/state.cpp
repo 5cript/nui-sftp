@@ -7,6 +7,55 @@
 
 namespace Persistence
 {
+    namespace
+    {
+        bool hasKnownEngineType(nlohmann::json const& session)
+        {
+            if (!session.is_object())
+                return false;
+            const auto type = session.find("type");
+            return type != session.end() && type->is_string() &&
+                terminalEngineTypeFromName(type->get_ref<std::string const&>()).has_value();
+        }
+
+        std::map<std::string, nlohmann::json> setAsideUnreadSessions(nlohmann::json& config)
+        {
+            std::map<std::string, nlohmann::json> unread{};
+            if (!config.is_object())
+                return unread;
+            const auto sessions = config.find("sessions");
+            if (sessions == config.end() || !sessions->is_object())
+                return unread;
+
+            for (auto session = sessions->begin(); session != sessions->end();)
+            {
+                if (hasKnownEngineType(*session))
+                {
+                    ++session;
+                    continue;
+                }
+                unread.emplace(session.key(), std::move(session.value()));
+                session = sessions->erase(session);
+            }
+            return unread;
+        }
+    }
+
+    void from_json(nlohmann::json const& j, State& state)
+    {
+        auto readable = j;
+        state.unreadSessions = setAsideUnreadSessions(readable);
+        SharedData::from_json(readable, state);
+    }
+
+    void to_json(nlohmann::json& j, State const& state)
+    {
+        SharedData::to_json(j, state);
+        auto& sessions = j["sessions"];
+        for (auto const& [name, session] : state.unreadSessions)
+            sessions.emplace(name, session);
+    }
+
     void InheritableReferences::applyTo(SessionOptions& session) const
     {
         session.terminalOptions.ref(Reference{terminalOptions});
