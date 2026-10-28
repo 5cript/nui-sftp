@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -1139,6 +1140,10 @@ namespace SecureShell::Test
                         for (auto* entry = static_cast<sftp_session>(sftp)->queue; entry != nullptr; entry = entry->next)
                             ++count;
                         return count;
+                    },
+                    []
+                    {
+                        return std::numeric_limits<std::size_t>::max();
                     }
                 )
                 .get();

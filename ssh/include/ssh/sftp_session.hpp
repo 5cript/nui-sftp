@@ -57,10 +57,13 @@ namespace SecureShell
             strand_->pushTask(std::forward<FunctionT>(func));
         }
 
-        template <typename FunctionT>
-        auto performPromise(FunctionT&& func) -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
+        template <
+            typename FunctionT,
+            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<FunctionT>>>>
+        auto performPromise(FunctionT&& func, UnfinishedFunc unfinished = {})
+            -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
         {
-            return strand_->pushPromiseTask(std::forward<FunctionT>(func));
+            return strand_->pushPromiseTask(std::forward<FunctionT>(func), std::move(unfinished));
         }
 
         /**

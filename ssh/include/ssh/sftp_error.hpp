@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ssh/async/unfinished_task_result.hpp>
+
 #include <fmt/format.h>
 
 #include <string>
@@ -69,6 +71,18 @@ namespace SecureShell
                 message,
                 static_cast<int>(wrapperError)
             );
+        }
+    };
+
+    template <>
+    struct UnfinishedTaskResult<SftpError>
+    {
+        SftpError operator()() const
+        {
+            return SftpError{
+                .message = "The task did not finish, the SFTP session is closed or its thread stopped",
+                .wrapperError = WrapperErrors::TaskPushFailed,
+            };
         }
     };
 }

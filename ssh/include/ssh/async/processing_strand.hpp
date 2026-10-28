@@ -123,21 +123,20 @@ namespace SecureShell
         /**
          * @brief Works like pushFinalTask but returns a future for the return value of the task.
          *
-         * @param task The task to run.
+         * @param func The task to run.
+         * @param unfinished Makes the future's value when the task does not finish, also when the strand was finalized
+         *        before. See UnfinishedTaskResult.
          */
-        template <typename FunctionT>
-        auto pushFinalPromiseTask(FunctionT&& func) -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
+        template <
+            typename FunctionT,
+            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<FunctionT>>>>
+        auto pushFinalPromiseTask(FunctionT&& func, UnfinishedFunc unfinished = {})
+            -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
         {
             auto* processingThread = finalize();
             if (processingThread == nullptr)
-            {
-                std::promise<std::invoke_result_t<std::decay_t<FunctionT>>> promise{};
-                promise.set_exception(
-                    std::make_exception_ptr(std::runtime_error("Cannot push task to finalized strand."))
-                );
-                return promise.get_future();
-            }
-            return processingThread->pushPromiseTask(std::forward<FunctionT>(func));
+                return Detail::unfinishedFuture<std::invoke_result_t<std::decay_t<FunctionT>>>(std::move(unfinished));
+            return processingThread->pushPromiseTask(std::forward<FunctionT>(func), std::move(unfinished));
         }
 
         /**
@@ -164,21 +163,20 @@ namespace SecureShell
          *
          * @tparam Func The type of the task.
          * @param func The task to push.
+         * @param unfinished Makes the future's value when the task does not finish, also when the strand was
+         *        finalized. See UnfinishedTaskResult.
          * @return std::future<std::invoke_result_t<std::decay_t<Func>>> The future of the return value of the task.
          */
-        template <typename Func>
-        auto pushPromiseTask(Func&& func) -> std::future<std::invoke_result_t<std::decay_t<Func>>>
+        template <
+            typename Func,
+            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<Func>>>>
+        auto pushPromiseTask(Func&& func, UnfinishedFunc unfinished = {})
+            -> std::future<std::invoke_result_t<std::decay_t<Func>>>
         {
             std::scoped_lock lock(mutex_);
             if (finalized_)
-            {
-                std::promise<std::invoke_result_t<std::decay_t<Func>>> promise{};
-                promise.set_exception(
-                    std::make_exception_ptr(std::runtime_error("Cannot push task to finalized strand."))
-                );
-                return promise.get_future();
-            }
-            return processingThread_->pushPromiseTask(std::forward<Func>(func));
+                return Detail::unfinishedFuture<std::invoke_result_t<std::decay_t<Func>>>(std::move(unfinished));
+            return processingThread_->pushPromiseTask(std::forward<Func>(func), std::move(unfinished));
         }
 
         /**
