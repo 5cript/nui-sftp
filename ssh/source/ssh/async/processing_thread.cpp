@@ -279,7 +279,8 @@ namespace SecureShell
                     }
                 );
                 lock.unlock();
-                return promise->get_future().wait_for(std::chrono::seconds{5}) == std::future_status::ready;
+                auto removed = promise->get_future();
+                return removed.wait_for(std::chrono::seconds{5}) == std::future_status::ready && removed.get();
             }
         }
 
