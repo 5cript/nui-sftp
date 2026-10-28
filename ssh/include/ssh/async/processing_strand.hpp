@@ -109,7 +109,8 @@ namespace SecureShell
         }
 
         /**
-         * @brief Pushes a task that makes any further pushes impossible. Also removes all permanent tasks.
+         * @brief Pushes a task that makes any further pushes impossible. Also removes all permanent tasks. The task
+         *        runs even when the thread no longer runs tasks, see ProcessingThread::pushCleanupTask.
          *
          * @param task The task to push.
          */
@@ -117,7 +118,7 @@ namespace SecureShell
         {
             auto* processingThread = finalize();
             if (processingThread != nullptr)
-                processingThread->pushTask(std::move(task));
+                processingThread->pushCleanupTask(std::move(task));
         }
 
         /**
@@ -136,7 +137,7 @@ namespace SecureShell
             auto* processingThread = finalize();
             if (processingThread == nullptr)
                 return Detail::unfinishedFuture<std::invoke_result_t<std::decay_t<FunctionT>>>(std::move(unfinished));
-            return processingThread->pushPromiseTask(std::forward<FunctionT>(func), std::move(unfinished));
+            return processingThread->pushCleanupPromiseTask(std::forward<FunctionT>(func), std::move(unfinished));
         }
 
         /**

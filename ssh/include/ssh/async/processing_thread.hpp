@@ -177,7 +177,8 @@ namespace SecureShell
         std::expected<void, std::string> watchSocket(std::function<SocketWait::Watched()> watched);
 
         /**
-         * @brief Stops the processing thread. Executes all pending tasks. Refuses pushes from now until the next start.
+         * @brief Stops the processing thread. Executes all pending tasks, on this thread acting as the processing
+         *        thread. Refuses pushes from now until the next start.
          */
         void stop();
 
@@ -194,9 +195,18 @@ namespace SecureShell
          *
          * @param task The task to push.
          * @return true If the task was pushed.
-         * @return false If the processing thread was stopped and not started again.
+         * @return false If the processing thread was stopped and not started again, or its loop ended on an exception.
          */
         bool pushTask(std::function<void()> task);
+
+        /**
+         * @brief Pushes a task that must run, a strand's final task. It is queued like pushTask while the loop or the
+         *        drain of stop() will run it, and still runs when the loop ends on an exception. Once neither will, it
+         *        runs on the calling thread at once, which acts as the processing thread meanwhile.
+         *
+         * @param task The task to push.
+         */
+        void pushCleanupTask(std::function<void()> task);
 
         /**
          * @brief Pushes a task that has a return value to the processing thread.
@@ -216,6 +226,25 @@ namespace SecureShell
             auto state = std::make_shared<Detail::PromiseTaskState<ReturnType, UnfinishedFunc>>(std::move(unfinished));
             auto future = state->future();
             pushTask(Detail::makePromiseTask(std::move(state), std::forward<Func>(func)));
+            return future;
+        }
+
+        /**
+         * @brief Works like pushCleanupTask but returns a future for the return value of the task.
+         *
+         * @param func The function to execute.
+         * @param unfinished Makes the future's value when the task throws, see UnfinishedTaskResult.
+         */
+        template <
+            typename Func,
+            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<Func>>>>
+        auto pushCleanupPromiseTask(Func&& func, UnfinishedFunc unfinished = {})
+            -> std::future<std::invoke_result_t<std::decay_t<Func>>>
+        {
+            using ReturnType = std::invoke_result_t<std::decay_t<Func>>;
+            auto state = std::make_shared<Detail::PromiseTaskState<ReturnType, UnfinishedFunc>>(std::move(unfinished));
+            auto future = state->future();
+            pushCleanupTask(Detail::makePromiseTask(std::move(state), std::forward<Func>(func)));
             return future;
         }
 
@@ -332,12 +361,36 @@ namespace SecureShell
             std::optional<std::chrono::milliseconds> pollInterval;
         };
 
+        /**
+         * @brief A queued task. Only cleanup tasks still run when the loop ends on an exception.
+         */
+        struct QueuedTask
+        {
+            std::function<void()> run;
+            bool cleanup{false};
+        };
+
+        /**
+         * @brief What happens to pushed tasks.
+         */
+        enum class Intake
+        {
+            /** @brief Tasks are queued: the thread was constructed or started. */
+            Open,
+            /** @brief stop() is running: tasks are refused, cleanup tasks are queued for its drain. */
+            Draining,
+            /** @brief Stopped, or the loop ended on an exception: tasks are refused, cleanup tasks run on the caller. */
+            Closed,
+        };
+
       private:
         std::thread thread_{};
+        /** @brief Held while cleanup tasks run outside the loop and while intake_ changes, taken before taskMutex_. */
+        std::recursive_mutex cleanupMutex_{};
         mutable std::recursive_mutex taskMutex_{};
         std::atomic<bool> running_ = false;
-        /** @brief Refuses pushes from stop() until the next start(). Written and checked by pushes under taskMutex_. */
-        std::atomic<bool> shuttingDown_ = false;
+        /** @brief Under taskMutex_. */
+        Intake intake_{Intake::Open};
         std::atomic_bool permanentTasksAvailable_ = false;
         std::atomic<int> permanentTaskIdCounter_ = 0;
         std::atomic<std::thread::id> processingThreadId_{};
@@ -356,7 +409,7 @@ namespace SecureShell
         std::function<SocketWait::Watched()> watchedSocket_{};
         std::unique_ptr<SocketWait> socketWait_{};
 
-        std::deque<std::function<void()>> tasks_{};
+        std::deque<QueuedTask> tasks_{};
         std::map<PermanentTaskId, PermanentTask> permanentTasks_{};
     };
 }
