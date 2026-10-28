@@ -562,21 +562,32 @@ namespace SecureShell
     std::future<std::expected<std::size_t, SftpError>>
     FileStream::readAll(std::function<bool(std::string_view data)> onReadFunc)
     {
+        using ReadResult = std::expected<std::size_t, SftpError>;
         struct ReadState : public std::enable_shared_from_this<ReadState>
         {
             FileStream& stream;
             BufferLease buffer;
             std::function<bool(std::string_view data)> callback;
-            std::promise<std::expected<std::size_t, SftpError>> promise;
+            // A read that is refused, never pushed or dropped leaves the unfinished error when the state is gone.
+            Detail::PromiseTaskState<ReadResult, UnfinishedTaskResult<ReadResult>> completion;
             std::size_t totalRead;
 
             ReadState(FileStream& stream, BufferLease buffer, std::function<bool(std::string_view data)> callback)
                 : stream{stream}
                 , buffer{std::move(buffer)}
                 , callback{std::move(callback)}
-                , promise{}
+                , completion{UnfinishedTaskResult<ReadResult>{}}
                 , totalRead{0}
             {}
+
+            void finish(ReadResult result)
+            {
+                auto finished = [&result]()
+                {
+                    return std::move(result);
+                };
+                completion.run(finished);
+            }
 
             void onRead(std::make_signed_t<std::size_t> amount)
             {
@@ -585,14 +596,14 @@ namespace SecureShell
                 {
                     const auto error = stream.lastError();
                     callback({});
-                    promise.set_value(std::unexpected(error));
+                    finish(std::unexpected(error));
                     return;
                 }
 
                 if (amount == 0)
                 {
                     callback({});
-                    promise.set_value(totalRead);
+                    finish(totalRead);
                     return;
                 }
 
@@ -600,7 +611,7 @@ namespace SecureShell
 
                 if (!callback({buffer.data(), static_cast<std::size_t>(amount)}))
                 {
-                    promise.set_value(totalRead);
+                    finish(totalRead);
                     return;
                 }
 
@@ -614,7 +625,7 @@ namespace SecureShell
                     {
                         if (!state->stream.file_)
                         {
-                            state->promise.set_value(
+                            state->finish(
                                 std::unexpected(
                                     SftpError{
                                         .message = "File is null",
@@ -661,8 +672,9 @@ namespace SecureShell
         }
 
         auto state = std::make_shared<ReadState>(*this, std::move(lease), std::move(onReadFunc));
+        auto future = state->completion.future();
         state->doRead();
-        return state->promise.get_future();
+        return future;
     }
     std::size_t FileStream::writeLengthLimit() const
     {
