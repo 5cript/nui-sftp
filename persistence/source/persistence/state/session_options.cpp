@@ -3,12 +3,41 @@
 #include <utility/visit_overloaded.hpp>
 #include <utility/algorithm/move_to_front.hpp>
 #include <nlohmann/json.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <iterator>
+#include <stdexcept>
 
 namespace Persistence
 {
+    std::optional<TerminalEngineType> terminalEngineTypeFromName(std::string const& name)
+    {
+        TerminalEngineType type{};
+        if (boost::describe::enum_from_string(name.c_str(), type))
+            return type;
+        return std::nullopt;
+    }
+
+    void SessionOptions::variantDecide(nlohmann::json const& j)
+    {
+        if (!j.contains("type"))
+            throw std::runtime_error("Terminal engine type not specified");
+        const auto name = j["type"].get<std::string>();
+        const auto type = terminalEngineTypeFromName(name);
+        if (!type)
+            throw std::runtime_error(fmt::format("Unknown terminal engine type: {}", name));
+        switch (*type)
+        {
+            case TerminalEngineType::ssh:
+                engine = SshSessionOptions{};
+                return;
+            case TerminalEngineType::shell:
+                engine = ExecutingSessionOptions{};
+                return;
+        }
+    }
+
     std::filesystem::path defaultShell()
     {
 #ifdef NUI_SFTP_MACOS

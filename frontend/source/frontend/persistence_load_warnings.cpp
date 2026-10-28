@@ -35,6 +35,8 @@ namespace
                 return language->get("persistence", "loadWarnings", "addedDefaultHistoryOptions");
             case WroteMissingDefaults:
                 return language->get("persistence", "loadWarnings", "wroteMissingDefaults");
+            case SessionsKeptUnread:
+                return language->get("persistence", "loadWarnings", "sessionsKeptUnread");
         }
         return {};
     }

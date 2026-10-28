@@ -28,7 +28,8 @@ namespace Persistence
         AddedDefaultSftpOptions,
         AddedDefaultQueueOptions,
         AddedDefaultHistoryOptions,
-        WroteMissingDefaults
+        WroteMissingDefaults,
+        SessionsKeptUnread
     )
 
     /**

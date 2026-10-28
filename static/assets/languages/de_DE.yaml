@@ -1228,6 +1228,7 @@ persistence:
     addedDefaultQueueOptions: "Standard-Warteschlangenoptionen hinzugefügt."
     addedDefaultHistoryOptions: "Standard-Verlaufsoptionen hinzugefügt."
     wroteMissingDefaults: "Die fehlenden Standardeinstellungen wurden in die Konfigurationsdatei geschrieben."
+    sessionsKeptUnread: "Die Konfiguration enthält Sitzungen eines Typs, den diese Version nicht öffnen kann, vermutlich aus einer neueren Version. Sie werden nicht angezeigt, bleiben aber in der Konfigurationsdatei erhalten:\n{}"
   errorSavingState: "Fehler beim Speichern des Zustands"
   saveFailed: "Beim Speichern des Anwendungszustands ist ein Fehler aufgetreten: {}."
 rootWarning:
