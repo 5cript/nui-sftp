@@ -24,8 +24,8 @@ namespace SecureShell
     namespace Detail
     {
         /**
-         * @brief The promise of a promise task, shared by the copies of the task. When the last copy is gone and the
-         *        task did not finish, the promise gets the unfinished result.
+         * @brief The promise of a promise task, shared by the copies of the task or of the callback that completes it.
+         *        When the last copy is gone and the task did not finish, the promise gets the unfinished result.
          */
         template <typename ResultT, typename UnfinishedT>
         class PromiseTaskState
