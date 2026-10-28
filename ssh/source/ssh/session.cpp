@@ -173,10 +173,9 @@ namespace SecureShell
 
     std::future<std::expected<std::weak_ptr<Channel>, int>> Session::createPtyChannel(PtyCreationOptions options)
     {
-        auto promise = std::make_shared<std::promise<std::expected<std::weak_ptr<Channel>, int>>>();
-
-        processingThread_.pushTask(
-            [this, options = std::move(options), promise]() mutable
+        using Created = std::expected<std::weak_ptr<Channel>, int>;
+        return processingThread_.pushPromiseTask(
+            [this, options = std::move(options)]() mutable -> Created
             {
                 auto ptyChannel = std::make_unique<ssh::Channel>(session_);
                 auto& channel = *ptyChannel;
@@ -227,7 +226,7 @@ namespace SecureShell
 
                 if (result.result != SSH_OK)
                 {
-                    return promise->set_value(std::unexpected(session_.getErrorCode()));
+                    return std::unexpected(session_.getErrorCode());
                 }
 
                 auto sharedChannel =
@@ -236,31 +235,29 @@ namespace SecureShell
                     hiddenChannel_ = sharedChannel;
                 else
                     channels_.push_back(sharedChannel);
-                return promise->set_value(sharedChannel);
+                return sharedChannel;
+            },
+            []() -> Created
+            {
+                return std::unexpected(SSH_ERROR);
             }
         );
-
-        return promise->get_future();
     }
 
     std::future<std::expected<std::weak_ptr<SftpSession>, SftpError>> Session::createSftpSession()
     {
-        auto promise = std::make_shared<std::promise<std::expected<std::weak_ptr<SftpSession>, SftpError>>>();
-
-        processingThread_.pushTask(
-            [this, promise]() -> void
+        return processingThread_.pushPromiseTask(
+            [this]() -> std::expected<std::weak_ptr<SftpSession>, SftpError>
             {
                 auto sftp = sftp_new(session_.getCSession());
                 if (sftp == nullptr)
                 {
-                    return promise->set_value(
-                        std::unexpected(
-                            SftpError{
-                                .message = session_.getError(),
-                                .sshError = session_.getErrorCode(),
-                                .sftpError = 0,
-                            }
-                        )
+                    return std::unexpected(
+                        SftpError{
+                            .message = session_.getError(),
+                            .sshError = session_.getErrorCode(),
+                            .sftpError = 0,
+                        }
                     );
                 }
 
@@ -273,17 +270,15 @@ namespace SecureShell
                         .sftpError = sftp_get_error(sftp),
                     };
                     sftp_free(sftp);
-                    return promise->set_value(std::unexpected(error));
+                    return std::unexpected(error);
                 }
 
                 // Kept before the caller hears of it, who may shut the session down and walk the list right away.
                 auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), sftp);
                 sftpSessions_.push_back(sftpSession);
-                promise->set_value(sftpSession);
+                return sftpSession;
             }
         );
-
-        return promise->get_future();
     }
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(

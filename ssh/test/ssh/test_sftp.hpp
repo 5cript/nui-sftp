@@ -115,6 +115,9 @@ namespace SecureShell::Test
             refused = probe.wait_for(replyTimeout) == std::future_status::ready && !probe.get().has_value();
         }
         ASSERT_TRUE(refused);
+        auto another = session->createSftpSession();
+        ASSERT_EQ(another.wait_for(0s), std::future_status::ready);
+        EXPECT_FALSE(another.get().has_value());
 
         auto closing = std::async(
             std::launch::async,
