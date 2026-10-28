@@ -1125,12 +1125,12 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         {
             results.push_back(
                 {strandIndex,
-                 std::unexpected(
-                     Operation::Error{
-                         .type = Operation::ErrorType::ChannelClosed,
-                         .extraInfo = "The SFTP processing thread no longer runs tasks",
-                     }
-                 )}
+                    std::unexpected(
+                        Operation::Error{
+                            .type = Operation::ErrorType::ChannelClosed,
+                            .extraInfo = "The SFTP processing thread no longer runs tasks",
+                        }
+                    )}
             );
         }
         else

@@ -140,13 +140,13 @@ namespace SecureShell::Test
 
         EXPECT_FALSE(processingThread.pushTask(countRun));
         EXPECT_FALSE(processingThread
-                         .pushPermanentTask(
-                             [](auto)
-                             {
-                                 return true;
-                             }
-                         )
-                         .first);
+                .pushPermanentTask(
+                    [](auto)
+                    {
+                        return true;
+                    }
+                )
+                .first);
         processingThread.stop();
         EXPECT_EQ(ran.load(), 0);
 
@@ -1430,13 +1430,13 @@ namespace SecureShell::Test
             }
         ));
         EXPECT_FALSE(processingThread
-                         .pushPermanentTask(
-                             [](auto)
-                             {
-                                 return true;
-                             }
-                         )
-                         .first);
+                .pushPermanentTask(
+                    [](auto)
+                    {
+                        return true;
+                    }
+                )
+                .first);
         auto refused = processingThread.pushPromiseTask(
             [&ran]
             {

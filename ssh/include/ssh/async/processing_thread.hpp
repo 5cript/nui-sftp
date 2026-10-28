@@ -379,7 +379,7 @@ namespace SecureShell
             Open,
             /** @brief stop() is running: tasks are refused, cleanup tasks are queued for its drain. */
             Draining,
-            /** @brief Stopped, or the loop ended on an exception: tasks are refused, cleanup tasks run on the caller. */
+            /** @brief Stopped, or the loop threw: tasks are refused, cleanup tasks run on the caller. */
             Closed,
         };
 

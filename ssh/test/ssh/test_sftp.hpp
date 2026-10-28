@@ -90,8 +90,9 @@ namespace SecureShell::Test
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         auto [session, sftp] = createSftpSession(serverStartResult->port);
-        auto opened =
-            sftp->openFile(remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        auto opened = sftp->openFile(
+            remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+        );
         ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
         ASSERT_TRUE(opened.get().has_value());
 
