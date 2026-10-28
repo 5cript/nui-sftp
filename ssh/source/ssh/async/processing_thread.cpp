@@ -82,22 +82,37 @@ namespace SecureShell
         notifyWake(interruptSocketWait);
         if (thread_.joinable())
             thread_.join();
-        // The id of a joined thread may be reused.
-        processingThreadId_.store({});
 
         // execute all pending tasks in FIFO order, matching the run loop, and outside the lock so pushes meanwhile are
-        // refused instead of waiting for the drain:
-        const ActingProcessingThread acting{processingThreadId_};
+        // refused instead of waiting for the drain. Intake stays Draining until the end, so no cleanup task runs on a
+        // caller meanwhile.
         std::unique_lock lock{taskMutex_};
+        processingThreadId_.store(std::this_thread::get_id());
         while (!tasks_.empty())
         {
-            auto task = std::move(tasks_.front().run);
-            tasks_.pop_front();
-            lock.unlock();
-            task();
+            {
+                auto task = std::move(tasks_.front());
+                tasks_.pop_front();
+                lock.unlock();
+                if (task.kind != TaskKind::Refused)
+                    runContained(task.run);
+            }
             lock.lock();
         }
+        // The id of the joined thread may be reused.
+        processingThreadId_.store({});
         intake_ = Intake::Closed;
+    }
+    void ProcessingThread::runContained(std::function<void()> const& task)
+    {
+        try
+        {
+            task();
+        }
+        catch (...)
+        {
+            // Outside the loop no task ends anything, a promise task completes with its unfinished result.
+        }
     }
     bool ProcessingThread::pushTask(std::function<void()> task)
     {
@@ -120,6 +135,24 @@ namespace SecureShell
         notifyWake(interruptSocketWait);
         return true;
     }
+    void ProcessingThread::queuePromiseTask(std::function<void()> task)
+    {
+        bool interruptSocketWait = false;
+        {
+            std::lock_guard lock{taskMutex_};
+            if (intake_ == Intake::Closed)
+                return;
+            if (intake_ == Intake::Draining)
+            {
+                tasks_.push_back({.run = std::move(task), .kind = TaskKind::Refused});
+                return;
+            }
+            tasks_.push_back({.run = std::move(task)});
+            wakeRequested_ = true;
+            interruptSocketWait = waitingOnSocket_;
+        }
+        notifyWake(interruptSocketWait);
+    }
     void ProcessingThread::pushCleanupTask(std::function<void()> task)
     {
         if (!task)
@@ -135,7 +168,7 @@ namespace SecureShell
             std::lock_guard lock{taskMutex_};
             if (intake_ != Intake::Closed)
             {
-                tasks_.push_back({.run = std::move(task), .cleanup = true});
+                tasks_.push_back({.run = std::move(task), .kind = TaskKind::Cleanup});
                 wakeRequested_ = true;
                 interruptSocketWait = waitingOnSocket_;
                 queued = true;
@@ -147,7 +180,7 @@ namespace SecureShell
             return;
         }
         const ActingProcessingThread acting{processingThreadId_};
-        task();
+        runContained(task);
     }
     void ProcessingThread::wake()
     {
@@ -416,6 +449,9 @@ namespace SecureShell
                             throw std::runtime_error("Task must not be empty.");
                         }
 #endif
+                        // Pushed while stop() drains, completed when the batch is gone.
+                        if (task.kind == TaskKind::Refused)
+                            continue;
                         try
                         {
                             task.run();
@@ -442,6 +478,9 @@ namespace SecureShell
             {
                 std::lock_guard lock{taskMutex_};
                 running_ = false;
+                // stop() drains what is queued once it joined this thread, and closes intake afterwards.
+                if (intake_ == Intake::Draining)
+                    return;
                 intake_ = Intake::Closed;
                 pending = std::exchange(tasks_, {});
             }
@@ -449,16 +488,8 @@ namespace SecureShell
             // Dropped promise tasks complete with their unfinished result, cleanup tasks still run.
             for (auto& task : pending)
             {
-                if (!task.cleanup)
-                    continue;
-                try
-                {
-                    task.run();
-                }
-                catch (...)
-                {
-                    // The loop already ended on an exception.
-                }
+                if (task.kind == TaskKind::Cleanup)
+                    runContained(task.run);
             }
         }
     }
