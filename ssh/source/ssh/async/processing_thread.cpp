@@ -26,8 +26,8 @@ namespace SecureShell
         {
             std::lock_guard lock{taskMutex_};
             running_ = true;
+            shuttingDown_ = false;
         }
-        shuttingDown_ = false;
         std::promise<void> awaitThreadStart{};
         thread_ = std::thread(
             [this, &awaitThreadStart, pollInterval]
@@ -41,10 +41,10 @@ namespace SecureShell
     }
     void ProcessingThread::stop()
     {
-        shuttingDown_ = true;
         bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
+            shuttingDown_ = true;
             running_ = false;
             wakeRequested_ = true;
             interruptSocketWait = waitingOnSocket_;
@@ -53,14 +53,17 @@ namespace SecureShell
         if (thread_.joinable())
             thread_.join();
 
-        // execute all pending tasks in FIFO order, matching the run loop:
-        std::lock_guard lock{taskMutex_};
+        // execute all pending tasks in FIFO order, matching the run loop, and outside the lock so pushes meanwhile are
+        // refused instead of waiting for the drain:
+        std::unique_lock lock{taskMutex_};
         while (!tasks_.empty())
         {
-            tasks_.front()();
+            auto task = std::move(tasks_.front());
             tasks_.pop_front();
+            lock.unlock();
+            task();
+            lock.lock();
         }
-        shuttingDown_ = false;
     }
     bool ProcessingThread::pushTask(std::function<void()> task)
     {
@@ -69,14 +72,13 @@ namespace SecureShell
             throw std::invalid_argument("Task must not be empty.");
         }
 
-        if (shuttingDown_)
-        {
-            return false;
-        }
-
         bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
+            if (shuttingDown_)
+            {
+                return false;
+            }
             tasks_.push_back(std::move(task));
             wakeRequested_ = true;
             interruptSocketWait = waitingOnSocket_;
@@ -147,15 +149,14 @@ namespace SecureShell
             throw std::invalid_argument("Task must not be empty.");
         }
 
-        if (shuttingDown_)
-        {
-            return {false, PermanentTaskId{-1}};
-        }
-
         PermanentTaskId id{-1};
         bool interruptSocketWait = false;
         {
             std::lock_guard lock{taskMutex_};
+            if (shuttingDown_)
+            {
+                return {false, PermanentTaskId{-1}};
+            }
             ++permanentTaskIdCounter_;
             id = PermanentTaskId{permanentTaskIdCounter_};
             permanentTasks_.insert({id, PermanentTask{.run = std::move(task), .pollInterval = pollInterval}});

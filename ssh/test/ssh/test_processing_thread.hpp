@@ -125,12 +125,90 @@ namespace SecureShell::Test
         ASSERT_EQ(ProcessingThread::maximumTasksProcessableAtOnce * 3, counter.load());
     }
 
-    TEST_F(ProcessingThreadTest, CanPushTaskAfterStop)
+    TEST_F(ProcessingThreadTest, CannotPushAfterStopUntilStartedAgain)
     {
+        std::atomic_int ran = 0;
+        const auto countRun = [&ran]
+        {
+            ++ran;
+        };
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         processingThread.stop();
-        EXPECT_TRUE(processingThread.pushTask([] {}));
+
+        EXPECT_FALSE(processingThread.pushTask(countRun));
+        EXPECT_FALSE(processingThread
+                         .pushPermanentTask(
+                             [](auto)
+                             {
+                                 return true;
+                             }
+                         )
+                         .first);
+        processingThread.stop();
+        EXPECT_EQ(ran.load(), 0);
+
+        processingThread.start(std::chrono::milliseconds{1});
+        Awaiter awaiter{};
+        EXPECT_TRUE(processingThread.pushTask(
+            [&awaiter]
+            {
+                awaiter.arrive();
+            }
+        ));
+        EXPECT_TRUE(awaiter.waitFor());
+    }
+
+    TEST_F(ProcessingThreadTest, CannotPushWhileStopWaitsForTheLastTask)
+    {
+        Awaiter running{};
+        std::promise<void> release{};
+        const auto released = release.get_future().share();
+        std::atomic_int lateRan = 0;
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        processingThread.pushTask(
+            [&running, released]
+            {
+                running.arrive();
+                released.wait_for(5s);
+            }
+        );
+        ASSERT_TRUE(running.waitFor());
+        std::thread stopper{[&processingThread]
+            {
+                processingThread.stop();
+            }};
+        int accepted = 0;
+        const auto refused = waitUntil(
+            [&processingThread, &lateRan, &accepted]
+            {
+                const auto pushed = processingThread.pushTask(
+                    [&lateRan]
+                    {
+                        ++lateRan;
+                    }
+                );
+                if (pushed)
+                    ++accepted;
+                return !pushed;
+            }
+        );
+        const auto permanentPushed = processingThread
+                                         .pushPermanentTask(
+                                             [](auto)
+                                             {
+                                                 return true;
+                                             }
+                                         )
+                                         .first;
+        release.set_value();
+        stopper.join();
+
+        EXPECT_TRUE(refused);
+        EXPECT_FALSE(permanentPushed);
+        EXPECT_FALSE(processingThread.pushTask([] {}));
+        EXPECT_EQ(lateRan.load(), accepted);
     }
 
     TEST_F(ProcessingThreadTest, CannotPushTaskWhileStopping)
@@ -1117,13 +1195,15 @@ namespace SecureShell::Test
         EXPECT_EQ(ran.load(), 1);
     }
 
-    TEST_F(ProcessingThreadTest, EveryAcceptedTaskRunsWhenStopRacesWithPushes)
+    TEST_F(ProcessingThreadTest, EveryAcceptedTaskRunsBeforeStopReturnsWhenPushesRace)
     {
         constexpr int pushers = 4;
         std::atomic_int accepted = 0;
         std::atomic_int ran = 0;
         std::atomic_bool keepPushing = true;
         bool pushing = false;
+        int ranWhenStopped = 0;
+        bool refusedAfterStop = false;
         {
             ProcessingThread processingThread;
             processingThread.start(1ms);
@@ -1156,12 +1236,16 @@ namespace SecureShell::Test
                 }
             );
             processingThread.stop();
+            ranWhenStopped = ran.load();
+            refusedAfterStop = !processingThread.pushTask([] {});
             keepPushing = false;
             for (auto& thread : threads)
                 thread.join();
-            // Tasks accepted after stop wait for the next start or for the destructor.
         }
         EXPECT_TRUE(pushing);
+        EXPECT_TRUE(refusedAfterStop);
+        // A push that passed the check before stop() but queued after its drain would run only in the destructor.
+        EXPECT_EQ(ranWhenStopped, accepted.load());
         EXPECT_EQ(ran.load(), accepted.load());
     }
 
