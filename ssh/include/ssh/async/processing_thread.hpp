@@ -92,7 +92,7 @@ namespace SecureShell
         std::expected<void, std::string> watchSocket(std::function<SocketWait::Watched()> watched);
 
         /**
-         * @brief Stops the processing thread. Executes all pending tasks.
+         * @brief Stops the processing thread. Executes all pending tasks. Refuses pushes from now until the next start.
          */
         void stop();
 
@@ -109,7 +109,7 @@ namespace SecureShell
          *
          * @param task The task to push.
          * @return true If the task was pushed.
-         * @return false If the task was empty or the processing thread is shutting down.
+         * @return false If the processing thread was stopped and not started again.
          */
         bool pushTask(std::function<void()> task);
 
@@ -259,6 +259,7 @@ namespace SecureShell
         std::thread thread_{};
         mutable std::recursive_mutex taskMutex_{};
         std::atomic<bool> running_ = false;
+        /** @brief Refuses pushes from stop() until the next start(). Written and checked by pushes under taskMutex_. */
         std::atomic<bool> shuttingDown_ = false;
         std::atomic_bool permanentTasksAvailable_ = false;
         std::atomic<int> permanentTaskIdCounter_ = 0;
