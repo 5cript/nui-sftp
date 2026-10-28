@@ -710,7 +710,11 @@ Nui::ElementRenderer Toolbar::operator()()
                     impl_->events->selectedTheme.modify();
 
                     impl_->stateHolder->stateCache().uiOptions.darkLightMode = impl_->events->darkLightMode.value();
-                    impl_->stateHolder->save(
+                    impl_->stateHolder->loadModifySave(
+                        [mode = impl_->events->darkLightMode.value()](Persistence::State& state)
+                        {
+                            state.uiOptions.darkLightMode = mode;
+                        },
                         [this](std::optional<std::string> const& error)
                         {
                             if (error)
