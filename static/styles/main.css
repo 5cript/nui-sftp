@@ -262,6 +262,11 @@
         box-shadow: 1px 4px 10px 0px rgb(199, 199, 199);
     }
 
+    /* Keeps the dim above 35% gray, below that the AppImage catalog counts the window as dark */
+    & .snc-spotlight-dim-fill {
+        fill-opacity: 0.55;
+    }
+
     & .nui-file-grid-background {
         background-color: var(--background-color);
         background-image: var(--background-image, url("data-url:../../../styles/nui-file-explorer/file_grid_background_light.png"));
