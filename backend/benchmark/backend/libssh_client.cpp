@@ -104,6 +104,10 @@ namespace Benchmark
                 [this, &transfer]()
                 {
                     return transferInStrand(transfer);
+                },
+                []() -> std::expected<void, std::string>
+                {
+                    return std::unexpected<std::string>{"The transfer task did not finish"};
                 }
             )
             .get();
