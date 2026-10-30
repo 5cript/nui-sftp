@@ -11,6 +11,8 @@ set(roots
     paths/include
     persistence/include
     persistence/source
+    remote_io/include
+    remote_io/source
     shared_data/include
     shared_data/source
     ssh/include

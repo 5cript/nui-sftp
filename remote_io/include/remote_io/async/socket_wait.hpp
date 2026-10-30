@@ -1,6 +1,6 @@
 #pragma once
 
-#include <libssh/libssh.h>
+#include <remote_io/async/native_socket.hpp>
 
 #include <chrono>
 #include <expected>
@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace SecureShell
+namespace RemoteIo
 {
     /**
      * @brief Blocks until a socket can be read (or written) or another thread calls wake.
@@ -34,7 +34,7 @@ namespace SecureShell
          */
         struct Watched
         {
-            socket_t socket{SSH_INVALID_SOCKET};
+            NativeSocket socket{invalidNativeSocket};
             /** @brief Also wake when the socket can be written, while libssh has output it could not send yet. */
             bool writable{false};
         };

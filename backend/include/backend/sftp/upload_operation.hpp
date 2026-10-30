@@ -3,7 +3,7 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/unsafe_fast_mode.hpp>
 #include <log/toast.hpp>
-#include <ssh/async/buffer_provider.hpp>
+#include <remote_io/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
@@ -108,7 +108,7 @@ class UploadOperation : public Operation
         UnsafeFastMode unsafeFastMode{};
     };
 
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     UploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, UploadOperationOptions options);
     ~UploadOperation() override;
@@ -314,6 +314,6 @@ class UploadOperation : public Operation
     PartialFile partialFileOnCancel_{PartialFile::Kept};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
-    SecureShell::BufferLease buffer_;
+    RemoteIo::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
 };

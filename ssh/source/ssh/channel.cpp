@@ -3,7 +3,11 @@
 
 namespace SecureShell
 {
-    Channel::Channel(Session* owner, std::unique_ptr<ProcessingStrand> strand, std::unique_ptr<ssh::Channel> channel)
+    Channel::Channel(
+        Session* owner,
+        std::unique_ptr<RemoteIo::ProcessingStrand> strand,
+        std::unique_ptr<ssh::Channel> channel
+    )
         : owner_{owner}
         , strand_{std::move(strand)}
         , channel_{std::move(channel)}
@@ -98,9 +102,9 @@ namespace SecureShell
             ssh_remove_channel_callbacks(channel_->getCChannel(), &callbacks_);
         callbacksRegistered_ = false;
     }
-    ProcessingThread::PermanentTaskStatus Channel::readTask()
+    RemoteIo::ProcessingThread::PermanentTaskStatus Channel::readTask()
     {
-        using enum ProcessingThread::PermanentTaskStatus;
+        using enum RemoteIo::ProcessingThread::PermanentTaskStatus;
         if (!onStdout_ || !onStderr_ || !onExit_ || !channel_)
             return Done;
 
@@ -157,7 +161,7 @@ namespace SecureShell
         onExit_ = std::move(onExit);
 
         auto [success, id] = strand_->pushPermanentTask(
-            std::function<ProcessingThread::PermanentTaskStatus()>{
+            std::function<RemoteIo::ProcessingThread::PermanentTaskStatus()>{
                 [this]()
                 {
                     return readTask();

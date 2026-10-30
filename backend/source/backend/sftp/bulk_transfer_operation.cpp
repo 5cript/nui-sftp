@@ -782,7 +782,7 @@ void BulkTransferOperation::pause(bool doPause)
     }
 }
 
-SecureShell::ProcessingStrand* BulkTransferOperation::strand() const
+RemoteIo::ProcessingStrand* BulkTransferOperation::strand() const
 {
     return strandOf(sftp_);
 }

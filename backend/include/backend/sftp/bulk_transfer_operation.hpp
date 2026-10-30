@@ -87,7 +87,7 @@ class BulkTransferOperation : public Operation
     std::expected<void, Error> cancel(bool adoptCancelState) override;
     void pause(bool doPause) override;
     void keepPartialFiles() override;
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
     bool usesStrand() const noexcept override

@@ -78,11 +78,11 @@ add_custom_target(
 add_ssh_test(nui-sftp-ssh-test secure-shell "${CMAKE_BINARY_DIR}/test")
 gtest_discover_tests(nui-sftp-ssh-test)
 
-# The processing thread, strands and transfers share state across threads, so their tests always run a second
-# time with ThreadSanitizer. libssh and the other libraries stay uninstrumented.
+# The sessions, strands and transfers share state across threads, so their tests always run a second time with
+# ThreadSanitizer, on the instrumented remote_io of its tests. libssh and the other libraries stay uninstrumented.
 if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     set(THREAD_SANITIZER_OPTIONS -fsanitize=thread -fno-omit-frame-pointer)
-    add_secure_shell_library(secure-shell-tsan)
+    add_secure_shell_library(secure-shell-tsan remote-io-tsan)
     target_compile_options(secure-shell-tsan PRIVATE ${THREAD_SANITIZER_OPTIONS})
     add_ssh_test(nui-sftp-ssh-tsan-test secure-shell-tsan "${CMAKE_BINARY_DIR}/test/tsan")
     # The mock server helper hands objects between the test and its asio thread, which TSAN only follows instrumented.

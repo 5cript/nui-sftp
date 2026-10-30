@@ -2,8 +2,8 @@
 
 #include <libssh/libsshpp.hpp>
 #include <libssh/callbacks.h>
-#include <ssh/async/processing_thread.hpp>
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/processing_thread.hpp>
+#include <remote_io/async/processing_strand.hpp>
 
 #include <atomic>
 #include <memory>
@@ -20,7 +20,7 @@ namespace SecureShell
     class Channel : public std::enable_shared_from_this<Channel>
     {
       public:
-        Channel(Session* owner, std::unique_ptr<ProcessingStrand> strand, std::unique_ptr<ssh::Channel>);
+        Channel(Session* owner, std::unique_ptr<RemoteIo::ProcessingStrand> strand, std::unique_ptr<ssh::Channel>);
         ~Channel();
         Channel(Channel const&) = delete;
         Channel& operator=(Channel const&) = delete;
@@ -83,7 +83,7 @@ namespace SecureShell
         );
 
       private:
-        ProcessingThread::PermanentTaskStatus readTask();
+        RemoteIo::ProcessingThread::PermanentTaskStatus readTask();
         void registerCallbacks();
         void removeCallbacks();
         static int onData(ssh_session session, ssh_channel channel, void* data, uint32_t length, int isStderr, void* self);
@@ -91,7 +91,7 @@ namespace SecureShell
 
       private:
         Session* owner_;
-        std::unique_ptr<ProcessingStrand> strand_;
+        std::unique_ptr<RemoteIo::ProcessingStrand> strand_;
         std::unique_ptr<ssh::Channel> channel_;
         std::function<void(std::string const&)> onStdout_{};
         std::function<void(std::string const&)> onStderr_{};

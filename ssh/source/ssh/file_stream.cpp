@@ -15,7 +15,7 @@ namespace SecureShell
 {
     namespace
     {
-        using TaskStatus = ProcessingThread::PermanentTaskStatus;
+        using TaskStatus = RemoteIo::ProcessingThread::PermanentTaskStatus;
 
         /** @brief Bytes a transfer moves per turn at least; several turns make up a cycle. */
         constexpr IFileStream::SignedSizeType targetBytesPerTurn = 256 * 1024;
@@ -572,17 +572,21 @@ namespace SecureShell
         struct ReadState : public std::enable_shared_from_this<ReadState>
         {
             FileStream& stream;
-            BufferLease buffer;
+            RemoteIo::BufferLease buffer;
             std::function<bool(std::string_view data)> callback;
             // A read that is refused, never pushed or dropped leaves the unfinished error when the state is gone.
-            Detail::PromiseTaskState<ReadResult, UnfinishedTaskResult<ReadResult>> completion;
+            RemoteIo::Detail::PromiseTaskState<ReadResult, RemoteIo::UnfinishedTaskResult<ReadResult>> completion;
             std::size_t totalRead;
 
-            ReadState(FileStream& stream, BufferLease buffer, std::function<bool(std::string_view data)> callback)
+            ReadState(
+                FileStream& stream,
+                RemoteIo::BufferLease buffer,
+                std::function<bool(std::string_view data)> callback
+            )
                 : stream{stream}
                 , buffer{std::move(buffer)}
                 , callback{std::move(callback)}
-                , completion{UnfinishedTaskResult<ReadResult>{}}
+                , completion{RemoteIo::UnfinishedTaskResult<ReadResult>{}}
                 , totalRead{0}
             {}
 
@@ -730,7 +734,7 @@ namespace SecureShell
             }
         );
     }
-    ProcessingStrand* FileStream::strand() const
+    RemoteIo::ProcessingStrand* FileStream::strand() const
     {
         auto sftp = sftp_.lock();
         return sftp ? sftp->strand_.get() : nullptr;
@@ -777,8 +781,9 @@ namespace SecureShell
 
         // Write in chunks for large data. A chunk that is refused, never pushed or dropped leaves the unfinished error:
         using WriteResult = std::expected<void, SftpError>;
-        auto state = std::make_shared<Detail::PromiseTaskState<WriteResult, UnfinishedTaskResult<WriteResult>>>(
-            UnfinishedTaskResult<WriteResult>{}
+        auto state = std::make_shared<
+            RemoteIo::Detail::PromiseTaskState<WriteResult, RemoteIo::UnfinishedTaskResult<WriteResult>>>(
+            RemoteIo::UnfinishedTaskResult<WriteResult>{}
         );
         auto future = state->future();
         writePart(

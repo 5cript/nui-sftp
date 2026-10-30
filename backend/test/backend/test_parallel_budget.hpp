@@ -25,7 +25,7 @@ namespace Test
                 return SharedData::OperationType::CustomAction;
             }
 
-            SecureShell::ProcessingStrand* strand() const override
+            RemoteIo::ProcessingStrand* strand() const override
             {
                 return nullptr;
             }

@@ -1,6 +1,4 @@
 #include <utility/process_temporary_directory.hpp>
-#include "test_buffer_provider.hpp"
-#include "test_processing_thread.hpp"
 #include "test_transfer_chunk_controller.hpp"
 #include "test_request_window.hpp"
 #include "test_ssh_session.hpp"

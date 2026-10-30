@@ -2,7 +2,7 @@
 
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/unsafe_fast_mode.hpp>
-#include <ssh/async/buffer_provider.hpp>
+#include <remote_io/async/buffer_provider.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <nui/utility/move_detector.hpp>
@@ -67,7 +67,7 @@ class DownloadOperation : public Operation
         UnsafeFastMode unsafeFastMode{};
     };
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         if (auto stream = fileStream_.lock(); stream)
             return stream->strand();
@@ -225,7 +225,7 @@ class DownloadOperation : public Operation
     /** @brief Where the download is written before it replaces localNativePath_, empty when no local path was given. */
     std::filesystem::path tempNativePath_{};
     std::ofstream localFile_;
-    SecureShell::BufferLease buffer_;
+    RemoteIo::BufferLease buffer_;
     std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
     /** @brief Bytes already present in an adopted partial file. */
     std::uint64_t resumeOffset_{0u};

@@ -1,4 +1,4 @@
-#include <ssh/async/socket_wait.hpp>
+#include <remote_io/async/socket_wait.hpp>
 
 #include <fmt/format.h>
 
@@ -15,8 +15,9 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+#include <type_traits>
 
-namespace SecureShell
+namespace RemoteIo
 {
     namespace
     {
@@ -31,6 +32,9 @@ namespace SecureShell
     }
 
 #ifdef _WIN32
+    static_assert(std::is_same_v<NativeSocket, SOCKET>);
+    static_assert(invalidNativeSocket == INVALID_SOCKET);
+
     struct SocketWait::Implementation
     {
         SOCKET wakeSocket{INVALID_SOCKET};

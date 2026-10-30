@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/unfinished_task_result.hpp>
+#include <remote_io/async/unfinished_task_result.hpp>
 
 #include <fmt/format.h>
 
@@ -122,15 +122,18 @@ namespace SecureShell
             );
         }
     };
+}
 
+namespace RemoteIo
+{
     template <>
-    struct UnfinishedTaskResult<SftpError>
+    struct UnfinishedTaskResult<SecureShell::SftpError>
     {
-        SftpError operator()() const
+        SecureShell::SftpError operator()() const
         {
-            return SftpError{
+            return SecureShell::SftpError{
                 .message = "The task did not finish, the SFTP session is closed or its thread stopped",
-                .wrapperError = WrapperErrors::TaskPushFailed,
+                .wrapperError = SecureShell::WrapperErrors::TaskPushFailed,
             };
         }
     };

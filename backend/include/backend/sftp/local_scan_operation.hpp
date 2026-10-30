@@ -51,7 +51,7 @@ class LocalScanOperation : public Operation
     LocalScanOperation& operator=(LocalScanOperation const&) = delete;
     LocalScanOperation& operator=(LocalScanOperation&&) = delete;
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         return nullptr;
     }

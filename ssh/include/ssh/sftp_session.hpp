@@ -2,9 +2,9 @@
 
 #include <libssh/libsshpp.hpp>
 #include <libssh/sftp.h>
-#include <ssh/async/buffer_provider.hpp>
-#include <ssh/async/processing_thread.hpp>
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/buffer_provider.hpp>
+#include <remote_io/async/processing_thread.hpp>
+#include <remote_io/async/processing_strand.hpp>
 #include <ssh/async/transfer_chunk_controller.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/file_stream.hpp>
@@ -39,7 +39,7 @@ namespace SecureShell
         using NativeSession = std::unique_ptr<sftp_session_struct, decltype(&sftp_free)>;
         friend class FileStream;
 
-        SftpSession(Session* owner, std::unique_ptr<ProcessingStrand> strand, NativeSession session);
+        SftpSession(Session* owner, std::unique_ptr<RemoteIo::ProcessingStrand> strand, NativeSession session);
         ~SftpSession();
         SftpSession(SftpSession const&) = delete;
         SftpSession& operator=(SftpSession const&) = delete;
@@ -61,7 +61,7 @@ namespace SecureShell
 
         template <
             typename FunctionT,
-            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<FunctionT>>>>
+            typename UnfinishedFunc = RemoteIo::UnfinishedTaskResult<std::invoke_result_t<std::decay_t<FunctionT>>>>
         auto performPromise(FunctionT&& func, UnfinishedFunc unfinished = {})
             -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
         {
@@ -395,7 +395,7 @@ namespace SecureShell
          */
         std::expected<sftp_limits_struct, Error> limitsInStrand();
 
-        ProcessingStrand* strand() const
+        RemoteIo::ProcessingStrand* strand() const
         {
             return strand_.get();
         }
@@ -416,7 +416,7 @@ namespace SecureShell
         /**
          * @brief Shared buffer pool for this session's file transfers.
          */
-        IBufferProvider& bufferProvider() noexcept
+        RemoteIo::IBufferProvider& bufferProvider() noexcept
         {
             return *bufferProvider_;
         }
@@ -503,10 +503,10 @@ namespace SecureShell
 
       private:
         Session* owner_;
-        std::unique_ptr<ProcessingStrand> strand_;
+        std::unique_ptr<RemoteIo::ProcessingStrand> strand_;
         /** @brief Freed by close on the processing thread, null afterwards. */
         NativeSession session_;
-        std::shared_ptr<IBufferProvider> bufferProvider_;
+        std::shared_ptr<RemoteIo::IBufferProvider> bufferProvider_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
         TransferChunkController chunkController_{};
     };

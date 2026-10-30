@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/processing_thread.hpp>
+#include <remote_io/async/processing_thread.hpp>
 #include <ssh/sftp_error.hpp>
 
 #include <atomic>
@@ -99,7 +99,7 @@ namespace SecureShell
         std::atomic<SignedSizeType> bytesTransferred_{0};
         std::atomic<SignedSizeType> lastBytesTransferred_{0};
         std::chrono::high_resolution_clock::time_point lastBpsCalculation_{std::chrono::high_resolution_clock::now()};
-        ProcessingThread::PermanentTaskId permanentTaskId_{-1};
+        RemoteIo::ProcessingThread::PermanentTaskId permanentTaskId_{-1};
         std::atomic<SignedSizeType> bytesPerSecond_{0};
     };
 }

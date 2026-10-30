@@ -189,7 +189,7 @@ namespace SecureShell
          */
         void closeInStrand(bool isBackElement = false) override;
 
-        ProcessingStrand* strand() const override;
+        RemoteIo::ProcessingStrand* strand() const override;
 
       private:
         std::function<void(sftp_file)> makeFileDeleter();

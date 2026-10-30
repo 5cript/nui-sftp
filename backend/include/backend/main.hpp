@@ -11,7 +11,7 @@
 #include <backend/opener.hpp>
 #include <command-store/command_store.hpp>
 #include <command-store/command_store_rpc.hpp>
-#include <ssh/async/processing_thread.hpp>
+#include <remote_io/async/processing_thread.hpp>
 #include <events/app_wide_events.hpp>
 #include <nui-file-explorer/support/default_places.hpp>
 #ifdef _WIN32

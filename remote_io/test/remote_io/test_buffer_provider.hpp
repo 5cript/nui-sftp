@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/buffer_provider.hpp>
+#include <remote_io/async/buffer_provider.hpp>
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-namespace SecureShell::Test
+namespace RemoteIo::Test
 {
     class BufferProviderTests : public ::testing::Test
     {
