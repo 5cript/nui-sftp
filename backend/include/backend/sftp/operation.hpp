@@ -6,7 +6,7 @@
 #include <shared_data/file_operations/operation_error_type.hpp>
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/file_operations/operation_state.hpp>
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/processing_strand.hpp>
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/sftp_session.hpp>
 #include <log/log.hpp>
@@ -23,7 +23,7 @@
 #include <vector>
 
 template <>
-struct SecureShell::UnfinishedTaskResult<SharedData::OperationError>
+struct RemoteIo::UnfinishedTaskResult<SharedData::OperationError>
 {
     SharedData::OperationError operator()() const
     {
@@ -53,7 +53,7 @@ class Operation
     template <typename FunctionT>
     auto visit(FunctionT&& func) const;
 
-    virtual SecureShell::ProcessingStrand* strand() const = 0;
+    virtual RemoteIo::ProcessingStrand* strand() const = 0;
 
     virtual void pause(bool)
     {
@@ -284,7 +284,7 @@ class Operation
      * @brief The processing strand of @p session, none once its channel was closed or is closing. It stays valid
      *        until the channel is closed, which happens on the queue's strand.
      */
-    static SecureShell::ProcessingStrand* strandOf(std::weak_ptr<SecureShell::SftpSession> const& session)
+    static RemoteIo::ProcessingStrand* strandOf(std::weak_ptr<SecureShell::SftpSession> const& session)
     {
         const auto locked = openSession(session);
         return locked ? locked->strand() : nullptr;
@@ -302,7 +302,7 @@ class Operation
      * @brief Waits until every task queued on @p strand so far has run, so none of them outlives the operation that
      *        queued it. Returns at once on the processing thread itself and on a finalized strand.
      */
-    static void waitForStrandTasks(SecureShell::ProcessingStrand* strand)
+    static void waitForStrandTasks(RemoteIo::ProcessingStrand* strand)
     {
         if (strand && !strand->withinProcessingThread())
             strand->pushPromiseTask([]() {}).wait();

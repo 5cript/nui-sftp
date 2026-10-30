@@ -38,7 +38,7 @@ class ScanOperation : public Operation
         std::vector<std::string> excludedSuffixes{};
     };
 
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     // work() here still waits on futures pushed to the SFTP strand; running it inside
     // the queue's batched strand umbrella would self-deadlock. Opt out of batching until

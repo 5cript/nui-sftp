@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ssh/async/socket_wait.hpp>
-#include <ssh/async/unfinished_task_result.hpp>
+#include <remote_io/async/socket_wait.hpp>
+#include <remote_io/async/unfinished_task_result.hpp>
 
 #include <thread>
 #include <atomic>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace SecureShell
+namespace RemoteIo
 {
     class ProcessingStrand;
 

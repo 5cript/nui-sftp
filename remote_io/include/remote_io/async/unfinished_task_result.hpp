@@ -2,7 +2,7 @@
 
 #include <expected>
 
-namespace SecureShell
+namespace RemoteIo
 {
     /**
      * @brief Makes what the future of a promise task holds when the task does not finish: its push was refused, the

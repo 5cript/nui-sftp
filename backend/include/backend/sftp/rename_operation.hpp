@@ -26,7 +26,7 @@ class RenameOperation : public Operation
     RenameOperation& operator=(RenameOperation const&) = delete;
     RenameOperation& operator=(RenameOperation&&) = delete;
 
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     // See ScanOperation for rationale — opt out of the queue's batched strand umbrella
     // until this op is converted to the *InStrand style.

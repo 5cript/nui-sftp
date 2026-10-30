@@ -26,7 +26,7 @@ class DeleteOperation : public Operation
         bool recursive{false};
     };
 
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     // See ScanOperation for rationale — opt out of the queue's batched strand umbrella
     // until this op is converted to the *InStrand style.

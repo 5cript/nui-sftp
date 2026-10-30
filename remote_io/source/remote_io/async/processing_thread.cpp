@@ -1,11 +1,11 @@
-#include <ssh/async/processing_thread.hpp>
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/processing_thread.hpp>
+#include <remote_io/async/processing_strand.hpp>
 
 #include <algorithm>
 #include <stdexcept>
 #include <future>
 
-namespace SecureShell
+namespace RemoteIo
 {
     namespace
     {
@@ -512,7 +512,7 @@ namespace SecureShell
         if (needs.awaitsInput)
         {
             const auto watched = socketWait_ && watchedSocket_ ? watchedSocket_() : SocketWait::Watched{};
-            if (watched.socket != SSH_INVALID_SOCKET)
+            if (watched.socket != invalidNativeSocket)
             {
                 waitingOnSocket_ = true;
                 lock.unlock();

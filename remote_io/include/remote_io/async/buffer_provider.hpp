@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace SecureShell
+namespace RemoteIo
 {
     /**
      * @brief Size categories for pooled SFTP transfer buffers.

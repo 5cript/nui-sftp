@@ -76,7 +76,7 @@ class LocalCopyOperation : public Operation
     LocalCopyOperation& operator=(LocalCopyOperation const&) = delete;
     LocalCopyOperation& operator=(LocalCopyOperation&&) = delete;
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         return nullptr;
     }

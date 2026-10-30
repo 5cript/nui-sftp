@@ -88,6 +88,6 @@ namespace SecureShell::Test
         MOCK_METHOD(sftp_file, release, (), (override));
         MOCK_METHOD(void, close, (bool isBackElement), (override));
         MOCK_METHOD(void, closeInStrand, (bool isBackElement), (override));
-        MOCK_METHOD(ProcessingStrand*, strand, (), (const, override));
+        MOCK_METHOD(RemoteIo::ProcessingStrand*, strand, (), (const, override));
     };
 }

@@ -3,7 +3,7 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
 #include <backend/sftp/scan_phase.hpp>
-#include <ssh/async/buffer_provider.hpp>
+#include <remote_io/async/buffer_provider.hpp>
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
@@ -116,7 +116,7 @@ class ArchiveUploadOperation : public Operation
         return SharedData::OperationType::ArchiveUpload;
     }
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         return strandOf(sftp_);
     }
@@ -187,7 +187,7 @@ class ArchiveUploadOperation : public Operation
     std::uint64_t currentEntryBytesRead_{0u};
     std::uint64_t totalBytesTransferred_{0u};
     std::uint64_t totalPayloadBytes_{0u};
-    SecureShell::BufferLease buffer_;
+    RemoteIo::BufferLease buffer_;
     /**
      * @brief Pre-scanned entry lists delivered by preceding
      *        LocalScanOperation(s), keyed by the directory root's local full

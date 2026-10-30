@@ -68,7 +68,7 @@ class LocalDeleteOperation : public Operation
     LocalDeleteOperation& operator=(LocalDeleteOperation const&) = delete;
     LocalDeleteOperation& operator=(LocalDeleteOperation&&) = delete;
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         return nullptr;
     }

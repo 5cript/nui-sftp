@@ -71,7 +71,7 @@ UploadOperation::~UploadOperation()
     waitForStrandTasks(strand());
 }
 
-SecureShell::ProcessingStrand* UploadOperation::strand() const
+RemoteIo::ProcessingStrand* UploadOperation::strand() const
 {
     return strandOf(sftp_);
 }

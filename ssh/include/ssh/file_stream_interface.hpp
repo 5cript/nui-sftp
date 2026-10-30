@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/processing_strand.hpp>
 #include <ssh/sftp_error.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/async/transfer_context.hpp>
@@ -203,6 +203,6 @@ namespace SecureShell
          *
          * @return void*
          */
-        virtual ProcessingStrand* strand() const = 0;
+        virtual RemoteIo::ProcessingStrand* strand() const = 0;
     };
 }

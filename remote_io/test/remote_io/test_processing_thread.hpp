@@ -1,8 +1,8 @@
 #pragma once
 
 #include <utility/awaiter.hpp>
-#include <ssh/async/processing_thread.hpp>
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/processing_thread.hpp>
+#include <remote_io/async/processing_strand.hpp>
 
 #include <gtest/gtest.h>
 
@@ -28,7 +28,7 @@
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
-namespace SecureShell::Test
+namespace RemoteIo::Test
 {
     namespace
     {
@@ -2001,7 +2001,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(processingThread.watchSocket(
             []
             {
-                return watching(SSH_INVALID_SOCKET);
+                return watching(invalidNativeSocket);
             }
         ));
         processingThread.pushPermanentTask(countingTask(turns, TaskStatus::AwaitInput), 5ms);

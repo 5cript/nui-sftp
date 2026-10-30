@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/processing_thread.hpp>
+#include <remote_io/async/processing_thread.hpp>
 
 #include <atomic>
 #include <future>
@@ -8,7 +8,7 @@
 #include <mutex>
 #include <set>
 
-namespace SecureShell
+namespace RemoteIo
 {
     /**
      * @brief This class makes it impossible to push tasks to a strand after it has been finalized.

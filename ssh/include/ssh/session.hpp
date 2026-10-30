@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/processing_thread.hpp>
+#include <remote_io/async/processing_thread.hpp>
 #include <ssh/sftp_error.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/termios.hpp>
@@ -91,7 +91,7 @@ namespace SecureShell
 
       private:
         std::function<void()> onConnectionLoss_;
-        SecureShell::ProcessingThread processingThread_;
+        RemoteIo::ProcessingThread processingThread_;
         ssh::Session session_;
         std::shared_ptr<Channel> hiddenChannel_;
         std::vector<std::shared_ptr<Channel>> channels_;

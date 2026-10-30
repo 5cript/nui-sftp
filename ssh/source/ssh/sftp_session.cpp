@@ -13,11 +13,11 @@
 
 namespace SecureShell
 {
-    SftpSession::SftpSession(Session* owner, std::unique_ptr<ProcessingStrand> strand, NativeSession session)
+    SftpSession::SftpSession(Session* owner, std::unique_ptr<RemoteIo::ProcessingStrand> strand, NativeSession session)
         : owner_{owner}
         , strand_{std::move(strand)}
         , session_{std::move(session)}
-        , bufferProvider_{DefaultBufferProvider::create()}
+        , bufferProvider_{RemoteIo::DefaultBufferProvider::create()}
         , fileStreams_{}
     {}
     SftpSession::~SftpSession()

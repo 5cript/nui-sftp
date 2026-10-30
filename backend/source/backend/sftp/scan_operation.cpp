@@ -226,7 +226,7 @@ std::expected<void, ScanOperation::Error> ScanOperation::cancel(bool adoptCancel
     return {};
 }
 
-SecureShell::ProcessingStrand* ScanOperation::strand() const
+RemoteIo::ProcessingStrand* ScanOperation::strand() const
 {
     return strandOf(sftp_);
 }

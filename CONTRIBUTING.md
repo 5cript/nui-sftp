@@ -249,6 +249,7 @@ same way.
 Test sources live next to the code they cover, under `*/test/`:
 
 ```
+remote_io/test/remote_io
 ssh/test/ssh
 backend/test/backend
 utility/test/utility
@@ -264,7 +265,7 @@ explicitly, or use ctest:
 # Build every test target in one go.
 cmake --build build/clang_debug --target \
   nui-tests nui-sftp-backend-test nui-sftp-utility-test \
-  nui-sftp-shared-data-test nui-sftp-ssh-test \
+  nui-sftp-shared-data-test nui-sftp-remote-io-test nui-sftp-ssh-test \
   nui-sftp-tar-archive-test nui-sftp-command-store-test
 
 # Run the whole suite. Tests run in parallel; the timeout makes a hang fail

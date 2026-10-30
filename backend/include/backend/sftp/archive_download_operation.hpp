@@ -4,7 +4,7 @@
 #include <backend/sftp/scan_operation.hpp>
 #include <backend/sftp/scan_phase.hpp>
 #include <paths/local_path.hpp>
-#include <ssh/async/buffer_provider.hpp>
+#include <remote_io/async/buffer_provider.hpp>
 #include <ssh/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
@@ -135,7 +135,7 @@ class ArchiveDownloadOperation : public Operation
         return SharedData::OperationType::ArchiveDownload;
     }
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         return strandOf(sftp_);
     }
@@ -214,7 +214,7 @@ class ArchiveDownloadOperation : public Operation
     std::uint64_t currentEntryBytesRead_{0u};
     std::uint64_t totalBytesTransferred_{0u};
     std::uint64_t totalPayloadBytes_{0u};
-    SecureShell::BufferLease buffer_;
+    RemoteIo::BufferLease buffer_;
     /** @brief options_.localArchivePath for the filesystem calls, empty when none was given. */
     std::filesystem::path localArchiveNativePath_{};
     std::filesystem::path tempPath_{};

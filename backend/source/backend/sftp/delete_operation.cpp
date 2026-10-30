@@ -37,7 +37,7 @@ DeleteOperation::DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, D
 DeleteOperation::~DeleteOperation()
 {}
 
-SecureShell::ProcessingStrand* DeleteOperation::strand() const
+RemoteIo::ProcessingStrand* DeleteOperation::strand() const
 {
     return strandOf(sftp_);
 }

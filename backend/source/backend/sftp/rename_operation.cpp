@@ -10,7 +10,7 @@ RenameOperation::RenameOperation(std::weak_ptr<SecureShell::SftpSession> sftp, R
     , futureTimeout_{options.futureTimeout}
 {}
 
-SecureShell::ProcessingStrand* RenameOperation::strand() const
+RemoteIo::ProcessingStrand* RenameOperation::strand() const
 {
     return strandOf(sftp_);
 }

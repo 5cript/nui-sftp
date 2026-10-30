@@ -241,7 +241,7 @@ namespace Test
         );
 
         // Every buffer the small files could get.
-        std::vector<SecureShell::BufferLease> held{};
+        std::vector<RemoteIo::BufferLease> held{};
         while (auto lease = sftp->bufferProvider().lease(0))
             held.push_back(std::move(lease));
 

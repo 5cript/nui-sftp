@@ -1,8 +1,8 @@
-#include <ssh/async/buffer_provider.hpp>
+#include <remote_io/async/buffer_provider.hpp>
 
 #include <utility>
 
-namespace SecureShell
+namespace RemoteIo
 {
     BufferLease::BufferLease(
         std::weak_ptr<IBufferProvider> owner,

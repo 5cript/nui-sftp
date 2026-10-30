@@ -1048,7 +1048,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     // Any strand-using op lets us share a single SFTP processing-thread umbrella across
     // every eligible op's workInStrand() call. Ops that do not use the strand run on the
     // caller afterwards: their work() blocks on that very thread and would deadlock inside it.
-    SecureShell::ProcessingStrand* strand = nullptr;
+    RemoteIo::ProcessingStrand* strand = nullptr;
     std::size_t strandIndex = 0;
     for (const auto& item : eligible)
     {

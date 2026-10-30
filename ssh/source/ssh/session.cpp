@@ -68,7 +68,7 @@ namespace SecureShell
             [this]()
             {
                 auto* const session = session_.getCSession();
-                return SocketWait::Watched{
+                return RemoteIo::SocketWait::Watched{
                     .socket = ssh_get_fd(session),
                     .writable = (ssh_get_poll_flags(session) & SSH_WRITE_PENDING) != 0,
                 };
