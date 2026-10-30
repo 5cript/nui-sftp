@@ -1,5 +1,6 @@
 #include "test_buffer_provider.hpp"
 #include "test_processing_thread.hpp"
+#include "test_remote_error.hpp"
 
 #include <gtest/gtest.h>
 

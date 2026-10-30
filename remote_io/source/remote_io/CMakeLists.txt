@@ -19,7 +19,7 @@ function(add_remote_io_library name)
             ${REMOTE_IO_SOURCE_DIRECTORY}/../../include
     )
 
-    target_link_libraries(${name} PRIVATE fmt::fmt)
+    target_link_libraries(${name} PUBLIC utility PRIVATE fmt::fmt)
     if (WIN32)
         target_link_libraries(${name} PUBLIC ws2_32)
     endif()

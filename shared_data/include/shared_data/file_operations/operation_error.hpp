@@ -5,36 +5,13 @@
 #include <shared_data/file_operations/operation_error_type.hpp>
 #include <ssh/sftp_error.hpp>
 
-namespace SecureShell
+namespace RemoteIo
 {
-    BOOST_DESCRIBE_ENUM(
-        WrapperErrors,
-        None,
-        OwnerNull,
-        SharedPtrDestroyed,
-        ShortWrite,
-        FileNull,
-        TaskPushFailed,
-        BufferUnavailable,
-        UnexpectedEndOfFile,
-        LocalIoFailure,
-        InvalidPath
-    )
-    BOOST_DESCRIBE_STRUCT(SftpError, (), (message, sshError, sftpError, wrapperError))
-
     inline void from_json(nlohmann::json const& json, WrapperErrors& error)
     {
         SharedData::from_json(json, error);
     }
     inline void to_json(nlohmann::json& json, WrapperErrors const& error)
-    {
-        SharedData::to_json(json, error);
-    }
-    inline void from_json(nlohmann::json const& json, SftpError& error)
-    {
-        SharedData::from_json(json, error);
-    }
-    inline void to_json(nlohmann::json& json, SftpError const& error)
     {
         SharedData::to_json(json, error);
     }
@@ -48,6 +25,20 @@ namespace SecureShell
         SharedData::to_val(val, error);
     }
 #endif
+}
+
+namespace SecureShell
+{
+    BOOST_DESCRIBE_STRUCT(SftpError, (), (message, sshError, sftpError, wrapperError))
+
+    inline void from_json(nlohmann::json const& json, SftpError& error)
+    {
+        SharedData::from_json(json, error);
+    }
+    inline void to_json(nlohmann::json& json, SftpError const& error)
+    {
+        SharedData::to_json(json, error);
+    }
 }
 
 namespace SharedData
