@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/sftp_error.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <utility/describe.hpp>
 #include <shared_data/file_operations/operation_type.hpp>
 #include <shared_data/file_operations/operation_error_type.hpp>
@@ -11,8 +11,6 @@
 #include <ssh/sftp_session.hpp>
 #include <log/log.hpp>
 #include <paths/remote_path.hpp>
-
-#include <libssh/sftp.h>
 
 #include <expected>
 #include <filesystem>
@@ -218,11 +216,12 @@ class Operation
      * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
      *        destination exists and may not be replaced.
      */
-    static Error remoteMoveError(SecureShell::SftpError error)
+    static Error remoteMoveError(SecureShell::SftpError const& error)
     {
-        if (error.sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+        auto remoteError = SecureShell::toRemoteError(error);
+        if (remoteError.kind == RemoteIo::RemoteErrorKind::AlreadyExists)
             return Error{.type = ErrorType::FileExists};
-        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+        return Error{.type = ErrorType::SftpError, .remoteError = std::move(remoteError)};
     }
 
     /**
@@ -313,8 +312,8 @@ class Operation
      */
     static Error asyncTransferError(SecureShell::AsyncTransferContext const& context)
     {
-        if (auto error = context.error(); error.has_value())
-            return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+        if (const auto error = context.error(); error.has_value())
+            return Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(*error)};
         return Error{.type = ErrorType::SftpError, .extraInfo = "The transfer ended before it completed"};
     }
 

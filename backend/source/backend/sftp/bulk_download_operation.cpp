@@ -144,9 +144,11 @@ bool BulkDownloadOperation::isSkippableError(Error const& error) const
         error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists ||
         error.type == ErrorType::ChangedSinceCompare)
         return true;
-    return error.sftpError &&
-        (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
-            error.sftpError->sftpError == SSH_FX_FAILURE);
+    using RemoteIo::RemoteErrorKind;
+    return error.remoteError &&
+        (error.remoteError->kind == RemoteErrorKind::NoSuchFile ||
+            error.remoteError->kind == RemoteErrorKind::PermissionDenied ||
+            error.remoteError->kind == RemoteErrorKind::Failure);
 }
 
 bool BulkDownloadOperation::isSkippableDirectoryError(Error const& error) const

@@ -191,7 +191,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                         contextResult.error().toString()
                     );
                     return enterErrorState<WorkStatus>(
-                        {.type = ErrorType::SftpError, .sftpError = contextResult.error()}
+                        {.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(contextResult.error())}
                     );
                 }
                 asyncTransferContext_ = contextResult.value();
@@ -382,7 +382,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::handleSymlinkInStra
             tempPath_.value(),
             result.error().message
         );
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = result.error()});
+        return std::unexpected(
+            Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(result.error())}
+        );
     }
 
     auto moved = ComparedStateCheck::moveRemoteIntoPlaceInStrand(
@@ -463,7 +465,9 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
         Log::error(
             options_.failureToast, "UploadOperation: Failed to write to remote file: {}", result.error().message
         );
-        return enterErrorState<bool>({.type = ErrorType::SftpError, .sftpError = result.error()});
+        return enterErrorState<bool>(
+            {.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(result.error())}
+        );
     }
 
     options_.progressCallback(0, totalSize_, totalSize_ - leftToUpload_, 0);
@@ -476,11 +480,11 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     const auto result = sftp.lstatInStrand(remotePath_);
     if (!result.has_value())
     {
-        const auto err = result.error();
-        if (err.sftpError != SSH_FX_NO_SUCH_FILE)
+        auto remoteError = SecureShell::toRemoteError(result.error());
+        if (remoteError.kind != RemoteIo::RemoteErrorKind::NoSuchFile)
         {
-            Log::error(options_.failureToast, "Failed to stat remote sftp file for continue: {}", err.message);
-            return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = err});
+            Log::error(options_.failureToast, "Failed to stat remote sftp file for continue: {}", remoteError.message);
+            return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = std::move(remoteError)});
         }
         // else ok — target does not yet exist.
     }
@@ -533,7 +537,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
                     "Failed to open remote sftp file for continue: {}",
                     openResult.error().message
                 );
-                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
+                return std::unexpected(
+                    Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(openResult.error())}
+                );
             }
             fileStream_ = openResult.value();
             openedTemporaryFile_ = true;
@@ -553,7 +559,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
                     "Failed to seek remote sftp file for continue: {}",
                     seekResult.error().message
                 );
-                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = seekResult.error()});
+                return std::unexpected(
+                    Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(seekResult.error())}
+                );
             }
 
             // Success! Continue upload from position.
@@ -581,7 +589,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::openOrAdoptFileInSt
     if (!openResult.has_value())
     {
         Log::error(options_.failureToast, "Failed to open remote sftp file for upload: {}", openResult.error().message);
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
+        return std::unexpected(
+            Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(openResult.error())}
+        );
     }
 
     fileStream_ = openResult.value();
@@ -613,7 +623,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::openDestinationInSt
             return std::unexpected(Error{.type = ErrorType::FileExists});
         }
         Log::error(options_.failureToast, "Failed to open remote sftp file for upload: {}", openResult.error().message);
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = openResult.error()});
+        return std::unexpected(
+            Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(openResult.error())}
+        );
     }
 
     fileStream_ = openResult.value();
@@ -684,15 +696,16 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& s
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = SecureShell::SftpError{
+                .remoteError = RemoteIo::RemoteError{
+                    .kind = RemoteIo::RemoteErrorKind::Failure,
                     .message = "Parent path exists but is not a directory",
-                    .sftpError = SSH_FX_FAILURE,
                 },
             }
         );
     }
-    if (statResult.error().sftpError != SSH_FX_NO_SUCH_FILE)
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = statResult.error()});
+    if (auto remoteError = SecureShell::toRemoteError(statResult.error());
+        remoteError.kind != RemoteIo::RemoteErrorKind::NoSuchFile)
+        return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = std::move(remoteError)});
 
     if (auto parent = ensureRemoteDirectoryExistsInStrand(sftp, dir.parent().value_or(Paths::RemotePath::root()));
         !parent.has_value())
@@ -711,7 +724,9 @@ UploadOperation::ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& s
             dir.value(),
             mkdirResult.error().message
         );
-        return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = mkdirResult.error()});
+        return std::unexpected(
+            Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(mkdirResult.error())}
+        );
     }
     return {};
 }
@@ -872,7 +887,9 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(Sec
         // The buffer comes first: a bulk defers a file that finds none, its destination must still be untouched then.
         const auto limits = sftp.limitsInStrand();
         if (!limits)
-            return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = limits.error()});
+            return std::unexpected(
+                Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(limits.error())}
+            );
         return leaseBufferInStrand(sftp, limits->max_write_length)
             .and_then(
                 [this, &sftp]()
@@ -904,9 +921,9 @@ UploadOperation::leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = SecureShell::SftpError{
+                .remoteError = RemoteIo::RemoteError{
                     .message = "No buffer available from pool",
-                    .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+                    .wrapperError = RemoteIo::WrapperErrors::BufferUnavailable,
                 },
             }
         );

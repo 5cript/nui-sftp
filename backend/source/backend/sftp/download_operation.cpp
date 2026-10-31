@@ -142,7 +142,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 {
                     Log::error("DownloadOperation: Failed to start async read: {}", contextResult.error().toString());
                     return enterErrorState<WorkStatus>(
-                        {.type = ErrorType::SftpError, .sftpError = contextResult.error()}
+                        {.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(contextResult.error())}
                     );
                 }
                 asyncTransferContext_ = contextResult.value();
@@ -385,7 +385,9 @@ std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnceInStran
     if (!result.has_value())
     {
         Log::error("DownloadOperation: Failed to read from remote file: {}", result.error().message);
-        return enterErrorState<bool>({.type = ErrorType::SftpError, .sftpError = result.error()});
+        return enterErrorState<bool>(
+            {.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(result.error())}
+        );
     }
 
     const auto readAmount = result.value();
@@ -504,9 +506,9 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
                 return false;
             return ResumeCheck::tailsMatchInStrand(stream, tempPath, existingSize)
                 .transform_error(
-                    [](SecureShell::SftpError error)
+                    [](SecureShell::SftpError const& error)
                     {
-                        return Error{.type = ErrorType::SftpError, .sftpError = std::move(error)};
+                        return Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(error)};
                     }
                 );
         }();
@@ -530,7 +532,9 @@ DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
                 Paths::nativeToUtf8(tempPath)
             );
             if (auto rewound = stream.seekInStrand(0); !rewound)
-                return std::unexpected(Error{.type = ErrorType::SftpError, .sftpError = rewound.error()});
+                return std::unexpected(
+                    Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(rewound.error())}
+                );
             if (const auto opened = openEmptyWrittenFile(); !opened)
                 return opened;
         }
@@ -671,7 +675,7 @@ DownloadOperation::readSymlinkInStrand(SecureShell::SftpSession& sftp, Paths::Re
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = deepLinkResult.error(),
+                .remoteError = SecureShell::toRemoteError(deepLinkResult.error()),
                 .extraInfo = fmt::format("Reading symlink target for entry: {}", remoteFullPath.value())
             }
         );
@@ -735,7 +739,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");
-            return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
+            return std::unexpected(
+                Error{.type = ErrorType::FileStatFailed, .remoteError = SecureShell::toRemoteError(fileInfo.error())}
+            );
         }
         options_.entry = fileInfo.value();
     }
@@ -752,7 +758,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = streamOpenResult.error(),
+                .remoteError = SecureShell::toRemoteError(streamOpenResult.error()),
                 .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value())
             }
         );
@@ -773,7 +779,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         if (!targetInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat the symlink target.");
-            return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = targetInfo.error()});
+            return std::unexpected(
+                Error{.type = ErrorType::FileStatFailed, .remoteError = SecureShell::toRemoteError(targetInfo.error())}
+            );
         }
         if (!targetInfo->isRegularFile())
             return std::unexpected(Error{.type = ErrorType::NotAFile});
@@ -833,9 +841,9 @@ DownloadOperation::leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = SecureShell::SftpError{
+                .remoteError = RemoteIo::RemoteError{
                     .message = "No buffer available from pool",
-                    .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
+                    .wrapperError = RemoteIo::WrapperErrors::BufferUnavailable,
                 },
             }
         );
@@ -1020,7 +1028,9 @@ std::expected<std::filesystem::perms, DownloadOperation::Error> DownloadOperatio
     if (!fileInfo.has_value())
     {
         Log::error("DownloadOperation: Failed to stat file.");
-        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .sftpError = fileInfo.error()});
+        return std::unexpected(
+            Error{.type = ErrorType::FileStatFailed, .remoteError = SecureShell::toRemoteError(fileInfo.error())}
+        );
     }
     // Special bits never travel and the umask applies, like for a file created locally.
     return Utility::inheritablePermissions(fileInfo->permissions).value_or(Utility::newFilePermissions());

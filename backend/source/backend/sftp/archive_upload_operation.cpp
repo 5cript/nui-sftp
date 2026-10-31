@@ -66,7 +66,7 @@ namespace
     {
         return SharedData::OperationError{
             .type = SharedData::OperationErrorType::UnknownError,
-            .sftpError = std::nullopt,
+            .remoteError = std::nullopt,
             .extraInfo = tarError.toString(),
         };
     }
@@ -442,7 +442,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Se
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = openResult.error(),
+                .remoteError = SecureShell::toRemoteError(openResult.error()),
                 .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
             }
         );
@@ -477,13 +477,15 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Se
     if (buffer_.empty())
     {
         Log::error("ArchiveUploadOperation: No transfer buffer available from pool.");
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = SecureShell::SftpError{
-                .message = "No buffer available from pool",
-                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
-            },
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .remoteError = RemoteIo::RemoteError{
+                    .message = "No buffer available from pool",
+                    .wrapperError = RemoteIo::WrapperErrors::BufferUnavailable,
+                },
+            }
+        );
     }
     return {};
 }

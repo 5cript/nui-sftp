@@ -1405,7 +1405,11 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     if (!result.has_value())
     {
         Log::error("Failed to stat remote sftp file: {}", result.error().message);
-        return std::unexpected(Operation::Error{.type = Operation::ErrorType::SftpError, .sftpError = result.error()});
+        return std::unexpected(
+            Operation::Error{
+                .type = Operation::ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(result.error())
+            }
+        );
     }
 
     auto transferOptions = sftpOpts_.downloadOptions.value_or(Persistence::DownloadOptions{});
