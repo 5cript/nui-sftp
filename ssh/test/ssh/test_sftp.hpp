@@ -568,6 +568,19 @@ namespace SecureShell::Test
         EXPECT_TRUE(listFut.get().has_value());
     }
 
+    TEST_F(SftpTests, MissingConfigDirectoryYieldsNoDirectoriesOnNoSuchPath)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("answerNoSuchPath", nlohmann::json::object()));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto fut = sftp->userDirectories(remote("/home/test"));
+        ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = fut.get();
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(result->empty());
+    }
+
     TEST_F(SftpTests, CanRenameFile)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

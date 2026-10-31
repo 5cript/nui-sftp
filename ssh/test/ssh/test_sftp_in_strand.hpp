@@ -185,6 +185,22 @@ namespace SecureShell::Test
         EXPECT_TRUE(result->targetInfo->isRegularFile());
     }
 
+    TEST_F(SftpInStrandTests, ReadLinkDeepCountsALinkIntoAMissingDirectoryAsDanglingOnNoSuchPath)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command(
+            "createSymlink", {{"path", "/home/test/link_into_nothing"}, {"target", "/home/test/missing/file.txt"}}
+        ));
+        ASSERT_TRUE(serverStartResult->command("answerNoSuchPath", nlohmann::json::object()));
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        auto result = runInStrand(sftp, [sftp = sftp]() {
+            return sftp->readLinkDeepInStrand(remote("/home/test/link_into_nothing"));
+        });
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(result->linkTarget.value(), "/home/test/missing/file.txt");
+        EXPECT_FALSE(result->targetInfo.has_value());
+    }
+
     TEST_F(SftpInStrandTests, UnsetPathsNeverReachTheServer)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
