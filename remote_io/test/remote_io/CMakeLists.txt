@@ -22,20 +22,48 @@ endfunction()
 add_remote_io_test(nui-sftp-remote-io-test remote-io "${CMAKE_BINARY_DIR}/test")
 gtest_discover_tests(nui-sftp-remote-io-test)
 
-# The processing thread and strands share state across threads, so their tests always run a second time with
-# ThreadSanitizer. The ssh tests link this copy too.
-if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    set(THREAD_SANITIZER_OPTIONS -fsanitize=thread -fno-omit-frame-pointer)
-    add_remote_io_library(remote-io-tsan)
-    target_compile_options(remote-io-tsan PRIVATE ${THREAD_SANITIZER_OPTIONS})
-    add_remote_io_test(nui-sftp-remote-io-tsan-test remote-io-tsan "${CMAKE_BINARY_DIR}/test/tsan")
-    target_compile_options(nui-sftp-remote-io-tsan-test PRIVATE ${THREAD_SANITIZER_OPTIONS})
-    target_link_options(nui-sftp-remote-io-tsan-test PRIVATE -fsanitize=thread)
+# Builds an instrumented copy of remote-io and its tests in test/<variant>, ctest names the tests <testPrefix>.*.
+function(add_sanitized_remote_io_test variant testPrefix environment)
+    set(sanitizerOptions ${ARGN})
+    add_remote_io_library(remote-io-${variant})
+    target_compile_options(remote-io-${variant} PRIVATE ${sanitizerOptions})
+    add_remote_io_test(nui-sftp-remote-io-${variant}-test remote-io-${variant} "${CMAKE_BINARY_DIR}/test/${variant}")
+    target_compile_options(nui-sftp-remote-io-${variant}-test PRIVATE ${sanitizerOptions})
+    target_link_options(nui-sftp-remote-io-${variant}-test PRIVATE ${sanitizerOptions})
     gtest_discover_tests(
-        nui-sftp-remote-io-tsan-test
-        TEST_PREFIX "Tsan."
-        PROPERTIES ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1"
+        nui-sftp-remote-io-${variant}-test
+        TEST_PREFIX "${testPrefix}."
+        PROPERTIES ENVIRONMENT "${environment}"
         DISCOVERY_TIMEOUT 60
+    )
+endfunction()
+
+# The processing thread and strands share state across threads, so their tests always run a second time with
+# ThreadSanitizer, and a third time with AddressSanitizer and UndefinedBehaviorSanitizer for lifetime bugs. The ssh
+# tests link the ThreadSanitizer copy too.
+if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_sanitized_remote_io_test(
+        tsan
+        Tsan
+        "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1"
+        -fsanitize=thread -fno-omit-frame-pointer
+    )
+
+    # Apple's clang has no LeakSanitizer.
+    if (APPLE)
+        set(detectLeaks 0)
+    else()
+        set(detectLeaks 1)
+    endif()
+    set(addressSanitizerEnvironment
+        "ASAN_OPTIONS=detect_leaks=${detectLeaks}:halt_on_error=1:detect_stack_use_after_return=1"
+        "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
+    )
+    add_sanitized_remote_io_test(
+        asan
+        Asan
+        "${addressSanitizerEnvironment}"
+        -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined
     )
 endif()
 
