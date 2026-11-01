@@ -7,10 +7,11 @@
 #include <shared_data/file_operations/operation_state.hpp>
 #include <remote_io/async/processing_strand.hpp>
 #include <remote_io/async/transfer_context.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <log/log.hpp>
 #include <paths/remote_path.hpp>
 
+#include <concepts>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -265,25 +266,26 @@ class Operation
     }
 
     /**
-     * @brief The session behind @p session for one work step, none once its channel was closed or is closing.
-     *        Operations hold their session weakly and lock it per step, so a closed channel ends them instead of
-     *        leaving them a dangling session.
+     * @brief The file system behind @p fileSystem for one work step, none once its channel was closed or is closing.
+     *        Operations hold their file system weakly and lock it per step, so a closed channel ends them instead of
+     *        leaving them a dangling file system. Keeps the type an operation holds, which may be a protocol's own.
      */
-    static std::shared_ptr<SecureShell::SftpSession> openSession(std::weak_ptr<SecureShell::SftpSession> const& session)
+    template <std::derived_from<RemoteIo::IRemoteFileSystem> FileSystemT>
+    static std::shared_ptr<FileSystemT> openSession(std::weak_ptr<FileSystemT> const& fileSystem)
     {
-        auto locked = session.lock();
+        auto locked = fileSystem.lock();
         if (!locked || !locked->strand() || locked->strand()->isFinalized())
             return nullptr;
         return locked;
     }
 
     /**
-     * @brief The processing strand of @p session, none once its channel was closed or is closing. It stays valid
+     * @brief The processing strand of @p fileSystem, none once its channel was closed or is closing. It stays valid
      *        until the channel is closed, which happens on the queue's strand.
      */
-    static RemoteIo::ProcessingStrand* strandOf(std::weak_ptr<SecureShell::SftpSession> const& session)
+    static RemoteIo::ProcessingStrand* strandOf(std::weak_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem)
     {
-        const auto locked = openSession(session);
+        const auto locked = openSession(fileSystem);
         return locked ? locked->strand() : nullptr;
     }
 
