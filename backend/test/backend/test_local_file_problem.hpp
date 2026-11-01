@@ -376,10 +376,10 @@ namespace Test
         EXPECT_EQ(failure.index, 0u);
         EXPECT_EQ(failure.type, SharedData::OperationErrorType::OpenFailure);
         EXPECT_EQ(failure.localProblem, unreadableProblem);
-        EXPECT_FALSE(failure.sftpErrorCode.has_value());
+        EXPECT_FALSE(failure.remoteErrorKind.has_value());
     }
 
-    TEST_F(LocalFileProblemUploadTests, ABulkUploadTellsTheServersCodeForAnEntryTheServerRefused)
+    TEST_F(LocalFileProblemUploadTests, ABulkUploadTellsTheRemoteKindForAnEntryTheServerRefused)
     {
         writeSource(sources_.path() / "refused.txt", "refused");
         writeSource(sources_.path() / "accepted.txt", "accepted");
@@ -409,7 +409,7 @@ namespace Test
         auto const& failure = operation.indexedFailures().front();
         EXPECT_EQ(failure.index, 0u);
         EXPECT_EQ(failure.type, SharedData::OperationErrorType::SftpError);
-        EXPECT_EQ(failure.sftpErrorCode, SSH_FX_NO_SUCH_FILE);
+        EXPECT_EQ(failure.remoteErrorKind, RemoteIo::RemoteErrorKind::NoSuchFile);
         EXPECT_FALSE(failure.localProblem.has_value());
     }
 }

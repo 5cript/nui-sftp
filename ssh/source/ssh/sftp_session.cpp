@@ -1,6 +1,7 @@
 #include <ssh/sftp_session.hpp>
 #include <ssh/session.hpp>
 #include <ssh/file_information.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <paths/relative_path.hpp>
 
 #include <algorithm>
@@ -13,6 +14,14 @@
 
 namespace SecureShell
 {
+    namespace
+    {
+        bool isMissing(SftpError const& error)
+        {
+            return toRemoteError(error).kind == RemoteIo::RemoteErrorKind::NoSuchFile;
+        }
+    }
+
     SftpSession::SftpSession(Session* owner, std::unique_ptr<RemoteIo::ProcessingStrand> strand, NativeSession session)
         : owner_{owner}
         , strand_{std::move(strand)}
@@ -570,7 +579,7 @@ namespace SecureShell
         const auto existing = lstatInStrand(destination);
         if (existing.has_value())
             return std::unexpected(alreadyExists(destination));
-        if (existing.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        if (!isMissing(existing.error()))
             return std::unexpected(linkError);
 
         // Filesystems without hard links, and Linux protected_hardlinks, refuse the link.
@@ -603,7 +612,7 @@ namespace SecureShell
         const auto destinationInfo = lstatInStrand(destination);
         if (!destinationInfo.has_value())
         {
-            if (destinationInfo.error().sftpError != SSH_FX_NO_SUCH_FILE || !lstatInStrand(*aside).has_value())
+            if (!isMissing(destinationInfo.error()) || !lstatInStrand(*aside).has_value())
                 return renameInStrand(source, destination);
             // A destination that only exists aside, from a rollback that failed, is put back first.
             if (auto restored = renameInStrand(*aside, destination); !restored.has_value())
@@ -841,7 +850,7 @@ namespace SecureShell
             .or_else(
                 [](Error const& error) -> std::expected<std::vector<Utility::UserDirectory>, Error>
                 {
-                    if (error.sftpError == SSH_FX_NO_SUCH_FILE)
+                    if (isMissing(error))
                         return std::vector<Utility::UserDirectory>{};
                     return std::unexpected(error);
                 }
@@ -977,7 +986,7 @@ namespace SecureShell
             if (attributes == nullptr)
             {
                 auto last = lastError();
-                if (last.sftpError == SSH_FX_NO_SUCH_FILE)
+                if (isMissing(last))
                 {
                     return DeepLinkResult{
                         .linkContent = linkContent.value_or(""),

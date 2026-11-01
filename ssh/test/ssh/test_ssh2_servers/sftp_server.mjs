@@ -177,6 +177,8 @@ const faults = {
     failRemoves: false,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
+    // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
+    answerNoSuchPath: false,
     bytesRead: 0,
     bytesWritten: 0,
 };
@@ -295,6 +297,33 @@ const resolveFileName = (path) => {
     return linuxified;
 }
 
+const noSuchPathStatus = 10;
+
+// ssh2 sends only the status codes of SFTP version 3, so a NO_SUCH_FILE status goes through ssh2, which keeps its flow
+// control, and gets its code replaced on the way out. A status ssh2 had to buffer goes out unchanged later.
+function sendStatusCode(sftpStream, reqid, code) {
+    const protocol = sftpStream._protocol;
+    const chunks = [];
+    sftpStream._protocol = { channelData: (_id, data) => chunks.push(Buffer.from(data)) };
+    try {
+        sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+    } finally {
+        sftpStream._protocol = protocol;
+    }
+    const packet = Buffer.concat(chunks);
+    const codeOffset = 9;
+    if (packet.length < codeOffset + 4)
+        return;
+    packet.writeUInt32BE(code, codeOffset);
+    protocol.channelData(sftpStream.outgoing.id, packet);
+}
+
+function sendMissing(sftpStream, reqid, path) {
+    if (faults.answerNoSuchPath && fakeFilesystem.find(pathUtil.posix.dirname(path)) === undefined)
+        return sendStatusCode(sftpStream, reqid, noSuchPathStatus);
+    return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+}
+
 const server = new Server({
     hostKeys: [fs.readFileSync('key.private')],
     debug: (message) => {
@@ -376,7 +405,7 @@ const server = new Server({
                             const parent = fakeFilesystem.find(parentPath);
                             if (parent === undefined || parent.type !== 'directory') {
                                 logMessage('Parent not found');
-                                return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                                return sendMissing(sftpStream, reqid, filename);
                             }
 
                             const name = pathUtil.basename(filename);
@@ -384,7 +413,7 @@ const server = new Server({
                         }
                         else if (flags & OPEN_MODE.READ) {
                             logMessage('File not found');
-                            return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                            return sendMissing(sftpStream, reqid, filename);
                         }
                     } else {
                         // Like a real server: CREAT with EXCL refuses anything that exists.
@@ -923,7 +952,7 @@ const server = new Server({
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
                         logMessage('File not found');
-                        return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                        return sendMissing(sftpStream, reqid, path);
                     }
 
                     logMessage(result.stat);
@@ -1003,6 +1032,9 @@ cli.on('denyDirectory', (command) => {
 // LSTAT of the path answers permission denied.
 cli.on('denyStat', (command) => {
     faults.deniedStats.add(command.path);
+});
+cli.on('answerNoSuchPath', (command) => {
+    faults.answerNoSuchPath = command.enabled !== false;
 });
 cli.on('resetRequestCounts', () => {
     requestCounts = {};

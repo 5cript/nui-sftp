@@ -63,6 +63,14 @@ namespace SecureShell::Test
         EXPECT_EQ(converted.wrapperError, WrapperErrors::BufferUnavailable);
     }
 
+    TEST(SftpErrorConversionTests, StatusWithoutMessageIsNamedInTheMessage)
+    {
+        EXPECT_EQ(toRemoteError(SftpError{.sftpError = SSH_FX_NO_SUCH_FILE}).message, "No such file");
+        EXPECT_EQ(toRemoteError(SftpError{.sftpError = 17}).message, "Lock conflict");
+        EXPECT_EQ(toRemoteError(SftpError{.message = "gone", .sftpError = SSH_FX_NO_SUCH_FILE}).message, "gone");
+        EXPECT_EQ(toRemoteError(SftpError{}).message, "");
+    }
+
     TEST(SftpErrorConversionTests, SshErrorWithoutSftpStatusIsAnSshError)
     {
         const auto fatal = toRemoteError(SftpError{.message = "Socket error", .sshError = SSH_FATAL});

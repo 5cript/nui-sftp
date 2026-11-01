@@ -166,13 +166,16 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Target c
                     {
                         const auto knownType = compared ? std::optional{compared->type} : std::nullopt;
                         // An item that is already gone, after a resume for one, counts as deleted.
-                        if (auto removed = removeOneInStrand(*session, path, knownType);
-                            !removed && removed.error().sftpError != SSH_FX_NO_SUCH_FILE)
+                        const auto removed = removeOneInStrand(*session, path, knownType);
+                        if (removed)
+                            return {};
+                        if (auto remoteError = SecureShell::toRemoteError(removed.error());
+                            remoteError.kind != RemoteIo::RemoteErrorKind::NoSuchFile)
                         {
                             return std::unexpected(
                                 Error{
                                     .type = ErrorType::DeleteFailed,
-                                    .sftpError = std::move(removed).error(),
+                                    .remoteError = std::move(remoteError),
                                     .extraInfo = path.value(),
                                 }
                             );

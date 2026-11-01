@@ -1,9 +1,9 @@
 #include <backend/file_tracking/failure_reason.hpp>
 #include <backend/sftp/local_file_problem.hpp>
+#include <utility/algorithm/case_convert.hpp>
 #include <utility/error_message.hpp>
 
 #include <boost/describe/enum_to_string.hpp>
-#include <libssh/sftp.h>
 
 #include <map>
 #include <optional>
@@ -13,15 +13,12 @@ namespace FileTracking
 {
     namespace
     {
+        using RemoteIo::RemoteErrorKind;
+        using RemoteIo::WrapperErrors;
         using SharedData::LocalFileProblem;
         using SharedData::OperationCompletionReason;
         using SharedData::OperationErrorType;
         using SharedData::UploadFailureReason;
-
-        /** @brief SSH_FX_NO_SPACE_ON_FILESYSTEM of SFTP version 5, which libssh does not define. */
-        constexpr int noSpaceOnFilesystem = 14;
-        /** @brief SSH_FX_QUOTA_EXCEEDED of SFTP version 5, which libssh does not define. */
-        constexpr int quotaExceeded = 15;
 
         std::optional<std::string> unlessEmpty(std::string const& text)
         {
@@ -53,21 +50,23 @@ namespace FileTracking
         }
 
         /**
-         * @brief The reason of an SFTP status code the server answered with, nothing for none.
+         * @brief The reason of what went wrong on the remote side, nothing when it does not tell.
          */
-        std::optional<UploadFailureReason> serverReasonOf(int sftpCode)
+        std::optional<UploadFailureReason> remoteReasonOf(RemoteErrorKind kind)
         {
-            switch (sftpCode)
+            switch (kind)
             {
-                case SSH_FX_OK:
+                case RemoteErrorKind::None:
                     return std::nullopt;
-                case SSH_FX_PERMISSION_DENIED:
+                case RemoteErrorKind::PermissionDenied:
                     return UploadFailureReason::PermissionDeniedOnServer;
-                case noSpaceOnFilesystem:
-                case quotaExceeded:
+                case RemoteErrorKind::NoSpace:
+                case RemoteErrorKind::QuotaExceeded:
                     return UploadFailureReason::NoSpaceOnServer;
-                case SSH_FX_NO_CONNECTION:
-                case SSH_FX_CONNECTION_LOST:
+                case RemoteErrorKind::NoConnection:
+                case RemoteErrorKind::ConnectionLost:
+                case RemoteErrorKind::ConnectionLimit:
+                case RemoteErrorKind::TimedOut:
                     return UploadFailureReason::ConnectionProblem;
                 default:
                     return UploadFailureReason::ServerRefused;
@@ -75,44 +74,52 @@ namespace FileTracking
         }
 
         /**
-         * @brief Why an SFTP call failed that did not get an answer from the server, nothing when it got one.
+         * @brief Why a remote call failed that never reached the server, nothing when it did.
          */
-        std::optional<UploadFailureReason> unansweredReasonOf(SecureShell::SftpError const& error)
+        std::optional<UploadFailureReason> unsentReasonOf(WrapperErrors wrapperError)
         {
-            switch (error.wrapperError)
+            switch (wrapperError)
             {
-                case SecureShell::WrapperErrors::OwnerNull:
-                case SecureShell::WrapperErrors::SharedPtrDestroyed:
+                case WrapperErrors::OwnerNull:
+                case WrapperErrors::SharedPtrDestroyed:
                     return UploadFailureReason::ConnectionProblem;
-                case SecureShell::WrapperErrors::LocalIoFailure:
+                case WrapperErrors::LocalIoFailure:
                     return UploadFailureReason::UnreadableLocally;
-                case SecureShell::WrapperErrors::InvalidPath:
+                case WrapperErrors::InvalidPath:
                     return UploadFailureReason::Unknown;
                 default:
-                    break;
+                    return std::nullopt;
             }
-            if (error.sftpError == SSH_FX_OK && error.sshError != 0)
-                return UploadFailureReason::ConnectionProblem;
-            return std::nullopt;
         }
 
         /**
-         * @brief The text an error has besides its type: what the code that raised it added, else the SFTP message.
+         * @brief The kind as a sentence, "No such file".
+         */
+        std::string kindInWords(RemoteErrorKind kind)
+        {
+            auto words = RemoteIo::toString(kind);
+            if (!words.empty())
+                words.front() = Utility::Algorithm::asciiToUpper(words.front());
+            return words;
+        }
+
+        /**
+         * @brief The text an error has besides its type: what the code that raised it added, else the remote message.
          */
         std::optional<std::string> textOf(SharedData::OperationError const& error)
         {
             if (error.extraInfo && !error.extraInfo->empty())
                 return error.extraInfo;
-            if (error.sftpError)
-                return unlessEmpty(error.sftpError->message);
+            if (error.remoteError)
+                return unlessEmpty(error.remoteError->message);
             return std::nullopt;
         }
 
-        std::optional<std::string> serverTextOf(SecureShell::SftpError const& error)
+        std::optional<std::string> remoteTextOf(RemoteIo::RemoteError const& error)
         {
             if (!error.message.empty())
                 return error.message;
-            return SecureShell::SftpError::sftpErrorToComprehensible(error.sftpError);
+            return kindInWords(error.kind);
         }
 
         /**
@@ -132,12 +139,12 @@ namespace FileTracking
             return {.reason = localReasonOf(*error.localProblem), .detail = textOf(error)};
         if (isConnectionLoss(error.type))
             return {.reason = UploadFailureReason::ConnectionProblem, .detail = textOf(error)};
-        if (error.sftpError)
+        if (error.remoteError)
         {
-            if (const auto unanswered = unansweredReasonOf(*error.sftpError))
-                return {.reason = *unanswered, .detail = textOf(error)};
-            if (const auto answered = serverReasonOf(error.sftpError->sftpError))
-                return {.reason = *answered, .detail = serverTextOf(*error.sftpError)};
+            if (const auto unsent = unsentReasonOf(error.remoteError->wrapperError))
+                return {.reason = *unsent, .detail = textOf(error)};
+            if (const auto remote = remoteReasonOf(error.remoteError->kind))
+                return {.reason = *remote, .detail = remoteTextOf(*error.remoteError)};
         }
         return {.reason = UploadFailureReason::Unknown, .detail = error.toString()};
     }
@@ -148,13 +155,10 @@ namespace FileTracking
             return {.reason = localReasonOf(*failure.localProblem)};
         if (isConnectionLoss(failure.type))
             return {.reason = UploadFailureReason::ConnectionProblem};
-        if (failure.sftpErrorCode)
+        if (failure.remoteErrorKind)
         {
-            if (const auto answered = serverReasonOf(*failure.sftpErrorCode))
-                return {
-                    .reason = *answered,
-                    .detail = SecureShell::SftpError::sftpErrorToComprehensible(*failure.sftpErrorCode),
-                };
+            if (const auto remote = remoteReasonOf(*failure.remoteErrorKind))
+                return {.reason = *remote, .detail = kindInWords(*failure.remoteErrorKind)};
         }
         return {
             .reason = UploadFailureReason::Unknown,

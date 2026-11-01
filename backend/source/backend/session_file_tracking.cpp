@@ -12,11 +12,11 @@
 #include <shared_data/file_operations/operation_mode.hpp>
 #include <shared_data/file_tracking/watch_conflict.hpp>
 #include <log/log.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <utility/visit_overloaded.hpp>
 
 #include <boost/asio/post.hpp>
 #include <fmt/format.h>
-#include <libssh/sftp.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -662,7 +662,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                 const auto result = future.get();
                 if (!result)
                 {
-                    if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
+                    if (SecureShell::toRemoteError(result.error()).kind == RemoteIo::RemoteErrorKind::NoSuchFile)
                         return std::nullopt;
                     return std::unexpected{result.error().toString()};
                 }

@@ -13,6 +13,7 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/sync_execution.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <tar_archive/compression.hpp>
 
 #include <nui/utility/scope_exit.hpp>
@@ -645,12 +646,7 @@ void Session::registerRpcSftpListDirectory()
                         const auto result = fut.get();
                         if (!result.has_value())
                         {
-                            const auto& error = result.error();
-                            if (!error.message.empty())
-                                return reply.error(error.message);
-                            if (error.sftpError != SSH_FX_OK)
-                                return reply.error(SecureShell::SftpError::sftpErrorToComprehensible(error.sftpError));
-                            return reply.error("");
+                            return reply.error(SecureShell::toRemoteError(result.error()).message);
                         }
 
                         Log::info("Listed directory '{}', got {} entries", path, result->size());
@@ -1699,7 +1695,8 @@ void Session::registerRpcSftpRename()
                         const auto result = fut.get();
                         if (!result.has_value())
                         {
-                            if (result.error().sftpError == SSH_FX_FILE_ALREADY_EXISTS)
+                            if (SecureShell::toRemoteError(result.error()).kind ==
+                                RemoteIo::RemoteErrorKind::AlreadyExists)
                                 return reply.error("backend.rename.targetExists");
                             return reply.error("Failed to rename file: " + result.error().toString());
                         }
@@ -1917,7 +1914,8 @@ void Session::registerRpcSftpStat()
                         const auto result = fut.get();
                         if (!result.has_value())
                         {
-                            if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
+                            if (SecureShell::toRemoteError(result.error()).kind ==
+                                RemoteIo::RemoteErrorKind::NoSuchFile)
                             {
                                 // File does not exist, return nullopt
                                 return reply({{"success", true}, {"stat", nullptr}});

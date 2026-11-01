@@ -53,7 +53,7 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
             if (!result.has_value())
                 return enterErrorState<WorkStatus>({
                     .type = ErrorType::RenameFailure,
-                    .sftpError = result.error(),
+                    .remoteError = SecureShell::toRemoteError(result.error()),
                     .extraInfo = sourcePath_.value(),
                 });
 

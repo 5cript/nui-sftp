@@ -8,7 +8,8 @@ namespace SecureShell
     /**
      * @brief The protocol neutral form of an SFTP error.
      *
-     * The SFTP status becomes the protocol code. Without one, an SSH error code makes it an SSH error.
+     * The SFTP status becomes the protocol code, and its name the message when the error has none. Without a status, an
+     * SSH error code makes it an SSH error.
      *
      * @param error The error of an SFTP session or one of its files.
      */

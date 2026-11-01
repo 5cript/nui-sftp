@@ -90,12 +90,12 @@ BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp
         const auto stat = sftp.lstatInStrand(*parent);
         if (stat)
             break;
-        if (stat.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        if (SecureShell::toRemoteError(stat.error()).kind != RemoteIo::RemoteErrorKind::NoSuchFile)
         {
             return std::unexpected(
                 Error{
                     .type = ErrorType::SftpError,
-                    .sftpError = stat.error(),
+                    .remoteError = SecureShell::toRemoteError(stat.error()),
                     .extraInfo = fmt::format("Inspecting remote directory: {}", parent->value())
                 }
             );
@@ -128,7 +128,7 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemot
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = result.error(),
+                .remoteError = SecureShell::toRemoteError(result.error()),
                 .extraInfo = fmt::format("Creating remote directory: {}", path.value())
             }
         );
@@ -162,9 +162,11 @@ bool BulkUploadOperation::isSkippableError(Error const& error) const
 {
     // Local read problems (no sftp error attached) and missing or unwritable remote targets do
     // not compromise the rest of the bulk.
-    return !error.sftpError ||
-        (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
-            error.sftpError->sftpError == SSH_FX_FAILURE);
+    using RemoteIo::RemoteErrorKind;
+    return !error.remoteError ||
+        (error.remoteError->kind == RemoteErrorKind::NoSuchFile ||
+            error.remoteError->kind == RemoteErrorKind::PermissionDenied ||
+            error.remoteError->kind == RemoteErrorKind::Failure);
 }
 
 std::filesystem::perms BulkUploadOperation::determinePerms(SharedData::DirectoryEntry const& entry) const

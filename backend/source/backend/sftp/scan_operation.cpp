@@ -75,17 +75,22 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
     {
         // A directory below the root that vanished or denies listing has unknown content, a sync tree
         // keeps it as unreadable instead of failing or treating it as empty.
-        const auto sftpError = result.error().sftpError;
-        const bool deniedOrVanished = sftpError == SSH_FX_PERMISSION_DENIED || sftpError == SSH_FX_NO_SUCH_FILE;
+        const auto kind = SecureShell::toRemoteError(result.error()).kind;
+        const bool deniedOrVanished =
+            kind == RemoteIo::RemoteErrorKind::PermissionDenied || kind == RemoteIo::RemoteErrorKind::NoSuchFile;
         if (buildTree_ && !relative.empty() && deniedOrVanished)
         {
             Log::warn("ScanOperation: Cannot list '{}': {}", path.value(), result.error().toString());
             return std::unexpected(
-                Error{.type = ErrorType::DirectoryUnreadable, .sftpError = result.error(), .extraInfo = path.value()}
+                Error{
+                    .type = ErrorType::DirectoryUnreadable,
+                    .remoteError = SecureShell::toRemoteError(result.error()),
+                    .extraInfo = path.value()
+                }
             );
         }
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-            {.type = ErrorType::SftpError, .sftpError = result.error()}
+            {.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(result.error())}
         );
     }
 

@@ -1,11 +1,11 @@
 #include <backend/existence_check.hpp>
 #include <backend/rpc_path_parameters.hpp>
 #include <shared_data/sync/case_fold.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <utility/error_message.hpp>
 #include <paths/paths.hpp>
 
 #include <fmt/format.h>
-#include <libssh/sftp.h>
 
 #include <filesystem>
 #include <optional>
@@ -51,7 +51,7 @@ namespace
         if (future.wait_for(timeout) != std::future_status::ready)
             return std::unexpected(fmt::format("'{}': stat timed out", path.value()));
         const auto result = future.get();
-        if (!result && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        if (!result && SecureShell::toRemoteError(result.error()).kind != RemoteIo::RemoteErrorKind::NoSuchFile)
             return std::unexpected(fmt::format("'{}': {}", path.value(), result.error().toString()));
         return result.has_value();
     }
@@ -69,9 +69,10 @@ namespace
         const auto result = future.get();
         if (!result)
         {
-            if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
+            const auto kind = SecureShell::toRemoteError(result.error()).kind;
+            if (kind == RemoteIo::RemoteErrorKind::NoSuchFile)
                 return std::unordered_set<std::string>{};
-            if (result.error().sftpError == SSH_FX_PERMISSION_DENIED)
+            if (kind == RemoteIo::RemoteErrorKind::PermissionDenied)
                 return std::nullopt;
             return std::unexpected(fmt::format("'{}': {}", parent.value(), result.error().toString()));
         }

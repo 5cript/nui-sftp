@@ -29,10 +29,10 @@ namespace SharedData
         OperationErrorType type{OperationErrorType::UnknownError};
         /** @brief Why the local file could not be read, for an error on the local side. */
         std::optional<LocalFileProblem> localProblem{};
-        /** @brief The server's SFTP status code, for an error the server answered with. */
-        std::optional<int> sftpErrorCode{};
+        /** @brief What went wrong on the remote side, for a remote error. */
+        std::optional<RemoteIo::RemoteErrorKind> remoteErrorKind{};
     };
-    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type, localProblem, sftpErrorCode))
+    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type, localProblem, remoteErrorKind))
 
     struct OperationCompleted
     {

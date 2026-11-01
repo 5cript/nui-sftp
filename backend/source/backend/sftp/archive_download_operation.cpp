@@ -99,7 +99,7 @@ namespace
     {
         return SharedData::OperationError{
             .type = SharedData::OperationErrorType::UnknownError,
-            .sftpError = std::nullopt,
+            .remoteError = std::nullopt,
             .extraInfo = tarError.toString(),
         };
     }
@@ -324,13 +324,15 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::prepareInStrand(
     if (buffer_.empty())
     {
         Log::error("ArchiveDownloadOperation: No transfer buffer available from pool.");
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = SecureShell::SftpError{
-                .message = "No buffer available from pool",
-                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
-            },
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .remoteError = RemoteIo::RemoteError{
+                    .message = "No buffer available from pool",
+                    .wrapperError = RemoteIo::WrapperErrors::BufferUnavailable,
+                },
+            }
+        );
     }
     return {};
 }
@@ -364,7 +366,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
                 return std::unexpected(
                     Error{
                         .type = ErrorType::FileStatFailed,
-                        .sftpError = current.error(),
+                        .remoteError = SecureShell::toRemoteError(current.error()),
                         .extraInfo = root.path.value(),
                     }
                 );
@@ -504,13 +506,13 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
             resolved.source.value(),
             streamOpenResult.error().message
         );
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = streamOpenResult.error(),
-            .extraInfo = fmt::format(
-                "Opening remote file: {}", resolved.source.value()
-            ),
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .remoteError = SecureShell::toRemoteError(streamOpenResult.error()),
+                .extraInfo = fmt::format("Opening remote file: {}", resolved.source.value()),
+            }
+        );
     }
     currentStream_ = streamOpenResult.value();
 
@@ -564,13 +566,13 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
             resolved.source.value(),
             readResult.error().message
         );
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = readResult.error(),
-            .extraInfo = fmt::format(
-                "Reading remote file: {}", resolved.source.value()
-            ),
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .remoteError = SecureShell::toRemoteError(readResult.error()),
+                .extraInfo = fmt::format("Reading remote file: {}", resolved.source.value()),
+            }
+        );
     }
     const auto bytesRead = readResult.value();
     if (bytesRead == 0)

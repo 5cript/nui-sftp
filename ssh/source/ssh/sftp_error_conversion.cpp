@@ -3,6 +3,8 @@
 #include <libssh/libssh.h>
 #include <libssh/sftp.h>
 
+#include <string>
+
 namespace SecureShell
 {
     namespace
@@ -54,6 +56,13 @@ namespace SecureShell
                 return RemoteErrorKind::PermissionDenied;
             return RemoteErrorKind::ConnectionLost;
         }
+
+        std::string messageOfSftpStatus(SftpError const& error)
+        {
+            if (!error.message.empty() || error.sftpError == SSH_FX_OK)
+                return error.message;
+            return SftpError::sftpErrorToComprehensible(error.sftpError);
+        }
     }
 
     RemoteIo::RemoteError toRemoteError(SftpError const& error)
@@ -72,7 +81,7 @@ namespace SecureShell
             .kind = kindOfSftpStatus(error.sftpError),
             .protocol = RemoteIo::Protocol::Sftp,
             .protocolCode = error.sftpError,
-            .message = error.message,
+            .message = messageOfSftpStatus(error),
             .wrapperError = error.wrapperError,
         };
     }

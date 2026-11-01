@@ -12,21 +12,21 @@ namespace
 {
     /**
      * @brief The skipped entry at @p index with why @p error says it was skipped: the local problem of a local
-     *        failure, the server's status code of one the server answered with.
+     *        failure, the kind of a remote one.
      */
     SharedData::IndexedFailure indexedFailureOf(std::size_t index, Operation::Error const& error)
     {
-        const auto serverCode = [&error]() -> std::optional<int>
+        const auto remoteKind = [&error]() -> std::optional<RemoteIo::RemoteErrorKind>
         {
-            if (!error.sftpError || error.sftpError->sftpError == SSH_FX_OK)
+            if (!error.remoteError || error.remoteError->kind == RemoteIo::RemoteErrorKind::None)
                 return std::nullopt;
-            return error.sftpError->sftpError;
+            return error.remoteError->kind;
         }();
         return SharedData::IndexedFailure{
             .index = static_cast<std::uint32_t>(index),
             .type = error.type,
             .localProblem = error.localProblem,
-            .sftpErrorCode = serverCode,
+            .remoteErrorKind = remoteKind,
         };
     }
 }
@@ -499,8 +499,8 @@ void BulkTransferOperation::emitProgress(bool force)
 
 bool BulkTransferOperation::isBufferShortage(Error const& error) noexcept
 {
-    return error.sftpError.has_value() &&
-        error.sftpError->wrapperError == SecureShell::WrapperErrors::BufferUnavailable;
+    return error.remoteError.has_value() &&
+        error.remoteError->wrapperError == RemoteIo::WrapperErrors::BufferUnavailable;
 }
 
 std::int64_t BulkTransferOperation::updateBulkBytesPerSecond(std::uint64_t bytesNow)
