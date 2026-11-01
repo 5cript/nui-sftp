@@ -348,11 +348,14 @@ namespace SecureShell::Test
         stream->close();
     }
 
-    TEST_F(SftpFileSystemTests, LinkIntoPlaceIsUnsupportedWithoutHardlinks)
+    TEST_F(SftpFileSystemTests, LinkIntoPlaceWithoutHardlinksIsUnsupportedOnlyForAFreeDestination)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
         ASSERT_TRUE(
             serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}})
+        );
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}})
         );
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
 
@@ -364,7 +367,16 @@ namespace SecureShell::Test
         );
         ASSERT_FALSE(linked.has_value());
         EXPECT_EQ(linked.error().kind, RemoteIo::RemoteErrorKind::Unsupported);
+        const auto refused = runInStrand(
+            *sftp,
+            RemoteIo::LinkIntoPlace{
+                .source = remote("/home/test/source.txt"), .destination = remote("/home/test/target.txt")
+            }
+        );
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::AlreadyExists);
         EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
         EXPECT_FALSE(remoteExists(*sftp, "/home/test/moved.txt"));
     }
 

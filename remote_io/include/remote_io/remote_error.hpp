@@ -168,4 +168,20 @@ namespace RemoteIo
             );
         }
     };
+
+    inline bool isMissing(RemoteError const& error)
+    {
+        return error.kind == RemoteErrorKind::NoSuchFile;
+    }
+
+    /**
+     * @brief The error for a destination found to exist, which no server reported.
+     */
+    inline RemoteError alreadyExistsError(std::string_view path)
+    {
+        return RemoteError{
+            .kind = RemoteErrorKind::AlreadyExists,
+            .message = fmt::format("'{}' already exists", path),
+        };
+    }
 }

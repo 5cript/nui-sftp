@@ -38,6 +38,8 @@ namespace RemoteIo
     struct Capabilities
     {
         bool symlinks{false};
+        /** @brief LinkIntoPlace can move a file through a hard link. */
+        bool hardLinks{false};
         bool setModificationTime{false};
         /** @brief Opening with OpenMode::Exclusive fails when the file exists. */
         bool exclusiveCreate{false};

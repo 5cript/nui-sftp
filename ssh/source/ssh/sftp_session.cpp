@@ -2,10 +2,9 @@
 #include <ssh/session.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/sftp_error_conversion.hpp>
-#include <paths/relative_path.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <chrono>
 #include <memory>
@@ -17,15 +16,11 @@ namespace SecureShell
 {
     namespace
     {
-        bool isMissing(RemoteIo::RemoteError const& error)
-        {
-            return error.kind == RemoteIo::RemoteErrorKind::NoSuchFile;
-        }
-
         RemoteIo::Capabilities capabilitiesOf(sftp_session session)
         {
             return RemoteIo::Capabilities{
                 .symlinks = true,
+                .hardLinks = sftp_extension_supported(session, "hardlink@openssh.com", "1") == 1,
                 .setModificationTime = true,
                 .exclusiveCreate = true,
                 .appendWrite = true,
@@ -589,52 +584,15 @@ namespace SecureShell
         std::optional<SharedData::FileType> sourceType
     )
     {
-        assert(strand_->withinProcessingThread());
-        const auto type = sourceType.has_value()
-            ? std::expected<SharedData::FileType, Error>{*sourceType}
-            : lstatInStrand(source).transform(
-                  [](FileInformation const& information)
-                  {
-                      return information.type;
-                  }
-              );
-        if (!type.has_value())
-            return std::unexpected(type.error());
-
-        if (*type == SharedData::FileType::Regular && supportsExtensionInStrand("hardlink@openssh.com"))
-            return hardlinkIntoPlaceInStrand(source, destination);
-
-        // libssh sends posix-rename@openssh.com when the server offers it, which replaces, while a plain SFTP v3
-        // rename refuses an existing destination.
-        if (!supportsExtensionInStrand("posix-rename@openssh.com"))
-        {
-            const auto renamed = renameInStrand(source, destination);
-            if (!renamed.has_value() && lstatInStrand(destination).has_value())
-                return std::unexpected(alreadyExists(destination));
-            return renamed;
-        }
-
-        // Leaves a window between the check and the rename.
-        if (lstatInStrand(destination).has_value())
-            return std::unexpected(alreadyExists(destination));
-        return renameInStrand(source, destination);
+        return RemoteIo::renameNoReplaceInStrand(*this, source, destination, sourceType);
     }
 
     RemoteIo::OperationResult<RemoteIo::LinkIntoPlace> SftpSession::run(RemoteIo::LinkIntoPlace const& operation)
     {
         auto const& source = operation.source;
         auto const& destination = operation.destination;
-        if (!supportsExtensionInStrand("hardlink@openssh.com"))
-        {
-            return std::unexpected(toRemoteError(
-                SftpError{
-                    .message = "The server has no hardlink@openssh.com",
-                    .sftpError = SSH_FX_OP_UNSUPPORTED,
-                }
-            ));
-        }
-
-        if (sftp_hardlink(session_.get(), source.c_str(), destination.c_str()) == SSH_OK)
+        const auto linksSupported = supportsExtensionInStrand("hardlink@openssh.com");
+        if (linksSupported && sftp_hardlink(session_.get(), source.c_str(), destination.c_str()) == SSH_OK)
         {
             if (auto removed = run(RemoteIo::RemoveFile{.path = source}); !removed.has_value())
             {
@@ -649,27 +607,23 @@ namespace SecureShell
             return {};
         }
 
-        auto linkError = lastError();
+        auto linkError = linksSupported ? lastError()
+                                        : toRemoteError(
+                                              SftpError{
+                                                  .message = "The server has no hardlink@openssh.com",
+                                                  .sftpError = SSH_FX_OP_UNSUPPORTED,
+                                              }
+                                          );
         const auto existing = run(RemoteIo::Lstat{.path = destination});
         if (existing.has_value())
-            return std::unexpected(alreadyExists(destination));
+            return std::unexpected(RemoteIo::alreadyExistsError(destination.value()));
         // Filesystems without hard links, and Linux protected_hardlinks, refuse the link.
-        if (isMissing(existing.error()))
+        if (RemoteIo::isMissing(existing.error()))
             linkError.kind = RemoteIo::RemoteErrorKind::Unsupported;
         // Unsupported promises a free destination, which the failed lstat could not confirm.
         else if (linkError.kind == RemoteIo::RemoteErrorKind::Unsupported)
             return std::unexpected(existing.error());
         return std::unexpected(std::move(linkError));
-    }
-
-    std::expected<void, SftpSession::Error>
-    SftpSession::hardlinkIntoPlaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination)
-    {
-        auto linked = runInStrand(RemoteIo::LinkIntoPlace{.source = source, .destination = destination});
-        if (linked.has_value() || linked.error().kind != RemoteIo::RemoteErrorKind::Unsupported)
-            return linked;
-        Log::debug("SftpSession: Cannot link '{}': {}, renaming instead.", source.value(), linked.error().toString());
-        return renameInStrand(source, destination);
     }
 
     std::expected<void, SftpSession::Error> SftpSession::renameReplaceInStrand(
@@ -678,76 +632,7 @@ namespace SecureShell
         std::string_view asideSuffix
     )
     {
-        assert(strand_->withinProcessingThread());
-        if (supportsExtensionInStrand("posix-rename@openssh.com"))
-            return renameInStrand(source, destination);
-
-        // Plain SFTP rename refuses an existing destination, so it is moved aside instead of deleted first.
-        const auto aside = destination.withFilenameSuffix(asideSuffix);
-        if (!aside)
-        {
-            return std::unexpected(toRemoteError(
-                SftpError{
-                    .message = fmt::format("Invalid suffix '{}' for '{}'", asideSuffix, destination.value()),
-                    .wrapperError = WrapperErrors::InvalidPath,
-                }
-            ));
-        }
-
-        const auto destinationInfo = lstatInStrand(destination);
-        if (!destinationInfo.has_value())
-        {
-            if (!isMissing(destinationInfo.error()) || !lstatInStrand(*aside).has_value())
-                return renameInStrand(source, destination);
-            // A destination that only exists aside, from a rollback that failed, is put back first.
-            if (auto restored = renameInStrand(*aside, destination); !restored.has_value())
-                return restored;
-        }
-        else if (destinationInfo->isDirectory())
-        {
-            return std::unexpected(toRemoteError(
-                SftpError{
-                    .message = fmt::format("'{}' is a directory", destination.value()),
-                    .sftpError = SSH_FX_FAILURE,
-                }
-            ));
-        }
-
-        if (auto movedAside = moveAsideInStrand(destination, *aside); !movedAside.has_value())
-            return movedAside;
-        if (auto renamed = renameInStrand(source, destination); !renamed.has_value())
-        {
-            if (auto restored = renameInStrand(*aside, destination); !restored.has_value())
-            {
-                Log::error(
-                    "SftpSession: Could not restore '{}' from '{}': {}",
-                    destination.value(),
-                    aside->value(),
-                    restored.error().toString()
-                );
-                auto error = renamed.error();
-                error.message =
-                    fmt::format("{}. The previous '{}' is kept as '{}'", error.message, destination.value(), aside->value());
-                return std::unexpected(std::move(error));
-            }
-            return renamed;
-        }
-        if (auto removed = removeFileInStrand(*aside); !removed.has_value())
-            Log::warn("SftpSession: Could not remove '{}': {}", aside->value(), removed.error().toString());
-        return {};
-    }
-
-    std::expected<void, SftpSession::Error>
-    SftpSession::moveAsideInStrand(Paths::RemotePath const& destination, Paths::RemotePath const& aside)
-    {
-        const auto movedAside = renameInStrand(destination, aside);
-        if (movedAside.has_value() || !lstatInStrand(aside).has_value())
-            return movedAside;
-
-        // A leftover of an earlier replace holds the name.
-        if (auto removed = removeFileInStrand(aside); !removed.has_value())
-            return removed;
-        return renameInStrand(destination, aside);
+        return RemoteIo::renameReplaceInStrand(*this, source, destination, asideSuffix);
     }
 
     std::expected<void, SftpSession::Error> SftpSession::moveIntoPlaceInStrand(
@@ -758,19 +643,7 @@ namespace SecureShell
         std::optional<SharedData::FileType> sourceType
     )
     {
-        if (replace)
-            return renameReplaceInStrand(source, destination, asideSuffix);
-        return renameNoReplaceInStrand(source, destination, sourceType);
-    }
-
-    SftpSession::Error SftpSession::alreadyExists(Paths::RemotePath const& destination)
-    {
-        return toRemoteError(
-            SftpError{
-                .message = fmt::format("'{}' already exists", destination.value()),
-                .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
-            }
-        );
+        return RemoteIo::moveIntoPlaceInStrand(*this, source, destination, replace, asideSuffix, sourceType);
     }
 
     std::future<std::expected<void, SftpSession::Error>>
@@ -902,53 +775,10 @@ namespace SecureShell
         return later(RemoteIo::HomeDirectory{});
     }
 
-    std::expected<std::string, SftpSession::Error>
-    SftpSession::readSmallFileInStrand(Paths::RemotePath const& path, std::size_t maximumSize)
-    {
-        if (auto valid = requireSetInStrand(path); !valid)
-            return std::unexpected(valid.error());
-        const std::unique_ptr<sftp_file_struct, decltype(&sftp_close)> file{
-            sftp_open(session_.get(), path.c_str(), O_RDONLY, 0), sftp_close
-        };
-        if (file == nullptr)
-            return std::unexpected(lastError());
-
-        std::string content;
-        std::array<char, 4096> buffer{};
-        while (content.size() < maximumSize)
-        {
-            const auto bytesRead =
-                sftp_read(file.get(), buffer.data(), std::min(buffer.size(), maximumSize - content.size()));
-            if (bytesRead < 0)
-                return std::unexpected(lastError());
-            if (bytesRead == 0)
-                break;
-            content.append(buffer.data(), static_cast<std::size_t>(bytesRead));
-        }
-        return content;
-    }
-
     std::expected<std::vector<Utility::UserDirectory>, SftpSession::Error>
     SftpSession::userDirectoriesInStrand(Paths::RemotePath const& home)
     {
-        constexpr std::size_t maximumFileSize = 64u * 1024u;
-        if (auto valid = requireSetInStrand(home); !valid)
-            return std::unexpected(valid.error());
-        return readSmallFileInStrand(home / *Paths::RelativePath::make(".config/user-dirs.dirs"), maximumFileSize)
-            .transform(
-                [&home](std::string const& content)
-                {
-                    return Utility::parseUserDirectories(content, home.value());
-                }
-            )
-            .or_else(
-                [](Error const& error) -> std::expected<std::vector<Utility::UserDirectory>, Error>
-                {
-                    if (isMissing(error))
-                        return std::vector<Utility::UserDirectory>{};
-                    return std::unexpected(error);
-                }
-            );
+        return RemoteIo::userDirectoriesInStrand(*this, home);
     }
 
     std::future<std::expected<std::vector<Utility::UserDirectory>, SftpSession::Error>>
@@ -1103,7 +933,7 @@ namespace SecureShell
             if (attributes == nullptr)
             {
                 auto last = lastError();
-                if (isMissing(last))
+                if (RemoteIo::isMissing(last))
                 {
                     return DeepLinkResult{
                         .linkContent = linkContent.value_or(""),
