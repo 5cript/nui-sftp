@@ -65,6 +65,9 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         "${addressSanitizerEnvironment}"
         -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined
     )
+    # Only remote_io is instrumented. gtest and the other libraries change libc++ vectors without updating their ASan
+    # annotations, which then report false overflows (gtest's test registration on macOS).
+    target_compile_definitions(remote-io-asan PUBLIC __SANITIZER_DISABLE_CONTAINER_OVERFLOW__)
 endif()
 
 # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
