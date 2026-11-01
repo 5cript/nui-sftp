@@ -103,13 +103,16 @@ namespace RemoteIo
     };
     BOOST_DESCRIBE_STRUCT(Lstat, (), (path))
 
-    struct CreateDirectory
+    /**
+     * @brief Creates a directory, fails when the path exists already.
+     */
+    struct CreateNewDirectory
     {
         using Result = void;
         Paths::RemotePath path;
         std::filesystem::perms permissions{std::filesystem::perms::owner_all};
     };
-    BOOST_DESCRIBE_STRUCT(CreateDirectory, (), (path, permissions))
+    BOOST_DESCRIBE_STRUCT(CreateNewDirectory, (), (path, permissions))
 
     /**
      * @brief Creates a directory unless a directory exists at the path already.
@@ -125,13 +128,13 @@ namespace RemoteIo
     /**
      * @brief Creates an empty file unless one exists at the path already.
      */
-    struct CreateFile
+    struct CreateEmptyFile
     {
         using Result = void;
         Paths::RemotePath path;
         std::filesystem::perms permissions{std::filesystem::perms::owner_read | std::filesystem::perms::owner_write};
     };
-    BOOST_DESCRIBE_STRUCT(CreateFile, (), (path, permissions))
+    BOOST_DESCRIBE_STRUCT(CreateEmptyFile, (), (path, permissions))
 
     struct RemoveFile
     {
@@ -143,12 +146,12 @@ namespace RemoteIo
     /**
      * @brief Removes an empty directory.
      */
-    struct RemoveDirectory
+    struct RemoveEmptyDirectory
     {
         using Result = void;
         Paths::RemotePath path;
     };
-    BOOST_DESCRIBE_STRUCT(RemoveDirectory, (), (path))
+    BOOST_DESCRIBE_STRUCT(RemoveEmptyDirectory, (), (path))
 
     /**
      * @brief Removes each path without recursing: a directory only when it is empty, anything else is unlinked. Stops
@@ -304,11 +307,11 @@ namespace RemoteIo
         ListDirectory,
         Stat,
         Lstat,
-        CreateDirectory,
+        CreateNewDirectory,
         CreateDirectoryIfItDoesntExist,
-        CreateFile,
+        CreateEmptyFile,
         RemoveFile,
-        RemoveDirectory,
+        RemoveEmptyDirectory,
         RemoveAll,
         FilterOutEmptyDirectories,
         Rename,
