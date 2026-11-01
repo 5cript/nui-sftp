@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -330,8 +329,8 @@ namespace RemoteIo
     using OperationResult = std::expected<typename OperationT::Result, RemoteError>;
 
     /**
-     * @brief Completes an operation exactly once: with its result, or with the unfinished result when it is destroyed
-     *        before, because the operation never started or whoever ran it dropped it.
+     * @brief Completes an operation exactly once: with its first result, later ones are ignored, or with the unfinished
+     *        result when it is destroyed before, because the operation never started or whoever ran it dropped it.
      */
     template <typename OperationT>
     class Completion
@@ -354,8 +353,8 @@ namespace RemoteIo
 
         void operator()(OperationResult<OperationT> result)
         {
-            assert(complete_);
-            std::exchange(complete_, nullptr)(std::move(result));
+            if (complete_)
+                std::exchange(complete_, nullptr)(std::move(result));
         }
 
       private:

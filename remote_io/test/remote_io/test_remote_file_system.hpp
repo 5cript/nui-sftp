@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <functional>
@@ -198,6 +199,23 @@ namespace RemoteIo::Test
         EXPECT_EQ(capabilities.renameSemantics, RenameSemantics::Unknown);
         EXPECT_FALSE(capabilities.maxParallelTransfers.has_value());
         EXPECT_FALSE(capabilities.preferAsyncTransfers);
+    }
+
+    TEST(RemoteFileSystemTests, AnOperationKeepsItsFirstResult)
+    {
+        std::vector<std::uint64_t> sizes{};
+        {
+            Completion<Lstat> complete{
+                [&sizes](OperationResult<Lstat> result)
+                {
+                    sizes.push_back(result.has_value() ? result->size : 0u);
+                }
+            };
+            complete(FileInformation{.size = 3u});
+            complete(FileInformation{.size = 4u});
+        }
+
+        EXPECT_EQ(sizes, std::vector<std::uint64_t>{3u});
     }
 
     TEST(RemoteFileSystemTests, AnOperationInStrandReturnsWhatTheFileSystemAnswered)
