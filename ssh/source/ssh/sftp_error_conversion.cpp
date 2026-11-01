@@ -50,6 +50,16 @@ namespace SecureShell
             }
         }
 
+        /**
+         * @brief The kind of an SFTP error, a read that ended early is a truncated transfer.
+         */
+        RemoteErrorKind kindOfSftpError(SftpError const& error)
+        {
+            if (error.sftpError == SSH_FX_OK && error.wrapperError == WrapperErrors::UnexpectedEndOfFile)
+                return RemoteErrorKind::Truncated;
+            return kindOfSftpStatus(error.sftpError);
+        }
+
         RemoteErrorKind kindOfSshError(int code)
         {
             if (code == SSH_REQUEST_DENIED)
@@ -78,7 +88,7 @@ namespace SecureShell
             };
         }
         return RemoteIo::RemoteError{
-            .kind = kindOfSftpStatus(error.sftpError),
+            .kind = kindOfSftpError(error),
             .protocol = RemoteIo::Protocol::Sftp,
             .protocolCode = error.sftpError,
             .message = messageOfSftpStatus(error),

@@ -1317,6 +1317,7 @@ namespace SecureShell::Test
 
         EXPECT_EQ(read.context->outcome(), AsyncTransferContext::Outcome::Failed);
         ASSERT_TRUE(read.context->error().has_value());
+        EXPECT_EQ(read.context->error()->kind, RemoteIo::RemoteErrorKind::Truncated);
         EXPECT_EQ(read.context->error()->wrapperError, WrapperErrors::UnexpectedEndOfFile);
         EXPECT_EQ(read.received.load(), GatedRead::fileSize);
         EXPECT_TRUE(readsFileOne(*sftp));

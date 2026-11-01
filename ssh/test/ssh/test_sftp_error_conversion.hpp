@@ -63,6 +63,17 @@ namespace SecureShell::Test
         EXPECT_EQ(converted.wrapperError, WrapperErrors::BufferUnavailable);
     }
 
+    TEST(SftpErrorConversionTests, ReadThatEndedEarlyIsTruncated)
+    {
+        const auto converted = toRemoteError(
+            SftpError{.message = "The remote file ended early", .wrapperError = WrapperErrors::UnexpectedEndOfFile}
+        );
+
+        EXPECT_EQ(converted.kind, RemoteErrorKind::Truncated);
+        EXPECT_EQ(converted.protocol, Protocol::Sftp);
+        EXPECT_EQ(converted.wrapperError, WrapperErrors::UnexpectedEndOfFile);
+    }
+
     TEST(SftpErrorConversionTests, StatusWithoutMessageIsNamedInTheMessage)
     {
         EXPECT_EQ(toRemoteError(SftpError{.sftpError = SSH_FX_NO_SUCH_FILE}).message, "No such file");
