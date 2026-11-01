@@ -207,6 +207,28 @@ namespace SecureShell::Test
         EXPECT_TRUE(stillThere.has_value());
     }
 
+    TEST_F(SftpInStrandTests, ADroppedConnectionIsNotReportedAsTheLastAnswerOfTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("dropAfterBytes", {{"bytes", 0}}));
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+
+        auto read = runInStrand(sftp, [sftp = sftp]() -> std::expected<std::size_t, SftpError> {
+            // The server answers NO_SUCH_FILE, libssh keeps that status when the connection breaks later.
+            EXPECT_FALSE(sftp->lstatInStrand(remote("/home/test/missing.txt")).has_value());
+            const auto opened = sftp->openFileInStrand(
+                remote("/home/test/file1.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+            );
+            if (!opened)
+                return std::unexpected(opened.error());
+            char byte = 0;
+            return opened->lock()->readSomeInStrand(&byte, 1);
+        });
+        ASSERT_FALSE(read.has_value());
+        EXPECT_EQ(read.error().sftpError, SSH_FX_CONNECTION_LOST) << read.error().toString();
+        EXPECT_NE(read.error().sshError, SSH_NO_ERROR) << read.error().toString();
+    }
+
     TEST_F(SftpInStrandTests, CreateSymLinkInStrandHappyPath)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

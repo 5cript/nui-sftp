@@ -67,7 +67,8 @@ namespace SecureShell
         }
 
         /**
-         * @brief Retrieves the last error that occurred. May contain success.
+         * @brief Retrieves the last error that occurred. May contain success. A closed connection or channel is
+         *        SSH_FX_CONNECTION_LOST, whatever the server answered before.
          */
         SftpError lastError() const;
 
