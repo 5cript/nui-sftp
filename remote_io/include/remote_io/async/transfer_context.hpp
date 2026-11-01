@@ -1,20 +1,18 @@
 #pragma once
 
-#include <remote_io/async/processing_thread.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 
-namespace SecureShell
+namespace RemoteIo
 {
-    class FileStream;
-
-    class AsyncTransferContext : public std::enable_shared_from_this<AsyncTransferContext>
+    class AsyncTransferContext
     {
       public:
         using SignedSizeType = std::make_signed_t<std::size_t>;
@@ -30,23 +28,28 @@ namespace SecureShell
             Canceled,
         };
 
-        // may update bytesTransferred_
-        friend FileStream;
+        AsyncTransferContext() = default;
+        /**
+         * @brief A context that wakes the thread driving the transfer when it resumes, fails or is canceled.
+         * @param wake Wakes that thread.
+         */
+        explicit AsyncTransferContext(std::function<void()> wake);
 
         bool paused() const;
         /**
-         * @brief Pauses or resumes the transfer; resuming wakes the processing thread, which sleeps while
-         *        every transfer is paused.
+         * @brief Pauses or resumes the transfer. Resuming wakes the thread that drives it, which sleeps while every
+         *        transfer is paused.
          */
         void pause(bool doPause);
         /**
-         * @brief Ends the transfer as canceled unless it already ended.
+         * @brief Ends the transfer as canceled and wakes the thread that drives it, unless it already ended.
          */
         void cancel();
         /**
-         * @brief Ends the transfer as failed with the given error unless it already ended.
+         * @brief Ends the transfer as failed with the given error and wakes the thread that drives it, unless it
+         *        already ended.
          */
-        void fail(SftpError error);
+        void fail(RemoteError error);
         /**
          * @brief Ends the transfer as completed unless it already ended.
          */
@@ -58,7 +61,7 @@ namespace SecureShell
         /**
          * @brief The error a failed transfer ended with.
          */
-        std::optional<SftpError> error() const;
+        std::optional<RemoteError> error() const;
         void calculateBytesPerSecond();
 
         /**
@@ -67,39 +70,41 @@ namespace SecureShell
          */
         void observe(std::function<void()> observer);
 
+        /**
+         * @brief Tells the observer of progress unless it heard of some within progressInterval. Called by the
+         *        transfer after each turn, on the thread that drives it.
+         */
+        void reportProgress();
+
         /** @brief How often an observer hears of progress at most. */
         static constexpr auto progressInterval = std::chrono::milliseconds{100};
 
         /**
-         * @brief Add to the running bytes-transferred counter from outside the
-         *        async FileStream path (e.g. a sync read-loop driven by an
-         *        Operation that still wants the throughput-meter machinery).
-         *        Pair with periodic calls to @ref calculateBytesPerSecond.
+         * @brief Adds to the running bytes-transferred counter. Pair with periodic calls to
+         *        @ref calculateBytesPerSecond.
          */
         void addBytesTransferred(SignedSizeType delta);
 
       private:
-        void end(Outcome outcome);
-
         /**
-         * @brief Tells the observer of progress unless it heard of some within progressInterval. Called by the
-         *        transfer after each turn, on the processing thread.
+         * @brief Ends the transfer with @p outcome and keeps @p error, unless it already ended.
+         * @return Whether this call ended the transfer.
          */
-        void reportProgress();
+        bool end(Outcome outcome, std::optional<RemoteError> error = std::nullopt);
+        void wake() const;
 
       private:
-        /** @brief Set by FileStream before the transfer starts, never changed after. */
-        std::function<void()> wake_{};
+        const std::function<void()> wake_{};
         std::function<void()> observer_{};
         std::chrono::steady_clock::time_point lastProgressReport_{};
         std::atomic<Outcome> outcome_{Outcome::Running};
-        mutable std::mutex errorMutex_{};
-        std::optional<SftpError> error_{};
+        /** @brief Makes ending and keeping the error one step, so an end that lost a race keeps no error. */
+        mutable std::mutex endMutex_{};
+        std::optional<RemoteError> error_{};
         std::atomic_bool paused_{false};
         std::atomic<SignedSizeType> bytesTransferred_{0};
         std::atomic<SignedSizeType> lastBytesTransferred_{0};
         std::chrono::high_resolution_clock::time_point lastBpsCalculation_{std::chrono::high_resolution_clock::now()};
-        RemoteIo::ProcessingThread::PermanentTaskId permanentTaskId_{-1};
         std::atomic<SignedSizeType> bytesPerSecond_{0};
     };
 }

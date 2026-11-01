@@ -5,7 +5,7 @@
 #include <backend/sftp/scan_phase.hpp>
 #include <paths/local_path.hpp>
 #include <remote_io/async/buffer_provider.hpp>
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <tar_archive/archive.hpp>
@@ -232,7 +232,8 @@ class ArchiveDownloadOperation : public Operation
      *        archive download drives chunks via readSomeInStrand rather than
      *        the FileStream async path that normally owns this context.
      */
-    std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
-        std::make_shared<SecureShell::AsyncTransferContext>()};
+    std::shared_ptr<RemoteIo::AsyncTransferContext> throughputMeter_{
+        std::make_shared<RemoteIo::AsyncTransferContext>()
+    };
     std::unique_ptr<ScanPhase<ScanOperation>> scanPhase_{};
 };

@@ -226,7 +226,7 @@ class DownloadOperation : public Operation
     std::filesystem::path tempNativePath_{};
     std::ofstream localFile_;
     RemoteIo::BufferLease buffer_;
-    std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
+    std::shared_ptr<RemoteIo::AsyncTransferContext> asyncTransferContext_;
     /** @brief Bytes already present in an adopted partial file. */
     std::uint64_t resumeOffset_{0u};
     /** @brief Bytes of the content in the temp file so far, an adopted partial file included. */

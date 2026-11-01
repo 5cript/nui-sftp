@@ -1,12 +1,29 @@
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 
-namespace SecureShell
+namespace RemoteIo
 {
-    void AsyncTransferContext::end(Outcome outcome)
+    AsyncTransferContext::AsyncTransferContext(std::function<void()> wake)
+        : wake_{std::move(wake)}
+    {}
+
+    bool AsyncTransferContext::end(Outcome outcome, std::optional<RemoteError> error)
     {
-        auto expected = Outcome::Running;
-        if (outcome_.compare_exchange_strong(expected, outcome) && observer_)
+        {
+            std::scoped_lock lock{endMutex_};
+            auto expected = Outcome::Running;
+            if (!outcome_.compare_exchange_strong(expected, outcome))
+                return false;
+            error_ = std::move(error);
+        }
+        if (observer_)
             observer_();
+        return true;
+    }
+
+    void AsyncTransferContext::wake() const
+    {
+        if (wake_)
+            wake_();
     }
 
     void AsyncTransferContext::observe(std::function<void()> observer)
@@ -27,18 +44,14 @@ namespace SecureShell
 
     void AsyncTransferContext::cancel()
     {
-        end(Outcome::Canceled);
+        if (end(Outcome::Canceled))
+            wake();
     }
 
-    void AsyncTransferContext::fail(SftpError error)
+    void AsyncTransferContext::fail(RemoteError error)
     {
-        if (outcome_.load() == Outcome::Running)
-        {
-            std::scoped_lock lock{errorMutex_};
-            if (!error_)
-                error_ = std::move(error);
-        }
-        end(Outcome::Failed);
+        if (end(Outcome::Failed, std::move(error)))
+            wake();
     }
 
     void AsyncTransferContext::complete()
@@ -56,9 +69,9 @@ namespace SecureShell
         return outcome_.load();
     }
 
-    std::optional<SftpError> AsyncTransferContext::error() const
+    std::optional<RemoteError> AsyncTransferContext::error() const
     {
-        std::scoped_lock lock{errorMutex_};
+        std::scoped_lock lock{endMutex_};
         return error_;
     }
 
@@ -80,8 +93,8 @@ namespace SecureShell
     void AsyncTransferContext::pause(bool doPause)
     {
         paused_.store(doPause);
-        if (!doPause && wake_)
-            wake_();
+        if (!doPause)
+            wake();
     }
 
     void AsyncTransferContext::addBytesTransferred(SignedSizeType delta)

@@ -1,4 +1,5 @@
 #include <ssh/file_stream.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <ssh/sftp_session.hpp>
 #include <ssh/async/request_window.hpp>
 
@@ -817,21 +818,21 @@ namespace SecureShell
             }
         };
     }
-    std::shared_ptr<AsyncTransferContext> FileStream::makeTransferContext()
+    std::shared_ptr<RemoteIo::AsyncTransferContext> FileStream::makeTransferContext()
     {
-        auto context = std::make_shared<AsyncTransferContext>();
-        context->wake_ = [weakStream = weak_from_this()]()
-        {
-            if (auto stream = weakStream.lock(); stream)
+        return std::make_shared<RemoteIo::AsyncTransferContext>(
+            [weakStream = weak_from_this()]()
             {
-                if (auto sftp = stream->sftp_.lock(); sftp)
-                    sftp->strand_->wake();
+                if (auto stream = weakStream.lock(); stream)
+                {
+                    if (auto sftp = stream->sftp_.lock(); sftp)
+                        sftp->strand_->wake();
+                }
             }
-        };
-        return context;
+        );
     }
 
-    std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> FileStream::readAsyncInStrand(
+    std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> FileStream::readAsyncInStrand(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,
@@ -843,7 +844,7 @@ namespace SecureShell
         auto context = makeTransferContext();
         auto pipeline = std::make_shared<ReadPipeline>();
         watchInFlight(pipeline);
-        const auto [success, id] = strand()->pushPermanentTask(
+        const bool pushed = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
              bufferSize,
@@ -859,6 +860,16 @@ namespace SecureShell
                 {
                     pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
+                const auto failTransfer = [&](SftpError const& error)
+                {
+                    context->fail(toRemoteError(error));
+                    return TaskStatus::Done;
+                };
+                const auto failWith = [&](SftpError const& error)
+                {
+                    discardPipeline();
+                    return failTransfer(error);
+                };
 
                 if (context->hasEnded())
                 {
@@ -872,27 +883,12 @@ namespace SecureShell
                     return TaskStatus::Idle;
                 }
                 if (!stream)
-                {
-                    context->fail(expiredError("File stream"));
-                    return TaskStatus::Done;
-                }
-
+                    return failTransfer(expiredError("File stream"));
                 if (!sftp)
-                {
-                    discardPipeline();
-                    context->fail(expiredError("SFTP session"));
-                    return TaskStatus::Done;
-                }
+                    return failWith(expiredError("SFTP session"));
                 const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
                     return TaskStatus::Busy;
-
-                const auto failWith = [&](SftpError error)
-                {
-                    discardPipeline();
-                    context->fail(std::move(error));
-                    return TaskStatus::Done;
-                };
 
                 auto* const file = stream->file_.get();
                 if (file == nullptr || pipeline->fileClosed())
@@ -902,8 +898,7 @@ namespace SecureShell
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
                 const auto fillPipeline = [&]() -> std::expected<void, SftpError>
                 {
-                    const auto unrequested =
-                        totalFileSize - context->bytesTransferred_.load() - pipeline->inFlightBytes();
+                    const auto unrequested = totalFileSize - context->bytesTransferred() - pipeline->inFlightBytes();
                     return pipeline->fill(*sftp, file, unrequested, upperBound);
                 };
 
@@ -941,7 +936,7 @@ namespace SecureShell
                             .wrapperError = WrapperErrors::LocalIoFailure,
                         });
                     }
-                    context->bytesTransferred_ += received->received;
+                    context->addBytesTransferred(received->received);
                     turnBytes += received->received;
                     if (pipeline->fileClosed())
                         return failWith(closedError());
@@ -958,26 +953,25 @@ namespace SecureShell
 
                 context->calculateBytesPerSecond();
                 context->reportProgress();
-                if (context->bytesTransferred_.load() >= totalFileSize && pipeline->empty())
+                if (context->bytesTransferred() >= totalFileSize && pipeline->empty())
                 {
                     context->complete();
                     return TaskStatus::Done;
                 }
                 return TaskStatus::Busy;
             }
-        );
-        if (!success)
+        ).first;
+        if (!pushed)
             return std::unexpected(
                 SftpError{
                     .message = "Failed to push permanent task",
                     .wrapperError = WrapperErrors::TaskPushFailed,
                 }
             );
-        context->permanentTaskId_ = id;
         return context;
     }
 
-    std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> FileStream::readAsync(
+    std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> FileStream::readAsync(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,
@@ -992,7 +986,7 @@ namespace SecureShell
         );
     }
 
-    std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> FileStream::writeAsyncInStrand(
+    std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> FileStream::writeAsyncInStrand(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,
@@ -1004,7 +998,7 @@ namespace SecureShell
         auto context = makeTransferContext();
         auto pipeline = std::make_shared<WritePipeline>();
         watchInFlight(pipeline);
-        const auto [success, id] = strand()->pushPermanentTask(
+        const bool pushed = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
              bufferSize,
@@ -1020,6 +1014,16 @@ namespace SecureShell
                 {
                     pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
+                const auto failTransfer = [&](SftpError const& error)
+                {
+                    context->fail(toRemoteError(error));
+                    return TaskStatus::Done;
+                };
+                const auto failWith = [&](SftpError const& error)
+                {
+                    discardPipeline();
+                    return failTransfer(error);
+                };
 
                 if (context->hasEnded())
                 {
@@ -1033,26 +1037,12 @@ namespace SecureShell
                     return TaskStatus::Idle;
                 }
                 if (!stream)
-                {
-                    context->fail(expiredError("File stream"));
-                    return TaskStatus::Done;
-                }
+                    return failTransfer(expiredError("File stream"));
                 if (!sftp)
-                {
-                    discardPipeline();
-                    context->fail(expiredError("SFTP session"));
-                    return TaskStatus::Done;
-                }
+                    return failWith(expiredError("SFTP session"));
                 const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
                     return TaskStatus::Busy;
-
-                const auto failWith = [&](SftpError error)
-                {
-                    discardPipeline();
-                    context->fail(std::move(error));
-                    return TaskStatus::Done;
-                };
 
                 auto* const file = stream->file_.get();
                 if (file == nullptr || pipeline->fileClosed())
@@ -1062,7 +1052,7 @@ namespace SecureShell
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
                 const auto fillPipeline = [&]() -> std::expected<void, SftpError>
                 {
-                    const auto unsent = totalFileSize - context->bytesTransferred_.load() - pipeline->inFlightBytes();
+                    const auto unsent = totalFileSize - context->bytesTransferred() - pipeline->inFlightBytes();
                     return pipeline->fill(*sftp, file, unsent, upperBound, buffer, doRead);
                 };
 
@@ -1081,7 +1071,7 @@ namespace SecureShell
                     if (!written)
                         return failWith(written.error());
                     pipeline->window().recordCompleted(*written, std::chrono::steady_clock::now(), target);
-                    context->bytesTransferred_ += *written;
+                    context->addBytesTransferred(*written);
                     turnBytes += *written;
                     if (auto filled = fillPipeline(); !filled)
                         return failWith(std::move(filled).error());
@@ -1089,26 +1079,25 @@ namespace SecureShell
 
                 context->calculateBytesPerSecond();
                 context->reportProgress();
-                if (context->bytesTransferred_.load() >= totalFileSize && pipeline->empty())
+                if (context->bytesTransferred() >= totalFileSize && pipeline->empty())
                 {
                     context->complete();
                     return TaskStatus::Done;
                 }
                 return TaskStatus::Busy;
             }
-        );
-        if (!success)
+        ).first;
+        if (!pushed)
             return std::unexpected(
                 SftpError{
                     .message = "Failed to push permanent task",
                     .wrapperError = WrapperErrors::TaskPushFailed,
                 }
             );
-        context->permanentTaskId_ = id;
         return context;
     }
 
-    std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> FileStream::writeAsync(
+    std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> FileStream::writeAsync(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,

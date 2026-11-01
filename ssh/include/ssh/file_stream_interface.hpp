@@ -3,7 +3,7 @@
 #include <remote_io/async/processing_strand.hpp>
 #include <ssh/sftp_error.hpp>
 #include <ssh/file_information.hpp>
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 
 #include <libssh/sftp.h>
 
@@ -104,9 +104,9 @@ namespace SecureShell
          * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
          * @param bufferSize The size of the buffer.
          * @param onRead Called when data is read. Return false to stop reading.
-         * @return std::shared_ptr<AsyncTransferContext>
+         * @return std::shared_ptr<RemoteIo::AsyncTransferContext>
          */
-        virtual std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> readAsync(
+        virtual std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> readAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -116,7 +116,7 @@ namespace SecureShell
         /**
          * @brief In-strand variant of readAsync. Must be called from within the processing thread.
          */
-        virtual std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> readAsyncInStrand(
+        virtual std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> readAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -129,9 +129,9 @@ namespace SecureShell
          * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
          * @param bufferSize The size of the buffer.
          * @param doRead Called to read from the file into buffer. Should return the number of bytes read.
-         * @return std::shared_ptr<AsyncTransferContext>
+         * @return std::shared_ptr<RemoteIo::AsyncTransferContext>
          */
-        virtual std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+        virtual std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> writeAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -141,7 +141,7 @@ namespace SecureShell
         /**
          * @brief In-strand variant of writeAsync. Must be called from within the processing thread.
          */
-        virtual std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> writeAsyncInStrand(
+        virtual std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
