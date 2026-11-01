@@ -8,8 +8,10 @@
 #include <ssh/sftp_session.hpp>
 
 #include <gtest/gtest.h>
+#include <libssh/sftp.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -296,6 +298,42 @@ namespace SecureShell::Test
         ASSERT_TRUE(serverStartResult->command("failCloses", {{"count", 1}}));
         EXPECT_FALSE(runLater(*sftp, filter).has_value());
     }
+
+    TEST_F(SftpFileSystemTests, OpenModesReachTheServerAsTheirSftpFlags)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        using enum RemoteIo::OpenMode;
+        struct Expectation
+        {
+            RemoteIo::OpenMode mode;
+            unsigned flags;
+        };
+        const auto expectations = std::array{
+            Expectation{Read, SSH_FXF_READ},
+            Expectation{Write, SSH_FXF_WRITE},
+            Expectation{Read | Write, SSH_FXF_READ | SSH_FXF_WRITE},
+            Expectation{Write | Create, SSH_FXF_WRITE | SSH_FXF_CREAT},
+            Expectation{Write | Truncate, SSH_FXF_WRITE | SSH_FXF_TRUNC},
+            Expectation{Read | Write | Create | Truncate, SSH_FXF_READ | SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_TRUNC},
+            Expectation{Write | Create | Exclusive, SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_EXCL},
+        };
+
+        for (const auto& [mode, flags] : expectations)
+        {
+            const auto path = RemoteIo::contains(mode, Exclusive) ? remote("/home/test/exclusive.txt")
+                                                                  : remote("/home/test/file1.txt");
+            const auto opened = runInStrand(*sftp, RemoteIo::OpenFile{.path = path, .mode = mode});
+            ASSERT_TRUE(opened.has_value()) << opened.error().toString();
+            if (const auto stream = opened->lock())
+                stream->close();
+
+            const auto received = serverStartResult->query("lastOpenFlags");
+            ASSERT_TRUE(received.has_value());
+            EXPECT_EQ(received->at("flags").get<unsigned>(), flags) << "mode " << static_cast<unsigned>(mode);
+        }
+    }
+
     TEST_F(SftpFileSystemTests, TransferLimitsAreTheLimitsOfTheStreams)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

@@ -201,6 +201,8 @@ const changeOpenSftpSessions = (change) => {
     for (const watcher of openSftpSessionsWatchers)
         watcher();
 };
+// The flags of the last OPEN as they came over the wire, null before the first.
+let lastOpenFlags = null;
 
 // True when this rename has to fail. Counts down the renames allowed before failing.
 const renameFails = () => {
@@ -397,6 +399,7 @@ const server = new Server({
                     filename = resolveFileName(filename);
 
                     logMessage('OPEN', filename, flags, attrs);
+                    lastOpenFlags = flags;
 
                     let result = fakeFilesystem.find(filename);
                     // OPEN follows symlinks like a real server.
@@ -1074,6 +1077,7 @@ cli.on('waitForOpenSftpSessions', (command) => new Promise((resolve) => {
     openSftpSessionsWatchers.add(check);
     check();
 }));
+cli.on('lastOpenFlags', () => ({ flags: lastOpenFlags }));
 cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });
