@@ -1,13 +1,15 @@
 #pragma once
 
+#include <remote_io/remote_error.hpp>
+
 #include <expected>
 
 namespace RemoteIo
 {
     /**
      * @brief Makes what the future of a promise task holds when the task does not finish: its push was refused, the
-     *        thread dropped it, or it threw. Defined for void (nothing), bool (false) and std::expected of an error
-     *        that defines it (that error), other results pass their own.
+     *        thread dropped it, or it threw. Defined for void (nothing), bool (false), RemoteError (a failed task push)
+     *        and std::expected of an error that defines it (that error), other results pass their own.
      */
     template <typename ResultT>
     struct UnfinishedTaskResult;
@@ -25,6 +27,18 @@ namespace RemoteIo
         bool operator()() const noexcept
         {
             return false;
+        }
+    };
+
+    template <>
+    struct UnfinishedTaskResult<RemoteError>
+    {
+        RemoteError operator()() const
+        {
+            return RemoteError{
+                .message = "The task did not finish, the connection is closed or its thread stopped",
+                .wrapperError = WrapperErrors::TaskPushFailed,
+            };
         }
     };
 

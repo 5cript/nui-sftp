@@ -1,0 +1,392 @@
+#pragma once
+
+#include <remote_io/async/unfinished_task_result.hpp>
+#include <remote_io/remote_error.hpp>
+#include <remote_io/remote_file_stream.hpp>
+#include <paths/remote_path.hpp>
+#include <utility/describe.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace RemoteIo
+{
+    /**
+     * @brief How a file is opened, combined with operator|.
+     */
+    enum class OpenMode : unsigned
+    {
+        Read = 1u,
+        Write = 2u,
+        Create = 4u,
+        Truncate = 8u,
+        Exclusive = 16u,
+    };
+
+    constexpr OpenMode operator|(OpenMode lhs, OpenMode rhs)
+    {
+        return static_cast<OpenMode>(static_cast<unsigned>(lhs) | static_cast<unsigned>(rhs));
+    }
+
+    /**
+     * @brief Whether @p modes has every flag of @p mode.
+     */
+    constexpr bool contains(OpenMode modes, OpenMode mode)
+    {
+        return (static_cast<unsigned>(modes) & static_cast<unsigned>(mode)) == static_cast<unsigned>(mode);
+    }
+
+    /**
+     * @brief The limits the server sets for transfers.
+     */
+    struct TransferLimits
+    {
+        /** @brief The most bytes one write may send, 0 for no limit. */
+        std::uint64_t maxWriteLength{0};
+    };
+
+    /**
+     * @brief Where a chain of symlinks ends.
+     */
+    struct DeepLinkResult
+    {
+        /** @brief The content of the link at the given path, as stored on the server. */
+        std::string linkContent;
+        /** @brief The end of the link chain. */
+        Paths::RemotePath linkTarget;
+        /** @brief The attributes of @ref linkTarget, empty when it does not exist. */
+        std::optional<FileInformation> targetInfo;
+    };
+
+    /**
+     * @brief Lists a directory.
+     */
+    struct ListDirectory
+    {
+        using Result = std::vector<FileInformation>;
+        Paths::RemotePath path;
+        /** @brief Also reads the literal and the target of every symlink, without it a symlink is listed as itself. */
+        bool resolveLinks{true};
+    };
+    BOOST_DESCRIBE_STRUCT(ListDirectory, (), (path, resolveLinks))
+
+    /**
+     * @brief The attributes of a path, of the end of the chain when it is a symlink.
+     */
+    struct Stat
+    {
+        using Result = FileInformation;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(Stat, (), (path))
+
+    /**
+     * @brief The attributes of a path, of the link itself when it is a symlink.
+     */
+    struct Lstat
+    {
+        using Result = FileInformation;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(Lstat, (), (path))
+
+    struct CreateDirectory
+    {
+        using Result = void;
+        Paths::RemotePath path;
+        std::filesystem::perms permissions{std::filesystem::perms::owner_all};
+    };
+    BOOST_DESCRIBE_STRUCT(CreateDirectory, (), (path, permissions))
+
+    /**
+     * @brief Creates a directory unless a directory exists at the path already.
+     */
+    struct CreateDirectoryIfItDoesntExist
+    {
+        using Result = void;
+        Paths::RemotePath path;
+        std::filesystem::perms permissions{std::filesystem::perms::owner_all};
+    };
+    BOOST_DESCRIBE_STRUCT(CreateDirectoryIfItDoesntExist, (), (path, permissions))
+
+    /**
+     * @brief Creates an empty file unless one exists at the path already.
+     */
+    struct CreateFile
+    {
+        using Result = void;
+        Paths::RemotePath path;
+        std::filesystem::perms permissions{std::filesystem::perms::owner_read | std::filesystem::perms::owner_write};
+    };
+    BOOST_DESCRIBE_STRUCT(CreateFile, (), (path, permissions))
+
+    struct RemoveFile
+    {
+        using Result = void;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(RemoveFile, (), (path))
+
+    /**
+     * @brief Removes an empty directory.
+     */
+    struct RemoveDirectory
+    {
+        using Result = void;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(RemoveDirectory, (), (path))
+
+    /**
+     * @brief Removes each path without recursing: a directory only when it is empty, anything else is unlinked. Stops
+     *        at the first failure.
+     */
+    struct RemoveAll
+    {
+        using Result = void;
+        std::vector<Paths::RemotePath> paths;
+    };
+    BOOST_DESCRIBE_STRUCT(RemoveAll, (), (paths))
+
+    /**
+     * @brief The directories that are not empty.
+     */
+    struct FilterOutEmptyDirectories
+    {
+        using Result = std::vector<Paths::RemotePath>;
+        std::vector<Paths::RemotePath> directories;
+    };
+    BOOST_DESCRIBE_STRUCT(FilterOutEmptyDirectories, (), (directories))
+
+    /**
+     * @brief Renames a path. Whether an existing destination is replaced follows Capabilities::renameSemantics.
+     */
+    struct Rename
+    {
+        using Result = void;
+        Paths::RemotePath source;
+        Paths::RemotePath destination;
+    };
+    BOOST_DESCRIBE_STRUCT(Rename, (), (source, destination))
+
+    /**
+     * @brief Moves a regular file to a destination that must not exist, atomically through a hard link. Unsupported
+     *        unless the protocol has hard links.
+     */
+    struct LinkIntoPlace
+    {
+        using Result = void;
+        Paths::RemotePath source;
+        Paths::RemotePath destination;
+    };
+    BOOST_DESCRIBE_STRUCT(LinkIntoPlace, (), (source, destination))
+
+    struct OpenFile
+    {
+        using Result = std::weak_ptr<IRemoteFileStream>;
+        Paths::RemotePath path;
+        OpenMode mode{OpenMode::Read};
+        /** @brief The permissions of a file the open creates. */
+        std::filesystem::perms permissions{std::filesystem::perms::owner_read | std::filesystem::perms::owner_write};
+    };
+    BOOST_DESCRIBE_STRUCT(OpenFile, (), (path, mode, permissions))
+
+    /**
+     * @brief Sets when a path was last modified. Needs Capabilities::setModificationTime.
+     */
+    struct SetModificationTime
+    {
+        using Result = void;
+        Paths::RemotePath path;
+        std::chrono::system_clock::time_point modificationTime{};
+    };
+    BOOST_DESCRIBE_STRUCT(SetModificationTime, (), (path, modificationTime))
+
+    /**
+     * @brief The directory the server starts the user in, with a fallback when the server does not tell.
+     */
+    struct HomeDirectory
+    {
+        using Result = Paths::RemotePath;
+    };
+    BOOST_DESCRIBE_STRUCT(HomeDirectory, (), ())
+
+    /**
+     * @brief The directory the server starts the user in, as the server resolves it, without a fallback. Needs
+     *        Capabilities::canonicalPath.
+     */
+    struct CanonicalHomeDirectory
+    {
+        using Result = Paths::RemotePath;
+    };
+    BOOST_DESCRIBE_STRUCT(CanonicalHomeDirectory, (), ())
+
+    /**
+     * @brief The canonical form of an existing path, with every symlink resolved. Needs Capabilities::canonicalPath.
+     */
+    struct CanonicalPath
+    {
+        using Result = Paths::RemotePath;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(CanonicalPath, (), (path))
+
+    struct ReadTransferLimits
+    {
+        using Result = TransferLimits;
+    };
+    BOOST_DESCRIBE_STRUCT(ReadTransferLimits, (), ())
+
+    /**
+     * @brief Follows a symlink to the end of its chain. Needs Capabilities::symlinks.
+     */
+    struct ReadLinkDeep
+    {
+        using Result = DeepLinkResult;
+        Paths::RemotePath path;
+        /** @brief How many links the chain may have at most. */
+        int maxDepth{10};
+    };
+    BOOST_DESCRIBE_STRUCT(ReadLinkDeep, (), (path, maxDepth))
+
+    /**
+     * @brief The literal of a symlink, valid UTF-8. Needs Capabilities::symlinks.
+     */
+    struct ReadLink
+    {
+        using Result = std::string;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(ReadLink, (), (path))
+
+    /**
+     * @brief Creates a symlink whose content is the target, which may be relative. Needs Capabilities::symlinks.
+     */
+    struct CreateSymLink
+    {
+        using Result = void;
+        std::string target;
+        Paths::RemotePath linkPath;
+    };
+    BOOST_DESCRIBE_STRUCT(CreateSymLink, (), (target, linkPath))
+
+    template <typename... OperationTs>
+    struct OperationList
+    {
+        static constexpr std::size_t size = sizeof...(OperationTs);
+
+        template <typename OperationT>
+        static consteval std::size_t indexOf()
+        {
+            static_assert((std::is_same_v<OperationT, OperationTs> || ...), "Not an operation of the list");
+            constexpr std::array matches{std::is_same_v<OperationT, OperationTs>...};
+            return static_cast<std::size_t>(std::ranges::find(matches, true) - matches.begin());
+        }
+    };
+
+    /**
+     * @brief Every operation of a remote file system. Each implementation runs every one of them.
+     */
+    using RemoteFileSystemOperations = OperationList<
+        ListDirectory,
+        Stat,
+        Lstat,
+        CreateDirectory,
+        CreateDirectoryIfItDoesntExist,
+        CreateFile,
+        RemoveFile,
+        RemoveDirectory,
+        RemoveAll,
+        FilterOutEmptyDirectories,
+        Rename,
+        LinkIntoPlace,
+        OpenFile,
+        SetModificationTime,
+        HomeDirectory,
+        CanonicalHomeDirectory,
+        CanonicalPath,
+        ReadTransferLimits,
+        ReadLinkDeep,
+        ReadLink,
+        CreateSymLink>;
+
+    template <typename OperationT>
+    using OperationResult = std::expected<typename OperationT::Result, RemoteError>;
+
+    /**
+     * @brief Completes an operation exactly once: with its result, or with the unfinished result when it is destroyed
+     *        before, because the operation never started or whoever ran it dropped it.
+     */
+    template <typename OperationT>
+    class Completion
+    {
+      public:
+        explicit Completion(std::move_only_function<void(OperationResult<OperationT>)> complete)
+            : complete_{std::move(complete)}
+        {}
+        ~Completion()
+        {
+            if (complete_)
+                complete_(UnfinishedTaskResult<OperationResult<OperationT>>{}());
+        }
+        Completion(Completion const&) = delete;
+        Completion& operator=(Completion const&) = delete;
+        Completion(Completion&& other) noexcept
+            : complete_{std::exchange(other.complete_, nullptr)}
+        {}
+        Completion& operator=(Completion&&) = delete;
+
+        void operator()(OperationResult<OperationT> result)
+        {
+            assert(complete_);
+            std::exchange(complete_, nullptr)(std::move(result));
+        }
+
+      private:
+        std::move_only_function<void(OperationResult<OperationT>)> complete_;
+    };
+
+    /**
+     * @brief An operation on its way to the file system, with what to do with its result.
+     */
+    template <typename OperationT>
+    struct Pending
+    {
+        OperationT operation;
+        Completion<OperationT> complete;
+    };
+
+    /**
+     * @brief Whether a path of @p operation is unset, which must never reach the server.
+     */
+    template <typename OperationT>
+    bool hasUnsetPath(OperationT const& operation)
+    {
+        bool unset = false;
+        boost::mp11::mp_for_each<boost::describe::describe_members<OperationT, boost::describe::mod_public>>(
+            [&operation, &unset](auto member)
+            {
+                auto const& value = operation.*member.pointer;
+                using ValueT = std::remove_cvref_t<decltype(value)>;
+                if constexpr (std::is_same_v<ValueT, Paths::RemotePath>)
+                    unset = unset || value.empty();
+                else if constexpr (std::is_same_v<ValueT, std::vector<Paths::RemotePath>>)
+                    unset = unset || std::ranges::any_of(value, &Paths::RemotePath::empty);
+            }
+        );
+        return unset;
+    }
+}
