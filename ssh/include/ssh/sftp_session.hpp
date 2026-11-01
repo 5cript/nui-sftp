@@ -8,7 +8,7 @@
 #include <ssh/async/transfer_chunk_controller.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/file_stream.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
 #include <ssh/session.hpp>
 #include <paths/remote_path.hpp>
 #include <utility/user_directories.hpp>
@@ -34,7 +34,7 @@ namespace SecureShell
     class SftpSession : public std::enable_shared_from_this<SftpSession>
     {
       public:
-        using Error = SftpError;
+        using Error = RemoteIo::RemoteError;
         /** @brief The libssh SFTP session, which sftp_free ends on the server too. */
         using NativeSession = std::unique_ptr<sftp_session_struct, decltype(&sftp_free)>;
         friend class FileStream;
@@ -70,9 +70,9 @@ namespace SecureShell
 
         /**
          * @brief Retrieves the last error that occurred. May contain success. A closed connection, channel or session
-         *        is SSH_FX_CONNECTION_LOST, whatever the server answered before.
+         *        is ConnectionLost, whatever the server answered before.
          */
-        SftpError lastError() const;
+        Error lastError() const;
 
         /**
          * @brief Lists the contents of a directory.
@@ -471,14 +471,14 @@ namespace SecureShell
             return {};
         }
 
-        static SftpError unsetPathError();
+        static Error unsetPathError();
 
         /**
          * @brief The absolute path the server canonicalizes @p path to.
          */
         std::expected<Paths::RemotePath, Error> canonicalizeInStrand(char const* path);
 
-        static SftpError alreadyExists(Paths::RemotePath const& destination);
+        static Error alreadyExists(Paths::RemotePath const& destination);
 
         /**
          * @brief Moves the regular file @p source to @p destination by a hard link and removing @p source, or by a

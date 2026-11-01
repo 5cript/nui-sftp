@@ -13,7 +13,6 @@
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
 #include <shared_data/sync/sync_execution.hpp>
-#include <ssh/sftp_error_conversion.hpp>
 #include <tar_archive/compression.hpp>
 
 #include <nui/utility/scope_exit.hpp>
@@ -646,7 +645,7 @@ void Session::registerRpcSftpListDirectory()
                         const auto result = fut.get();
                         if (!result.has_value())
                         {
-                            return reply.error(SecureShell::toRemoteError(result.error()).message);
+                            return reply.error(result.error().message);
                         }
 
                         Log::info("Listed directory '{}', got {} entries", path, result->size());
@@ -1679,12 +1678,12 @@ void Session::registerRpcSftpRename()
                                 newPath = *newPath,
                                 overwrite,
                                 asideSuffix = Persistence::asideFileSuffix(self.remoteTempFileSuffix_)]()
-                                -> std::expected<void, SecureShell::SftpError>
+                                -> std::expected<void, RemoteIo::RemoteError>
                             {
                                 const auto sftp = session.lock();
                                 if (!sftp)
                                     return std::unexpected(
-                                        SecureShell::SftpError{.message = "The SFTP channel was closed"}
+                                        RemoteIo::RemoteError{.message = "The SFTP channel was closed"}
                                     );
                                 return sftp->moveIntoPlaceInStrand(oldPath, newPath, overwrite, asideSuffix);
                             }
@@ -1695,8 +1694,7 @@ void Session::registerRpcSftpRename()
                         const auto result = fut.get();
                         if (!result.has_value())
                         {
-                            if (SecureShell::toRemoteError(result.error()).kind ==
-                                RemoteIo::RemoteErrorKind::AlreadyExists)
+                            if (result.error().kind == RemoteIo::RemoteErrorKind::AlreadyExists)
                                 return reply.error("backend.rename.targetExists");
                             return reply.error("Failed to rename file: " + result.error().toString());
                         }
@@ -1914,8 +1912,7 @@ void Session::registerRpcSftpStat()
                         const auto result = fut.get();
                         if (!result.has_value())
                         {
-                            if (SecureShell::toRemoteError(result.error()).kind ==
-                                RemoteIo::RemoteErrorKind::NoSuchFile)
+                            if (result.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
                             {
                                 // File does not exist, return nullopt
                                 return reply({{"success", true}, {"stat", nullptr}});

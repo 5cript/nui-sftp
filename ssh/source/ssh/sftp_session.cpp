@@ -16,9 +16,9 @@ namespace SecureShell
 {
     namespace
     {
-        bool isMissing(SftpError const& error)
+        bool isMissing(RemoteIo::RemoteError const& error)
         {
-            return toRemoteError(error).kind == RemoteIo::RemoteErrorKind::NoSuchFile;
+            return error.kind == RemoteIo::RemoteErrorKind::NoSuchFile;
         }
     }
 
@@ -215,13 +215,13 @@ namespace SecureShell
         {
             if (attributes->type != SSH_FILEXFER_TYPE_DIRECTORY)
             {
-                return std::unexpected(
-                    SftpSession::Error{
+                return std::unexpected(toRemoteError(
+                    SftpError{
                         .message = "Path exists and is not a directory",
                         .sshError = SSH_OK,
                         .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
                     }
-                );
+                ));
             }
         }
         return {};
@@ -601,12 +601,12 @@ namespace SecureShell
         const auto aside = destination.withFilenameSuffix(asideSuffix);
         if (!aside)
         {
-            return std::unexpected(
+            return std::unexpected(toRemoteError(
                 SftpError{
                     .message = fmt::format("Invalid suffix '{}' for '{}'", asideSuffix, destination.value()),
                     .wrapperError = WrapperErrors::InvalidPath,
                 }
-            );
+            ));
         }
 
         const auto destinationInfo = lstatInStrand(destination);
@@ -620,12 +620,12 @@ namespace SecureShell
         }
         else if (destinationInfo->isDirectory())
         {
-            return std::unexpected(
+            return std::unexpected(toRemoteError(
                 SftpError{
                     .message = fmt::format("'{}' is a directory", destination.value()),
                     .sftpError = SSH_FX_FAILURE,
                 }
-            );
+            ));
         }
 
         if (auto movedAside = moveAsideInStrand(destination, *aside); !movedAside.has_value())
@@ -678,12 +678,14 @@ namespace SecureShell
         return renameNoReplaceInStrand(source, destination, sourceType);
     }
 
-    SftpError SftpSession::alreadyExists(Paths::RemotePath const& destination)
+    SftpSession::Error SftpSession::alreadyExists(Paths::RemotePath const& destination)
     {
-        return SftpError{
-            .message = fmt::format("'{}' already exists", destination.value()),
-            .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
-        };
+        return toRemoteError(
+            SftpError{
+                .message = fmt::format("'{}' already exists", destination.value()),
+                .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
+            }
+        );
     }
 
     std::future<std::expected<void, SftpSession::Error>>
@@ -753,11 +755,13 @@ namespace SecureShell
             .transform_error(
                 [](Paths::PathError const& error)
                 {
-                    return Error{
-                        .message = fmt::format("The server canonicalized to {}", error.toString()),
-                        .sftpError = SSH_FX_FAILURE,
-                        .wrapperError = WrapperErrors::InvalidPath,
-                    };
+                    return toRemoteError(
+                        SftpError{
+                            .message = fmt::format("The server canonicalized to {}", error.toString()),
+                            .sftpError = SSH_FX_FAILURE,
+                            .wrapperError = WrapperErrors::InvalidPath,
+                        }
+                    );
                 }
             );
     }
@@ -787,7 +791,9 @@ namespace SecureShell
         const auto optionResult = ssh_options_get(session_->session, SSH_OPTIONS_USER, &rawUser);
         const std::unique_ptr<char, decltype(&ssh_string_free_char)> user{rawUser, ssh_string_free_char};
         if (optionResult != SSH_OK || user == nullptr || user.get()[0] == '\0')
-            return std::unexpected(Error{.message = "Server did not report a home directory and the user is unknown"});
+            return std::unexpected(
+                toRemoteError(SftpError{.message = "Server did not report a home directory and the user is unknown"})
+            );
 
         const auto guess = Paths::RemotePath::make(fmt::format("/home/{}", user.get()));
         if (!guess)
@@ -868,35 +874,36 @@ namespace SecureShell
         );
     }
 
-    SftpError SftpSession::unsetPathError()
+    SftpSession::Error SftpSession::unsetPathError()
     {
-        return Error{
-            .message = "The remote path is not set",
-            .sftpError = SSH_FX_FAILURE,
-            .wrapperError = WrapperErrors::InvalidPath,
-        };
+        return toRemoteError(
+            SftpError{
+                .message = "The remote path is not set",
+                .sftpError = SSH_FX_FAILURE,
+                .wrapperError = WrapperErrors::InvalidPath,
+            }
+        );
     }
 
-    SftpError SftpSession::lastError() const
+    SftpSession::Error SftpSession::lastError() const
     {
         if (!session_)
-            return SftpError{.message = "The SFTP session is closed", .sftpError = SSH_FX_CONNECTION_LOST};
+            return toRemoteError(
+                SftpError{.message = "The SFTP session is closed", .sftpError = SSH_FX_CONNECTION_LOST}
+            );
         // libssh keeps the status of the last answer when the connection breaks.
         if ((ssh_get_status(session_->session) & (SSH_CLOSED | SSH_CLOSED_ERROR)) != 0 ||
             ssh_channel_is_open(session_->channel) == 0)
         {
-            return SftpError{
-                .message = ssh_get_error(session_->session),
-                .sshError = ssh_get_error_code(session_->session),
-                .sftpError = SSH_FX_CONNECTION_LOST,
-            };
+            return toRemoteError(
+                SftpError{
+                    .message = ssh_get_error(session_->session),
+                    .sshError = ssh_get_error_code(session_->session),
+                    .sftpError = SSH_FX_CONNECTION_LOST,
+                }
+            );
         }
-        const auto result = SftpError{
-            .message = "",
-            .sshError = 0,
-            .sftpError = sftp_get_error(session_.get()),
-        };
-        return result;
+        return toRemoteError(SftpError{.sftpError = sftp_get_error(session_.get())});
     }
 
     std::expected<sftp_limits_struct, SftpSession::Error> SftpSession::limitsInStrand()
@@ -1018,26 +1025,26 @@ namespace SecureShell
             auto next = currentPath.resolveLink(readLinkResult.get());
             if (!next)
             {
-                return std::unexpected(
-                    Error{
+                return std::unexpected(toRemoteError(
+                    SftpError{
                         .message = fmt::format(
                             "Symlink '{}' has an unusable target: {}", currentPath.value(), next.error().toString()
                         ),
                         .sftpError = SSH_FX_FAILURE,
                         .wrapperError = WrapperErrors::InvalidPath,
                     }
-                );
+                ));
             }
             currentPath = *std::move(next);
         }
 
-        return std::unexpected(
-            Error{
+        return std::unexpected(toRemoteError(
+            SftpError{
                 .message = "Maximum symlink depth exceeded",
                 .sshError = SSH_OK,
                 .sftpError = SSH_FX_FAILURE,
             }
-        );
+        ));
     }
 
     std::future<std::expected<SftpSession::DeepLinkResult, SftpSession::Error>>

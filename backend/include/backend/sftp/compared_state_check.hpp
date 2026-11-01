@@ -34,7 +34,7 @@ namespace ComparedStateCheck
     /**
      * @brief What is at the remote @p path now, without following a link.
      */
-    std::expected<SharedData::ComparedState, SecureShell::SftpError>
+    std::expected<SharedData::ComparedState, RemoteIo::RemoteError>
     remoteStateOfInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path);
 
     /**

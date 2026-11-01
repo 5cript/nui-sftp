@@ -1,7 +1,6 @@
 #include <backend/sftp/compared_state_check.hpp>
 #include <log/log.hpp>
 #include <paths/native.hpp>
-#include <ssh/sftp_error_conversion.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <utility/rename.hpp>
@@ -86,13 +85,13 @@ namespace ComparedStateCheck
         }
     }
 
-    std::expected<SharedData::ComparedState, SecureShell::SftpError>
+    std::expected<SharedData::ComparedState, RemoteIo::RemoteError>
     remoteStateOfInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
     {
         const auto information = sftp.lstatInStrand(path);
         if (!information)
         {
-            if (SecureShell::toRemoteError(information.error()).kind == RemoteIo::RemoteErrorKind::NoSuchFile)
+            if (information.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
                 return SharedData::ComparedState{};
             return std::unexpected(information.error());
         }
@@ -141,9 +140,7 @@ namespace ComparedStateCheck
         const auto current = remoteStateOfInStrand(sftp, path);
         if (!current)
             return std::unexpected(
-                Operation::Error{
-                    .type = Operation::ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(current.error())
-                }
+                Operation::Error{.type = Operation::ErrorType::SftpError, .remoteError = current.error()}
             );
         if (!SharedData::unchangedSinceCompare(*compared, *current))
             return std::unexpected(changedError(path.value()));

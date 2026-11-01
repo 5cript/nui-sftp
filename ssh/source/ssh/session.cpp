@@ -1,5 +1,6 @@
 #include <ssh/session.hpp>
 #include <ssh/sequential.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <ssh/sftp_session.hpp>
 #include <paths/native.hpp>
 #include <ssh/ssh_key.hpp>
@@ -244,33 +245,33 @@ namespace SecureShell
         );
     }
 
-    std::future<std::expected<std::weak_ptr<SftpSession>, SftpError>> Session::createSftpSession()
+    std::future<std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>> Session::createSftpSession()
     {
         return processingThread_.pushPromiseTask(
-            [this]() -> std::expected<std::weak_ptr<SftpSession>, SftpError>
+            [this]() -> std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>
             {
                 SftpSession::NativeSession sftp{sftp_new(session_.getCSession()), &sftp_free};
                 if (!sftp)
                 {
-                    return std::unexpected(
+                    return std::unexpected(toRemoteError(
                         SftpError{
                             .message = session_.getError(),
                             .sshError = session_.getErrorCode(),
                             .sftpError = 0,
                         }
-                    );
+                    ));
                 }
 
                 auto result = sftp_init(sftp.get());
                 if (result != SSH_OK)
                 {
-                    return std::unexpected(
+                    return std::unexpected(toRemoteError(
                         SftpError{
                             .message = session_.getError(),
                             .sshError = session_.getErrorCode(),
                             .sftpError = sftp_get_error(sftp.get()),
                         }
-                    );
+                    ));
                 }
 
                 // Kept before the caller hears of it, who may shut the session down and walk the list right away.

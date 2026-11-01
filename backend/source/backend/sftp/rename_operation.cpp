@@ -38,11 +38,11 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
             auto fut = sftp->performPromise(
                 [session = sftp_,
                     source = sourcePath_,
-                    destination = destinationPath_]() -> std::expected<void, SecureShell::SftpError>
+                    destination = destinationPath_]() -> std::expected<void, RemoteIo::RemoteError>
                 {
                     const auto sftp = session.lock();
                     if (!sftp)
-                        return std::unexpected(SecureShell::SftpError{.message = "The SFTP channel was closed"});
+                        return std::unexpected(RemoteIo::RemoteError{.message = "The SFTP channel was closed"});
                     return sftp->renameNoReplaceInStrand(source, destination);
                 }
             );
@@ -53,7 +53,7 @@ std::expected<RenameOperation::WorkStatus, RenameOperation::Error> RenameOperati
             if (!result.has_value())
                 return enterErrorState<WorkStatus>({
                     .type = ErrorType::RenameFailure,
-                    .remoteError = SecureShell::toRemoteError(result.error()),
+                    .remoteError = result.error(),
                     .extraInfo = sourcePath_.value(),
                 });
 

@@ -366,7 +366,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::flattenRootsInSt
                 return std::unexpected(
                     Error{
                         .type = ErrorType::FileStatFailed,
-                        .remoteError = SecureShell::toRemoteError(current.error()),
+                        .remoteError = current.error(),
                         .extraInfo = root.path.value(),
                     }
                 );
@@ -509,7 +509,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::openNextEntryInS
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .remoteError = SecureShell::toRemoteError(streamOpenResult.error()),
+                .remoteError = streamOpenResult.error(),
                 .extraInfo = fmt::format("Opening remote file: {}", resolved.source.value()),
             }
         );
@@ -569,7 +569,7 @@ std::expected<bool, Operation::Error> ArchiveDownloadOperation::readChunkInStran
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .remoteError = SecureShell::toRemoteError(readResult.error()),
+                .remoteError = readResult.error(),
                 .extraInfo = fmt::format("Reading remote file: {}", resolved.source.value()),
             }
         );
