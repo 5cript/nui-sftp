@@ -247,6 +247,15 @@ namespace SecureShell
         std::expected<void, Error> statInStrand(Paths::RemotePath const& path, sftp_attributes attributes);
 
         /**
+         * @brief Sets the access and modification time of a path. Must be called from within the processing thread.
+         * @return Unsupported for a time SFTP cannot carry, before 1970 or after 2106.
+         */
+        std::expected<void, Error> setModificationTimeInStrand(
+            Paths::RemotePath const& path,
+            std::chrono::system_clock::time_point modificationTime
+        );
+
+        /**
          * @brief Sets the owner of a file or directory.
          *
          * @param path

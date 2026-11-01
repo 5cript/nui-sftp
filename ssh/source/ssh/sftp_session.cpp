@@ -553,6 +553,14 @@ namespace SecureShell
         return {};
     }
 
+    std::expected<void, SftpSession::Error> SftpSession::setModificationTimeInStrand(
+        Paths::RemotePath const& path,
+        std::chrono::system_clock::time_point modificationTime
+    )
+    {
+        return runInStrand(RemoteIo::SetModificationTime{.path = path, .modificationTime = modificationTime});
+    }
+
     RemoteIo::OperationResult<RemoteIo::Rename> SftpSession::run(RemoteIo::Rename const& operation)
     {
         const auto result = sftp_rename(session_.get(), operation.source.c_str(), operation.destination.c_str());
