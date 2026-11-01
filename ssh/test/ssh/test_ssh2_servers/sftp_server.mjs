@@ -179,6 +179,8 @@ const faults = {
     failRemoves: false,
     // CLOSE closes the handle but answers failure, like a network filesystem reporting a deferred write error.
     failCloses: false,
+    // Closes that fail before closes succeed again, null for all.
+    closesFailing: null,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
     // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
@@ -550,7 +552,9 @@ const server = new Server({
                     }
                     handles.delete(handleString);
 
-                    if (faults.failCloses) {
+                    if (faults.failCloses && faults.closesFailing !== 0) {
+                        if (faults.closesFailing !== null)
+                            --faults.closesFailing;
                         logMessage('Fault: failing close');
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
@@ -1038,6 +1042,7 @@ cli.on('failRemoves', (command) => {
 });
 cli.on('failCloses', (command) => {
     faults.failCloses = command.enabled !== false;
+    faults.closesFailing = command.count === undefined ? null : Number(command.count);
 });
 cli.on('denyDirectory', (command) => {
     faults.deniedDirectories.add(command.path);

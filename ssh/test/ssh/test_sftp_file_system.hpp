@@ -16,6 +16,7 @@
 #include <future>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace SecureShell::Test
 {
@@ -276,6 +277,24 @@ namespace SecureShell::Test
         const auto after = runLater(*sftp, RemoteIo::Stat{.path = remote("/home/test/file1.txt")});
         ASSERT_TRUE(after.has_value()) << after.error().toString();
         EXPECT_EQ(after->mtime, before->mtime);
+    }
+
+    TEST_F(SftpFileSystemTests, FilterOutEmptyDirectoriesFailsWhenAnyDirectoryDoesNotClose)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/full"}}));
+        ASSERT_TRUE(serverStartResult->command("createFile", {{"path", "/home/test/full/a.txt"}, {"content", "a"}}));
+        ASSERT_TRUE(serverStartResult->command("createDirectory", {{"path", "/home/test/empty"}}));
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        const auto filter =
+            RemoteIo::FilterOutEmptyDirectories{.directories = {remote("/home/test/full"), remote("/home/test/empty")}};
+
+        const auto filtered = runLater(*sftp, filter);
+        ASSERT_TRUE(filtered.has_value()) << filtered.error().toString();
+        EXPECT_EQ(*filtered, std::vector<Paths::RemotePath>{remote("/home/test/full")});
+
+        ASSERT_TRUE(serverStartResult->command("failCloses", {{"count", 1}}));
+        EXPECT_FALSE(runLater(*sftp, filter).has_value());
     }
     TEST_F(SftpFileSystemTests, TransferLimitsAreTheLimitsOfTheStreams)
     {

@@ -356,7 +356,6 @@ namespace SecureShell
     RemoteIo::OperationResult<RemoteIo::FilterOutEmptyDirectories>
     SftpSession::run(RemoteIo::FilterOutEmptyDirectories const& operation)
     {
-        int closeResult = 0;
         std::vector<Paths::RemotePath> nonEmpties;
         for (const auto& path : operation.directories)
         {
@@ -367,11 +366,15 @@ namespace SecureShell
             if (attributes == nullptr)
                 return std::unexpected(lastError());
 
-            if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
+            if (attributes->type != SSH_FILEXFER_TYPE_DIRECTORY)
+                continue;
+
+            int closeResult = SSH_OK;
+            bool nonEmpty = false;
             {
                 std::unique_ptr<sftp_dir_struct, std::function<void(sftp_dir_struct*)>> dir{
                     sftp_opendir(session_.get(), path.c_str()),
-                    [&](sftp_dir_struct* dir)
+                    [&closeResult](sftp_dir_struct* dir)
                     {
                         if (dir != nullptr)
                         {
@@ -402,19 +405,16 @@ namespace SecureShell
                         return true;
                 };
 
-                auto result = findNonDotEntry();
-                if (!result)
-                    result = findNonDotEntry();
-                if (!result)
-                    result = findNonDotEntry();
-
-                if (result)
-                    nonEmpties.push_back(path);
+                nonEmpty = findNonDotEntry();
+                if (!nonEmpty)
+                    nonEmpty = findNonDotEntry();
+                if (!nonEmpty)
+                    nonEmpty = findNonDotEntry();
             }
-        }
-        if (closeResult != SSH_OK)
-        {
-            return std::unexpected(lastError());
+            if (closeResult != SSH_OK)
+                return std::unexpected(lastError());
+            if (nonEmpty)
+                nonEmpties.push_back(path);
         }
         return nonEmpties;
     }
