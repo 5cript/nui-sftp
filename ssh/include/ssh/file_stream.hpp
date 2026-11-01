@@ -195,7 +195,7 @@ namespace SecureShell
         std::function<void(sftp_file)> makeFileDeleter();
 
         /**
-         * @brief A transfer context whose resume wakes this stream's processing thread.
+         * @brief A transfer context that wakes this stream's processing thread when it resumes, fails or is canceled.
          */
         std::shared_ptr<RemoteIo::AsyncTransferContext> makeTransferContext();
 

@@ -2,17 +2,18 @@
 
 namespace RemoteIo
 {
-    void AsyncTransferContext::end(Outcome outcome, std::optional<RemoteError> error)
+    bool AsyncTransferContext::end(Outcome outcome, std::optional<RemoteError> error)
     {
         {
             std::scoped_lock lock{endMutex_};
             auto expected = Outcome::Running;
             if (!outcome_.compare_exchange_strong(expected, outcome))
-                return;
+                return false;
             error_ = std::move(error);
         }
         if (observer_)
             observer_();
+        return true;
     }
 
     void AsyncTransferContext::wake() const
@@ -44,13 +45,14 @@ namespace RemoteIo
 
     void AsyncTransferContext::cancel()
     {
-        end(Outcome::Canceled);
-        wake();
+        if (end(Outcome::Canceled))
+            wake();
     }
 
     void AsyncTransferContext::fail(RemoteError error)
     {
-        end(Outcome::Failed, std::move(error));
+        if (end(Outcome::Failed, std::move(error)))
+            wake();
     }
 
     void AsyncTransferContext::complete()
@@ -92,7 +94,8 @@ namespace RemoteIo
     void AsyncTransferContext::pause(bool doPause)
     {
         paused_.store(doPause);
-        wake();
+        if (!doPause)
+            wake();
     }
 
     void AsyncTransferContext::addBytesTransferred(SignedSizeType delta)

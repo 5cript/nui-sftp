@@ -31,16 +31,17 @@ namespace RemoteIo
 
         bool paused() const;
         /**
-         * @brief Pauses or resumes the transfer and wakes the thread that drives it, which sleeps while every transfer
-         *        is paused.
+         * @brief Pauses or resumes the transfer. Resuming wakes the thread that drives it, which sleeps while every
+         *        transfer is paused.
          */
         void pause(bool doPause);
         /**
-         * @brief Ends the transfer as canceled unless it already ended, and wakes the thread that drives it.
+         * @brief Ends the transfer as canceled and wakes the thread that drives it, unless it already ended.
          */
         void cancel();
         /**
-         * @brief Ends the transfer as failed with the given error unless it already ended.
+         * @brief Ends the transfer as failed with the given error and wakes the thread that drives it, unless it
+         *        already ended.
          */
         void fail(RemoteError error);
         /**
@@ -87,8 +88,9 @@ namespace RemoteIo
       private:
         /**
          * @brief Ends the transfer with @p outcome and keeps @p error, unless it already ended.
+         * @return Whether this call ended the transfer.
          */
-        void end(Outcome outcome, std::optional<RemoteError> error = std::nullopt);
+        bool end(Outcome outcome, std::optional<RemoteError> error = std::nullopt);
         void wake() const;
 
       private:

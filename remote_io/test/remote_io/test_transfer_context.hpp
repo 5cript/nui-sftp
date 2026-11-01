@@ -28,7 +28,43 @@ namespace RemoteIo::Test
         EXPECT_EQ(wakes, 1);
     }
 
-    TEST(TransferContextTests, PausingAndResumingWakeItsThread)
+    TEST(TransferContextTests, FailingEndsTheTransferAndWakesItsThread)
+    {
+        AsyncTransferContext context{};
+        int wakes = 0;
+        context.setWake(
+            [&wakes]()
+            {
+                ++wakes;
+            }
+        );
+
+        context.fail(RemoteError{.kind = RemoteErrorKind::ConnectionLost});
+
+        EXPECT_EQ(context.outcome(), AsyncTransferContext::Outcome::Failed);
+        EXPECT_EQ(wakes, 1);
+    }
+
+    TEST(TransferContextTests, EndingAnEndedTransferDoesNotWakeItsThread)
+    {
+        AsyncTransferContext context{};
+        int wakes = 0;
+        context.setWake(
+            [&wakes]()
+            {
+                ++wakes;
+            }
+        );
+
+        context.complete();
+        context.cancel();
+        context.fail(RemoteError{.kind = RemoteErrorKind::ConnectionLost});
+
+        EXPECT_EQ(context.outcome(), AsyncTransferContext::Outcome::Completed);
+        EXPECT_EQ(wakes, 0);
+    }
+
+    TEST(TransferContextTests, OnlyResumingWakesItsThread)
     {
         AsyncTransferContext context{};
         int wakes = 0;
@@ -41,11 +77,11 @@ namespace RemoteIo::Test
 
         context.pause(true);
         EXPECT_TRUE(context.paused());
-        EXPECT_EQ(wakes, 1);
+        EXPECT_EQ(wakes, 0);
 
         context.pause(false);
         EXPECT_FALSE(context.paused());
-        EXPECT_EQ(wakes, 2);
+        EXPECT_EQ(wakes, 1);
     }
 
     TEST(TransferContextTests, AContextWithoutWakePausesAndCancels)
