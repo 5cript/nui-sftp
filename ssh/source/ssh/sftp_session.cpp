@@ -627,6 +627,9 @@ namespace SecureShell
         // Filesystems without hard links, and Linux protected_hardlinks, refuse the link.
         if (isMissing(existing.error()))
             linkError.kind = RemoteIo::RemoteErrorKind::Unsupported;
+        // Unsupported promises a free destination, which the failed lstat could not confirm.
+        else if (linkError.kind == RemoteIo::RemoteErrorKind::Unsupported)
+            return std::unexpected(existing.error());
         return std::unexpected(std::move(linkError));
     }
 

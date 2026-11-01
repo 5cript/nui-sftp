@@ -174,6 +174,8 @@ const faults = {
     // Renames that fail before renames succeed again, null for all.
     renamesFailing: null,
     failHardlinks: false,
+    // The status failing hard links answer, permission denied unless set.
+    hardlinkFailureStatus: null,
     failRemoves: false,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
@@ -756,7 +758,7 @@ const server = new Server({
                     if (name === 'hardlink@openssh.com') {
                         if (faults.failHardlinks) {
                             logMessage('Fault: failing hardlink');
-                            return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                            return sftpStream.status(reqid, faults.hardlinkFailureStatus ?? STATUS_CODE.PERMISSION_DENIED);
                         }
                         if (newResult !== undefined || oldResult.type !== 'file')
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);
@@ -1019,9 +1021,11 @@ cli.on('failRenames', (command) => {
     faults.renamesBeforeFailure = command.after === undefined ? null : Number(command.after);
     faults.renamesFailing = command.count === undefined ? null : Number(command.count);
 });
-// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks.
+// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks. 'unsupported' as
+// status answers OP_UNSUPPORTED, like OpenSSH on a filesystem whose link() is ENOSYS.
 cli.on('failHardlinks', (command) => {
     faults.failHardlinks = command.enabled !== false;
+    faults.hardlinkFailureStatus = command.status === 'unsupported' ? STATUS_CODE.OP_UNSUPPORTED : null;
 });
 cli.on('failRemoves', (command) => {
     faults.failRemoves = command.enabled !== false;
