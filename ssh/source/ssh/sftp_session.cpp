@@ -9,6 +9,7 @@
 #include <cassert>
 #include <chrono>
 #include <memory>
+#include <utility>
 
 #include <fcntl.h>
 
@@ -528,14 +529,25 @@ namespace SecureShell
     RemoteIo::OperationResult<RemoteIo::SetModificationTime>
     SftpSession::run(RemoteIo::SetModificationTime const& operation)
     {
-        // SFTP version 3 has times in whole seconds and sets the access time along with the modification time.
-        const auto seconds = static_cast<std::uint32_t>(
-            std::chrono::duration_cast<std::chrono::seconds>(operation.modificationTime.time_since_epoch()).count()
-        );
+        // SFTP version 3 has times in whole unsigned 32 bit seconds and sets the access time along with the
+        // modification time.
+        const auto seconds =
+            std::chrono::floor<std::chrono::seconds>(operation.modificationTime.time_since_epoch()).count();
+        if (!std::in_range<std::uint32_t>(seconds))
+        {
+            return std::unexpected(toRemoteError(
+                SftpError{
+                    .message = fmt::format(
+                        "SFTP cannot set a modification time before 1970 or after 2106 on '{}'", operation.path.value()
+                    ),
+                    .sftpError = SSH_FX_OP_UNSUPPORTED,
+                }
+            ));
+        }
         sftp_attributes_struct attributes{};
         attributes.flags = SSH_FILEXFER_ATTR_ACMODTIME;
-        attributes.atime = seconds;
-        attributes.mtime = seconds;
+        attributes.atime = static_cast<std::uint32_t>(seconds);
+        attributes.mtime = static_cast<std::uint32_t>(seconds);
         if (sftp_setstat(session_.get(), operation.path.c_str(), &attributes) != SSH_OK)
             return std::unexpected(lastError());
         return {};

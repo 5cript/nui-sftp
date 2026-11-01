@@ -252,6 +252,31 @@ namespace SecureShell::Test
         EXPECT_EQ(information->mtime, seconds);
     }
 
+    TEST_F(SftpFileSystemTests, SetModificationTimeRefusesTimesSftpCannotCarry)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        const auto before = runLater(*sftp, RemoteIo::Stat{.path = remote("/home/test/file1.txt")});
+        ASSERT_TRUE(before.has_value()) << before.error().toString();
+
+        using std::chrono::seconds;
+        for (const auto time : {seconds{-1}, seconds{std::int64_t{1} << 32}})
+        {
+            const auto set = runInStrand(
+                *sftp,
+                RemoteIo::SetModificationTime{
+                    .path = remote("/home/test/file1.txt"),
+                    .modificationTime = std::chrono::system_clock::time_point{time},
+                }
+            );
+            ASSERT_FALSE(set.has_value()) << time.count();
+            EXPECT_EQ(set.error().kind, RemoteIo::RemoteErrorKind::Unsupported);
+        }
+
+        const auto after = runLater(*sftp, RemoteIo::Stat{.path = remote("/home/test/file1.txt")});
+        ASSERT_TRUE(after.has_value()) << after.error().toString();
+        EXPECT_EQ(after->mtime, before->mtime);
+    }
     TEST_F(SftpFileSystemTests, TransferLimitsAreTheLimitsOfTheStreams)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

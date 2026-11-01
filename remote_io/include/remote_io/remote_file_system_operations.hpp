@@ -208,7 +208,8 @@ namespace RemoteIo
     BOOST_DESCRIBE_STRUCT(OpenFile, (), (path, mode, permissions))
 
     /**
-     * @brief Sets when a path was last modified. Needs Capabilities::setModificationTime.
+     * @brief Sets when a path was last modified. Needs Capabilities::setModificationTime. Fails with Unsupported for a
+     *        time the protocol cannot carry.
      */
     struct SetModificationTime
     {
