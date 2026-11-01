@@ -868,7 +868,7 @@ void DownloadOperation::cleanup()
     }
 
     if (auto stream = fileStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
 
     localFile_.close();
 

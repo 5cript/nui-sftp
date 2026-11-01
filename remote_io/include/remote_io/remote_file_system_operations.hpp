@@ -185,8 +185,9 @@ namespace RemoteIo
     BOOST_DESCRIBE_STRUCT(Rename, (), (source, destination))
 
     /**
-     * @brief Moves a regular file to a destination that must not exist, atomically through a hard link. Unsupported
-     *        unless the protocol has hard links.
+     * @brief Moves a regular file to a destination that must not exist, atomically through a hard link. Fails with
+     *        AlreadyExists when the destination exists, and with Unsupported when the protocol has no hard links or
+     *        the server refused to link to the free destination, a rename then moves the file instead.
      */
     struct LinkIntoPlace
     {

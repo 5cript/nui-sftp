@@ -1006,7 +1006,7 @@ void UploadOperation::cleanup()
     localFile_.close();
 
     if (auto stream = fileStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
 }
 
 std::expected<void, UploadOperation::Error> UploadOperation::finalize()

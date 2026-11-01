@@ -90,9 +90,10 @@ namespace SecureShell::Test
         MOCK_METHOD((std::expected<void, RemoteIo::RemoteError>), writeInStrand, (std::string_view data), (override));
         MOCK_METHOD(std::size_t, writeLengthLimit, (), (const, override));
         MOCK_METHOD(std::size_t, readLengthLimit, (), (const, override));
+        MOCK_METHOD((std::expected<void, RemoteIo::RemoteError>), finishInStrand, (), (override));
         MOCK_METHOD(sftp_file, release, (), (override));
-        MOCK_METHOD(void, close, (bool isBackElement), (override));
-        MOCK_METHOD(void, closeInStrand, (bool isBackElement), (override));
+        MOCK_METHOD(void, close, (), (override));
+        MOCK_METHOD(void, closeInStrand, (), (override));
         MOCK_METHOD(RemoteIo::ProcessingStrand*, strand, (), (const, override));
     };
 }

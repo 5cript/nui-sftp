@@ -302,7 +302,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(file);
 
         auto done = sftp->performPromise([file = file]() -> bool {
-            file->closeInStrand(false);
+            file->closeInStrand();
             return true;
         });
         ASSERT_EQ(done.wait_for(5s), std::future_status::ready);
@@ -519,6 +519,6 @@ namespace SecureShell::Test
         ASSERT_EQ(fut.wait_for(replyTimeout), std::future_status::ready);
         auto file = fut.get().value().lock();
         ASSERT_TRUE(file);
-        ASSERT_DEBUG_DEATH({ file->closeInStrand(false); }, ".*");
+        ASSERT_DEBUG_DEATH({ file->closeInStrand(); }, ".*");
     }
 }

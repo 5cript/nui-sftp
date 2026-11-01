@@ -397,11 +397,10 @@ namespace SecureShell
         , limits_{limits}
     {}
     FileStream::~FileStream() = default;
-    FileStream::FileStream(FileStream&& other)
-        : sftp_{std::move(other.sftp_)}
-        , file_{other.file_.release(), makeFileDeleter()}
-        , limits_{other.limits_}
-    {}
+    void FileStream::close()
+    {
+        close(false);
+    }
     void FileStream::close(bool isBackElement)
     {
         if (auto sftp = sftp_.lock(); sftp)
@@ -422,6 +421,10 @@ namespace SecureShell
                 closeInStrand(isBackElement);
             }
         }
+    }
+    void FileStream::closeInStrand()
+    {
+        closeInStrand(false);
     }
     void FileStream::closeInStrand(bool isBackElement)
     {
@@ -456,17 +459,6 @@ namespace SecureShell
                 );
             }
         };
-    }
-    FileStream& FileStream::operator=(FileStream&& other)
-    {
-        if (this != &other)
-        {
-            sftp_ = std::move(other.sftp_);
-            file_ = std::unique_ptr<sftp_file_struct, std::function<void(sftp_file)>>{
-                other.file_.release(), makeFileDeleter()
-            };
-        }
-        return *this;
     }
     std::expected<void, RemoteIo::RemoteError> FileStream::seekInStrand(std::size_t pos)
     {
@@ -811,6 +803,10 @@ namespace SecureShell
             }
         );
         return future;
+    }
+    std::expected<void, RemoteIo::RemoteError> FileStream::finishInStrand()
+    {
+        return {};
     }
     sftp_file FileStream::release()
     {

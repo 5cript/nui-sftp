@@ -54,7 +54,7 @@ namespace
         std::expected<void, TarArchive::TarError> finish() override
         {
             if (auto stream = stream_.lock(); stream)
-                stream->close(false);
+                stream->close();
             return {};
         }
 
@@ -667,7 +667,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInS
     }
 
     if (auto stream = remoteStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
     remoteStream_.reset();
 
     const auto moved = sftp.moveIntoPlaceInStrand(
@@ -727,7 +727,7 @@ void ArchiveUploadOperation::cleanup()
     currentLocalFile_.close();
     writer_.reset();
     if (auto stream = remoteStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
     remoteStream_.reset();
 
     if (tempCreated_)
