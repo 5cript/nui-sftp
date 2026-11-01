@@ -299,13 +299,8 @@ namespace SecureShell
         renameInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
 
         /**
-         * @brief Renames without replacing @p destination. Fails with SSH_FX_FILE_ALREADY_EXISTS when it exists.
-         *
-         * A regular file moves atomically through hardlink@openssh.com where the server has it and the link
-         * succeeds. Otherwise a server without posix-rename@openssh.com refuses an existing destination itself,
-         * and on one with it the destination is checked before the rename, which leaves a window.
-         *
-         * @param sourceType The type of @p source when the caller knows it, saves an lstat.
+         * @brief RemoteIo::renameNoReplaceInStrand on this session. A regular file moves atomically through
+         *        hardlink@openssh.com where the server has it and the link succeeds.
          */
         std::expected<void, Error> renameNoReplaceInStrand(
             Paths::RemotePath const& source,
@@ -314,11 +309,7 @@ namespace SecureShell
         );
 
         /**
-         * @brief Renames over an existing @p destination.
-         *
-         * Atomic with posix-rename@openssh.com. Otherwise the destination is moved aside to @p asideSuffix first
-         * and moved back when the rename fails; if moving it back fails too, the error names where it is kept.
-         * A leftover aside is removed when the destination exists, and put back when it does not.
+         * @brief RemoteIo::renameReplaceInStrand on this session, atomic with posix-rename@openssh.com.
          */
         std::expected<void, Error> renameReplaceInStrand(
             Paths::RemotePath const& source,
@@ -327,8 +318,7 @@ namespace SecureShell
         );
 
         /**
-         * @brief Moves a finished transfer from @p source to @p destination with @ref renameReplaceInStrand when
-         *        @p replace is set, otherwise with @ref renameNoReplaceInStrand.
+         * @brief RemoteIo::moveIntoPlaceInStrand on this session.
          */
         std::expected<void, Error> moveIntoPlaceInStrand(
             Paths::RemotePath const& source,
@@ -539,24 +529,6 @@ namespace SecureShell
         std::expected<Paths::RemotePath, Error> canonicalizeInStrand(char const* path);
 
         static Error alreadyExists(Paths::RemotePath const& destination);
-
-        /**
-         * @brief Moves the regular file @p source to @p destination with LinkIntoPlace, or by a rename when the server
-         *        refuses the link and @p destination does not exist.
-         */
-        std::expected<void, Error>
-        hardlinkIntoPlaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
-
-        /**
-         * @brief Renames @p destination to @p aside, removing a file left at @p aside first when the rename fails.
-         */
-        std::expected<void, Error> moveAsideInStrand(Paths::RemotePath const& destination, Paths::RemotePath const& aside);
-
-        /**
-         * @brief Reads a file into a string, stopping after maximumSize bytes.
-         */
-        std::expected<std::string, Error>
-        readSmallFileInStrand(Paths::RemotePath const& path, std::size_t maximumSize);
 
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);
         void removeAllFileStreams();

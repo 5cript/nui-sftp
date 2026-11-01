@@ -12,6 +12,7 @@ function(add_remote_io_library name)
             ${REMOTE_IO_SOURCE_DIRECTORY}/async/processing_thread.cpp
             ${REMOTE_IO_SOURCE_DIRECTORY}/async/socket_wait.cpp
             ${REMOTE_IO_SOURCE_DIRECTORY}/async/transfer_context.cpp
+            ${REMOTE_IO_SOURCE_DIRECTORY}/remote_file_system_helpers.cpp
     )
 
     target_include_directories(
@@ -20,7 +21,7 @@ function(add_remote_io_library name)
             ${REMOTE_IO_SOURCE_DIRECTORY}/../../include
     )
 
-    target_link_libraries(${name} PUBLIC utility paths shared-data PRIVATE fmt::fmt)
+    target_link_libraries(${name} PUBLIC utility paths shared-data PRIVATE log fmt::fmt)
     if (WIN32)
         target_link_libraries(${name} PUBLIC ws2_32)
     endif()

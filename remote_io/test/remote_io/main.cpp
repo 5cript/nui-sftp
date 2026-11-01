@@ -2,6 +2,7 @@
 #include "test_processing_thread.hpp"
 #include "test_remote_error.hpp"
 #include "test_remote_file_system.hpp"
+#include "test_remote_file_system_helpers.hpp"
 #include "test_transfer_context.hpp"
 
 #include <gtest/gtest.h>
