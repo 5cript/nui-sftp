@@ -174,7 +174,13 @@ const faults = {
     // Renames that fail before renames succeed again, null for all.
     renamesFailing: null,
     failHardlinks: false,
+    // The status failing hard links answer, permission denied unless set.
+    hardlinkFailureStatus: null,
     failRemoves: false,
+    // CLOSE closes the handle but answers failure, like a network filesystem reporting a deferred write error.
+    failCloses: false,
+    // Closes that fail before closes succeed again, null for all.
+    closesFailing: null,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
     // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
@@ -195,6 +201,8 @@ const changeOpenSftpSessions = (change) => {
     for (const watcher of openSftpSessionsWatchers)
         watcher();
 };
+// The flags of the last OPEN as they came over the wire, null before the first.
+let lastOpenFlags = null;
 
 // True when this rename has to fail. Counts down the renames allowed before failing.
 const renameFails = () => {
@@ -391,6 +399,7 @@ const server = new Server({
                     filename = resolveFileName(filename);
 
                     logMessage('OPEN', filename, flags, attrs);
+                    lastOpenFlags = flags;
 
                     let result = fakeFilesystem.find(filename);
                     // OPEN follows symlinks like a real server.
@@ -546,6 +555,12 @@ const server = new Server({
                     }
                     handles.delete(handleString);
 
+                    if (faults.failCloses && faults.closesFailing !== 0) {
+                        if (faults.closesFailing !== null)
+                            --faults.closesFailing;
+                        logMessage('Fault: failing close');
+                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
                     sftpStream.status(reqid, STATUS_CODE.OK);
 
                     logMessage('File closed');
@@ -756,7 +771,7 @@ const server = new Server({
                     if (name === 'hardlink@openssh.com') {
                         if (faults.failHardlinks) {
                             logMessage('Fault: failing hardlink');
-                            return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                            return sftpStream.status(reqid, faults.hardlinkFailureStatus ?? STATUS_CODE.PERMISSION_DENIED);
                         }
                         if (newResult !== undefined || oldResult.type !== 'file')
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);
@@ -1019,12 +1034,18 @@ cli.on('failRenames', (command) => {
     faults.renamesBeforeFailure = command.after === undefined ? null : Number(command.after);
     faults.renamesFailing = command.count === undefined ? null : Number(command.count);
 });
-// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks.
+// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks. 'unsupported' as
+// status answers OP_UNSUPPORTED, like OpenSSH on a filesystem whose link() is ENOSYS.
 cli.on('failHardlinks', (command) => {
     faults.failHardlinks = command.enabled !== false;
+    faults.hardlinkFailureStatus = command.status === 'unsupported' ? STATUS_CODE.OP_UNSUPPORTED : null;
 });
 cli.on('failRemoves', (command) => {
     faults.failRemoves = command.enabled !== false;
+});
+cli.on('failCloses', (command) => {
+    faults.failCloses = command.enabled !== false;
+    faults.closesFailing = command.count === undefined ? null : Number(command.count);
 });
 cli.on('denyDirectory', (command) => {
     faults.deniedDirectories.add(command.path);
@@ -1056,6 +1077,7 @@ cli.on('waitForOpenSftpSessions', (command) => new Promise((resolve) => {
     openSftpSessionsWatchers.add(check);
     check();
 }));
+cli.on('lastOpenFlags', () => ({ flags: lastOpenFlags }));
 cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });

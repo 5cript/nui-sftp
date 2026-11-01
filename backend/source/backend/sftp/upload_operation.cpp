@@ -1006,7 +1006,7 @@ void UploadOperation::cleanup()
     localFile_.close();
 
     if (auto stream = fileStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
 }
 
 std::expected<void, UploadOperation::Error> UploadOperation::finalize()
@@ -1133,15 +1133,9 @@ void UploadOperation::applyModificationTimeInStrand(SecureShell::SftpSession& sf
         );
         return;
     }
-    const auto seconds = static_cast<std::uint32_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::file_clock::to_sys(localTime).time_since_epoch())
-            .count()
-    );
-    sftp_attributes_struct attributes{};
-    attributes.flags = SSH_FILEXFER_ATTR_ACMODTIME;
-    attributes.atime = seconds;
-    attributes.mtime = seconds;
-    if (const auto applied = sftp.statInStrand(writtenPath(), &attributes); !applied.has_value())
+    const auto modificationTime =
+        std::chrono::floor<std::chrono::system_clock::duration>(std::chrono::file_clock::to_sys(localTime));
+    if (const auto applied = sftp.setModificationTimeInStrand(writtenPath(), modificationTime); !applied.has_value())
         Log::warn("UploadOperation: Failed to set mtime on '{}': {}.", writtenPath().value(), applied.error().message);
 }
 

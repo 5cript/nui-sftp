@@ -2143,6 +2143,28 @@ namespace SecureShell::Test
         EXPECT_EQ(readRemote(*sftp, "/home/test/moved.txt"), "source");
     }
 
+    TEST_F(SftpTests, RenameNoReplaceKeepsADestinationItCannotStat)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/source.txt"}, {"content", "source"}})
+        );
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/target.txt"}, {"content", "target"}})
+        );
+        ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "hardlink@openssh.com"}}));
+        ASSERT_TRUE(serverStartResult->command("advertise", {{"name", "posix-rename@openssh.com"}}));
+        ASSERT_TRUE(serverStartResult->command("failHardlinks", {{"status", "unsupported"}}));
+        ASSERT_TRUE(serverStartResult->command("denyStat", {{"path", "/home/test/target.txt"}}));
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        const auto refused = renameNoReplace(*sftp, "/home/test/target.txt", SharedData::FileType::Regular);
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::PermissionDenied);
+        EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
+        EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
+    }
+
     TEST_F(SftpTests, RenameNoReplaceSucceedsWhenTheLinkedSourceCannotBeRemoved)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

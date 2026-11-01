@@ -25,8 +25,8 @@ namespace SecureShell
         ~FileStream() override;
         FileStream(FileStream const&) = delete;
         FileStream& operator=(FileStream const&) = delete;
-        FileStream(FileStream&&);
-        FileStream& operator=(FileStream&&);
+        FileStream(FileStream&&) = delete;
+        FileStream& operator=(FileStream&&) = delete;
 
         /**
          * @brief Moves the file pointer to the specified position.
@@ -174,6 +174,12 @@ namespace SecureShell
         ) override;
 
         /**
+         * @brief Closes the file, the answer to the CLOSE carries errors the server only reports then, like those of a
+         *        network filesystem. The stream reads and writes no more, closeInStrand still removes it.
+         */
+        std::expected<void, RemoteIo::RemoteError> finishInStrand() override;
+
+        /**
          * @brief Brings this class into an invalid state and returns the sftp_file. The ownership of the file is
          * transferred to the caller.
          *
@@ -181,15 +187,20 @@ namespace SecureShell
          */
         sftp_file release() override;
 
+        void close() override;
+
         /**
          * @brief Closes the file and removes itself from the sftp session.
+         * @param isBackElement Whether this is the last stream of the session, which is then removed faster.
          */
-        void close(bool isBackElement = false) override;
+        void close(bool isBackElement);
+
+        void closeInStrand() override;
 
         /**
          * @brief In-strand variant of close. Must be called from within the processing thread.
          */
-        void closeInStrand(bool isBackElement = false) override;
+        void closeInStrand(bool isBackElement);
 
         RemoteIo::ProcessingStrand* strand() const override;
 

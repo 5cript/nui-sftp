@@ -631,7 +631,7 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseEntryInS
 
     if (auto stream = currentStream_.lock(); stream)
     {
-        stream->close(false);
+        stream->close();
     }
     currentStream_.reset();
 
@@ -741,7 +741,7 @@ void ArchiveDownloadOperation::cleanup()
         writer_->discard();
     currentEntry_.reset();
     if (auto stream = currentStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
     currentStream_.reset();
     writer_.reset();
 

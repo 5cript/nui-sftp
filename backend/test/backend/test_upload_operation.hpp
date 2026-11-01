@@ -1738,6 +1738,35 @@ namespace Test
         EXPECT_EQ(information->mtime, 1600000000u);
     }
 
+    TEST_F(UploadOperationTests, AnUploadLeavesTheServersTimeWhenSftpCannotCarryTheSourceTime)
+    {
+        using std::chrono::seconds;
+        // A day before 1970 and the start of 2200.
+        for (const auto time : {seconds{-86400}, seconds{7258118400}})
+        {
+            CREATE_SERVER_AND_JOINER(sftpServer);
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+            const auto source = temporaryRoot / "dated.bin";
+            writeContent(source, patternedContent(1024u));
+            std::filesystem::last_write_time(source, std::chrono::file_clock::from_sys(std::chrono::sys_seconds{time}));
+            UploadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/dated.bin"),
+                    .localPath = toLocal(source),
+                }
+            };
+            ASSERT_EQ(runToCompletion(operation), UploadOperation::WorkStatus::Complete) << time.count();
+
+            auto stat = sftp->stat(remote("/home/test/dated.bin"));
+            ASSERT_EQ(stat.wait_for(5s), std::future_status::ready);
+            const auto information = stat.get();
+            ASSERT_TRUE(information.has_value());
+            // The test server gives a new file the time 0.
+            EXPECT_EQ(information->mtime, 0u) << time.count();
+        }
+    }
+
     TEST_F(UploadOperationTests, AnUploadWhoseDestinationChangedSinceTheCompareFailsBeforeItWritesAnything)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

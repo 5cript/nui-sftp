@@ -185,8 +185,10 @@ namespace RemoteIo
     BOOST_DESCRIBE_STRUCT(Rename, (), (source, destination))
 
     /**
-     * @brief Moves a regular file to a destination that must not exist, atomically through a hard link. Unsupported
-     *        unless the protocol has hard links.
+     * @brief Moves a regular file to a destination that must not exist, atomically through a hard link. Fails with
+     *        AlreadyExists when the destination exists, and with Unsupported only when the destination is known to be
+     *        free and the protocol has no hard links or the server refused the link. It never renames, after
+     *        Unsupported the caller may move the file with Rename.
      */
     struct LinkIntoPlace
     {
@@ -207,7 +209,8 @@ namespace RemoteIo
     BOOST_DESCRIBE_STRUCT(OpenFile, (), (path, mode, permissions))
 
     /**
-     * @brief Sets when a path was last modified. Needs Capabilities::setModificationTime.
+     * @brief Sets when a path was last modified. Needs Capabilities::setModificationTime. Fails with Unsupported for a
+     *        time the protocol cannot carry.
      */
     struct SetModificationTime
     {
