@@ -88,6 +88,27 @@ namespace SecureShell::Test
         EXPECT_EQ(information.error().wrapperError, RemoteIo::WrapperErrors::TaskPushFailed);
     }
 
+    TEST_F(SftpFileSystemTests, CloseOnTheProcessingThreadClosesTheSessionAndItsStreams)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        const auto stream = openForReading(*sftp, "/home/test/file1.txt");
+        ASSERT_NE(stream, nullptr);
+
+        auto closed = sftp->performPromise(
+            [fileSystem = std::static_pointer_cast<RemoteIo::IRemoteFileSystem>(sftp)]()
+            {
+                return fileSystem->close();
+            }
+        );
+        ASSERT_EQ(closed.wait_for(replyTimeout), std::future_status::ready);
+        EXPECT_TRUE(closed.get());
+        EXPECT_FALSE(sftp->close());
+        auto information = stream->stat();
+        ASSERT_EQ(information.wait_for(replyTimeout), std::future_status::ready);
+        EXPECT_FALSE(information.get().has_value());
+    }
+
     TEST_F(SftpFileSystemTests, RenameReplacesAsTheCapabilitiesTell)
     {
         for (const bool posixRename : {false, true})

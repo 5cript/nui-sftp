@@ -70,18 +70,27 @@ namespace SecureShell
         if (strand_->isFinalized())
             return false;
 
-        return strand_
-            ->pushFinalPromiseTask(
-                [this, isBackElement]()
-                {
-                    removeAllFileStreams();
-                    // Here and not in the destructor, which runs on whichever thread drops the last reference.
-                    session_.reset();
-                    owner_->sftpSessionRemoveItself(this, isBackElement);
-                    return true;
-                }
-            )
-            .get();
+        const auto removeItself = [this, isBackElement]()
+        {
+            removeAllFileStreams();
+            // Here and not in the destructor, which runs on whichever thread drops the last reference.
+            session_.reset();
+            owner_->sftpSessionRemoveItself(this, isBackElement);
+            return true;
+        };
+        if (!strand_->withinProcessingThread())
+            return strand_->pushFinalPromiseTask(removeItself).get();
+
+        // The final task would wait for this thread. Removing itself may drop the last owner under the strand's lock.
+        const auto self = shared_from_this();
+        bool removed = false;
+        strand_->doFinalSync(
+            [&removed, &removeItself]()
+            {
+                removed = removeItself();
+            }
+        );
+        return removed;
     }
     void SftpSession::fileStreamRemoveItself(FileStream* stream, bool isBackElement)
     {
