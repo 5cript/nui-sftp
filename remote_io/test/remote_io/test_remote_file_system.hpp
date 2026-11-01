@@ -110,6 +110,8 @@ namespace RemoteIo::Test
                 {
                     {
                         std::scoped_lock lock{mutex_};
+                        if (gaveUp_)
+                            return;
                         pending_.push_back(std::move(pending));
                     }
                     started_.notify_all();
@@ -119,7 +121,8 @@ namespace RemoteIo::Test
             }
 
             /**
-             * @brief Waits until an Lstat started and takes it.
+             * @brief Waits until an Lstat started and takes it. When none starts in time, later ones are dropped, so a
+             *        failing test leaves no inStrand call waiting.
              */
             std::optional<Pending<Lstat>> takeStarted()
             {
@@ -132,7 +135,10 @@ namespace RemoteIo::Test
                             return !pending_.empty();
                         }
                     ))
+                {
+                    gaveUp_ = true;
                     return std::nullopt;
+                }
                 auto taken = std::move(pending_.front());
                 pending_.pop_front();
                 return taken;
@@ -167,6 +173,7 @@ namespace RemoteIo::Test
             std::mutex mutex_{};
             std::condition_variable started_{};
             std::deque<Pending<Lstat>> pending_{};
+            bool gaveUp_{false};
         };
     }
 
@@ -175,7 +182,27 @@ namespace RemoteIo::Test
     using RemoteFileSystemTestDetail::remote;
     using RemoteFileSystemTestDetail::replyTimeout;
 
-    TEST(RemoteFileSystemTests, OpenModesCombineAndAreFound)
+    class RemoteFileSystemTests : public ::testing::Test
+    {
+      protected:
+        void SetUp() override
+        {
+            processingThread_.start(std::chrono::milliseconds{1});
+        }
+
+        /**
+         * @brief Stops the thread while the strand exists, so tasks a failed test left queued still run safely.
+         */
+        void TearDown() override
+        {
+            processingThread_.stop();
+        }
+
+        ProcessingThread processingThread_{};
+        std::unique_ptr<ProcessingStrand> strand_{processingThread_.createStrand()};
+    };
+
+    TEST_F(RemoteFileSystemTests, OpenModesCombineAndAreFound)
     {
         const auto created = OpenMode::Write | OpenMode::Create | OpenMode::Truncate;
 
@@ -185,7 +212,7 @@ namespace RemoteIo::Test
         EXPECT_FALSE(contains(created, OpenMode::Read | OpenMode::Write));
     }
 
-    TEST(RemoteFileSystemTests, CapabilitiesPromiseNothingByDefault)
+    TEST_F(RemoteFileSystemTests, CapabilitiesPromiseNothingByDefault)
     {
         const Capabilities capabilities{};
 
@@ -201,16 +228,16 @@ namespace RemoteIo::Test
         EXPECT_FALSE(capabilities.preferAsyncTransfers);
     }
 
-    TEST(RemoteFileSystemTests, AnOperationKeepsItsFirstResult)
+    TEST_F(RemoteFileSystemTests, AnOperationKeepsItsFirstResult)
     {
         std::vector<std::uint64_t> sizes{};
         {
-            Completion<Lstat> complete{
+            Completion<Lstat> complete(
                 [&sizes](OperationResult<Lstat> result)
                 {
                     sizes.push_back(result.has_value() ? result->size : 0u);
                 }
-            };
+            );
             complete(FileInformation{.size = 3u});
             complete(FileInformation{.size = 4u});
         }
@@ -218,15 +245,12 @@ namespace RemoteIo::Test
         EXPECT_EQ(sizes, std::vector<std::uint64_t>{3u});
     }
 
-    TEST(RemoteFileSystemTests, AnOperationInStrandReturnsWhatTheFileSystemAnswered)
+    TEST_F(RemoteFileSystemTests, AnOperationInStrandReturnsWhatTheFileSystemAnswered)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
 
         auto answered = fileSystem->performPromise(
-            [&fileSystem]()
+            [fileSystem]()
             {
                 return fileSystem->inStrand(Lstat{.path = remote("/home/user/file.txt")});
             }
@@ -239,12 +263,9 @@ namespace RemoteIo::Test
         EXPECT_EQ(fileSystem->started.load(), 1);
     }
 
-    TEST(RemoteFileSystemTests, AnOperationStartedLaterRunsOnTheStrandOfASynchronousFileSystem)
+    TEST_F(RemoteFileSystemTests, AnOperationStartedLaterRunsOnTheStrandOfASynchronousFileSystem)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
 
         auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
 
@@ -255,15 +276,12 @@ namespace RemoteIo::Test
         EXPECT_TRUE(fileSystem->startedOnStrand.load());
     }
 
-    TEST(RemoteFileSystemTests, AnOperationThatCompletesAfterItStartedIsAwaitedInStrand)
+    TEST_F(RemoteFileSystemTests, AnOperationThatCompletesAfterItStartedIsAwaitedInStrand)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand_.get());
 
         auto answered = fileSystem->performPromise(
-            [&fileSystem]()
+            [fileSystem]()
             {
                 return fileSystem->inStrand(Lstat{.path = remote("/home/user/file.txt")});
             }
@@ -278,13 +296,10 @@ namespace RemoteIo::Test
         EXPECT_EQ(information->size, 7u);
     }
 
-    TEST(RemoteFileSystemTests, AnOperationStartedLaterNeedsNoStrandWhereTheFileSystemStartsItAtOnce)
+    TEST_F(RemoteFileSystemTests, AnOperationStartedLaterNeedsNoStrandWhereTheFileSystemStartsItAtOnce)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
-        processingThread.stop();
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand_.get());
+        processingThread_.stop();
 
         auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
         auto started = fileSystem->takeStarted();
@@ -297,15 +312,12 @@ namespace RemoteIo::Test
         EXPECT_EQ(information->size, 9u);
     }
 
-    TEST(RemoteFileSystemTests, AnInStrandWaitEndsWhenTheFileSystemDropsTheOperation)
+    TEST_F(RemoteFileSystemTests, AnInStrandWaitEndsWhenTheFileSystemDropsTheOperation)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand_.get());
 
         auto answered = fileSystem->performPromise(
-            [&fileSystem]()
+            [fileSystem]()
             {
                 return fileSystem->inStrand(Lstat{.path = remote("/home/user/file.txt")});
             }
@@ -318,12 +330,9 @@ namespace RemoteIo::Test
         EXPECT_EQ(information.error().wrapperError, WrapperErrors::TaskPushFailed);
     }
 
-    TEST(RemoteFileSystemTests, AnOperationTheFileSystemDropsCompletesAsUnfinished)
+    TEST_F(RemoteFileSystemTests, AnOperationTheFileSystemDropsCompletesAsUnfinished)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand_.get());
 
         auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
         fileSystem->takeStarted().reset();
@@ -334,13 +343,10 @@ namespace RemoteIo::Test
         EXPECT_EQ(information.error().wrapperError, WrapperErrors::TaskPushFailed);
     }
 
-    TEST(RemoteFileSystemTests, AnOperationStartedLaterOnAStoppedStrandCompletesAsUnfinished)
+    TEST_F(RemoteFileSystemTests, AnOperationStartedLaterOnAStoppedStrandCompletesAsUnfinished)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
-        processingThread.stop();
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        processingThread_.stop();
 
         auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
 
@@ -351,12 +357,9 @@ namespace RemoteIo::Test
         EXPECT_EQ(fileSystem->started.load(), 0);
     }
 
-    TEST(RemoteFileSystemTests, AnOperationStartedLaterAfterTheFileSystemIsGoneCompletesAsUnfinished)
+    TEST_F(RemoteFileSystemTests, AnOperationStartedLaterAfterTheFileSystemIsGoneCompletesAsUnfinished)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
         std::promise<void> release;
         fileSystem->perform(
             [released = release.get_future().share()]()
@@ -375,22 +378,19 @@ namespace RemoteIo::Test
         EXPECT_EQ(information.error().wrapperError, WrapperErrors::TaskPushFailed);
     }
 
-    TEST(RemoteFileSystemTests, UnsetPathsNeverReachTheFileSystem)
+    TEST_F(RemoteFileSystemTests, UnsetPathsNeverReachTheFileSystem)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
 
         auto stat = fileSystem->later(Lstat{});
         auto rename = fileSystem->performPromise(
-            [&fileSystem]()
+            [fileSystem]()
             {
                 return fileSystem->inStrand(Rename{.source = remote("/home/user/a"), .destination = {}});
             }
         );
         auto removeAll = fileSystem->performPromise(
-            [&fileSystem]()
+            [fileSystem]()
             {
                 return fileSystem->inStrand(RemoveAll{.paths = {remote("/home/user/a"), Paths::RemotePath{}}});
             }
@@ -411,23 +411,20 @@ namespace RemoteIo::Test
         EXPECT_EQ(fileSystem->started.load(), 0);
     }
 
-    TEST(RemoteFileSystemTests, TasksRunOnTheStrandOfTheFileSystem)
+    TEST_F(RemoteFileSystemTests, TasksRunOnTheStrandOfTheFileSystem)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
 
-        std::promise<bool> performed;
-        auto performedOnStrand = performed.get_future();
+        const auto performed = std::make_shared<std::promise<bool>>();
+        auto performedOnStrand = performed->get_future();
         fileSystem->perform(
-            [&performed, &strand]()
+            [performed, strand = strand_.get()]()
             {
-                performed.set_value(strand->withinProcessingThread());
+                performed->set_value(strand->withinProcessingThread());
             }
         );
         auto promised = fileSystem->performPromise(
-            [&strand]() -> std::expected<bool, RemoteError>
+            [strand = strand_.get()]() -> std::expected<bool, RemoteError>
             {
                 return strand->withinProcessingThread();
             }
