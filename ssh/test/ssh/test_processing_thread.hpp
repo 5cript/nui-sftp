@@ -390,10 +390,10 @@ namespace SecureShell::Test
 
     TEST_F(ProcessingThreadTest, PermanentTaskIsExecutedMultipleTimes)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
         std::latch latch{5};
         std::atomic_int counter = 5;
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
         auto result = processingThread.pushPermanentTask(
             [&](auto)
             {
@@ -856,10 +856,10 @@ namespace SecureShell::Test
         // the same lambda replayed on the next cycle, throwing future_error from the
         // already-satisfied promise. The outer catch then set running_ = false and the
         // thread silently died, deadlocking any subsequent .get() on a queued task.
+        Awaiter blockerStarted{};
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
 
-        Awaiter blockerStarted{};
         auto blocker = processingThread.pushPermanentTask(
             [&blockerStarted](auto)
             {
