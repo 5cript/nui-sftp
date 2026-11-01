@@ -137,7 +137,8 @@ namespace RemoteIo
         }
 
         /**
-         * @brief Runs @p operation from any thread, the future holds its result.
+         * @brief Runs @p operation from any thread, the future holds its result. The file system must be owned by a
+         *        shared_ptr: when it is gone before the operation starts, the operation completes as unfinished.
          */
         template <typename OperationT>
         std::future<OperationResult<OperationT>> later(OperationT operation)
@@ -159,9 +160,10 @@ namespace RemoteIo
                 Pending<OperationT>{.operation = std::move(operation), .complete = std::move(complete)}
             );
             dispatch(
-                [this, pending]()
+                [fileSystem = weak_from_this(), pending]()
                 {
-                    start(std::move(*pending));
+                    if (const auto locked = fileSystem.lock())
+                        locked->start(std::move(*pending));
                 }
             );
             return future;

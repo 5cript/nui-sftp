@@ -351,6 +351,30 @@ namespace RemoteIo::Test
         EXPECT_EQ(fileSystem->started.load(), 0);
     }
 
+    TEST(RemoteFileSystemTests, AnOperationStartedLaterAfterTheFileSystemIsGoneCompletesAsUnfinished)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand.get());
+        std::promise<void> release;
+        fileSystem->perform(
+            [released = release.get_future().share()]()
+            {
+                released.wait();
+            }
+        );
+
+        auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
+        fileSystem.reset();
+        release.set_value();
+
+        ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
+        const auto information = answered.get();
+        ASSERT_FALSE(information.has_value());
+        EXPECT_EQ(information.error().wrapperError, WrapperErrors::TaskPushFailed);
+    }
+
     TEST(RemoteFileSystemTests, UnsetPathsNeverReachTheFileSystem)
     {
         ProcessingThread processingThread;
