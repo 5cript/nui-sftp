@@ -85,7 +85,10 @@ namespace RemoteIo
         void addBytesTransferred(SignedSizeType delta);
 
       private:
-        void end(Outcome outcome);
+        /**
+         * @brief Ends the transfer with @p outcome and keeps @p error, unless it already ended.
+         */
+        void end(Outcome outcome, std::optional<RemoteError> error = std::nullopt);
         void wake() const;
 
       private:
@@ -93,7 +96,8 @@ namespace RemoteIo
         std::function<void()> observer_{};
         std::chrono::steady_clock::time_point lastProgressReport_{};
         std::atomic<Outcome> outcome_{Outcome::Running};
-        mutable std::mutex errorMutex_{};
+        /** @brief Makes ending and keeping the error one step, so an end that lost a race keeps no error. */
+        mutable std::mutex endMutex_{};
         std::optional<RemoteError> error_{};
         std::atomic_bool paused_{false};
         std::atomic<SignedSizeType> bytesTransferred_{0};

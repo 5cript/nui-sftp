@@ -2,10 +2,16 @@
 
 namespace RemoteIo
 {
-    void AsyncTransferContext::end(Outcome outcome)
+    void AsyncTransferContext::end(Outcome outcome, std::optional<RemoteError> error)
     {
-        auto expected = Outcome::Running;
-        if (outcome_.compare_exchange_strong(expected, outcome) && observer_)
+        {
+            std::scoped_lock lock{endMutex_};
+            auto expected = Outcome::Running;
+            if (!outcome_.compare_exchange_strong(expected, outcome))
+                return;
+            error_ = std::move(error);
+        }
+        if (observer_)
             observer_();
     }
 
@@ -44,13 +50,7 @@ namespace RemoteIo
 
     void AsyncTransferContext::fail(RemoteError error)
     {
-        if (outcome_.load() == Outcome::Running)
-        {
-            std::scoped_lock lock{errorMutex_};
-            if (!error_)
-                error_ = std::move(error);
-        }
-        end(Outcome::Failed);
+        end(Outcome::Failed, std::move(error));
     }
 
     void AsyncTransferContext::complete()
@@ -70,7 +70,7 @@ namespace RemoteIo
 
     std::optional<RemoteError> AsyncTransferContext::error() const
     {
-        std::scoped_lock lock{errorMutex_};
+        std::scoped_lock lock{endMutex_};
         return error_;
     }
 

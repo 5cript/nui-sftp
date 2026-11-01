@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <latch>
+#include <thread>
 
 namespace RemoteIo::Test
 {
@@ -69,6 +71,28 @@ namespace RemoteIo::Test
         ASSERT_TRUE(context.error().has_value());
         EXPECT_EQ(context.error()->kind, RemoteErrorKind::ConnectionLost);
         EXPECT_EQ(context.error()->protocol, Protocol::Ftp);
+    }
+
+    TEST(TransferContextTests, ACancelRacingAFailureLeavesAnErrorOnlyWhenTheFailureWon)
+    {
+        for (int round = 0; round < 1000; ++round)
+        {
+            AsyncTransferContext context{};
+            std::latch start{2};
+            std::thread failing{
+                [&context, &start]()
+                {
+                    start.arrive_and_wait();
+                    context.fail(RemoteError{.kind = RemoteErrorKind::ConnectionLost});
+                }
+            };
+            start.arrive_and_wait();
+            context.cancel();
+            failing.join();
+
+            ASSERT_EQ(context.error().has_value(), context.outcome() == AsyncTransferContext::Outcome::Failed)
+                << "round " << round;
+        }
     }
 
     TEST(TransferContextTests, OnlyAFailedTransferHasAnError)
