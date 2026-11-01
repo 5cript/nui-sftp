@@ -415,10 +415,10 @@ namespace RemoteIo::Test
     {
         auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
 
-        const auto performed = std::make_shared<std::promise<bool>>();
+        auto performed = std::make_shared<std::promise<bool>>();
         auto performedOnStrand = performed->get_future();
         fileSystem->perform(
-            [performed, strand = strand_.get()]()
+            [performed = std::move(performed), strand = strand_.get()]()
             {
                 performed->set_value(strand->withinProcessingThread());
             }

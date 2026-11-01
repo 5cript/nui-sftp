@@ -122,14 +122,18 @@ namespace RemoteIo
                 return std::unexpected(unsetPathError());
             // The completing thread may still be inside notify when the wait returns, so the state is shared.
             const auto call = std::make_shared<InStrandCall<OperationResult<OperationT>>>();
-            auto complete = Completion<OperationT>(
-                [call](OperationResult<OperationT> result)
-                {
-                    call->result = std::move(result);
-                    call->completed.notify();
+            start(
+                Pending<OperationT>{
+                    .operation = std::move(operation),
+                    .complete = Completion<OperationT>(
+                        [call](OperationResult<OperationT> result)
+                        {
+                            call->result = std::move(result);
+                            call->completed.notify();
+                        }
+                    ),
                 }
             );
-            start(Pending<OperationT>{.operation = std::move(operation), .complete = std::move(complete)});
             if (!call->completed.completed())
                 awaitInStrand(call->completed);
             assert(call->completed.completed());
@@ -150,17 +154,17 @@ namespace RemoteIo
                 promise->set_value(std::unexpected(unsetPathError()));
                 return future;
             }
-            auto complete = Completion<OperationT>(
-                [promise](OperationResult<OperationT> result)
-                {
-                    promise->set_value(std::move(result));
-                }
-            );
             auto pending = std::make_shared<Pending<OperationT>>(
-                Pending<OperationT>{.operation = std::move(operation), .complete = std::move(complete)}
+                std::move(operation),
+                Completion<OperationT>(
+                    [promise = std::move(promise)](OperationResult<OperationT> result)
+                    {
+                        promise->set_value(std::move(result));
+                    }
+                )
             );
             dispatch(
-                [fileSystem = weak_from_this(), pending]()
+                [fileSystem = weak_from_this(), pending = std::move(pending)]()
                 {
                     if (const auto locked = fileSystem.lock())
                         locked->start(std::move(*pending));
@@ -227,7 +231,7 @@ namespace RemoteIo
         };
 
         template <typename OperationT>
-        void start(Pending<OperationT> pending)
+        void start(Pending<OperationT>&& pending)
         {
             (*trampolines_)[RemoteFileSystemOperations::indexOf<OperationT>()](*this, &pending);
         }
