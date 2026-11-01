@@ -98,9 +98,8 @@ namespace RemoteIo::Test
         class DeferredFileSystem final : public RemoteFileSystemImplementation<DeferredFileSystem>
         {
           public:
-            DeferredFileSystem(ProcessingStrand* strand, std::chrono::milliseconds awaitBudget)
+            explicit DeferredFileSystem(ProcessingStrand* strand)
                 : strand_{strand}
-                , awaitBudget_{awaitBudget}
             {}
 
             template <typename OperationT>
@@ -160,14 +159,9 @@ namespace RemoteIo::Test
             {
                 start();
             }
-            void awaitInStrand(CompletionSignal& completed) override
-            {
-                completed.waitUntil(std::chrono::steady_clock::now() + awaitBudget_);
-            }
 
           private:
             ProcessingStrand* strand_;
-            std::chrono::milliseconds awaitBudget_;
             std::shared_ptr<IBufferProvider> bufferProvider_{DefaultBufferProvider::create()};
             std::mutex mutex_{};
             std::condition_variable started_{};
@@ -248,7 +242,7 @@ namespace RemoteIo::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get(), replyTimeout);
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
 
         auto answered = fileSystem->performPromise(
             [&fileSystem]()
@@ -271,7 +265,7 @@ namespace RemoteIo::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get(), replyTimeout);
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
         processingThread.stop();
 
         auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
@@ -285,12 +279,12 @@ namespace RemoteIo::Test
         EXPECT_EQ(information->size, 9u);
     }
 
-    TEST(RemoteFileSystemTests, AnInStrandWaitThatGivesUpFailsAsTimedOutAndTheLateCompletionIsHarmless)
+    TEST(RemoteFileSystemTests, AnInStrandWaitEndsWhenTheFileSystemDropsTheOperation)
     {
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get(), std::chrono::milliseconds{0});
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
 
         auto answered = fileSystem->performPromise(
             [&fileSystem]()
@@ -298,15 +292,12 @@ namespace RemoteIo::Test
                 return fileSystem->inStrand(Lstat{.path = remote("/home/user/file.txt")});
             }
         );
-        auto started = fileSystem->takeStarted();
-        ASSERT_TRUE(started.has_value());
+        fileSystem->takeStarted().reset();
+
         ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
         const auto information = answered.get();
-
-        started->complete(FileInformation{.size = 1u});
-
         ASSERT_FALSE(information.has_value());
-        EXPECT_EQ(information.error().kind, RemoteErrorKind::TimedOut);
+        EXPECT_EQ(information.error().wrapperError, WrapperErrors::TaskPushFailed);
     }
 
     TEST(RemoteFileSystemTests, AnOperationTheFileSystemDropsCompletesAsUnfinished)
@@ -314,7 +305,7 @@ namespace RemoteIo::Test
         ProcessingThread processingThread;
         processingThread.start(std::chrono::milliseconds{1});
         auto strand = processingThread.createStrand();
-        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get(), replyTimeout);
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand.get());
 
         auto answered = fileSystem->later(Lstat{.path = remote("/home/user/file.txt")});
         fileSystem->takeStarted().reset();

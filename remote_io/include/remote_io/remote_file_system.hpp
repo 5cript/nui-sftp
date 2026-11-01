@@ -8,7 +8,6 @@
 
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <expected>
@@ -76,15 +75,11 @@ namespace RemoteIo
             return completed_;
         }
 
-        /**
-         * @return Whether the operation completed before @p deadline.
-         */
-        bool waitUntil(std::chrono::steady_clock::time_point deadline)
+        void wait()
         {
             std::unique_lock lock{mutex_};
-            return condition_.wait_until(
+            condition_.wait(
                 lock,
-                deadline,
                 [this]()
                 {
                     return completed_;
@@ -101,7 +96,8 @@ namespace RemoteIo
     /**
      * @brief A file system on a server, whatever protocol it speaks. Every operation of RemoteFileSystemOperations can
      *        run on the processing thread of its strand with @ref inStrand, or from any thread with @ref later.
-     *        Implementations derive from RemoteFileSystemImplementation.
+     *        Implementations derive from RemoteFileSystemImplementation and complete every operation they start, if
+     *        need be as timed out, so no caller waits forever and no result arrives after its caller left.
      */
     class IRemoteFileSystem : public std::enable_shared_from_this<IRemoteFileSystem>
     {
@@ -124,8 +120,8 @@ namespace RemoteIo
             assert(strand()->withinProcessingThread());
             if (hasUnsetPath(operation))
                 return std::unexpected(unsetPathError());
-            // The completion may come after a wait that gave up, so its state does not live on this stack.
-            auto call = std::make_shared<InStrandCall<OperationResult<OperationT>>>();
+            // The completing thread may still be inside notify when the wait returns, so the state is shared.
+            const auto call = std::make_shared<InStrandCall<OperationResult<OperationT>>>();
             auto complete = Completion<OperationT>(
                 [call](OperationResult<OperationT> result)
                 {
@@ -136,10 +132,7 @@ namespace RemoteIo
             start(Pending<OperationT>{.operation = std::move(operation), .complete = std::move(complete)});
             if (!call->completed.completed())
                 awaitInStrand(call->completed);
-            if (!call->completed.completed())
-                return std::unexpected(
-                    RemoteError{.kind = RemoteErrorKind::TimedOut, .message = "The operation did not complete in time"}
-                );
+            assert(call->completed.completed());
             return std::move(*call->result);
         }
 
@@ -214,10 +207,14 @@ namespace RemoteIo
         virtual void dispatch(std::function<void()> start) = 0;
 
         /**
-         * @brief Waits on the processing thread for an operation that did not complete when it started, until it
-         *        completed or waiting longer makes no sense, then @ref inStrand fails as timed out.
+         * @brief Waits on the processing thread until an operation that did not complete when it started completed.
+         *        Never returns earlier: the protocol bounds the operation and completes it as timed out itself.
+         *        Protocols that make progress only on this thread override it to drive themselves meanwhile.
          */
-        virtual void awaitInStrand(CompletionSignal& completed) = 0;
+        virtual void awaitInStrand(CompletionSignal& completed)
+        {
+            completed.wait();
+        }
 
       private:
         template <typename ResultT>
