@@ -844,7 +844,7 @@ namespace SecureShell
         auto context = makeTransferContext();
         auto pipeline = std::make_shared<ReadPipeline>();
         watchInFlight(pipeline);
-        const auto [success, id] = strand()->pushPermanentTask(
+        const bool pushed = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
              bufferSize,
@@ -860,6 +860,16 @@ namespace SecureShell
                 {
                     pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
+                const auto failTransfer = [&](SftpError const& error)
+                {
+                    context->fail(toRemoteError(error));
+                    return TaskStatus::Done;
+                };
+                const auto failWith = [&](SftpError const& error)
+                {
+                    discardPipeline();
+                    return failTransfer(error);
+                };
 
                 if (context->hasEnded())
                 {
@@ -873,27 +883,12 @@ namespace SecureShell
                     return TaskStatus::Idle;
                 }
                 if (!stream)
-                {
-                    context->fail(toRemoteError(expiredError("File stream")));
-                    return TaskStatus::Done;
-                }
-
+                    return failTransfer(expiredError("File stream"));
                 if (!sftp)
-                {
-                    discardPipeline();
-                    context->fail(toRemoteError(expiredError("SFTP session")));
-                    return TaskStatus::Done;
-                }
+                    return failWith(expiredError("SFTP session"));
                 const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
                     return TaskStatus::Busy;
-
-                const auto failWith = [&](SftpError error)
-                {
-                    discardPipeline();
-                    context->fail(toRemoteError(error));
-                    return TaskStatus::Done;
-                };
 
                 auto* const file = stream->file_.get();
                 if (file == nullptr || pipeline->fileClosed())
@@ -965,8 +960,8 @@ namespace SecureShell
                 }
                 return TaskStatus::Busy;
             }
-        );
-        if (!success)
+        ).first;
+        if (!pushed)
             return std::unexpected(
                 SftpError{
                     .message = "Failed to push permanent task",
@@ -1003,7 +998,7 @@ namespace SecureShell
         auto context = makeTransferContext();
         auto pipeline = std::make_shared<WritePipeline>();
         watchInFlight(pipeline);
-        const auto [success, id] = strand()->pushPermanentTask(
+        const bool pushed = strand()->pushPermanentTask(
             [weakStream = weak_from_this(),
              buffer,
              bufferSize,
@@ -1019,6 +1014,16 @@ namespace SecureShell
                 {
                     pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
+                const auto failTransfer = [&](SftpError const& error)
+                {
+                    context->fail(toRemoteError(error));
+                    return TaskStatus::Done;
+                };
+                const auto failWith = [&](SftpError const& error)
+                {
+                    discardPipeline();
+                    return failTransfer(error);
+                };
 
                 if (context->hasEnded())
                 {
@@ -1032,26 +1037,12 @@ namespace SecureShell
                     return TaskStatus::Idle;
                 }
                 if (!stream)
-                {
-                    context->fail(toRemoteError(expiredError("File stream")));
-                    return TaskStatus::Done;
-                }
+                    return failTransfer(expiredError("File stream"));
                 if (!sftp)
-                {
-                    discardPipeline();
-                    context->fail(toRemoteError(expiredError("SFTP session")));
-                    return TaskStatus::Done;
-                }
+                    return failWith(expiredError("SFTP session"));
                 const auto target = sftp->chunkController().targetCallDuration();
                 if (stream->strand()->cycleElapsed() > target)
                     return TaskStatus::Busy;
-
-                const auto failWith = [&](SftpError error)
-                {
-                    discardPipeline();
-                    context->fail(toRemoteError(error));
-                    return TaskStatus::Done;
-                };
 
                 auto* const file = stream->file_.get();
                 if (file == nullptr || pipeline->fileClosed())
@@ -1095,8 +1086,8 @@ namespace SecureShell
                 }
                 return TaskStatus::Busy;
             }
-        );
-        if (!success)
+        ).first;
+        if (!pushed)
             return std::unexpected(
                 SftpError{
                     .message = "Failed to push permanent task",
