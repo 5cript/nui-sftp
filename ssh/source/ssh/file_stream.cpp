@@ -820,8 +820,7 @@ namespace SecureShell
     }
     std::shared_ptr<RemoteIo::AsyncTransferContext> FileStream::makeTransferContext()
     {
-        auto context = std::make_shared<RemoteIo::AsyncTransferContext>();
-        context->setWake(
+        return std::make_shared<RemoteIo::AsyncTransferContext>(
             [weakStream = weak_from_this()]()
             {
                 if (auto stream = weakStream.lock(); stream)
@@ -831,7 +830,6 @@ namespace SecureShell
                 }
             }
         );
-        return context;
     }
 
     std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> FileStream::readAsyncInStrand(

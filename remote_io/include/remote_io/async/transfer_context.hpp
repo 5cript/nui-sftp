@@ -6,14 +6,13 @@
 #include <chrono>
 #include <cstddef>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <type_traits>
 
 namespace RemoteIo
 {
-    class AsyncTransferContext : public std::enable_shared_from_this<AsyncTransferContext>
+    class AsyncTransferContext
     {
       public:
         using SignedSizeType = std::make_signed_t<std::size_t>;
@@ -28,6 +27,13 @@ namespace RemoteIo
             Failed,
             Canceled,
         };
+
+        AsyncTransferContext() = default;
+        /**
+         * @brief A context that wakes the thread driving the transfer when it resumes, fails or is canceled.
+         * @param wake Wakes that thread.
+         */
+        explicit AsyncTransferContext(std::function<void()> wake);
 
         bool paused() const;
         /**
@@ -65,12 +71,6 @@ namespace RemoteIo
         void observe(std::function<void()> observer);
 
         /**
-         * @brief Sets how pausing, resuming and canceling wake the thread that drives the transfer. Set by the stream
-         *        before the transfer starts, never changed after.
-         */
-        void setWake(std::function<void()> wake);
-
-        /**
          * @brief Tells the observer of progress unless it heard of some within progressInterval. Called by the
          *        transfer after each turn, on the thread that drives it.
          */
@@ -94,7 +94,7 @@ namespace RemoteIo
         void wake() const;
 
       private:
-        std::function<void()> wake_{};
+        const std::function<void()> wake_{};
         std::function<void()> observer_{};
         std::chrono::steady_clock::time_point lastProgressReport_{};
         std::atomic<Outcome> outcome_{Outcome::Running};

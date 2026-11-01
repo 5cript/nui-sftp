@@ -12,14 +12,13 @@ namespace RemoteIo::Test
 {
     TEST(TransferContextTests, CancelEndsTheTransferAndWakesItsThread)
     {
-        AsyncTransferContext context{};
         int wakes = 0;
-        context.setWake(
+        AsyncTransferContext context{
             [&wakes]()
             {
                 ++wakes;
             }
-        );
+        };
 
         context.cancel();
 
@@ -30,14 +29,13 @@ namespace RemoteIo::Test
 
     TEST(TransferContextTests, FailingEndsTheTransferAndWakesItsThread)
     {
-        AsyncTransferContext context{};
         int wakes = 0;
-        context.setWake(
+        AsyncTransferContext context{
             [&wakes]()
             {
                 ++wakes;
             }
-        );
+        };
 
         context.fail(RemoteError{.kind = RemoteErrorKind::ConnectionLost});
 
@@ -47,14 +45,13 @@ namespace RemoteIo::Test
 
     TEST(TransferContextTests, EndingAnEndedTransferDoesNotWakeItsThread)
     {
-        AsyncTransferContext context{};
         int wakes = 0;
-        context.setWake(
+        AsyncTransferContext context{
             [&wakes]()
             {
                 ++wakes;
             }
-        );
+        };
 
         context.complete();
         context.cancel();
@@ -66,14 +63,13 @@ namespace RemoteIo::Test
 
     TEST(TransferContextTests, OnlyResumingWakesItsThread)
     {
-        AsyncTransferContext context{};
         int wakes = 0;
-        context.setWake(
+        AsyncTransferContext context{
             [&wakes]()
             {
                 ++wakes;
             }
-        );
+        };
 
         context.pause(true);
         EXPECT_TRUE(context.paused());

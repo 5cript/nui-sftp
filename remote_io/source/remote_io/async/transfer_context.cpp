@@ -2,6 +2,10 @@
 
 namespace RemoteIo
 {
+    AsyncTransferContext::AsyncTransferContext(std::function<void()> wake)
+        : wake_{std::move(wake)}
+    {}
+
     bool AsyncTransferContext::end(Outcome outcome, std::optional<RemoteError> error)
     {
         {
@@ -25,11 +29,6 @@ namespace RemoteIo
     void AsyncTransferContext::observe(std::function<void()> observer)
     {
         observer_ = std::move(observer);
-    }
-
-    void AsyncTransferContext::setWake(std::function<void()> wake)
-    {
-        wake_ = std::move(wake);
     }
 
     void AsyncTransferContext::reportProgress()
