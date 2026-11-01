@@ -247,7 +247,8 @@ namespace RemoteIo
     /**
      * @brief The base of a remote file system implementation. @p DerivedT starts every operation of
      *        RemoteFileSystemOperations with a member template `void startOperation(Pending<OperationT>)`, which
-     *        completes it now or later; a missing operation does not compile.
+     *        completes it now or later; a missing operation does not compile. @p DerivedT gets shared_from_this from
+     *        IRemoteFileSystem, a second std::enable_shared_from_this base would leave both unset.
      */
     template <typename DerivedT>
     class RemoteFileSystemImplementation : public IRemoteFileSystem
@@ -255,7 +256,12 @@ namespace RemoteIo
       protected:
         RemoteFileSystemImplementation()
             : IRemoteFileSystem{trampolines}
-        {}
+        {
+            static_assert(
+                !std::is_base_of_v<std::enable_shared_from_this<DerivedT>, DerivedT>,
+                "Use the enable_shared_from_this base of IRemoteFileSystem, a second one is never set"
+            );
+        }
 
       private:
         template <typename OperationT>
