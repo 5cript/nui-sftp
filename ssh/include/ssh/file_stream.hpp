@@ -174,7 +174,8 @@ namespace SecureShell
         ) override;
 
         /**
-         * @brief SFTP confirms every write, nothing is left to wait for.
+         * @brief Closes the file, the answer to the CLOSE carries errors the server only reports then, like those of a
+         *        network filesystem. The stream reads and writes no more, closeInStrand still removes it.
          */
         std::expected<void, RemoteIo::RemoteError> finishInStrand() override;
 

@@ -806,6 +806,14 @@ namespace SecureShell
     }
     std::expected<void, RemoteIo::RemoteError> FileStream::finishInStrand()
     {
+        if (auto sftp = sftp_.lock(); sftp)
+            assert(sftp->strand_->withinProcessingThread());
+        VERIFY_FILE_STREAM();
+        if (discardInFlight_)
+            std::exchange(discardInFlight_, {})(file_.get());
+        // sftp_close frees the file even when the server refuses the CLOSE.
+        if (sftp_close(file_.release()) != SSH_NO_ERROR)
+            return std::unexpected(lastError());
         return {};
     }
     sftp_file FileStream::release()

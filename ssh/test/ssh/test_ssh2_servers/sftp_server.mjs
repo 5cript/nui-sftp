@@ -177,6 +177,8 @@ const faults = {
     // The status failing hard links answer, permission denied unless set.
     hardlinkFailureStatus: null,
     failRemoves: false,
+    // CLOSE closes the handle but answers failure, like a network filesystem reporting a deferred write error.
+    failCloses: false,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
     // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
@@ -548,6 +550,10 @@ const server = new Server({
                     }
                     handles.delete(handleString);
 
+                    if (faults.failCloses) {
+                        logMessage('Fault: failing close');
+                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
                     sftpStream.status(reqid, STATUS_CODE.OK);
 
                     logMessage('File closed');
@@ -1029,6 +1035,9 @@ cli.on('failHardlinks', (command) => {
 });
 cli.on('failRemoves', (command) => {
     faults.failRemoves = command.enabled !== false;
+});
+cli.on('failCloses', (command) => {
+    faults.failCloses = command.enabled !== false;
 });
 cli.on('denyDirectory', (command) => {
     faults.deniedDirectories.add(command.path);

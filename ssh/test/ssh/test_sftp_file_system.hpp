@@ -154,6 +154,63 @@ namespace SecureShell::Test
         EXPECT_EQ(readRemote(*sftp, "/home/test/created.txt"), "created");
     }
 
+    TEST_F(SftpFileSystemTests, FinishReportsTheAnswerToTheClose)
+    {
+        for (const bool failClose : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(Sftp);
+            if (failClose)
+                ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+            auto [owner, sftp] = createSftpSession(serverStartResult->port);
+
+            std::shared_ptr<RemoteIo::IRemoteFileStream> stream{};
+            auto finished = sftp->performPromise(
+                [&sftp, &stream]()
+                {
+                    using enum RemoteIo::OpenMode;
+                    return sftp
+                        ->inStrand(
+                            RemoteIo::OpenFile{.path = remote("/home/test/finished.txt"), .mode = Write | Create}
+                        )
+                        .and_then(
+                            [&stream](
+                                std::weak_ptr<RemoteIo::IRemoteFileStream> const& weakStream
+                            ) -> std::expected<void, RemoteIo::RemoteError>
+                            {
+                                stream = weakStream.lock();
+                                if (!stream)
+                                    return std::unexpected(RemoteIo::RemoteError{.message = "The stream is gone"});
+                                return stream->writeInStrand("finished");
+                            }
+                        )
+                        .and_then(
+                            [&stream]()
+                            {
+                                return stream->finishInStrand();
+                            }
+                        );
+                }
+            );
+            ASSERT_EQ(finished.wait_for(replyTimeout), std::future_status::ready);
+            const auto finishResult = finished.get();
+            EXPECT_EQ(finishResult.has_value(), !failClose) << "failClose: " << failClose;
+            ASSERT_NE(stream, nullptr);
+
+            auto writtenAfterFinish = sftp->performPromise(
+                [&stream]()
+                {
+                    auto written = stream->writeInStrand("late");
+                    stream->closeInStrand();
+                    return written;
+                }
+            );
+            ASSERT_EQ(writtenAfterFinish.wait_for(replyTimeout), std::future_status::ready);
+            EXPECT_FALSE(writtenAfterFinish.get().has_value());
+            stream.reset();
+            EXPECT_EQ(readRemote(*sftp, "/home/test/finished.txt"), "finished");
+        }
+    }
+
     TEST_F(SftpFileSystemTests, SetModificationTimeSetsWhatStatReports)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
