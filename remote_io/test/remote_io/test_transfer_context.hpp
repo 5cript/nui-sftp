@@ -176,6 +176,29 @@ namespace RemoteIo::Test
         EXPECT_LE(calls, 1 + elapsed / AsyncTransferContext::progressInterval);
     }
 
+    TEST(TransferContextTests, TheObserverHearsOfProgressAgainOnceTheIntervalPassed)
+    {
+        AsyncTransferContext context{};
+        int calls = 0;
+        context.observe(
+            [&calls]()
+            {
+                ++calls;
+            }
+        );
+
+        const auto start = std::chrono::steady_clock::now();
+        context.reportProgress();
+        ASSERT_EQ(calls, 1);
+
+        const auto deadline = start + std::chrono::seconds{5};
+        while (calls == 1 && std::chrono::steady_clock::now() < deadline)
+            context.reportProgress();
+
+        EXPECT_EQ(calls, 2);
+        EXPECT_GE(std::chrono::steady_clock::now() - start, AsyncTransferContext::progressInterval);
+    }
+
     TEST(TransferContextTests, BytesAddUp)
     {
         AsyncTransferContext context{};
