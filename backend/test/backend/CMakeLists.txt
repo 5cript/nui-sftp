@@ -15,6 +15,7 @@ target_link_libraries(
         secure-shell
         utility
         backend
+        remote-io-test-doubles
         GTest::gtest
         GTest::gmock_main
         GTest::gtest_main

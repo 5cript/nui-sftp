@@ -14,6 +14,7 @@
 #include "test_bulk_download_operation.hpp"
 #include "test_bulk_upload_operation.hpp"
 #include "test_parallel_budget.hpp"
+#include "test_operation_base.hpp"
 #include "test_archive_download_operation.hpp"
 #include "test_archive_upload_operation.hpp"
 #include "test_file_tracking.hpp"

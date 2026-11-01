@@ -19,6 +19,11 @@ function(add_remote_io_test name remoteIo outputDirectory)
     set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${outputDirectory}")
 endfunction()
 
+# The header-only fakes, for the tests of the targets that use remote-io: <remote_io/fake_remote_file_system.hpp>.
+add_library(remote-io-test-doubles INTERFACE)
+target_include_directories(remote-io-test-doubles INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(remote-io-test-doubles INTERFACE remote-io)
+
 add_remote_io_test(nui-sftp-remote-io-test remote-io "${CMAKE_BINARY_DIR}/test")
 gtest_discover_tests(nui-sftp-remote-io-test)
 
