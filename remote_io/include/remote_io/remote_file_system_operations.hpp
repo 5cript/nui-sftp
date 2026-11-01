@@ -334,7 +334,7 @@ namespace RemoteIo
     class Completion
     {
       public:
-        explicit Completion(std::move_only_function<void(OperationResult<OperationT>)> complete)
+        explicit Completion(std::function<void(OperationResult<OperationT>)> complete)
             : complete_{std::move(complete)}
         {}
         ~Completion()
@@ -356,7 +356,7 @@ namespace RemoteIo
         }
 
       private:
-        std::move_only_function<void(OperationResult<OperationT>)> complete_;
+        std::function<void(OperationResult<OperationT>)> complete_;
     };
 
     /**
