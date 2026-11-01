@@ -99,7 +99,7 @@ namespace RemoteIo
      *        Implementations derive from RemoteFileSystemImplementation and complete every operation they start, if
      *        need be as timed out, so no caller waits forever and no result arrives after its caller left.
      */
-    class IRemoteFileSystem : public std::enable_shared_from_this<IRemoteFileSystem>
+    class IRemoteFileSystem
     {
       public:
         using Trampoline = void (*)(IRemoteFileSystem& fileSystem, void* pending);
@@ -163,11 +163,10 @@ namespace RemoteIo
                     }
                 )
             );
-            dispatch(
-                [fileSystem = weak_from_this(), pending = std::move(pending)]()
+            dispatchWhileOwned(
+                [pending = std::move(pending)](IRemoteFileSystem& fileSystem)
                 {
-                    if (const auto locked = fileSystem.lock())
-                        locked->start(std::move(*pending));
+                    fileSystem.start(std::move(*pending));
                 }
             );
             return future;
@@ -223,6 +222,12 @@ namespace RemoteIo
         }
 
       private:
+        /**
+         * @brief Runs @p start through @ref dispatch while a shared_ptr still owns this file system, drops it when none
+         *        does.
+         */
+        virtual void dispatchWhileOwned(std::function<void(IRemoteFileSystem&)> start) = 0;
+
         template <typename ResultT>
         struct InStrandCall
         {
@@ -251,23 +256,36 @@ namespace RemoteIo
     /**
      * @brief The base of a remote file system implementation. @p DerivedT starts every operation of
      *        RemoteFileSystemOperations with a member template `void startOperation(Pending<OperationT>)`, which
-     *        completes it now or later; a missing operation does not compile. @p DerivedT gets shared_from_this from
-     *        IRemoteFileSystem, a second std::enable_shared_from_this base would leave both unset.
+     *        completes it now or later; a missing operation does not compile. @p DerivedT gets shared_from_this and
+     *        weak_from_this of its own type from this base.
      */
     template <typename DerivedT>
-    class RemoteFileSystemImplementation : public IRemoteFileSystem
+    class RemoteFileSystemImplementation
+        : public IRemoteFileSystem
+        , public std::enable_shared_from_this<DerivedT>
     {
       protected:
         RemoteFileSystemImplementation()
             : IRemoteFileSystem{trampolines}
         {
             static_assert(
-                !std::is_base_of_v<std::enable_shared_from_this<DerivedT>, DerivedT>,
-                "Use the enable_shared_from_this base of IRemoteFileSystem, a second one is never set"
+                std::is_convertible_v<DerivedT*, std::enable_shared_from_this<DerivedT>*>,
+                "Use the enable_shared_from_this base of RemoteFileSystemImplementation, a second one is never set"
             );
         }
 
       private:
+        void dispatchWhileOwned(std::function<void(IRemoteFileSystem&)> start) final
+        {
+            this->dispatch(
+                [owner = this->weak_from_this(), start = std::move(start)]()
+                {
+                    if (const auto locked = owner.lock())
+                        start(*locked);
+                }
+            );
+        }
+
         template <typename OperationT>
         static void trampoline(IRemoteFileSystem& fileSystem, void* pending)
         {

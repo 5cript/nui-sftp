@@ -68,23 +68,6 @@ namespace SecureShell
         bool close(bool isBackElement);
 
         /**
-         * @brief shared_from_this of the IRemoteFileSystem base as an SftpSession, which operations hold until they
-         *        hold the interface.
-         */
-        std::shared_ptr<SftpSession> shared_from_this()
-        {
-            return std::static_pointer_cast<SftpSession>(IRemoteFileSystem::shared_from_this());
-        }
-
-        /**
-         * @brief weak_from_this of the IRemoteFileSystem base as an SftpSession, see @ref shared_from_this.
-         */
-        std::weak_ptr<SftpSession> weak_from_this()
-        {
-            return std::static_pointer_cast<SftpSession>(IRemoteFileSystem::weak_from_this().lock());
-        }
-
-        /**
          * @brief Rename replaces an existing destination when the server has posix-rename@openssh.com, a plain SFTP
          *        rename refuses it.
          */
