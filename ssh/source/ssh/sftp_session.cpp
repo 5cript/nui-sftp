@@ -866,6 +866,16 @@ namespace SecureShell
 
     SftpError SftpSession::lastError() const
     {
+        // libssh keeps the status of the last answer when the connection breaks.
+        if ((ssh_get_status(session_->session) & (SSH_CLOSED | SSH_CLOSED_ERROR)) != 0 ||
+            ssh_channel_is_open(session_->channel) == 0)
+        {
+            return SftpError{
+                .message = ssh_get_error(session_->session),
+                .sshError = ssh_get_error_code(session_->session),
+                .sftpError = SSH_FX_CONNECTION_LOST,
+            };
+        }
         const auto result = SftpError{
             .message = "",
             .sshError = 0,
