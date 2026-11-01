@@ -14,19 +14,6 @@ namespace RemoteIo
 {
     namespace
     {
-        bool isMissing(RemoteError const& error)
-        {
-            return error.kind == RemoteErrorKind::NoSuchFile;
-        }
-
-        RemoteError alreadyExists(Paths::RemotePath const& destination)
-        {
-            return RemoteError{
-                .kind = RemoteErrorKind::AlreadyExists,
-                .message = fmt::format("'{}' already exists", destination.value()),
-            };
-        }
-
         /**
          * @brief @p knownType, or the type an Lstat of @p path finds.
          */
@@ -59,7 +46,7 @@ namespace RemoteIo
         {
             const auto renamed = fileSystem.inStrand(Rename{.source = source, .destination = destination});
             if (!renamed.has_value() && fileSystem.inStrand(Lstat{.path = destination}).has_value())
-                return std::unexpected(alreadyExists(destination));
+                return std::unexpected(alreadyExistsError(destination.value()));
             return renamed;
         }
 
@@ -107,7 +94,7 @@ namespace RemoteIo
         // Leaves a window between the check and the rename.
         const auto existing = fileSystem.inStrand(Lstat{.path = destination});
         if (existing.has_value())
-            return std::unexpected(alreadyExists(destination));
+            return std::unexpected(alreadyExistsError(destination.value()));
         if (!isMissing(existing.error()))
             return std::unexpected(existing.error());
         return renameToFreeName(fileSystem, source, destination);

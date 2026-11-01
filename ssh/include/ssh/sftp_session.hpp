@@ -528,8 +528,6 @@ namespace SecureShell
          */
         std::expected<Paths::RemotePath, Error> canonicalizeInStrand(char const* path);
 
-        static Error alreadyExists(Paths::RemotePath const& destination);
-
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);
         void removeAllFileStreams();
 

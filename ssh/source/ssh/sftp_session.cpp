@@ -3,10 +3,8 @@
 #include <ssh/file_information.hpp>
 #include <ssh/sftp_error_conversion.hpp>
 #include <remote_io/remote_file_system_helpers.hpp>
-#include <paths/relative_path.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <chrono>
 #include <memory>
@@ -18,11 +16,6 @@ namespace SecureShell
 {
     namespace
     {
-        bool isMissing(RemoteIo::RemoteError const& error)
-        {
-            return error.kind == RemoteIo::RemoteErrorKind::NoSuchFile;
-        }
-
         RemoteIo::Capabilities capabilitiesOf(sftp_session session)
         {
             return RemoteIo::Capabilities{
@@ -623,9 +616,9 @@ namespace SecureShell
                                           );
         const auto existing = run(RemoteIo::Lstat{.path = destination});
         if (existing.has_value())
-            return std::unexpected(alreadyExists(destination));
+            return std::unexpected(RemoteIo::alreadyExistsError(destination.value()));
         // Filesystems without hard links, and Linux protected_hardlinks, refuse the link.
-        if (isMissing(existing.error()))
+        if (RemoteIo::isMissing(existing.error()))
             linkError.kind = RemoteIo::RemoteErrorKind::Unsupported;
         // Unsupported promises a free destination, which the failed lstat could not confirm.
         else if (linkError.kind == RemoteIo::RemoteErrorKind::Unsupported)
@@ -651,16 +644,6 @@ namespace SecureShell
     )
     {
         return RemoteIo::moveIntoPlaceInStrand(*this, source, destination, replace, asideSuffix, sourceType);
-    }
-
-    SftpSession::Error SftpSession::alreadyExists(Paths::RemotePath const& destination)
-    {
-        return toRemoteError(
-            SftpError{
-                .message = fmt::format("'{}' already exists", destination.value()),
-                .sftpError = SSH_FX_FILE_ALREADY_EXISTS,
-            }
-        );
     }
 
     std::future<std::expected<void, SftpSession::Error>>
@@ -950,7 +933,7 @@ namespace SecureShell
             if (attributes == nullptr)
             {
                 auto last = lastError();
-                if (isMissing(last))
+                if (RemoteIo::isMissing(last))
                 {
                     return DeepLinkResult{
                         .linkContent = linkContent.value_or(""),
