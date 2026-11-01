@@ -481,6 +481,18 @@ namespace SecureShell
             pending.complete(run(pending.operation));
         }
 
+        /**
+         * @brief inStrand without its completion, which SFTP never defers.
+         */
+        template <typename OperationT>
+        RemoteIo::OperationResult<OperationT> runInStrand(OperationT const& operation)
+        {
+            assert(strand_->withinProcessingThread());
+            if (RemoteIo::hasUnsetPath(operation))
+                return std::unexpected(unsetPathError());
+            return run(operation);
+        }
+
         RemoteIo::OperationResult<RemoteIo::ListDirectory> run(RemoteIo::ListDirectory const& operation);
         RemoteIo::OperationResult<RemoteIo::Stat> run(RemoteIo::Stat const& operation);
         RemoteIo::OperationResult<RemoteIo::Lstat> run(RemoteIo::Lstat const& operation);

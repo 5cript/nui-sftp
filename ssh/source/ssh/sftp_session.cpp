@@ -203,7 +203,7 @@ namespace SecureShell
     std::expected<std::vector<FileInformation>, SftpSession::Error>
     SftpSession::listDirectoryInStrand(Paths::RemotePath const& path, bool resolveLinks)
     {
-        return inStrand(RemoteIo::ListDirectory{.path = path, .resolveLinks = resolveLinks});
+        return runInStrand(RemoteIo::ListDirectory{.path = path, .resolveLinks = resolveLinks});
     }
 
     std::future<std::expected<std::vector<FileInformation>, SftpSession::Error>>
@@ -227,7 +227,7 @@ namespace SecureShell
     std::expected<void, SftpSession::Error>
     SftpSession::createDirectoryInStrand(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
-        return inStrand(RemoteIo::CreateNewDirectory{.path = path, .permissions = permissions});
+        return runInStrand(RemoteIo::CreateNewDirectory{.path = path, .permissions = permissions});
     }
 
     std::future<std::expected<void, SftpSession::Error>>
@@ -271,7 +271,7 @@ namespace SecureShell
         std::filesystem::perms permissions
     )
     {
-        return inStrand(RemoteIo::CreateDirectoryIfItDoesntExist{.path = path, .permissions = permissions});
+        return runInStrand(RemoteIo::CreateDirectoryIfItDoesntExist{.path = path, .permissions = permissions});
     }
 
     std::future<std::expected<void, SftpSession::Error>>
@@ -307,7 +307,7 @@ namespace SecureShell
     std::expected<void, SftpSession::Error>
     SftpSession::createFileInStrand(Paths::RemotePath const& path, std::filesystem::perms permissions)
     {
-        return inStrand(RemoteIo::CreateEmptyFile{.path = path, .permissions = permissions});
+        return runInStrand(RemoteIo::CreateEmptyFile{.path = path, .permissions = permissions});
     }
 
     std::future<std::expected<void, SftpSession::Error>>
@@ -326,7 +326,7 @@ namespace SecureShell
 
     std::expected<void, SftpSession::Error> SftpSession::removeFileInStrand(Paths::RemotePath const& path)
     {
-        return inStrand(RemoteIo::RemoveFile{.path = path});
+        return runInStrand(RemoteIo::RemoveFile{.path = path});
     }
 
     std::future<std::expected<void, SftpSession::Error>> SftpSession::removeFile(Paths::RemotePath const& path)
@@ -345,7 +345,7 @@ namespace SecureShell
 
     std::expected<void, SftpSession::Error> SftpSession::removeDirectoryInStrand(Paths::RemotePath const& path)
     {
-        return inStrand(RemoteIo::RemoveEmptyDirectory{.path = path});
+        return runInStrand(RemoteIo::RemoveEmptyDirectory{.path = path});
     }
 
     std::future<std::expected<void, SftpSession::Error>> SftpSession::removeDirectory(Paths::RemotePath const& path)
@@ -472,7 +472,7 @@ namespace SecureShell
 
     std::expected<FileInformation, SftpSession::Error> SftpSession::statInStrand(Paths::RemotePath const& path)
     {
-        return inStrand(RemoteIo::Stat{.path = path});
+        return runInStrand(RemoteIo::Stat{.path = path});
     }
 
     std::future<std::expected<FileInformation, SftpSession::Error>> SftpSession::stat(Paths::RemotePath const& path)
@@ -495,7 +495,7 @@ namespace SecureShell
 
     std::expected<FileInformation, SftpSession::Error> SftpSession::lstatInStrand(Paths::RemotePath const& path)
     {
-        return inStrand(RemoteIo::Lstat{.path = path});
+        return runInStrand(RemoteIo::Lstat{.path = path});
     }
 
     std::future<std::expected<FileInformation, SftpSession::Error>>
@@ -566,7 +566,7 @@ namespace SecureShell
     std::expected<void, SftpSession::Error>
     SftpSession::renameInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination)
     {
-        return inStrand(RemoteIo::Rename{.source = source, .destination = destination});
+        return runInStrand(RemoteIo::Rename{.source = source, .destination = destination});
     }
 
     bool SftpSession::supportsExtensionInStrand(char const* name, char const* version) const
@@ -657,7 +657,7 @@ namespace SecureShell
     std::expected<void, SftpSession::Error>
     SftpSession::hardlinkIntoPlaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination)
     {
-        auto linked = inStrand(RemoteIo::LinkIntoPlace{.source = source, .destination = destination});
+        auto linked = runInStrand(RemoteIo::LinkIntoPlace{.source = source, .destination = destination});
         if (linked.has_value() || linked.error().kind != RemoteIo::RemoteErrorKind::Unsupported)
             return linked;
         Log::debug("SftpSession: Cannot link '{}': {}, renaming instead.", source.value(), linked.error().toString());
@@ -846,7 +846,7 @@ namespace SecureShell
 
     std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::canonicalHomeDirectoryInStrand()
     {
-        return inStrand(RemoteIo::CanonicalHomeDirectory{});
+        return runInStrand(RemoteIo::CanonicalHomeDirectory{});
     }
 
     RemoteIo::OperationResult<RemoteIo::CanonicalPath> SftpSession::run(RemoteIo::CanonicalPath const& operation)
@@ -857,7 +857,7 @@ namespace SecureShell
     std::expected<Paths::RemotePath, SftpSession::Error>
     SftpSession::canonicalPathInStrand(Paths::RemotePath const& path)
     {
-        return inStrand(RemoteIo::CanonicalPath{.path = path});
+        return runInStrand(RemoteIo::CanonicalPath{.path = path});
     }
 
     RemoteIo::OperationResult<RemoteIo::HomeDirectory> SftpSession::run(RemoteIo::HomeDirectory const&)
@@ -886,7 +886,7 @@ namespace SecureShell
 
     std::expected<Paths::RemotePath, SftpSession::Error> SftpSession::homeDirectoryInStrand()
     {
-        return inStrand(RemoteIo::HomeDirectory{});
+        return runInStrand(RemoteIo::HomeDirectory{});
     }
 
     std::future<std::expected<Paths::RemotePath, SftpSession::Error>> SftpSession::homeDirectory()
@@ -1152,7 +1152,7 @@ namespace SecureShell
     std::expected<SftpSession::DeepLinkResult, SftpSession::Error>
     SftpSession::readLinkDeepInStrand(Paths::RemotePath const& path, int maxDepth)
     {
-        return inStrand(RemoteIo::ReadLinkDeep{.path = path, .maxDepth = maxDepth});
+        return runInStrand(RemoteIo::ReadLinkDeep{.path = path, .maxDepth = maxDepth});
     }
 
     std::future<std::expected<SftpSession::DeepLinkResult, SftpSession::Error>>
@@ -1173,7 +1173,7 @@ namespace SecureShell
 
     std::expected<std::string, SftpSession::Error> SftpSession::readLinkInStrand(Paths::RemotePath const& path)
     {
-        return inStrand(RemoteIo::ReadLink{.path = path});
+        return runInStrand(RemoteIo::ReadLink{.path = path});
     }
 
     RemoteIo::OperationResult<RemoteIo::CreateSymLink> SftpSession::run(RemoteIo::CreateSymLink const& operation)
@@ -1187,7 +1187,7 @@ namespace SecureShell
     std::expected<void, SftpSession::Error>
     SftpSession::createSymLinkInStrand(std::string const& target, Paths::RemotePath const& linkPath)
     {
-        return inStrand(RemoteIo::CreateSymLink{.target = target, .linkPath = linkPath});
+        return runInStrand(RemoteIo::CreateSymLink{.target = target, .linkPath = linkPath});
     }
 
     std::future<std::expected<void, SftpSession::Error>>
