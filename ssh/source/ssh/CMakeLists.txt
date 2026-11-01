@@ -8,7 +8,6 @@ function(add_secure_shell_library name remoteIo)
     add_library(
         ${name}
         STATIC
-            ${SECURE_SHELL_SOURCE_DIRECTORY}/async/transfer_context.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/session.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/channel.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/sftp_session.cpp

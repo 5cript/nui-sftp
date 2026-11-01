@@ -315,5 +315,5 @@ class UploadOperation : public Operation
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
     RemoteIo::BufferLease buffer_;
-    std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
+    std::shared_ptr<RemoteIo::AsyncTransferContext> asyncTransferContext_;
 };

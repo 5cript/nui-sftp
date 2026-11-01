@@ -135,9 +135,9 @@ namespace SecureShell
          * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
          * @param bufferSize The size of the buffer.
          * @param onRead Called when data is read. Return false to stop reading.
-         * @return std::shared_ptr<AsyncTransferContext>
+         * @return std::shared_ptr<RemoteIo::AsyncTransferContext>
          */
-        std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> readAsync(
+        std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> readAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -147,14 +147,14 @@ namespace SecureShell
         /**
          * @brief In-strand variant of readAsync. Must be called from within the processing thread.
          */
-        std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> readAsyncInStrand(
+        std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> readAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
             std::function<bool(SignedSizeType)> onRead
         ) override;
 
-        std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+        std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> writeAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -164,7 +164,7 @@ namespace SecureShell
         /**
          * @brief In-strand variant of writeAsync. Must be called from within the processing thread.
          */
-        std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> writeAsyncInStrand(
+        std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -197,7 +197,7 @@ namespace SecureShell
         /**
          * @brief A transfer context whose resume wakes this stream's processing thread.
          */
-        std::shared_ptr<AsyncTransferContext> makeTransferContext();
+        std::shared_ptr<RemoteIo::AsyncTransferContext> makeTransferContext();
 
         /**
          * @brief Lets closing the file first wait for the requests @p pipeline still has in flight, whose answers

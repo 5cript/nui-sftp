@@ -5,7 +5,7 @@
 #include <nui/utility/scope_exit.hpp>
 #include <ssh/sftp_session.hpp>
 #include <ssh/file_stream.hpp>
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 
 #include <gtest/gtest.h>
 
@@ -24,6 +24,8 @@ using namespace std::string_literals;
 
 namespace SecureShell::Test
 {
+    using RemoteIo::AsyncTransferContext;
+
     /** @brief How long a test waits for a single answer of the local server, generous for stalled CI runners. */
     constexpr std::chrono::seconds replyTimeout{5};
 

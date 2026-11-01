@@ -1,0 +1,132 @@
+#pragma once
+
+#include <remote_io/async/transfer_context.hpp>
+
+#include <gtest/gtest.h>
+
+#include <chrono>
+
+namespace RemoteIo::Test
+{
+    TEST(TransferContextTests, CancelEndsTheTransferAndWakesItsThread)
+    {
+        AsyncTransferContext context{};
+        int wakes = 0;
+        context.setWake(
+            [&wakes]()
+            {
+                ++wakes;
+            }
+        );
+
+        context.cancel();
+
+        EXPECT_EQ(context.outcome(), AsyncTransferContext::Outcome::Canceled);
+        EXPECT_TRUE(context.hasEnded());
+        EXPECT_EQ(wakes, 1);
+    }
+
+    TEST(TransferContextTests, PausingAndResumingWakeItsThread)
+    {
+        AsyncTransferContext context{};
+        int wakes = 0;
+        context.setWake(
+            [&wakes]()
+            {
+                ++wakes;
+            }
+        );
+
+        context.pause(true);
+        EXPECT_TRUE(context.paused());
+        EXPECT_EQ(wakes, 1);
+
+        context.pause(false);
+        EXPECT_FALSE(context.paused());
+        EXPECT_EQ(wakes, 2);
+    }
+
+    TEST(TransferContextTests, AContextWithoutWakePausesAndCancels)
+    {
+        AsyncTransferContext context{};
+
+        context.pause(true);
+        context.cancel();
+
+        EXPECT_TRUE(context.paused());
+        EXPECT_EQ(context.outcome(), AsyncTransferContext::Outcome::Canceled);
+    }
+
+    TEST(TransferContextTests, TheFirstEndWinsAndKeepsItsError)
+    {
+        AsyncTransferContext context{};
+        context.fail(RemoteError{.kind = RemoteErrorKind::ConnectionLost, .protocol = Protocol::Ftp});
+        context.fail(RemoteError{.kind = RemoteErrorKind::TimedOut});
+        context.complete();
+        context.cancel();
+
+        EXPECT_EQ(context.outcome(), AsyncTransferContext::Outcome::Failed);
+        ASSERT_TRUE(context.error().has_value());
+        EXPECT_EQ(context.error()->kind, RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(context.error()->protocol, Protocol::Ftp);
+    }
+
+    TEST(TransferContextTests, OnlyAFailedTransferHasAnError)
+    {
+        AsyncTransferContext completed{};
+        completed.complete();
+        EXPECT_EQ(completed.outcome(), AsyncTransferContext::Outcome::Completed);
+        EXPECT_FALSE(completed.error().has_value());
+
+        AsyncTransferContext running{};
+        EXPECT_EQ(running.outcome(), AsyncTransferContext::Outcome::Running);
+        EXPECT_FALSE(running.error().has_value());
+    }
+
+    TEST(TransferContextTests, TheObserverHearsTheEndOnce)
+    {
+        AsyncTransferContext context{};
+        int calls = 0;
+        context.observe(
+            [&calls]()
+            {
+                ++calls;
+            }
+        );
+
+        context.complete();
+        context.cancel();
+
+        EXPECT_EQ(calls, 1);
+    }
+
+    TEST(TransferContextTests, TheObserverHearsOfProgressAtMostOncePerInterval)
+    {
+        AsyncTransferContext context{};
+        int calls = 0;
+        context.observe(
+            [&calls]()
+            {
+                ++calls;
+            }
+        );
+
+        const auto start = std::chrono::steady_clock::now();
+        for (int report = 0; report < 1000; ++report)
+            context.reportProgress();
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+
+        EXPECT_GE(calls, 1);
+        EXPECT_LE(calls, 1 + elapsed / AsyncTransferContext::progressInterval);
+    }
+
+    TEST(TransferContextTests, BytesAddUp)
+    {
+        AsyncTransferContext context{};
+
+        context.addBytesTransferred(100);
+        context.addBytesTransferred(28);
+
+        EXPECT_EQ(context.bytesTransferred(), 128);
+    }
+}

@@ -4,7 +4,7 @@
 #include <backend/sftp/local_scan_operation.hpp>
 #include <backend/sftp/scan_phase.hpp>
 #include <remote_io/async/buffer_provider.hpp>
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 #include <ssh/file_stream.hpp>
 #include <ssh/sftp_session.hpp>
 #include <paths/local_path.hpp>
@@ -202,8 +202,9 @@ class ArchiveUploadOperation : public Operation
      *        drives writes via writeInStrand rather than the FileStream async
      *        path that normally owns this context.
      */
-    std::shared_ptr<SecureShell::AsyncTransferContext> throughputMeter_{
-        std::make_shared<SecureShell::AsyncTransferContext>()};
+    std::shared_ptr<RemoteIo::AsyncTransferContext> throughputMeter_{
+        std::make_shared<RemoteIo::AsyncTransferContext>()
+    };
     /** @brief A scanned directory or name that cannot go into the archive, set once the scan delivered it. */
     std::optional<Error> incompleteScan_{};
     std::unique_ptr<ScanPhase<LocalScanOperation>> scanPhase_{};

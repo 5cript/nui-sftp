@@ -11,6 +11,7 @@ function(add_remote_io_library name)
             ${REMOTE_IO_SOURCE_DIRECTORY}/async/buffer_provider.cpp
             ${REMOTE_IO_SOURCE_DIRECTORY}/async/processing_thread.cpp
             ${REMOTE_IO_SOURCE_DIRECTORY}/async/socket_wait.cpp
+            ${REMOTE_IO_SOURCE_DIRECTORY}/async/transfer_context.cpp
     )
 
     target_include_directories(

@@ -1,6 +1,6 @@
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 
-namespace SecureShell
+namespace RemoteIo
 {
     void AsyncTransferContext::end(Outcome outcome)
     {
@@ -9,9 +9,20 @@ namespace SecureShell
             observer_();
     }
 
+    void AsyncTransferContext::wake() const
+    {
+        if (wake_)
+            wake_();
+    }
+
     void AsyncTransferContext::observe(std::function<void()> observer)
     {
         observer_ = std::move(observer);
+    }
+
+    void AsyncTransferContext::setWake(std::function<void()> wake)
+    {
+        wake_ = std::move(wake);
     }
 
     void AsyncTransferContext::reportProgress()
@@ -28,9 +39,10 @@ namespace SecureShell
     void AsyncTransferContext::cancel()
     {
         end(Outcome::Canceled);
+        wake();
     }
 
-    void AsyncTransferContext::fail(SftpError error)
+    void AsyncTransferContext::fail(RemoteError error)
     {
         if (outcome_.load() == Outcome::Running)
         {
@@ -56,7 +68,7 @@ namespace SecureShell
         return outcome_.load();
     }
 
-    std::optional<SftpError> AsyncTransferContext::error() const
+    std::optional<RemoteError> AsyncTransferContext::error() const
     {
         std::scoped_lock lock{errorMutex_};
         return error_;
@@ -80,8 +92,7 @@ namespace SecureShell
     void AsyncTransferContext::pause(bool doPause)
     {
         paused_.store(doPause);
-        if (!doPause && wake_)
-            wake_();
+        wake();
     }
 
     void AsyncTransferContext::addBytesTransferred(SignedSizeType delta)

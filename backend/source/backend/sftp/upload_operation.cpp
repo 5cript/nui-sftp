@@ -226,7 +226,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             {
                 if (asyncTransferContext_->hasEnded())
                 {
-                    if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
+                    if (asyncTransferContext_->outcome() != RemoteIo::AsyncTransferContext::Outcome::Completed)
                         return enterErrorState<WorkStatus>(
                             readFailure_.value_or(asyncTransferError(*asyncTransferContext_))
                         );

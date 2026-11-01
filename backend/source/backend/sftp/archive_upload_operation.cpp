@@ -589,9 +589,7 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
 
     currentEntryBytesRead_ += bytesRead;
     totalBytesTransferred_ += bytesRead;
-    throughputMeter_->addBytesTransferred(
-        static_cast<SecureShell::AsyncTransferContext::SignedSizeType>(bytesRead)
-    );
+    throughputMeter_->addBytesTransferred(static_cast<RemoteIo::AsyncTransferContext::SignedSizeType>(bytesRead));
     throughputMeter_->calculateBytesPerSecond();
     options_.progressCallback(
         0u, totalPayloadBytes_, totalBytesTransferred_, throughputMeter_->bytesPerSecond()

@@ -176,7 +176,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             {
                 if (asyncTransferContext_->hasEnded())
                 {
-                    if (asyncTransferContext_->outcome() != SecureShell::AsyncTransferContext::Outcome::Completed)
+                    if (asyncTransferContext_->outcome() != RemoteIo::AsyncTransferContext::Outcome::Completed)
                         return enterErrorState<WorkStatus>(asyncTransferError(*asyncTransferContext_));
                     options_.progressCallback(
                         0ull, options_.entry->size, options_.entry->size, asyncTransferContext_->bytesPerSecond()

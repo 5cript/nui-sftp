@@ -7,7 +7,7 @@
 #include <shared_data/file_operations/operation_error.hpp>
 #include <shared_data/file_operations/operation_state.hpp>
 #include <remote_io/async/processing_strand.hpp>
-#include <ssh/async/transfer_context.hpp>
+#include <remote_io/async/transfer_context.hpp>
 #include <ssh/sftp_session.hpp>
 #include <log/log.hpp>
 #include <paths/remote_path.hpp>
@@ -248,7 +248,7 @@ class Operation
     /**
      * @brief Lets @p context wake the queue when it progresses or ends.
      */
-    void observeTransfer(SecureShell::AsyncTransferContext& context) const
+    void observeTransfer(RemoteIo::AsyncTransferContext& context) const
     {
         context.observe(wake_);
     }
@@ -310,10 +310,10 @@ class Operation
     /**
      * @brief The error of an async transfer that ended without completing.
      */
-    static Error asyncTransferError(SecureShell::AsyncTransferContext const& context)
+    static Error asyncTransferError(RemoteIo::AsyncTransferContext const& context)
     {
-        if (const auto error = context.error(); error.has_value())
-            return Error{.type = ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(*error)};
+        if (auto error = context.error(); error.has_value())
+            return Error{.type = ErrorType::SftpError, .remoteError = std::move(error)};
         return Error{.type = ErrorType::SftpError, .extraInfo = "The transfer ended before it completed"};
     }
 

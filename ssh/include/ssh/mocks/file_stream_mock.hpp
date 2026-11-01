@@ -44,7 +44,7 @@ namespace SecureShell::Test
         );
         using OnReadFuncT = std::function<bool(SecureShell::IFileStream::SignedSizeType)>;
         MOCK_METHOD(
-            (std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>>),
+            (std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>>),
             readAsync,
             (SecureShell::IFileStream::SignedSizeType totalFileSize,
                 char* buffer,
@@ -53,7 +53,7 @@ namespace SecureShell::Test
             (override)
         );
         MOCK_METHOD(
-            (std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>),
+            (std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>),
             readAsyncInStrand,
             (SecureShell::IFileStream::SignedSizeType totalFileSize,
                 char* buffer,
@@ -64,7 +64,7 @@ namespace SecureShell::Test
         using DoReadFuncT =
             std::function<SecureShell::IFileStream::SignedSizeType(SecureShell::IFileStream::SignedSizeType)>;
         MOCK_METHOD(
-            (std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>>),
+            (std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>>),
             writeAsync,
             (SecureShell::IFileStream::SignedSizeType totalFileSize,
                 char* buffer,
@@ -73,7 +73,7 @@ namespace SecureShell::Test
             (override)
         );
         MOCK_METHOD(
-            (std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>),
+            (std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>),
             writeAsyncInStrand,
             (SecureShell::IFileStream::SignedSizeType totalFileSize,
                 char* buffer,
