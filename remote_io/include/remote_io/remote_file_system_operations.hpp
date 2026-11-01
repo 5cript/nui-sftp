@@ -186,8 +186,9 @@ namespace RemoteIo
 
     /**
      * @brief Moves a regular file to a destination that must not exist, atomically through a hard link. Fails with
-     *        AlreadyExists when the destination exists, and with Unsupported when the protocol has no hard links or
-     *        the server refused to link to the free destination, a rename then moves the file instead.
+     *        AlreadyExists when the destination exists, and with Unsupported only when the destination is known to be
+     *        free and the protocol has no hard links or the server refused the link. It never renames, after
+     *        Unsupported the caller may move the file with Rename.
      */
     struct LinkIntoPlace
     {
