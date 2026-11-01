@@ -1,7 +1,7 @@
 #pragma once
 
 #include <remote_io/async/processing_thread.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/termios.hpp>
 #include <ssh/channel.hpp>
@@ -70,7 +70,7 @@ namespace SecureShell
          *
          * @return std::future<std::expected<std::weak_ptr<SftpSession>, int>>
          */
-        std::future<std::expected<std::weak_ptr<SftpSession>, SftpError>> createSftpSession();
+        std::future<std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>> createSftpSession();
 
         std::string getErrorMessage();
 

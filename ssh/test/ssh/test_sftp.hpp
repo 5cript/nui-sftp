@@ -25,6 +25,7 @@ using namespace std::string_literals;
 namespace SecureShell::Test
 {
     using RemoteIo::AsyncTransferContext;
+    using RemoteIo::WrapperErrors;
 
     /** @brief How long a test waits for a single answer of the local server, generous for stalled CI runners. */
     constexpr std::chrono::seconds replyTimeout{5};
@@ -77,7 +78,7 @@ namespace SecureShell::Test
             while (std::chrono::steady_clock::now() < deadline)
             {
                 auto probe = sftp.performPromise(
-                    []() -> std::expected<void, SftpError>
+                    []() -> std::expected<void, RemoteIo::RemoteError>
                     {
                         return {};
                     }
@@ -904,7 +905,7 @@ namespace SecureShell::Test
         auto [client, sftp] = createSftpSession(serverStartResult->port);
         ASSERT_TRUE(sftp->close());
 
-        EXPECT_EQ(sftp->lastError().sftpError, SSH_FX_CONNECTION_LOST);
+        EXPECT_EQ(sftp->lastError().kind, RemoteIo::RemoteErrorKind::ConnectionLost);
     }
 
     TEST_F(SftpTests, ClosingTheSftpSessionClosesItsOpenFilesOnTheServer)
@@ -1968,7 +1969,7 @@ namespace SecureShell::Test
             ASSERT_EQ(future.wait_for(replyTimeout), std::future_status::ready);
             const auto result = future.get();
             ASSERT_FALSE(result.has_value()) << "hardlink: " << hardlink;
-            EXPECT_EQ(result.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
+            EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::AlreadyExists);
             EXPECT_EQ(readRemote(*sftp, "/home/test/source.txt"), "source");
             EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
         }
@@ -2024,7 +2025,7 @@ namespace SecureShell::Test
 
     namespace
     {
-        std::expected<void, SftpError> renameReplace(SftpSession& sftp)
+        std::expected<void, RemoteIo::RemoteError> renameReplace(SftpSession& sftp)
         {
             auto future = sftp.performPromise(
                 [&sftp]()
@@ -2035,11 +2036,11 @@ namespace SecureShell::Test
                 }
             );
             if (future.wait_for(replyTimeout) != std::future_status::ready)
-                return std::unexpected(SftpError{.message = "timeout"});
+                return std::unexpected(RemoteIo::RemoteError{.message = "timeout"});
             return future.get();
         }
 
-        std::expected<void, SftpError> renameNoReplace(
+        std::expected<void, RemoteIo::RemoteError> renameNoReplace(
             SftpSession& sftp,
             std::string_view destination,
             std::optional<SharedData::FileType> sourceType = std::nullopt
@@ -2052,7 +2053,7 @@ namespace SecureShell::Test
                 }
             );
             if (future.wait_for(replyTimeout) != std::future_status::ready)
-                return std::unexpected(SftpError{.message = "timeout"});
+                return std::unexpected(RemoteIo::RemoteError{.message = "timeout"});
             return future.get();
         }
     }
@@ -2134,7 +2135,7 @@ namespace SecureShell::Test
 
         const auto refused = renameNoReplace(*sftp, "/home/test/target.txt", SharedData::FileType::Regular);
         ASSERT_FALSE(refused.has_value());
-        EXPECT_EQ(refused.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::AlreadyExists);
         EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
 
         ASSERT_TRUE(renameNoReplace(*sftp, "/home/test/moved.txt", SharedData::FileType::Regular).has_value());
@@ -2175,7 +2176,7 @@ namespace SecureShell::Test
         };
         const auto refused = move(false);
         ASSERT_FALSE(refused.has_value());
-        EXPECT_EQ(refused.error().sftpError, SSH_FX_FILE_ALREADY_EXISTS);
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::AlreadyExists);
         EXPECT_EQ(readRemote(*sftp, "/home/test/target.txt"), "target");
 
         ASSERT_TRUE(move(true).has_value());

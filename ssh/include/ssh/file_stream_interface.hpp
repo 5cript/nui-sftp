@@ -1,7 +1,7 @@
 #pragma once
 
 #include <remote_io/async/processing_strand.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
 #include <ssh/file_information.hpp>
 #include <remote_io/async/transfer_context.hpp>
 
@@ -33,46 +33,46 @@ namespace SecureShell
          *
          * @param pos Where to move the file pointer to.
          */
-        virtual std::future<std::expected<void, SftpError>> seek(std::size_t pos) = 0;
+        virtual std::future<std::expected<void, RemoteIo::RemoteError>> seek(std::size_t pos) = 0;
 
         /**
          * @brief In-strand variant of seek. Must be called from within the processing thread.
          */
-        virtual std::expected<void, SftpError> seekInStrand(std::size_t pos) = 0;
+        virtual std::expected<void, RemoteIo::RemoteError> seekInStrand(std::size_t pos) = 0;
 
         /**
          * @brief Tells the current position in the file.
          *
-         * @return std::future<std::expected<std::size_t, SftpError>> The current position or an error.
+         * @return std::future<std::expected<std::size_t, RemoteIo::RemoteError>> The current position or an error.
          */
-        virtual std::future<std::expected<std::size_t, SftpError>> tell() = 0;
+        virtual std::future<std::expected<std::size_t, RemoteIo::RemoteError>> tell() = 0;
 
         /**
          * @brief In-strand variant of tell. Must be called from within the processing thread.
          */
-        virtual std::expected<std::size_t, SftpError> tellInStrand() = 0;
+        virtual std::expected<std::size_t, RemoteIo::RemoteError> tellInStrand() = 0;
 
         /**
          * @brief Retrieves information about the file.
          *
-         * @return std::future<std::expected<FileInformation, SftpError>>
+         * @return std::future<std::expected<FileInformation, RemoteIo::RemoteError>>
          */
-        virtual std::future<std::expected<FileInformation, SftpError>> stat() = 0;
+        virtual std::future<std::expected<FileInformation, RemoteIo::RemoteError>> stat() = 0;
 
         /**
          * @brief In-strand variant of stat. Must be called from within the processing thread.
          */
-        virtual std::expected<FileInformation, SftpError> statInStrand() = 0;
+        virtual std::expected<FileInformation, RemoteIo::RemoteError> statInStrand() = 0;
 
         /**
          * @brief Rewind the file to the beginning.
          */
-        virtual std::future<std::expected<void, SftpError>> rewind() = 0;
+        virtual std::future<std::expected<void, RemoteIo::RemoteError>> rewind() = 0;
 
         /**
          * @brief In-strand variant of rewind. Must be called from within the processing thread.
          */
-        virtual std::expected<void, SftpError> rewindInStrand() = 0;
+        virtual std::expected<void, RemoteIo::RemoteError> rewindInStrand() = 0;
 
         /**
          * @brief Reads some bytes from the file. Not necessarily fills the buffer. bufferSize MUST be less than or
@@ -80,22 +80,24 @@ namespace SecureShell
          *
          * @param buffer
          * @param bufferSize
-         * @return std::future<std::expected<std::size_t, SftpError>> The number of bytes read or an error.
+         * @return std::future<std::expected<std::size_t, RemoteIo::RemoteError>> The number of bytes read or an error.
          */
-        virtual std::future<std::expected<std::size_t, SftpError>> readSome(char* buffer, std::size_t bufferSize) = 0;
+        virtual std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
+        readSome(char* buffer, std::size_t bufferSize) = 0;
 
         /**
          * @brief In-strand variant of readSome. Must be called from within the processing thread.
          */
-        virtual std::expected<std::size_t, SftpError> readSomeInStrand(char* buffer, std::size_t bufferSize) = 0;
+        virtual std::expected<std::size_t, RemoteIo::RemoteError>
+        readSomeInStrand(char* buffer, std::size_t bufferSize) = 0;
 
         /**
          * @brief Reads all bytes from the file.
          *
          * @param onRead Let this function return false to stop reading.
-         * @return std::future<std::expected<std::size_t, SftpError>> The number of bytes read or an error.
+         * @return std::future<std::expected<std::size_t, RemoteIo::RemoteError>> The number of bytes read or an error.
          */
-        virtual std::future<std::expected<std::size_t, SftpError>>
+        virtual std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
         readAll(std::function<bool(std::string_view data)> onRead) = 0;
 
         /**
@@ -106,7 +108,8 @@ namespace SecureShell
          * @param onRead Called when data is read. Return false to stop reading.
          * @return std::shared_ptr<RemoteIo::AsyncTransferContext>
          */
-        virtual std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> readAsync(
+        virtual std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>>
+        readAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -116,7 +119,7 @@ namespace SecureShell
         /**
          * @brief In-strand variant of readAsync. Must be called from within the processing thread.
          */
-        virtual std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> readAsyncInStrand(
+        virtual std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError> readAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -131,7 +134,8 @@ namespace SecureShell
          * @param doRead Called to read from the file into buffer. Should return the number of bytes read.
          * @return std::shared_ptr<RemoteIo::AsyncTransferContext>
          */
-        virtual std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> writeAsync(
+        virtual std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>>
+        writeAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -141,7 +145,8 @@ namespace SecureShell
         /**
          * @brief In-strand variant of writeAsync. Must be called from within the processing thread.
          */
-        virtual std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> writeAsyncInStrand(
+        virtual std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>
+        writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -155,15 +160,15 @@ namespace SecureShell
          *
          * @param buffer
          * @param bufferSize
-         * @return std::future<std::expected<void, SftpError>>
+         * @return std::future<std::expected<void, RemoteIo::RemoteError>>
          */
-        virtual std::future<std::expected<void, SftpError>> write(std::string_view data) = 0;
+        virtual std::future<std::expected<void, RemoteIo::RemoteError>> write(std::string_view data) = 0;
 
         /**
          * @brief In-strand variant of write. Must be called from within the processing thread.
          * Chunking for data larger than writeLengthLimit is handled inline.
          */
-        virtual std::expected<void, SftpError> writeInStrand(std::string_view data) = 0;
+        virtual std::expected<void, RemoteIo::RemoteError> writeInStrand(std::string_view data) = 0;
 
         /**
          * @brief Returns the maximum number of bytes that can be written in a single pure write operation.

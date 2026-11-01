@@ -8,7 +8,7 @@ namespace
     /**
      * @brief Removes @p path by itself, a directory only when it is empty. Its type is looked up unless given.
      */
-    std::expected<void, SecureShell::SftpError> removeOneInStrand(
+    std::expected<void, RemoteIo::RemoteError> removeOneInStrand(
         SecureShell::SftpSession& sftp,
         Paths::RemotePath const& path,
         std::optional<SharedData::FileType> type
@@ -166,16 +166,13 @@ std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Target c
                     {
                         const auto knownType = compared ? std::optional{compared->type} : std::nullopt;
                         // An item that is already gone, after a resume for one, counts as deleted.
-                        const auto removed = removeOneInStrand(*session, path, knownType);
-                        if (removed)
-                            return {};
-                        if (auto remoteError = SecureShell::toRemoteError(removed.error());
-                            remoteError.kind != RemoteIo::RemoteErrorKind::NoSuchFile)
+                        if (auto removed = removeOneInStrand(*session, path, knownType);
+                            !removed && removed.error().kind != RemoteIo::RemoteErrorKind::NoSuchFile)
                         {
                             return std::unexpected(
                                 Error{
                                     .type = ErrorType::DeleteFailed,
-                                    .remoteError = std::move(remoteError),
+                                    .remoteError = std::move(removed).error(),
                                     .extraInfo = path.value(),
                                 }
                             );

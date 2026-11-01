@@ -90,12 +90,12 @@ BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp
         const auto stat = sftp.lstatInStrand(*parent);
         if (stat)
             break;
-        if (SecureShell::toRemoteError(stat.error()).kind != RemoteIo::RemoteErrorKind::NoSuchFile)
+        if (stat.error().kind != RemoteIo::RemoteErrorKind::NoSuchFile)
         {
             return std::unexpected(
                 Error{
                     .type = ErrorType::SftpError,
-                    .remoteError = SecureShell::toRemoteError(stat.error()),
+                    .remoteError = stat.error(),
                     .extraInfo = fmt::format("Inspecting remote directory: {}", parent->value())
                 }
             );
@@ -128,7 +128,7 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemot
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .remoteError = SecureShell::toRemoteError(result.error()),
+                .remoteError = result.error(),
                 .extraInfo = fmt::format("Creating remote directory: {}", path.value())
             }
         );

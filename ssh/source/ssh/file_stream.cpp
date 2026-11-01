@@ -26,23 +26,27 @@ namespace SecureShell
             return std::chrono::steady_clock::now() - turnStart > limit;
         }
 
-        SftpError expiredError(std::string_view what)
+        RemoteIo::RemoteError expiredError(std::string_view what)
         {
-            return SftpError{
-                .message = fmt::format("{} expired during the transfer", what),
-                .wrapperError = WrapperErrors::SharedPtrDestroyed,
-            };
+            return toRemoteError(
+                SftpError{
+                    .message = fmt::format("{} expired during the transfer", what),
+                    .wrapperError = WrapperErrors::SharedPtrDestroyed,
+                }
+            );
         }
 
-        SftpError closedError()
+        RemoteIo::RemoteError closedError()
         {
-            return SftpError{
-                .message = "The file was closed during the transfer",
-                .wrapperError = WrapperErrors::FileNull,
-            };
+            return toRemoteError(
+                SftpError{
+                    .message = "The file was closed during the transfer",
+                    .wrapperError = WrapperErrors::FileNull,
+                }
+            );
         }
 
-        SftpError transferError(SftpSession const& sftp, std::string_view what)
+        RemoteIo::RemoteError transferError(SftpSession const& sftp, std::string_view what)
         {
             auto error = sftp.lastError();
             error.message = std::string{what};
@@ -176,7 +180,7 @@ namespace SecureShell
              * @param unrequested Bytes of the file no request asks for yet.
              * @param upperBound Largest request, the buffer size or the server limit.
              */
-            std::expected<void, SftpError>
+            std::expected<void, RemoteIo::RemoteError>
             fill(SftpSession const& sftp, sftp_file file, SignedSizeType unrequested, SignedSizeType upperBound)
             {
                 if (!nextOffset_)
@@ -197,7 +201,8 @@ namespace SecureShell
             /**
              * @brief Asks for the rest of a short answer before the answers of the requests after it.
              */
-            std::expected<void, SftpError> requestGap(SftpSession const& sftp, sftp_file file, ReceivedRead const& read)
+            std::expected<void, RemoteIo::RemoteError>
+            requestGap(SftpSession const& sftp, sftp_file file, ReceivedRead const& read)
             {
                 const auto offset = read.offset + static_cast<std::uint64_t>(read.received);
                 auto request = begin(sftp, file, offset, read.requested - read.received);
@@ -210,7 +215,7 @@ namespace SecureShell
             /**
              * @brief Waits for the oldest request and copies its data into the buffer.
              */
-            std::expected<ReceivedRead, SftpError>
+            std::expected<ReceivedRead, RemoteIo::RemoteError>
             receiveOldest(SftpSession const& sftp, char* buffer, SignedSizeType bufferSize)
             {
                 auto oldest = popOldest();
@@ -252,7 +257,7 @@ namespace SecureShell
              *
              * @return The request and the bytes it asks for.
              */
-            static std::expected<std::pair<sftp_aio, SignedSizeType>, SftpError>
+            static std::expected<std::pair<sftp_aio, SignedSizeType>, RemoteIo::RemoteError>
             begin(SftpSession const& sftp, sftp_file file, std::uint64_t offset, SignedSizeType length)
             {
                 sftp_seek64(file, offset);
@@ -282,7 +287,7 @@ namespace SecureShell
              * @param upperBound Largest request, the buffer size or the server limit.
              * @param doRead Reads up to the given bytes into the buffer, returns how many it read.
              */
-            std::expected<void, SftpError> fill(
+            std::expected<void, RemoteIo::RemoteError> fill(
                 SftpSession const& sftp,
                 sftp_file file,
                 SignedSizeType unsent,
@@ -298,10 +303,12 @@ namespace SecureShell
                         return std::unexpected(closedError());
                     if (amountRead <= 0)
                     {
-                        return std::unexpected(SftpError{
-                            .message = "Reading the local file failed",
-                            .wrapperError = WrapperErrors::LocalIoFailure,
-                        });
+                        return std::unexpected(toRemoteError(
+                            SftpError{
+                                .message = "Reading the local file failed",
+                                .wrapperError = WrapperErrors::LocalIoFailure,
+                            }
+                        ));
                     }
                     const auto length = std::min(unsent, amountRead);
                     // libssh caps a request at the server limit, the rest goes in further requests.
@@ -327,7 +334,7 @@ namespace SecureShell
              *
              * @return The bytes it wrote. SFTP writes all of a request or fails.
              */
-            std::expected<SignedSizeType, SftpError> completeOldest(SftpSession const& sftp)
+            std::expected<SignedSizeType, RemoteIo::RemoteError> completeOldest(SftpSession const& sftp)
             {
                 auto oldest = popOldest();
                 auto* request = oldest.request.release();
@@ -356,7 +363,7 @@ namespace SecureShell
 
 #define VERIFY_FILE_STREAM() \
     if (!file_) \
-    return std::unexpected(SftpError{.message = "File is null", .wrapperError = WrapperErrors::FileNull})
+    return std::unexpected(toRemoteError(SftpError{.message = "File is null", .wrapperError = WrapperErrors::FileNull}))
 
     template <typename FunctionT>
     void FileStream::perform(FunctionT&& func)
@@ -374,12 +381,12 @@ namespace SecureShell
         using ResultType = std::invoke_result_t<std::decay_t<FunctionT>>;
         std::promise<ResultType> promise{};
         promise.set_value(
-            std::unexpected(
+            std::unexpected(toRemoteError(
                 SftpError{
                     .message = "Owner is null",
                     .wrapperError = WrapperErrors::OwnerNull,
                 }
-            )
+            ))
         );
         return promise.get_future();
     }
@@ -461,7 +468,7 @@ namespace SecureShell
         }
         return *this;
     }
-    std::expected<void, SftpError> FileStream::seekInStrand(std::size_t pos)
+    std::expected<void, RemoteIo::RemoteError> FileStream::seekInStrand(std::size_t pos)
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
@@ -469,7 +476,7 @@ namespace SecureShell
         sftp_seek64(file_.get(), pos);
         return {};
     }
-    std::future<std::expected<void, SftpError>> FileStream::seek(std::size_t pos)
+    std::future<std::expected<void, RemoteIo::RemoteError>> FileStream::seek(std::size_t pos)
     {
         return performPromise(
             [this, pos]()
@@ -478,7 +485,7 @@ namespace SecureShell
             }
         );
     }
-    std::expected<FileInformation, SftpError> FileStream::statInStrand()
+    std::expected<FileInformation, RemoteIo::RemoteError> FileStream::statInStrand()
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
@@ -490,7 +497,7 @@ namespace SecureShell
             return std::unexpected(lastError());
         return fromSftpAttributes(attributes.get());
     }
-    std::future<std::expected<FileInformation, SftpError>> FileStream::stat()
+    std::future<std::expected<FileInformation, RemoteIo::RemoteError>> FileStream::stat()
     {
         return performPromise(
             [this]()
@@ -499,14 +506,14 @@ namespace SecureShell
             }
         );
     }
-    std::expected<std::size_t, SftpError> FileStream::tellInStrand()
+    std::expected<std::size_t, RemoteIo::RemoteError> FileStream::tellInStrand()
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
         VERIFY_FILE_STREAM();
         return static_cast<std::size_t>(sftp_tell64(file_.get()));
     }
-    std::future<std::expected<std::size_t, SftpError>> FileStream::tell()
+    std::future<std::expected<std::size_t, RemoteIo::RemoteError>> FileStream::tell()
     {
         return performPromise(
             [this]()
@@ -515,7 +522,7 @@ namespace SecureShell
             }
         );
     }
-    std::expected<void, SftpError> FileStream::rewindInStrand()
+    std::expected<void, RemoteIo::RemoteError> FileStream::rewindInStrand()
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
@@ -523,7 +530,7 @@ namespace SecureShell
         sftp_rewind(file_.get());
         return {};
     }
-    std::future<std::expected<void, SftpError>> FileStream::rewind()
+    std::future<std::expected<void, RemoteIo::RemoteError>> FileStream::rewind()
     {
         return performPromise(
             [this]()
@@ -532,7 +539,7 @@ namespace SecureShell
             }
         );
     }
-    SftpError FileStream::lastError() const
+    RemoteIo::RemoteError FileStream::lastError() const
     {
         if (auto sftp = sftp_.lock(); sftp)
         {
@@ -540,13 +547,15 @@ namespace SecureShell
         }
         else
         {
-            return SftpError{
-                .message = "shared_ptr expired",
-                .wrapperError = WrapperErrors::SharedPtrDestroyed,
-            };
+            return toRemoteError(
+                SftpError{
+                    .message = "shared_ptr expired",
+                    .wrapperError = WrapperErrors::SharedPtrDestroyed,
+                }
+            );
         }
     }
-    std::expected<std::size_t, SftpError> FileStream::readSomeInStrand(char* buffer, std::size_t bufferSize)
+    std::expected<std::size_t, RemoteIo::RemoteError> FileStream::readSomeInStrand(char* buffer, std::size_t bufferSize)
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
@@ -556,7 +565,8 @@ namespace SecureShell
             return std::unexpected(lastError());
         return static_cast<std::size_t>(result);
     }
-    std::future<std::expected<std::size_t, SftpError>> FileStream::readSome(char* buffer, std::size_t bufferSize)
+    std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
+    FileStream::readSome(char* buffer, std::size_t bufferSize)
     {
         return performPromise(
             [this, buffer, bufferSize]()
@@ -566,10 +576,10 @@ namespace SecureShell
         );
     }
 
-    std::future<std::expected<std::size_t, SftpError>>
+    std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
     FileStream::readAll(std::function<bool(std::string_view data)> onReadFunc)
     {
-        using ReadResult = std::expected<std::size_t, SftpError>;
+        using ReadResult = std::expected<std::size_t, RemoteIo::RemoteError>;
         struct ReadState : public std::enable_shared_from_this<ReadState>
         {
             FileStream& stream;
@@ -637,12 +647,12 @@ namespace SecureShell
                         if (!state->stream.file_)
                         {
                             state->finish(
-                                std::unexpected(
+                                std::unexpected(toRemoteError(
                                     SftpError{
                                         .message = "File is null",
                                         .wrapperError = WrapperErrors::FileNull,
                                     }
-                                )
+                                ))
                             );
                             return;
                         }
@@ -655,14 +665,14 @@ namespace SecureShell
         auto sftp = sftp_.lock();
         if (!sftp)
         {
-            std::promise<std::expected<std::size_t, SftpError>> promise{};
+            std::promise<std::expected<std::size_t, RemoteIo::RemoteError>> promise{};
             promise.set_value(
-                std::unexpected(
+                std::unexpected(toRemoteError(
                     SftpError{
                         .message = "Owner is null",
                         .wrapperError = WrapperErrors::OwnerNull,
                     }
-                )
+                ))
             );
             return promise.get_future();
         }
@@ -670,14 +680,14 @@ namespace SecureShell
         auto lease = sftp->bufferProvider().leaseForTransfer(readLengthLimit(), readLengthLimit());
         if (lease.empty())
         {
-            std::promise<std::expected<std::size_t, SftpError>> promise{};
+            std::promise<std::expected<std::size_t, RemoteIo::RemoteError>> promise{};
             promise.set_value(
-                std::unexpected(
+                std::unexpected(toRemoteError(
                     SftpError{
                         .message = "No buffer available from pool",
                         .wrapperError = WrapperErrors::BufferUnavailable,
                     }
-                )
+                ))
             );
             return promise.get_future();
         }
@@ -697,7 +707,7 @@ namespace SecureShell
     }
     void FileStream::writePart(
         std::string_view toWrite,
-        std::function<void(std::expected<void, SftpError>&&)> onWriteComplete
+        std::function<void(std::expected<void, RemoteIo::RemoteError>&&)> onWriteComplete
     )
     {
         perform(
@@ -706,7 +716,9 @@ namespace SecureShell
                 if (!file_)
                 {
                     return onWriteComplete(
-                        std::unexpected(SftpError{.message = "File is null", .wrapperError = WrapperErrors::FileNull})
+                        std::unexpected(
+                            toRemoteError(SftpError{.message = "File is null", .wrapperError = WrapperErrors::FileNull})
+                        )
                     );
                 }
 
@@ -722,12 +734,12 @@ namespace SecureShell
                 if (written == 0 && !toWrite.empty())
                 {
                     return onWriteComplete(
-                        std::unexpected(
+                        std::unexpected(toRemoteError(
                             SftpError{
                                 .message = "Failed to write any data",
                                 .wrapperError = WrapperErrors::ShortWrite,
                             }
-                        )
+                        ))
                     );
                 }
 
@@ -740,7 +752,7 @@ namespace SecureShell
         auto sftp = sftp_.lock();
         return sftp ? sftp->strand_.get() : nullptr;
     }
-    std::expected<void, SftpError> FileStream::writeInStrand(std::string_view data)
+    std::expected<void, RemoteIo::RemoteError> FileStream::writeInStrand(std::string_view data)
     {
         if (auto sftp = sftp_.lock(); sftp)
             assert(sftp->strand_->withinProcessingThread());
@@ -752,24 +764,24 @@ namespace SecureShell
             if (written < 0)
                 return std::unexpected(lastError());
             if (written == 0)
-                return std::unexpected(
+                return std::unexpected(toRemoteError(
                     SftpError{
                         .message = "Failed to write any data",
                         .wrapperError = WrapperErrors::ShortWrite,
                     }
-                );
+                ));
             data.remove_prefix(static_cast<std::size_t>(written));
         }
         return {};
     }
 
-    std::future<std::expected<void, SftpError>> FileStream::write(std::string_view data)
+    std::future<std::expected<void, RemoteIo::RemoteError>> FileStream::write(std::string_view data)
     {
         // Short easy path:
         if (data.size() <= writeLengthLimit())
         {
             return performPromise(
-                [this, data]() -> std::expected<void, SftpError>
+                [this, data]() -> std::expected<void, RemoteIo::RemoteError>
                 {
                     VERIFY_FILE_STREAM();
                     const auto written = sftp_write(file_.get(), data.data(), data.size());
@@ -781,7 +793,7 @@ namespace SecureShell
         }
 
         // Write in chunks for large data. A chunk that is refused, never pushed or dropped leaves the unfinished error:
-        using WriteResult = std::expected<void, SftpError>;
+        using WriteResult = std::expected<void, RemoteIo::RemoteError>;
         auto state = std::make_shared<
             RemoteIo::Detail::PromiseTaskState<WriteResult, RemoteIo::UnfinishedTaskResult<WriteResult>>>(
             RemoteIo::UnfinishedTaskResult<WriteResult>{}
@@ -832,7 +844,7 @@ namespace SecureShell
         );
     }
 
-    std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> FileStream::readAsyncInStrand(
+    std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError> FileStream::readAsyncInStrand(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,
@@ -860,12 +872,12 @@ namespace SecureShell
                 {
                     pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
-                const auto failTransfer = [&](SftpError const& error)
+                const auto failTransfer = [&](RemoteIo::RemoteError const& error)
                 {
-                    context->fail(toRemoteError(error));
+                    context->fail(error);
                     return TaskStatus::Done;
                 };
-                const auto failWith = [&](SftpError const& error)
+                const auto failWith = [&](RemoteIo::RemoteError const& error)
                 {
                     discardPipeline();
                     return failTransfer(error);
@@ -896,7 +908,7 @@ namespace SecureShell
                 const auto lengthLimit = static_cast<SignedSizeType>(stream->readLengthLimit());
                 const auto upperBound =
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
-                const auto fillPipeline = [&]() -> std::expected<void, SftpError>
+                const auto fillPipeline = [&]() -> std::expected<void, RemoteIo::RemoteError>
                 {
                     const auto unrequested = totalFileSize - context->bytesTransferred() - pipeline->inFlightBytes();
                     return pipeline->fill(*sftp, file, unrequested, upperBound);
@@ -923,18 +935,22 @@ namespace SecureShell
                         // The remote file is shorter than listed. Finalizing would replace the
                         // destination with a truncated copy.
                         context->calculateBytesPerSecond();
-                        return failWith(SftpError{
-                            .message = "The remote file ended before the expected size was read",
-                            .wrapperError = WrapperErrors::UnexpectedEndOfFile,
-                        });
+                        return failWith(toRemoteError(
+                            SftpError{
+                                .message = "The remote file ended before the expected size was read",
+                                .wrapperError = WrapperErrors::UnexpectedEndOfFile,
+                            }
+                        ));
                     }
                     pipeline->window().recordCompleted(received->received, std::chrono::steady_clock::now(), target);
                     if (!onRead(received->received))
                     {
-                        return failWith(SftpError{
-                            .message = "Storing the received data failed",
-                            .wrapperError = WrapperErrors::LocalIoFailure,
-                        });
+                        return failWith(toRemoteError(
+                            SftpError{
+                                .message = "Storing the received data failed",
+                                .wrapperError = WrapperErrors::LocalIoFailure,
+                            }
+                        ));
                     }
                     context->addBytesTransferred(received->received);
                     turnBytes += received->received;
@@ -962,16 +978,17 @@ namespace SecureShell
             }
         ).first;
         if (!pushed)
-            return std::unexpected(
+            return std::unexpected(toRemoteError(
                 SftpError{
                     .message = "Failed to push permanent task",
                     .wrapperError = WrapperErrors::TaskPushFailed,
                 }
-            );
+            ));
         return context;
     }
 
-    std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> FileStream::readAsync(
+    std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>>
+    FileStream::readAsync(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,
@@ -986,7 +1003,8 @@ namespace SecureShell
         );
     }
 
-    std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError> FileStream::writeAsyncInStrand(
+    std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>
+    FileStream::writeAsyncInStrand(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,
@@ -1014,12 +1032,12 @@ namespace SecureShell
                 {
                     pipeline->discard(sftp ? stream->file_.get() : nullptr);
                 };
-                const auto failTransfer = [&](SftpError const& error)
+                const auto failTransfer = [&](RemoteIo::RemoteError const& error)
                 {
-                    context->fail(toRemoteError(error));
+                    context->fail(error);
                     return TaskStatus::Done;
                 };
-                const auto failWith = [&](SftpError const& error)
+                const auto failWith = [&](RemoteIo::RemoteError const& error)
                 {
                     discardPipeline();
                     return failTransfer(error);
@@ -1050,7 +1068,7 @@ namespace SecureShell
                 const auto lengthLimit = static_cast<SignedSizeType>(stream->writeLengthLimit());
                 const auto upperBound =
                     std::max(SignedSizeType{1}, lengthLimit > 0 ? std::min(bufferSize, lengthLimit) : bufferSize);
-                const auto fillPipeline = [&]() -> std::expected<void, SftpError>
+                const auto fillPipeline = [&]() -> std::expected<void, RemoteIo::RemoteError>
                 {
                     const auto unsent = totalFileSize - context->bytesTransferred() - pipeline->inFlightBytes();
                     return pipeline->fill(*sftp, file, unsent, upperBound, buffer, doRead);
@@ -1088,16 +1106,17 @@ namespace SecureShell
             }
         ).first;
         if (!pushed)
-            return std::unexpected(
+            return std::unexpected(toRemoteError(
                 SftpError{
                     .message = "Failed to push permanent task",
                     .wrapperError = WrapperErrors::TaskPushFailed,
                 }
-            );
+            ));
         return context;
     }
 
-    std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, SftpError>> FileStream::writeAsync(
+    std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>>
+    FileStream::writeAsync(
         SignedSizeType totalFileSize,
         char* buffer,
         SignedSizeType bufferSize,

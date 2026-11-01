@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ssh/sftp_error_conversion.hpp>
 #include <utility/describe.hpp>
 #include <shared_data/file_operations/operation_type.hpp>
 #include <shared_data/file_operations/operation_error_type.hpp>
@@ -216,12 +215,11 @@ class Operation
      * @brief The error of a finished transfer that could not be moved into place on the server: FileExists when the
      *        destination exists and may not be replaced.
      */
-    static Error remoteMoveError(SecureShell::SftpError const& error)
+    static Error remoteMoveError(RemoteIo::RemoteError error)
     {
-        auto remoteError = SecureShell::toRemoteError(error);
-        if (remoteError.kind == RemoteIo::RemoteErrorKind::AlreadyExists)
+        if (error.kind == RemoteIo::RemoteErrorKind::AlreadyExists)
             return Error{.type = ErrorType::FileExists};
-        return Error{.type = ErrorType::SftpError, .remoteError = std::move(remoteError)};
+        return Error{.type = ErrorType::SftpError, .remoteError = std::move(error)};
     }
 
     /**

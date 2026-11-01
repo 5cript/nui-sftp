@@ -209,13 +209,13 @@ namespace SecureShell::Test
             return sftp->removeFileInStrand(Paths::RemotePath{});
         });
         ASSERT_FALSE(removed.has_value());
-        EXPECT_EQ(removed.error().wrapperError, WrapperErrors::InvalidPath);
+        EXPECT_EQ(removed.error().wrapperError, RemoteIo::WrapperErrors::InvalidPath);
 
         auto renamed = runInStrand(sftp, [sftp = sftp]() {
             return sftp->renameReplaceInStrand(remote("/home/test/file1.txt"), Paths::RemotePath{}, ".old");
         });
         ASSERT_FALSE(renamed.has_value());
-        EXPECT_EQ(renamed.error().wrapperError, WrapperErrors::InvalidPath);
+        EXPECT_EQ(renamed.error().wrapperError, RemoteIo::WrapperErrors::InvalidPath);
 
         auto stillThere = runInStrand(sftp, [sftp = sftp]() {
             return sftp->lstatInStrand(remote("/home/test/file1.txt"));
@@ -229,7 +229,7 @@ namespace SecureShell::Test
         ASSERT_TRUE(serverStartResult->command("dropAfterBytes", {{"bytes", 0}}));
         auto [owner, sftp] = createSftpSession(serverStartResult->port);
 
-        auto read = runInStrand(sftp, [sftp = sftp]() -> std::expected<std::size_t, SftpError> {
+        auto read = runInStrand(sftp, [sftp = sftp]() -> std::expected<std::size_t, SftpSession::Error> {
             // The server answers NO_SUCH_FILE, libssh keeps that status when the connection breaks later.
             EXPECT_FALSE(sftp->lstatInStrand(remote("/home/test/missing.txt")).has_value());
             const auto opened = sftp->openFileInStrand(
@@ -241,8 +241,7 @@ namespace SecureShell::Test
             return opened->lock()->readSomeInStrand(&byte, 1);
         });
         ASSERT_FALSE(read.has_value());
-        EXPECT_EQ(read.error().sftpError, SSH_FX_CONNECTION_LOST) << read.error().toString();
-        EXPECT_NE(read.error().sshError, SSH_NO_ERROR) << read.error().toString();
+        EXPECT_EQ(read.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << read.error().toString();
     }
 
     TEST_F(SftpInStrandTests, CreateSymLinkInStrandHappyPath)

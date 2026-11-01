@@ -1406,9 +1406,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     {
         Log::error("Failed to stat remote sftp file: {}", result.error().message);
         return std::unexpected(
-            Operation::Error{
-                .type = Operation::ErrorType::SftpError, .remoteError = SecureShell::toRemoteError(result.error())
-            }
+            Operation::Error{.type = Operation::ErrorType::SftpError, .remoteError = result.error()}
         );
     }
 

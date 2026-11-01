@@ -442,7 +442,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Se
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .remoteError = SecureShell::toRemoteError(openResult.error()),
+                .remoteError = openResult.error(),
                 .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
             }
         );
