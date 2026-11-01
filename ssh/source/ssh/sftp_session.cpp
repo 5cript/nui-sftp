@@ -27,6 +27,7 @@ namespace SecureShell
         {
             return RemoteIo::Capabilities{
                 .symlinks = true,
+                .hardLinks = sftp_extension_supported(session, "hardlink@openssh.com", "1") == 1,
                 .setModificationTime = true,
                 .exclusiveCreate = true,
                 .appendWrite = true,

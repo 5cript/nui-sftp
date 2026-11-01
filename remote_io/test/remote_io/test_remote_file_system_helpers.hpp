@@ -97,6 +97,8 @@ namespace RemoteIo::Test
 
         ProcessingThread processingThread_{};
         std::unique_ptr<ProcessingStrand> strand_{processingThread_.createStrand()};
+        /** @brief Outlives stopping the thread, which drains helpers that timed out. */
+        std::shared_ptr<FakeRemoteFileSystem> fileSystem_{};
     };
 
     class RemoteFileSystemRenameHelperTests
@@ -107,9 +109,8 @@ namespace RemoteIo::Test
         void SetUp() override
         {
             fileSystem_ = makeFileSystem({
-                .capabilities = {.renameSemantics = GetParam().semantics},
+                .capabilities = {.hardLinks = GetParam().hardLinks, .renameSemantics = GetParam().semantics},
                 .unknownRenameReplaces = GetParam().unknownRenameReplaces,
-                .hardLinks = GetParam().hardLinks,
             });
             fileSystem_->addFile(source, "source");
         }
@@ -136,8 +137,6 @@ namespace RemoteIo::Test
                 }
             );
         }
-
-        std::shared_ptr<FakeRemoteFileSystem> fileSystem_{};
     };
 
     INSTANTIATE_TEST_SUITE_P(
@@ -215,14 +214,53 @@ namespace RemoteIo::Test
         EXPECT_TRUE(fileSystem_->exists(remotePath("/home/user/folder")));
     }
 
+    class RemoteFileSystemHelperTests
+        : public RemoteFileSystemHelperFixture
+        , public ::testing::Test
+    {};
+
+    TEST_F(RemoteFileSystemHelperTests, RenameNoReplaceReportsADestinationThatAppearedAfterTheCheckAsExisting)
+    {
+        fileSystem_ = makeFileSystem({
+            .capabilities = {.renameSemantics = RenameSemantics::Unknown},
+            .unknownRenameReplaces = false,
+        });
+        fileSystem_->addDirectory(remotePath("/home/user/folder"));
+        fileSystem_->addFile(destination, "destination");
+        // The check misses the destination, as if it was created right after it.
+        fileSystem_->failWhen<Lstat>(
+            [checked = std::make_shared<bool>(false)](Lstat const& operation)
+            {
+                return operation.path == destination && !std::exchange(*checked, true);
+            },
+            RemoteError{.kind = RemoteErrorKind::NoSuchFile}
+        );
+
+        const auto refused = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return renameNoReplaceInStrand(*fileSystem_, remotePath("/home/user/folder"), destination);
+            }
+        );
+
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error().kind, RemoteErrorKind::AlreadyExists);
+        EXPECT_EQ(fileSystem_->contentOf(destination), "destination");
+        EXPECT_TRUE(fileSystem_->exists(remotePath("/home/user/folder")));
+    }
+
     TEST_P(RemoteFileSystemRenameHelperTests, RenameNoReplaceLinksAFileWhereTheFileSystemLinks)
     {
         ASSERT_TRUE(renameNoReplace(source, SharedData::FileType::Regular).has_value());
 
+        // A rename that refuses by itself needs no check of the destination.
+        const auto links = GetParam().hardLinks;
+        const auto checks = !links && GetParam().semantics != RenameSemantics::Refuses;
         EXPECT_EQ(fileSystem_->contentOf(destination), "source");
-        EXPECT_EQ(fileSystem_->started<LinkIntoPlace>(), 1u);
-        EXPECT_EQ(fileSystem_->started<Rename>(), GetParam().hardLinks ? 0u : 1u);
-        EXPECT_EQ(fileSystem_->started<Lstat>(), 0u);
+        EXPECT_EQ(fileSystem_->started<LinkIntoPlace>(), links ? 1u : 0u);
+        EXPECT_EQ(fileSystem_->started<Rename>(), links ? 0u : 1u);
+        EXPECT_EQ(fileSystem_->started<Lstat>(), checks ? 1u : 0u);
     }
 
     TEST_P(RemoteFileSystemRenameHelperTests, RenameReplaceReplacesAnExistingFileOrMovesToAFreeName)
@@ -295,6 +333,9 @@ namespace RemoteIo::Test
             ASSERT_TRUE(replaced.has_value()) << replaced.error().toString();
             EXPECT_EQ(fileSystem_->contentOf(destination), "source") << destinationExists;
             EXPECT_FALSE(fileSystem_->exists(source)) << destinationExists;
+            // A rename that replaces never looks for an aside.
+            if (GetParam().semantics != RenameSemantics::Replaces)
+                EXPECT_FALSE(fileSystem_->exists(aside)) << destinationExists;
         }
     }
 
@@ -330,7 +371,10 @@ namespace RemoteIo::Test
         , public ::testing::Test
     {
       protected:
-        std::shared_ptr<FakeRemoteFileSystem> fileSystem_{makeFileSystem({.capabilities = {.userDirectories = true}})};
+        void SetUp() override
+        {
+            fileSystem_ = makeFileSystem({.capabilities = {.userDirectories = true}});
+        }
     };
 
     TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileReadsUpToTheMaximum)
@@ -351,6 +395,7 @@ namespace RemoteIo::Test
             );
             ASSERT_TRUE(read.has_value()) << read.error().toString();
             EXPECT_EQ(*read, content.substr(0, maximumSize));
+            EXPECT_EQ(fileSystem_->openStreams(), 0u) << maximumSize;
         }
         const auto missing = runInStrand(
             *fileSystem_,
@@ -361,6 +406,24 @@ namespace RemoteIo::Test
         );
         ASSERT_FALSE(missing.has_value());
         EXPECT_EQ(missing.error().kind, RemoteErrorKind::NoSuchFile);
+    }
+
+    TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileFailsOnAStreamThatReadsNothing)
+    {
+        fileSystem_ = makeFileSystem({.readLengthLimit = 0u});
+        fileSystem_->addFile(remotePath("/home/user/notes.txt"), "notes");
+
+        const auto read = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return readSmallFileInStrand(*fileSystem_, remotePath("/home/user/notes.txt"), 100u);
+            }
+        );
+
+        ASSERT_FALSE(read.has_value());
+        EXPECT_EQ(read.error().kind, RemoteErrorKind::Failure);
+        EXPECT_EQ(fileSystem_->openStreams(), 0u);
     }
 
     TEST_F(RemoteFileSystemReadHelperTests, UserDirectoriesAreReadFromTheHomeDirectory)
@@ -402,7 +465,7 @@ namespace RemoteIo::Test
         incapable->addFile(remotePath("/home/user/.config/user-dirs.dirs"), "XDG_DOWNLOAD_DIR=\"$HOME/Downloads\"\n");
         const auto withoutCapability = runInStrand(
             *incapable,
-            [&incapable]()
+            [incapable]()
             {
                 return userDirectoriesInStrand(*incapable, remotePath("/home/user"));
             }

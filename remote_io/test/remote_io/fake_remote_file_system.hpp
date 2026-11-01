@@ -28,9 +28,14 @@ namespace RemoteIo::Test
     class FakeRemoteFileStream final : public IRemoteFileStream
     {
       public:
-        FakeRemoteFileStream(std::weak_ptr<FakeRemoteFileSystem> fileSystem, Paths::RemotePath path)
+        FakeRemoteFileStream(
+            std::weak_ptr<FakeRemoteFileSystem> fileSystem,
+            Paths::RemotePath path,
+            std::size_t readLengthLimit
+        )
             : fileSystem_{std::move(fileSystem)}
             , path_{std::move(path)}
+            , readLengthLimit_{readLengthLimit}
         {}
 
         std::expected<void, RemoteError> seekInStrand(std::size_t position) override
@@ -68,12 +73,9 @@ namespace RemoteIo::Test
         {
             return {};
         }
-        /**
-         * @brief Smaller than the files of most tests, so they take several reads.
-         */
         std::size_t readLengthLimit() const override
         {
-            return 1024u;
+            return readLengthLimit_;
         }
         std::size_t writeLengthLimit() const override
         {
@@ -86,6 +88,7 @@ namespace RemoteIo::Test
       private:
         std::weak_ptr<FakeRemoteFileSystem> fileSystem_;
         Paths::RemotePath path_;
+        std::size_t readLengthLimit_;
         std::size_t position_{0};
     };
 
@@ -102,8 +105,8 @@ namespace RemoteIo::Test
             Capabilities capabilities{};
             /** @brief Whether a rename replaces an existing destination when the capabilities say Unknown. */
             bool unknownRenameReplaces{true};
-            /** @brief LinkIntoPlace links, otherwise it answers Unsupported for a free destination. */
-            bool hardLinks{false};
+            /** @brief Smaller than the files of most tests, so they take several reads. */
+            std::size_t readLengthLimit{1024u};
         };
 
         FakeRemoteFileSystem(ProcessingStrand* strand, Options options)
@@ -153,6 +156,12 @@ namespace RemoteIo::Test
             return nodes_.contains(path.value());
         }
 
+        std::size_t openStreams() const
+        {
+            std::scoped_lock lock{mutex_};
+            return streams_.size();
+        }
+
         /**
          * @brief Fails every later @p OperationT that @p matches with @p error, leaving the files as they are.
          */
@@ -181,21 +190,13 @@ namespace RemoteIo::Test
             return started_[RemoteFileSystemOperations::indexOf<OperationT>()];
         }
 
+        /**
+         * @brief Completes @p pending outside the lock, so a completion may use the fake again.
+         */
         template <typename OperationT>
         void startOperation(Pending<OperationT> pending)
         {
-            std::scoped_lock lock{mutex_};
-            constexpr auto index = RemoteFileSystemOperations::indexOf<OperationT>();
-            ++started_[index];
-            for (auto const& failure : failures_[index])
-            {
-                if (auto error = failure(&pending.operation))
-                    return pending.complete(std::unexpected(std::move(*error)));
-            }
-            if constexpr (requires { run(pending.operation); })
-                pending.complete(run(pending.operation));
-            else
-                pending.complete(std::unexpected(errorOf(RemoteErrorKind::Unsupported, "Not in the fake")));
+            pending.complete(resultOf(pending.operation));
         }
 
         Capabilities capabilities() const override
@@ -250,6 +251,23 @@ namespace RemoteIo::Test
         {
             for (auto parent = path.parent(); parent && !nodes_.contains(parent->value()); parent = parent->parent())
                 nodes_.emplace(parent->value(), Node{.type = SharedData::FileType::Directory});
+        }
+
+        template <typename OperationT>
+        OperationResult<OperationT> resultOf(OperationT const& operation)
+        {
+            std::scoped_lock lock{mutex_};
+            constexpr auto index = RemoteFileSystemOperations::indexOf<OperationT>();
+            ++started_[index];
+            for (auto const& failure : failures_[index])
+            {
+                if (auto error = failure(&operation))
+                    return std::unexpected(std::move(*error));
+            }
+            if constexpr (requires { run(operation); })
+                return run(operation);
+            else
+                return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "Not in the fake"));
         }
 
         Node* find(Paths::RemotePath const& path)
@@ -337,7 +355,7 @@ namespace RemoteIo::Test
                 return std::unexpected(noSuchFile(operation.source));
             if (find(operation.destination) != nullptr)
                 return std::unexpected(errorOf(RemoteErrorKind::AlreadyExists, "The destination exists"));
-            if (!options_.hardLinks)
+            if (!options_.capabilities.hardLinks)
                 return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "No hard links"));
             if (source->type != SharedData::FileType::Regular)
                 return std::unexpected(errorOf(RemoteErrorKind::Failure, "Not a regular file"));
@@ -355,7 +373,8 @@ namespace RemoteIo::Test
                 return std::unexpected(noSuchFile(operation.path));
             if (node->type != SharedData::FileType::Regular)
                 return std::unexpected(errorOf(RemoteErrorKind::Failure, "Not a regular file"));
-            auto stream = std::make_shared<FakeRemoteFileStream>(weak_from_this(), operation.path);
+            auto stream =
+                std::make_shared<FakeRemoteFileStream>(weak_from_this(), operation.path, options_.readLengthLimit);
             streams_.push_back(stream);
             return stream;
         }

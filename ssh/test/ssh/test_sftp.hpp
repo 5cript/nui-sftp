@@ -2112,9 +2112,9 @@ namespace SecureShell::Test
             ASSERT_TRUE(
                 serverStartResult->command("createFile", {{"path", "/home/test/target.txt.aside"}, {"content", "target"}})
             );
-            // Putting it back and moving it aside again succeed, the rename into place fails.
+            // The rename into place fails, putting the destination back from aside succeeds.
             if (failInPlace)
-                ASSERT_TRUE(serverStartResult->command("failRenames", {{"after", 2}, {"count", 1}}));
+                ASSERT_TRUE(serverStartResult->command("failRenames", {{"after", 0}, {"count", 1}}));
             auto [_, sftp] = createSftpSession(serverStartResult->port);
 
             const auto result = renameReplace(*sftp);

@@ -92,7 +92,7 @@ namespace RemoteIo
         if (!type.has_value())
             return std::unexpected(type.error());
 
-        if (*type == SharedData::FileType::Regular)
+        if (*type == SharedData::FileType::Regular && fileSystem.capabilities().hardLinks)
         {
             auto linked = fileSystem.inStrand(LinkIntoPlace{.source = source, .destination = destination});
             if (linked.has_value() || linked.error().kind != RemoteErrorKind::Unsupported)
@@ -110,7 +110,7 @@ namespace RemoteIo
             return std::unexpected(alreadyExists(destination));
         if (!isMissing(existing.error()))
             return std::unexpected(existing.error());
-        return fileSystem.inStrand(Rename{.source = source, .destination = destination});
+        return renameToFreeName(fileSystem, source, destination);
     }
 
     std::expected<void, RemoteError> renameReplaceInStrand(
@@ -140,12 +140,9 @@ namespace RemoteIo
         const auto destinationInformation = fileSystem.inStrand(Lstat{.path = destination});
         if (!destinationInformation.has_value())
         {
+            // A destination that only exists aside, from a rollback that failed, is put back if the rename fails.
             if (!isMissing(destinationInformation.error()) || !fileSystem.inStrand(Lstat{.path = *aside}).has_value())
                 return fileSystem.inStrand(Rename{.source = source, .destination = destination});
-            // A destination that only exists aside, from a rollback that failed, is put back first.
-            if (auto restored = fileSystem.inStrand(Rename{.source = *aside, .destination = destination});
-                !restored.has_value())
-                return restored;
         }
         else if (destinationInformation->isDirectory())
         {
@@ -156,9 +153,11 @@ namespace RemoteIo
                 }
             );
         }
-
-        if (auto movedAside = moveAside(fileSystem, destination, *aside); !movedAside.has_value())
+        else if (auto movedAside = moveAside(fileSystem, destination, *aside); !movedAside.has_value())
+        {
             return movedAside;
+        }
+
         if (auto renamed = fileSystem.inStrand(Rename{.source = source, .destination = destination});
             !renamed.has_value())
         {
@@ -216,6 +215,15 @@ namespace RemoteIo
         std::string content;
         std::array<char, 4096> buffer{};
         const auto pieceSize = std::min(buffer.size(), stream->readLengthLimit());
+        if (pieceSize == 0)
+        {
+            return std::unexpected(
+                RemoteError{
+                    .kind = RemoteErrorKind::Failure,
+                    .message = fmt::format("The stream of '{}' reads no bytes", path.value()),
+                }
+            );
+        }
         while (content.size() < maximumSize)
         {
             const auto bytesRead =

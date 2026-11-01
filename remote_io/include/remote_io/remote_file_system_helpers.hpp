@@ -19,9 +19,10 @@ namespace RemoteIo
      * @brief Renames without replacing @p destination, fails with AlreadyExists when it exists. Must be called on the
      *        processing thread of the file system's strand.
      *
-     * A regular file moves with LinkIntoPlace, atomically where the protocol links. Otherwise a file system whose
-     * rename refuses an existing destination is left to refuse it, and on any other the destination is checked
-     * before the rename, which leaves a window. A destination that cannot be checked is never renamed over.
+     * A regular file moves with LinkIntoPlace where Capabilities::hardLinks is set, atomically where the link
+     * succeeds. Otherwise a file system whose rename refuses an existing destination is left to refuse it, and on
+     * any other the destination is checked before the rename, which leaves a window. A destination that cannot be
+     * checked is never renamed over.
      *
      * @param sourceType The type of @p source when the caller knows it, saves an Lstat.
      */
@@ -38,7 +39,8 @@ namespace RemoteIo
      *
      * One rename where the file system's rename replaces. Otherwise the destination is moved aside to
      * @p asideSuffix first and moved back when the rename fails; if moving it back fails too, the error names where
-     * it is kept. A leftover aside is removed when the destination exists, and put back when it does not.
+     * it is kept. A leftover aside is removed when the destination exists, and put back when it does not and the
+     * rename fails.
      */
     std::expected<void, RemoteError> renameReplaceInStrand(
         IRemoteFileSystem& fileSystem,
