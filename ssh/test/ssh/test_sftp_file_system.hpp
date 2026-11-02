@@ -18,6 +18,7 @@
 #include <future>
 #include <memory>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace SecureShell::Test
@@ -110,6 +111,34 @@ namespace SecureShell::Test
         auto information = stream->stat();
         ASSERT_EQ(information.wait_for(replyTimeout), std::future_status::ready);
         EXPECT_FALSE(information.get().has_value());
+    }
+
+    TEST_F(SftpFileSystemTests, AnOperationAfterCloseOnTheProcessingThreadReportsALostConnection)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        const auto path = remote("/home/test/file1.txt");
+
+        const auto kindOf = [](auto const& result)
+        {
+            return result ? RemoteIo::RemoteErrorKind::None : result.error().kind;
+        };
+        auto kinds = sftp->performPromise(
+            [sftp, path, kindOf]()
+                -> std::expected<std::pair<RemoteIo::RemoteErrorKind, RemoteIo::RemoteErrorKind>, RemoteIo::RemoteError>
+            {
+                std::static_pointer_cast<RemoteIo::IRemoteFileSystem>(sftp)->close();
+                // libssh dereferences a freed session for a remove instead of refusing it.
+                return std::pair{
+                    kindOf(sftp->inStrand(RemoteIo::RemoveFile{.path = path})), kindOf(sftp->removeFileInStrand(path))
+                };
+            }
+        );
+        ASSERT_EQ(kinds.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = kinds.get();
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(result->first, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(result->second, RemoteIo::RemoteErrorKind::ConnectionLost);
     }
 
     TEST_F(SftpFileSystemTests, RenameReplacesAsTheCapabilitiesTell)
