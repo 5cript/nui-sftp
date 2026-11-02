@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ssh/file_stream_interface.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
+#include <remote_io/remote_file_stream.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -20,5 +20,5 @@ namespace ResumeCheck
      * @return False when they differ or either side is shorter than @p size.
      */
     std::expected<bool, RemoteIo::RemoteError>
-    tailsMatchInStrand(SecureShell::IFileStream& remote, std::filesystem::path const& local, std::uint64_t size);
+    tailsMatchInStrand(RemoteIo::IRemoteFileStream& remote, std::filesystem::path const& local, std::uint64_t size);
 }
