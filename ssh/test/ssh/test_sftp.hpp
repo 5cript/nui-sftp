@@ -859,6 +859,45 @@ namespace SecureShell::Test
         EXPECT_FALSE(sftp->close());
     }
 
+    TEST_F(SftpTests, ClosedSftpSessionEndsOnTheServerWhileTheConnectionStays)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        const auto openOnServer = [&serverStartResult]()
+        {
+            return serverStartResult->query("openSftpSessions").value_or(nullptr);
+        };
+
+        auto [client, sftp] = createSftpSession(serverStartResult->port);
+        ASSERT_EQ(openOnServer(), 1);
+
+        ASSERT_TRUE(sftp->close());
+        // The end travels over the connection, which is not ordered with the query.
+        const auto open = serverStartResult->query(
+            "waitForOpenSftpSessions", {{"count", 0}, {"timeoutMs", std::chrono::milliseconds{replyTimeout}.count()}}
+        );
+        EXPECT_EQ(open.value_or(nullptr), 0);
+
+        auto reopened = client->createSftpSession();
+        ASSERT_EQ(reopened.wait_for(replyTimeout), std::future_status::ready);
+        EXPECT_TRUE(reopened.get().has_value());
+        EXPECT_EQ(openOnServer(), 1);
+    }
+
+    TEST_F(SftpTests, ClosingTheSftpSessionClosesItsOpenFilesOnTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [client, sftp] = createSftpSession(serverStartResult->port);
+        ASSERT_TRUE(openForReading(*sftp, "/home/test/large.txt"));
+        ASSERT_TRUE(openForWriting(*sftp, "/home/test/uploaded.bin"));
+        ASSERT_TRUE(serverStartResult->command("resetRequestCounts", {}));
+
+        // Each close waits for the server's answer, so the requests are counted when close returns.
+        ASSERT_TRUE(sftp->close());
+        const auto counts = serverStartResult->query("requestCounts");
+        ASSERT_TRUE(counts.has_value());
+        EXPECT_EQ(counts->value("CLOSE", 0), 2) << counts->dump();
+    }
+
     TEST_F(SftpTests, CanStatFileUsingFileStream)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
