@@ -16,17 +16,17 @@
 #include <backend/rpc_helper.hpp>
 
 #include <nui/rpc.hpp>
-#include <libssh/libsshpp.hpp>
-#include <libssh/sftp.h>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/strand.hpp>
 
 #include <atomic>
+#include <expected>
 #include <filesystem>
 #include <memory>
 #include <map>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 
 class SessionManager
@@ -67,11 +67,19 @@ class SessionManager
     void addPasswordProvider(int priority, PasswordProvider* provider);
     void joinSessionAdder();
     /**
-     * @brief Connects a new session with @p sessionOptions, @p onComplete hears its id or why it failed.
+     * @brief Makes the connection of a new session on the strand, handed the callback for its loss.
+     */
+    using Connect =
+        std::function<std::expected<SessionConnection, std::string>(std::function<void()> onConnectionLoss)>;
+
+    /**
+     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed.
+     * @param sftpOptions The transfer options of the session.
      * @param failureToast Whether the error logged when it fails is shown as a toast.
      */
     void addSession(
-        Persistence::SshSessionOptions const& sessionOptions,
+        Connect connect,
+        Persistence::SftpOptions sftpOptions,
         Log::Toast failureToast,
         std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)>
             onComplete
@@ -91,6 +99,12 @@ class SessionManager
 
   private:
     // void dispatchUpdates();
+
+    /**
+     * @brief Connects to the SSH server of @p sessionOptions, asking for passwords and key phrases through the
+     *        password providers.
+     */
+    Connect secureShellConnect(Persistence::SshSessionOptions sessionOptions);
 
     /**
      * Handles calls from the frontend to connect to a new ssh server with the following payload:
