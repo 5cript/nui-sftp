@@ -15,6 +15,24 @@
 
 using namespace std::chrono_literals;
 
+namespace
+{
+    /**
+     * @brief Removes the local file @p path, a failure is only logged.
+     */
+    void removeLocalFile(std::filesystem::path const& path)
+    {
+        std::error_code removeError{};
+        std::filesystem::remove(path, removeError);
+        if (removeError)
+            Log::warn(
+                "DownloadOperation: Cannot remove '{}': {}",
+                Paths::nativeToUtf8(path),
+                Utility::errorMessage(removeError)
+            );
+    }
+}
+
 DownloadOperation::DownloadOperation(
     std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
     DownloadOperationOptions options
@@ -878,28 +896,10 @@ void DownloadOperation::cleanup()
     localFile_.close();
 
     if (options_.doCleanup && !tempNativePath_.empty())
-    {
-        std::error_code removeError{};
-        std::filesystem::remove(tempNativePath_, removeError);
-        if (removeError)
-            Log::warn(
-                "DownloadOperation: Cannot remove '{}': {}",
-                Paths::nativeToUtf8(tempNativePath_),
-                Utility::errorMessage(removeError)
-            );
-    }
+        removeLocalFile(tempNativePath_);
     // Nothing continues a partial destination, so a stopped or failed download leaves none.
     if (std::exchange(openedDestination_, false))
-    {
-        std::error_code removeError{};
-        std::filesystem::remove(localNativePath_, removeError);
-        if (removeError)
-            Log::warn(
-                "DownloadOperation: Cannot remove '{}': {}",
-                options_.localPath.toUtf8(),
-                Utility::errorMessage(removeError)
-            );
-    }
+        removeLocalFile(localNativePath_);
 }
 
 void DownloadOperation::keepPartialFiles()
@@ -981,6 +981,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
             options_.remotePath.value(),
             finished.error().toString()
         );
+        // Kept partial files or not, a later download must not continue it. The unsafe fast mode's destination goes
+        // with the failure.
+        if (!unsafeFast_)
+            removeLocalFile(tempPath);
         return finished;
     }
 

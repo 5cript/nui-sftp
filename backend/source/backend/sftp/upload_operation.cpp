@@ -1077,6 +1077,12 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Re
         );
     }
 
+    const auto removeTempFile = [this, &fileSystem]()
+    {
+        if (const auto removed = fileSystem.inStrand(RemoteIo::RemoveFile{.path = tempPath_}); !removed.has_value())
+            Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
+    };
+
     if (const auto finished = finishTransferInStrand(fileStream_); !finished)
     {
         Log::error(
@@ -1085,6 +1091,10 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Re
             writtenPath().value(),
             finished.error().toString()
         );
+        // Continuing it later would put the bytes the server refused in place. The unsafe fast mode's destination
+        // goes with the failure.
+        if (!unsafeFast_)
+            removeTempFile();
         return finished;
     }
 
@@ -1109,8 +1119,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::finalizeInStrand(Re
     );
     if (!moved.has_value())
     {
-        if (auto removed = fileSystem.inStrand(RemoteIo::RemoveFile{.path = tempPath_}); !removed.has_value())
-            Log::warn("UploadOperation: Cannot remove '{}': {}", tempPath_.value(), removed.error().message);
+        removeTempFile();
         return std::unexpected(std::move(moved).error());
     }
     reportSent();

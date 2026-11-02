@@ -516,6 +516,8 @@ namespace Test
             EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError) << bigFileOptimized;
             ASSERT_TRUE(serverStartResult->command("failCloses", {{"enabled", false}}));
             EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content") << bigFileOptimized;
+            // A later upload would continue it and put the refused bytes in place.
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt.filepart"), "<missing>") << bigFileOptimized;
         }
     }
 
@@ -535,6 +537,8 @@ namespace Test
                     .remotePath = remote("/home/test/file1.txt"),
                     .localPath = toLocal(localPath),
                     .mayOverwrite = true,
+                    // Kept partial files must not keep the refused one.
+                    .doCleanup = false,
                     .bigFileOptimized = bigFileOptimized,
                 }
             };
@@ -543,6 +547,7 @@ namespace Test
             ASSERT_FALSE(result.has_value()) << bigFileOptimized;
             EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError) << bigFileOptimized;
             EXPECT_EQ(readLocalFile(localPath), "original content") << bigFileOptimized;
+            EXPECT_FALSE(std::filesystem::exists(localPath.generic_string() + ".filepart")) << bigFileOptimized;
         }
     }
 
