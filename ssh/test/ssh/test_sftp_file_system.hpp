@@ -3,6 +3,7 @@
 #include "common_fixture.hpp"
 #include "test_sftp.hpp"
 
+#include <remote_io/connection.hpp>
 #include <remote_io/remote_file_system.hpp>
 #include <ssh/session.hpp>
 #include <ssh/sftp_session.hpp>
@@ -77,6 +78,26 @@ namespace SecureShell::Test
         );
 
         const auto information = runInStrand(*sftp, RemoteIo::Lstat{.path = remote("/home/test/file1.txt")});
+        ASSERT_TRUE(information.has_value()) << information.error().toString();
+        EXPECT_EQ(information->type, SharedData::FileType::Regular);
+    }
+
+    TEST_F(SftpFileSystemTests, TheSessionOpensAFileSystemAsAConnection)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto session = makePasswordTestSession(serverStartResult->port);
+        ASSERT_TRUE(session.has_value()) << session.error();
+        RemoteIo::IConnection& connection = **session;
+        connection.start();
+
+        auto created = connection.createFileSystem();
+        ASSERT_EQ(created.wait_for(replyTimeout), std::future_status::ready);
+        const auto opened = created.get();
+        ASSERT_TRUE(opened.has_value()) << opened.error().toString();
+        const auto fileSystem = opened->lock();
+        ASSERT_NE(fileSystem, nullptr);
+
+        const auto information = runLater(*fileSystem, RemoteIo::Lstat{.path = remote("/home/test/file1.txt")});
         ASSERT_TRUE(information.has_value()) << information.error().toString();
         EXPECT_EQ(information->type, SharedData::FileType::Regular);
     }

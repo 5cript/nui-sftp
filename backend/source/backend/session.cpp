@@ -5,7 +5,6 @@
 #include <utility/localized_message.hpp>
 #include <backend/existence_check.hpp>
 #include <remote_io/remote_file_system_helpers.hpp>
-#include <ssh/sftp_session.hpp>
 
 #include <paths/paths.hpp>
 
@@ -67,7 +66,7 @@ namespace
 
 Session::Session(
     Ids::SessionId id,
-    std::unique_ptr<SecureShell::Session> session,
+    SessionConnection connection,
     boost::asio::any_io_executor executor,
     std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
     Nui::Window& wnd,
@@ -80,7 +79,8 @@ Session::Session(
 )
     : RpcHelper::StrandRpc{executor, std::move(strand), wnd, hub}
     , id_{std::move(id)}
-    , session_{std::move(session)}
+    , connection_{std::move(connection.connection)}
+    , terminalHost_{connection.terminalHost}
     , operationQueue_{std::make_shared<OperationQueue>(
           executor_,
           strand_,
@@ -116,18 +116,21 @@ void Session::start()
             if (!self)
                 return;
 
-            if (!self->session_)
+            if (!self->connection_)
             {
                 Log::error("Session is not valid, cannot start");
                 return;
             }
 
-            self->session_->start();
+            self->connection_->start();
             self->registerRpcCreateChannel();
-            self->registerRpcStartChannelRead();
             self->registerRpcChannelClose();
-            self->registerRpcChannelWrite();
-            self->registerRpcChannelPtyResize();
+            if (self->terminalHost_)
+            {
+                self->registerRpcStartChannelRead();
+                self->registerRpcChannelWrite();
+                self->registerRpcChannelPtyResize();
+            }
             self->registerRpcSftpListDirectory();
             self->registerRpcSftpHomeDirectory();
             self->registerRpcSftpUserDirectories();
@@ -239,11 +242,11 @@ void Session::stop()
             }
             self->sftpChannels_.clear();
 
-            // Close session
-            if (self->session_)
+            if (self->connection_)
             {
-                Log::info("Closing ssh session '{}'", self->id_.value());
-                self->session_.reset();
+                Log::info("Closing the connection of session '{}'", self->id_.value());
+                self->terminalHost_ = nullptr;
+                self->connection_.reset();
             }
         }
     );
@@ -420,6 +423,8 @@ void Session::registerRpcCreateChannel()
 
                 if (!fileMode)
                 {
+                    if (!self->terminalHost_)
+                        return reply.error("The session has no terminals");
                     Log::info("Creating pty channel for session '{}'", self->id_.value());
                     Log::info("Session options: {}", parameters["engineOptions"].dump());
                     Log::info("Termios: {}", parameters["termios"].dump());
@@ -427,7 +432,7 @@ void Session::registerRpcCreateChannel()
                     const auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
                     const auto termios = parameters["termios"].get<Persistence::Termios>();
 
-                    const auto weakChannel = self->session_
+                    const auto weakChannel = self->terminalHost_
                                                  ->createPtyChannel(
                                                      {.environment = sessionOptions.sshOptions->environment,
                                                          .localeEnv = sessionOptions.sshOptions->localeEnv,
@@ -453,13 +458,15 @@ void Session::registerRpcCreateChannel()
                 }
                 else
                 {
-                    Log::info("Creating sftp channel for session '{}'", self->id_.value());
+                    Log::info("Creating file system channel for session '{}'", self->id_.value());
 
-                    const auto weakChannel = self->session_->createSftpSession().get();
+                    const auto weakChannel = self->connection_->createFileSystem().get();
                     if (!weakChannel.has_value())
                     {
-                        Log::error("Failed to create sftp channel: {}", weakChannel.error().toString());
-                        return reply.error("Failed to create sftp channel: " + weakChannel.error().toString());
+                        Log::error("Failed to create file system channel: {}", weakChannel.error().toString());
+                        return reply.error(
+                            fmt::format("Failed to create file system channel: {}", weakChannel.error().toString())
+                        );
                     }
 
                     const auto channelId = Ids::generateChannelId();
@@ -468,7 +475,7 @@ void Session::registerRpcCreateChannel()
                         self->operationQueue_->limitParallelism(fileSystem->capabilities().maxParallelTransfers);
 
                     Log::info(
-                        "Created sftp channel with id '{}', sftp channel total is now '{}'.",
+                        "Created file system channel with id '{}', file system channel total is now '{}'.",
                         channelId.value(),
                         self->sftpChannels_.size()
                     );

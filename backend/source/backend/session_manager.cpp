@@ -8,7 +8,6 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/asio/dispatch.hpp>
-#include <libssh/libssh.h>
 #include <roar/utility/base64.hpp>
 #include <roar/filesystem/special_paths.hpp>
 
@@ -225,25 +224,43 @@ void SessionManager::addPasswordProvider(int priority, PasswordProvider* provide
     );
 }
 
+SessionManager::Connect SessionManager::secureShellConnect(Persistence::SshSessionOptions sessionOptions)
+{
+    return [this, sessionOptions = std::move(sessionOptions)](
+               std::function<void()> onConnectionLoss
+           ) -> std::expected<SessionConnection, std::string>
+    {
+        std::pair<SessionManager*, std::string> askPassUserDataKeyPhrase{this, "keyPhrase"};
+        std::pair<SessionManager*, std::string> askPassUserDataPassword{this, "password"};
+        return SecureShell::makeSession(
+            sessionOptions,
+            askPassDefault,
+            &askPassUserDataKeyPhrase,
+            &askPassUserDataPassword,
+            nullptr,
+            std::move(onConnectionLoss)
+        )
+            .transform(&SessionConnection::fromSecureShell);
+    };
+}
+
 void SessionManager::addSession(
-    Persistence::SshSessionOptions const& sessionOptions,
+    Connect connect,
+    Persistence::SftpOptions sftpOptions,
     Log::Toast failureToast,
     std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)> onComplete
 )
 {
     within_strand_do(
-        [this, sessionOptions, failureToast, onComplete = std::move(onComplete)]()
+        [this,
+            connect = std::move(connect),
+            sftpOptions = std::move(sftpOptions),
+            failureToast,
+            onComplete = std::move(onComplete)]()
         {
             const auto sessionId = Ids::SessionId{Ids::generateId()};
 
-            std::pair<SessionManager*, std::string> askPassUserDataKeyPhrase{this, "keyPhrase"};
-            std::pair<SessionManager*, std::string> askPassUserDataPassword{this, "password"};
-            auto maybeSshSession = SecureShell::makeSession(
-                sessionOptions,
-                askPassDefault,
-                &askPassUserDataKeyPhrase,
-                &askPassUserDataPassword,
-                nullptr,
+            auto connection = connect(
                 // Self destruct callback
                 [weak = weak_from_this(), sessionId]()
                 {
@@ -277,24 +294,23 @@ void SessionManager::addSession(
                 }
             );
 
-            if (maybeSshSession)
+            if (connection)
             {
                 const auto session = std::make_shared<Session>(
                     sessionId,
-                    std::move(maybeSshSession).value(),
+                    *std::move(connection),
                     executor_,
                     strand_,
                     *wnd_,
                     *hub_,
-                    sessionOptions.sftpOptions.value(),
+                    sftpOptions,
                     &bulkResumeRegistry_,
                     keptTransferRegistry_,
                     localOperationQueue_,
                     FileTracking::TrackerServices{
                         .instances = temporaryInstances_.get(),
                         .localWatches = localWatches_.get(),
-                        .defaultOptions =
-                            [this]()
+                        .defaultOptions = [this]()
                         {
                             return fileTrackingDefaults_;
                         },
@@ -313,8 +329,8 @@ void SessionManager::addSession(
             }
             else
             {
-                Log::error(failureToast, "Failed to create session: {}", maybeSshSession.error());
-                onComplete(std::nullopt, maybeSshSession.error());
+                Log::error(failureToast, "Failed to create session: {}", connection.error());
+                onComplete(std::nullopt, connection.error());
             }
         }
     );
@@ -402,8 +418,11 @@ void SessionManager::registerRpcSessionConnect()
                     }
                 );
 
+                auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
+                auto sftpOptions = sessionOptions.sftpOptions.value();
                 addSession(
-                    parameters["engineOptions"].get<Persistence::SshSessionOptions>(),
+                    secureShellConnect(std::move(sessionOptions)),
+                    std::move(sftpOptions),
                     failureToast,
                     std::move(onComplete)
                 );

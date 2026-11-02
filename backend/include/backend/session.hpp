@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ssh/session.hpp>
+#include <remote_io/connection.hpp>
 #include <remote_io/remote_file_system.hpp>
 #include <ids/ids.hpp>
 #include <backend/sftp/operation_queue.hpp>
@@ -21,6 +22,25 @@
 #include <unordered_map>
 
 /**
+ * @brief What a session talks to its server through.
+ */
+struct SessionConnection
+{
+    std::unique_ptr<RemoteIo::IConnection> connection;
+    /** @brief The SSH session behind the connection, which hosts terminals. Nothing for a protocol without them. */
+    SecureShell::Session* terminalHost{nullptr};
+
+    /**
+     * @brief An SSH session, which is the connection and hosts terminals as well.
+     */
+    static SessionConnection fromSecureShell(std::unique_ptr<SecureShell::Session> session)
+    {
+        auto* const terminalHost = session.get();
+        return {.connection = std::move(session), .terminalHost = terminalHost};
+    }
+};
+
+/**
  * @brief This session is the implementation equivalent of one tab in the UI.
  * A tab in the UI represents everything related to one server address and port.
  *
@@ -35,7 +55,7 @@ class Session
 
     Session(
         Ids::SessionId id,
-        std::unique_ptr<SecureShell::Session> session,
+        SessionConnection connection,
         boost::asio::any_io_executor executor,
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
         Nui::Window& wnd,
@@ -419,7 +439,9 @@ class Session
     std::atomic_bool running_;
     /** @brief A doOperationQueueWork is posted and not yet run. On the strand. */
     bool operationQueueWorkScheduled_{false};
-    std::unique_ptr<SecureShell::Session> session_{};
+    std::unique_ptr<RemoteIo::IConnection> connection_{};
+    /** @brief Part of connection_, nothing without terminals or once connection_ is gone. */
+    SecureShell::Session* terminalHost_{nullptr};
     std::shared_ptr<OperationQueue> operationQueue_;
     /// Non-owning. Lifetime is the SessionManager's, which outlives all
     /// sessions it created.

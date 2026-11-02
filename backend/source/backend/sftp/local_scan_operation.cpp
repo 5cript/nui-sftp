@@ -7,7 +7,6 @@
 #include <log/log.hpp>
 #include <paths/native.hpp>
 
-#include <ssh/sftp_session.hpp>
 
 #include <filesystem>
 #include <fstream>

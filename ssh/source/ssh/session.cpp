@@ -245,40 +245,60 @@ namespace SecureShell
         );
     }
 
+    std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError> Session::createSftpSessionInThread()
+    {
+        SftpSession::NativeSession sftp{sftp_new(session_.getCSession()), &sftp_free};
+        if (!sftp)
+        {
+            return std::unexpected(toRemoteError(
+                SftpError{
+                    .message = session_.getError(),
+                    .sshError = session_.getErrorCode(),
+                    .sftpError = 0,
+                }
+            ));
+        }
+
+        auto result = sftp_init(sftp.get());
+        if (result != SSH_OK)
+        {
+            return std::unexpected(toRemoteError(
+                SftpError{
+                    .message = session_.getError(),
+                    .sshError = session_.getErrorCode(),
+                    .sftpError = sftp_get_error(sftp.get()),
+                }
+            ));
+        }
+
+        // Kept before the caller hears of it, who may shut the session down and walk the list right away.
+        auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), std::move(sftp));
+        sftpSessions_.push_back(sftpSession);
+        return sftpSession;
+    }
+
     std::future<std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>> Session::createSftpSession()
     {
         return processingThread_.pushPromiseTask(
-            [this]() -> std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>
+            [this]()
             {
-                SftpSession::NativeSession sftp{sftp_new(session_.getCSession()), &sftp_free};
-                if (!sftp)
-                {
-                    return std::unexpected(toRemoteError(
-                        SftpError{
-                            .message = session_.getError(),
-                            .sshError = session_.getErrorCode(),
-                            .sftpError = 0,
-                        }
-                    ));
-                }
+                return createSftpSessionInThread();
+            }
+        );
+    }
 
-                auto result = sftp_init(sftp.get());
-                if (result != SSH_OK)
-                {
-                    return std::unexpected(toRemoteError(
-                        SftpError{
-                            .message = session_.getError(),
-                            .sshError = session_.getErrorCode(),
-                            .sftpError = sftp_get_error(sftp.get()),
-                        }
-                    ));
-                }
-
-                // Kept before the caller hears of it, who may shut the session down and walk the list right away.
-                auto sftpSession =
-                    std::make_shared<SftpSession>(this, processingThread_.createStrand(), std::move(sftp));
-                sftpSessions_.push_back(sftpSession);
-                return sftpSession;
+    std::future<std::expected<std::weak_ptr<RemoteIo::IRemoteFileSystem>, RemoteIo::RemoteError>>
+    Session::createFileSystem()
+    {
+        return processingThread_.pushPromiseTask(
+            [this]()
+            {
+                return createSftpSessionInThread().transform(
+                    [](std::weak_ptr<SftpSession> const& sftpSession) -> std::weak_ptr<RemoteIo::IRemoteFileSystem>
+                    {
+                        return sftpSession;
+                    }
+                );
             }
         );
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <remote_io/async/processing_thread.hpp>
+#include <remote_io/connection.hpp>
 #include <remote_io/remote_error.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/termios.hpp>
@@ -20,7 +21,7 @@ namespace SecureShell
 {
     class SftpSession;
 
-    class Session
+    class Session : public RemoteIo::IConnection
     {
       public:
         friend class Channel;
@@ -28,7 +29,7 @@ namespace SecureShell
         friend class FileStream;
 
         Session(std::function<void()> onConnectionLoss);
-        ~Session();
+        ~Session() override;
         Session(Session const&) = delete;
         Session& operator=(Session const&) = delete;
         Session(Session&&) = delete;
@@ -43,7 +44,7 @@ namespace SecureShell
          * @brief Starts processing the session and channels.
          *
          */
-        void start();
+        void start() override;
 
         struct PtyCreationOptions
         {
@@ -72,9 +73,17 @@ namespace SecureShell
          */
         std::future<std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>> createSftpSession();
 
+        /**
+         * @brief An SFTP session as the protocol neutral file system, see createSftpSession.
+         */
+        std::future<std::expected<std::weak_ptr<RemoteIo::IRemoteFileSystem>, RemoteIo::RemoteError>>
+        createFileSystem() override;
+
         std::string getErrorMessage();
 
       private:
+        std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError> createSftpSessionInThread();
+
         void channelRemoveItself(Channel* channel, bool isBackElement);
         void removeAllChannels();
 
