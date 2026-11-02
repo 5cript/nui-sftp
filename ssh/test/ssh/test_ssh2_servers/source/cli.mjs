@@ -11,7 +11,7 @@ class CommandLineInterface {
 
         logMessage('Command line interface started');
 
-        this.rl.on('line', (input) => {
+        this.rl.on('line', async (input) => {
             logMessage(`Command from stdin: ${input}`);
             if (input.length === 0)
                 return;
@@ -31,6 +31,9 @@ class CommandLineInterface {
                 if (this.eventMap.has(command.command)) {
                     reply = this.eventMap.get(command.command)(command);
                 }
+                // The acknowledgement of a handler that answers with a promise waits for it.
+                if (reply instanceof Promise)
+                    reply = await reply;
                 if (command.ack === true) {
                     process.stdout.write(JSON.stringify({ ack: command.command, reply }) + '\n');
                 }

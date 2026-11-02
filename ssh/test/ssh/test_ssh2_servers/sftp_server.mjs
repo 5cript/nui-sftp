@@ -184,6 +184,15 @@ const faults = {
 const advertisedExtensions = {};
 // Requests by their packet type since the last resetRequestCounts.
 let requestCounts = {};
+// SFTP sessions whose channel the client has not ended yet.
+let openSftpSessions = 0;
+// Called after every change of openSftpSessions.
+const openSftpSessionsWatchers = new Set();
+const changeOpenSftpSessions = (change) => {
+    openSftpSessions += change;
+    for (const watcher of openSftpSessionsWatchers)
+        watcher();
+};
 
 // True when this rename has to fail. Counts down the renames allowed before failing.
 const renameFails = () => {
@@ -338,6 +347,10 @@ const server = new Server({
 
                 const handles = new Map();
                 const sftpStream = accept();
+                changeOpenSftpSessions(1);
+                sftpStream.once('end', () => {
+                    changeOpenSftpSessions(-1);
+                });
                 advertiseExtensions(sftpStream);
                 const emit = sftpStream.emit.bind(sftpStream);
                 sftpStream.emit = (event, ...args) => {
@@ -995,6 +1008,22 @@ cli.on('resetRequestCounts', () => {
     requestCounts = {};
 });
 cli.on('requestCounts', () => requestCounts);
+cli.on('openSftpSessions', () => openSftpSessions);
+// Answers once count SFTP sessions are open, or with the number open after timeoutMs.
+cli.on('waitForOpenSftpSessions', (command) => new Promise((resolve) => {
+    const finish = () => {
+        openSftpSessionsWatchers.delete(check);
+        clearTimeout(timer);
+        resolve(openSftpSessions);
+    };
+    const check = () => {
+        if (openSftpSessions === command.count)
+            finish();
+    };
+    const timer = setTimeout(finish, command.timeoutMs ?? 5000);
+    openSftpSessionsWatchers.add(check);
+    check();
+}));
 cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });

@@ -249,8 +249,8 @@ namespace SecureShell
         return processingThread_.pushPromiseTask(
             [this]() -> std::expected<std::weak_ptr<SftpSession>, SftpError>
             {
-                auto sftp = sftp_new(session_.getCSession());
-                if (sftp == nullptr)
+                SftpSession::NativeSession sftp{sftp_new(session_.getCSession()), &sftp_free};
+                if (!sftp)
                 {
                     return std::unexpected(
                         SftpError{
@@ -261,20 +261,21 @@ namespace SecureShell
                     );
                 }
 
-                auto result = sftp_init(sftp);
+                auto result = sftp_init(sftp.get());
                 if (result != SSH_OK)
                 {
-                    const SftpError error{
-                        .message = session_.getError(),
-                        .sshError = session_.getErrorCode(),
-                        .sftpError = sftp_get_error(sftp),
-                    };
-                    sftp_free(sftp);
-                    return std::unexpected(error);
+                    return std::unexpected(
+                        SftpError{
+                            .message = session_.getError(),
+                            .sshError = session_.getErrorCode(),
+                            .sftpError = sftp_get_error(sftp.get()),
+                        }
+                    );
                 }
 
                 // Kept before the caller hears of it, who may shut the session down and walk the list right away.
-                auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), sftp);
+                auto sftpSession =
+                    std::make_shared<SftpSession>(this, processingThread_.createStrand(), std::move(sftp));
                 sftpSessions_.push_back(sftpSession);
                 return sftpSession;
             }

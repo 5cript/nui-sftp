@@ -433,6 +433,12 @@ namespace SecureShell
         {
             if (auto sftp = this->sftp_.lock(); sftp)
             {
+                // The final task of SftpSession::close, whose strand refuses tasks and which frees the session next.
+                if (sftp->strand_->isFinalized() && sftp->strand_->withinProcessingThread() && sftp->session_)
+                {
+                    sftp_close(file);
+                    return;
+                }
                 // This is safe because file is just a pointer, even if 'this' is deleted by this point.
                 sftp->perform(
                     [file]()
