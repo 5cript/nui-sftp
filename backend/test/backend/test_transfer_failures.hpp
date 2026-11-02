@@ -687,6 +687,35 @@ namespace Test
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar.filepart"), "<missing>");
     }
 
+    TEST_F(TransferFailureTests, ArchiveUploadWhoseCloseTheServerRefusesKeepsExistingRemoteArchive)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/backup.tar"}, {"content", "old archive"}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto localPath = localDirectory_.path() / "packed.txt";
+        writeLocalFile(localPath, alphabet(4096));
+        ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(localPath)},
+                .remoteArchivePath = remote("/home/test/backup.tar"),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+
+        const auto result = runToEnd(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError);
+        ASSERT_TRUE(serverStartResult->command("failCloses", {{"enabled", false}}));
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar"), "old archive");
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar.filepart"), "<missing>");
+    }
+
     TEST_F(TransferFailureTests, ArchiveUploadReplacesTheArchiveOnlyWhenComplete)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
