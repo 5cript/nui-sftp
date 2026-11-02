@@ -3,7 +3,7 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
 #include <backend/sftp/scan_phase.hpp>
-#include <ssh/file_stream.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
@@ -48,7 +48,7 @@ class DeleteOperation : public Operation
         std::optional<SharedData::ComparedState> compared{};
     };
 
-    DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options);
+    DeleteOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, DeleteOperationOptions options);
     ~DeleteOperation() override;
     DeleteOperation(DeleteOperation const&) = delete;
     DeleteOperation(DeleteOperation&&) = delete;
@@ -130,7 +130,7 @@ class DeleteOperation : public Operation
     std::expected<void, DeleteOperation::Error> removeOnce(Target const& target);
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     Paths::RemotePath remotePath_;
     std::function<void(std::string const&, std::uint64_t, std::uint64_t)> filesRemovedProgress_;
     std::chrono::seconds futureTimeout_;

@@ -1,6 +1,6 @@
 #include <backend/sftp/remote_delete_guard.hpp>
 #include <log/log.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <utility/localized_message.hpp>
 
 #include <fmt/format.h>
@@ -130,11 +130,11 @@ namespace RemoteDeleteGuardDetail
 }
 
 RemoteDeleteGuard::RemoteDeleteGuard(
-    SecureShell::SftpSession& sftp,
+    RemoteIo::IRemoteFileSystem& fileSystem,
     std::optional<Paths::RemotePath>& knownHome,
     std::chrono::milliseconds timeout
 )
-    : sftp_{&sftp}
+    : fileSystem_{&fileSystem}
     , knownHome_{&knownHome}
     , timeout_{timeout}
 {}
@@ -192,12 +192,7 @@ RemoteDeleteGuard::home(Paths::RemotePath const& target)
     if (*knownHome_ || homeUnknown_)
         return *knownHome_;
 
-    auto future = sftp_->performPromise(
-        [sftp = sftp_]()
-        {
-            return sftp->canonicalHomeDirectoryInStrand();
-        }
-    );
+    auto future = fileSystem_->later(RemoteIo::CanonicalHomeDirectory{});
     if (future.wait_for(timeout_) != std::future_status::ready)
         return std::unexpected(
             RemoteDeleteRefusal{.reason = RemoteDeleteRefusal::Reason::NotVerified, .target = target.value()}
@@ -246,12 +241,7 @@ RemoteDeleteGuard::lookUpCanonical(Paths::RemotePath const& directory, Paths::Re
     if (const auto cached = canonicalDirectories_.find(directory.value()); cached != canonicalDirectories_.end())
         return cached->second;
 
-    auto future = sftp_->performPromise(
-        [sftp = sftp_, directory]()
-        {
-            return sftp->canonicalPathInStrand(directory);
-        }
-    );
+    auto future = fileSystem_->later(RemoteIo::CanonicalPath{.path = directory});
     if (future.wait_for(timeout_) != std::future_status::ready)
         return std::unexpected(
             RemoteDeleteRefusal{.reason = RemoteDeleteRefusal::Reason::NotVerified, .target = target.value()}

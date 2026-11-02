@@ -1,34 +1,33 @@
 #include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/delete_operation.hpp>
 
-#include <ssh/sftp_session.hpp>
-
 namespace
 {
     /**
      * @brief Removes @p path by itself, a directory only when it is empty. Its type is looked up unless given.
      */
     std::expected<void, RemoteIo::RemoteError> removeOneInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& path,
         std::optional<SharedData::FileType> type
     )
     {
         if (!type)
         {
-            const auto information = sftp.lstatInStrand(path);
+            const auto information = fileSystem.inStrand(RemoteIo::Lstat{.path = path});
             if (!information)
                 return std::unexpected(information.error());
             type = information->type;
         }
-        return *type == SharedData::FileType::Directory ? sftp.removeDirectoryInStrand(path)
-                                                        : sftp.removeFileInStrand(path);
+        return *type == SharedData::FileType::Directory
+            ? fileSystem.inStrand(RemoteIo::RemoveEmptyDirectory{.path = path})
+            : fileSystem.inStrand(RemoteIo::RemoveFile{.path = path});
     }
 }
 
-DeleteOperation::DeleteOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DeleteOperationOptions options)
+DeleteOperation::DeleteOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, DeleteOperationOptions options)
     : Operation{}
-    , sftp_{std::move(sftp)}
+    , fileSystem_{std::move(fileSystem)}
     , remotePath_{std::move(options.remotePath)}
     , filesRemovedProgress_{std::move(options.filesRemovedProgress)}
     , futureTimeout_{options.futureTimeout}
@@ -39,7 +38,7 @@ DeleteOperation::~DeleteOperation()
 
 RemoteIo::ProcessingStrand* DeleteOperation::strand() const
 {
-    return strandOf(sftp_);
+    return strandOf(fileSystem_);
 }
 
 std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperation::work()
@@ -150,12 +149,12 @@ std::expected<DeleteOperation::WorkStatus, DeleteOperation::Error> DeleteOperati
 
 std::expected<void, DeleteOperation::Error> DeleteOperation::removeOnce(Target const& target)
 {
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<void>(channelClosedError());
     auto const& path = target.path;
-    auto fut = sftp->performPromise(
-        [weak = std::weak_ptr{sftp}, path, compared = target.compared]() -> std::expected<void, Error>
+    auto fut = fileSystem->performPromise(
+        [weak = std::weak_ptr{fileSystem}, path, compared = target.compared]() -> std::expected<void, Error>
         {
             const auto session = weak.lock();
             if (!session)
