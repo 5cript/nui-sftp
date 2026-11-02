@@ -460,7 +460,7 @@ namespace SecureShell
         template <typename OperationT>
         void startOperation(RemoteIo::Pending<OperationT> pending)
         {
-            pending.complete(run(pending.operation));
+            pending.complete(runWhileOpen(pending.operation));
         }
 
         /**
@@ -472,6 +472,18 @@ namespace SecureShell
             assert(strand_->withinProcessingThread());
             if (RemoteIo::hasUnsetPath(operation))
                 return std::unexpected(unsetPathError());
+            return runWhileOpen(operation);
+        }
+
+        /**
+         * @brief Runs @p operation unless the session is closed, whose null libssh session most libssh calls
+         *        dereference.
+         */
+        template <typename OperationT>
+        RemoteIo::OperationResult<OperationT> runWhileOpen(OperationT const& operation)
+        {
+            if (!session_)
+                return std::unexpected(lastError());
             return run(operation);
         }
 
