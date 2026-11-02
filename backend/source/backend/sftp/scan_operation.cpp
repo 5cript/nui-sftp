@@ -1,14 +1,12 @@
 #include <backend/sftp/scan_operation.hpp>
 #include <log/log.hpp>
-
-#include <ssh/sftp_session.hpp>
-#include <ssh/file_stream.hpp>
+#include <remote_io/remote_file_system.hpp>
 
 #include <string>
 #include <algorithm>
 
-ScanOperation::ScanOperation(std::weak_ptr<SecureShell::SftpSession> sftp, ScanOperationOptions options)
-    : sftp_{std::move(sftp)}
+ScanOperation::ScanOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, ScanOperationOptions options)
+    : fileSystem_{std::move(fileSystem)}
     , remotePath_{std::move(options.remotePath)}
     , progressCallback_{std::move(options.progressCallback)}
     , futureTimeout_{options.futureTimeout}
@@ -24,10 +22,9 @@ ScanOperation::~ScanOperation() = default;
 namespace
 {
     std::optional<std::string>
-    readRemoteFile(SecureShell::SftpSession& sftp, Paths::RemotePath const& path, std::chrono::seconds timeout)
+    readRemoteFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
-        auto openFut =
-            sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
+        auto openFut = fileSystem.later(RemoteIo::OpenFile{.path = path, .mode = RemoteIo::OpenMode::Read});
         if (openFut.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
         auto openResult = openFut.get();
@@ -62,11 +59,11 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(channelClosedError());
     const auto path = remotePath_ / relative;
-    auto fut = sftp->listDirectory(path);
+    auto fut = fileSystem->later(RemoteIo::ListDirectory{.path = path});
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>({.type = ErrorType::FutureTimeout});
 
@@ -112,7 +109,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*sftp, path / *entry.nameSegment(), futureTimeout_))
+        if (auto content = readRemoteFile(*fileSystem, path / *entry.nameSegment(), futureTimeout_))
             ignoreMatcher_.addFile(relative, *content);
     }
 
@@ -229,5 +226,5 @@ std::expected<void, ScanOperation::Error> ScanOperation::cancel(bool adoptCancel
 
 RemoteIo::ProcessingStrand* ScanOperation::strand() const
 {
-    return strandOf(sftp_);
+    return strandOf(fileSystem_);
 }
