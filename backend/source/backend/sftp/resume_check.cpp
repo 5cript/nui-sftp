@@ -7,7 +7,7 @@
 namespace ResumeCheck
 {
     std::expected<bool, RemoteIo::RemoteError>
-    tailsMatchInStrand(SecureShell::IFileStream& remote, std::filesystem::path const& local, std::uint64_t size)
+    tailsMatchInStrand(RemoteIo::IRemoteFileStream& remote, std::filesystem::path const& local, std::uint64_t size)
     {
         const auto count = std::min(size, comparedBytes);
         const auto offset = size - count;

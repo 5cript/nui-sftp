@@ -15,9 +15,30 @@
 
 using namespace std::chrono_literals;
 
-DownloadOperation::DownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DownloadOperationOptions options)
+namespace
+{
+    /**
+     * @brief Removes the local file @p path, a failure is only logged.
+     */
+    void removeLocalFile(std::filesystem::path const& path)
+    {
+        std::error_code removeError{};
+        std::filesystem::remove(path, removeError);
+        if (removeError)
+            Log::warn(
+                "DownloadOperation: Cannot remove '{}': {}",
+                Paths::nativeToUtf8(path),
+                Utility::errorMessage(removeError)
+            );
+    }
+}
+
+DownloadOperation::DownloadOperation(
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
+    DownloadOperationOptions options
+)
     : Operation{}
-    , sftp_{std::move(sftp)}
+    , fileSystem_{std::move(fileSystem)}
     , options_{std::move(options)}
     , localFile_{}
 {
@@ -42,10 +63,10 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
     // Drive one work() step from outside the strand. OperationQueue normally calls
     // workInStrand directly inside its batched umbrella, so this wrapper is only used by
     // callers that aren't already on the strand (standalone ops, tests).
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<WorkStatus>(channelClosedError());
-    auto fut = sftp->performPromise(
+    auto fut = fileSystem->performPromise(
         [this]()
         {
             return workInStrand();
@@ -63,8 +84,8 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
 {
     using enum OperationState;
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp && !hasEnded())
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem && !hasEnded())
         return enterErrorState<WorkStatus>(channelClosedError());
 
     switch (state_)
@@ -91,7 +112,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                 );
                 return enterErrorState<WorkStatus>({.type = ErrorType::FileExists});
             }
-            const auto prepareResult = prepareInStrand(*sftp);
+            const auto prepareResult = prepareInStrand(*fileSystem);
             if (!prepareResult.has_value())
             {
                 Log::error("DownloadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
@@ -105,7 +126,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             state_ = Running;
             if (options_.entry->isSymlink() && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
             {
-                const auto result = handleSymlinkInStrand(*sftp);
+                const auto result = handleSymlinkInStrand(*fileSystem);
                 if (!result.has_value())
                 {
                     Log::error("DownloadOperation: Failed to handle symlink: {}", result.error().toString());
@@ -130,10 +151,10 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
                     return enterErrorState<WorkStatus>({.type = ErrorType::FileStreamExpired});
                 }
                 const auto contextResult = stream->readAsyncInStrand(
-                    static_cast<SecureShell::IFileStream::SignedSizeType>(options_.entry->size - resumeOffset_),
+                    static_cast<RemoteIo::IRemoteFileStream::SignedSizeType>(options_.entry->size - resumeOffset_),
                     buffer_.data(),
                     buffer_.size(),
-                    [this](SecureShell::IFileStream::SignedSizeType bytesRead)
+                    [this](RemoteIo::IRemoteFileStream::SignedSizeType bytesRead)
                     {
                         return commitBufferToFile(bytesRead);
                     }
@@ -242,16 +263,16 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
 {
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return std::unexpected(channelClosedError());
-    auto fut = sftp->performPromise(
+    auto fut = fileSystem->performPromise(
         [this]() -> std::expected<void, Error>
         {
-            const auto sftp = openSession(sftp_);
-            if (!sftp)
+            const auto fileSystem = openSession(fileSystem_);
+            if (!fileSystem)
                 return std::unexpected(channelClosedError());
-            return handleSymlinkInStrand(*sftp);
+            return handleSymlinkInStrand(*fileSystem);
         }
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
@@ -262,7 +283,8 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlink()
     return fut.get();
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkInStrand(SecureShell::SftpSession& sftp)
+std::expected<void, DownloadOperation::Error>
+DownloadOperation::handleSymlinkInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     if (options_.symlinkHandling == Persistence::SymlinkHandling::SkipSymlink)
     {
@@ -270,7 +292,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
         return {};
     }
 
-    const auto readResult = readSymlinkInStrand(sftp, remotePath_);
+    const auto readResult = readSymlinkInStrand(fileSystem, remotePath_);
     if (!readResult.has_value())
         return std::unexpected(readResult.error());
     auto const& linkEntry = readResult.value().targetInfo;
@@ -336,10 +358,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::handleSymlinkIn
 
 std::expected<bool, DownloadOperation::Error> DownloadOperation::readOnce()
 {
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<bool>(channelClosedError());
-    auto fut = sftp->performPromise(
+    auto fut = fileSystem->performPromise(
         [this]()
         {
             return readOnceInStrand();
@@ -424,7 +446,7 @@ DownloadOperation::Error DownloadOperation::sizeMismatch() const
     };
 }
 
-bool DownloadOperation::commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead)
+bool DownloadOperation::commitBufferToFile(RemoteIo::IRemoteFileStream::SignedSizeType bytesRead)
 {
     localFile_.write(buffer_.data(), static_cast<std::streamsize>(bytesRead));
     bytesInFile_ += static_cast<std::uint64_t>(bytesRead);
@@ -471,7 +493,7 @@ DownloadOperation::refuseLinkedPath(std::filesystem::path const& path) const
 }
 
 std::expected<void, DownloadOperation::Error>
-DownloadOperation::openOrAdoptFileInStrand(SecureShell::IFileStream& stream)
+DownloadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileStream& stream)
 {
     auto const& tempPath = tempNativePath_;
 
@@ -657,10 +679,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::openEmptyWritte
     return {};
 }
 
-std::expected<SecureShell::SftpSession::DeepLinkResult, DownloadOperation::Error>
-DownloadOperation::readSymlinkInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& remoteFullPath)
+std::expected<RemoteIo::DeepLinkResult, DownloadOperation::Error>
+DownloadOperation::readSymlinkInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& remoteFullPath)
 {
-    auto deepLinkResult = sftp.readLinkDeepInStrand(remoteFullPath);
+    auto deepLinkResult = fileSystem.inStrand(RemoteIo::ReadLinkDeep{.path = remoteFullPath});
     if (!deepLinkResult.has_value())
     {
         Log::error(
@@ -698,16 +720,16 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
         }
     }
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState(channelClosedError());
-    auto fut = sftp->performPromise(
+    auto fut = fileSystem->performPromise(
         [this]() -> std::expected<void, Error>
         {
-            const auto sftp = openSession(sftp_);
-            if (!sftp)
+            const auto fileSystem = openSession(fileSystem_);
+            if (!fileSystem)
                 return std::unexpected(channelClosedError());
-            return prepareInStrand(*sftp);
+            return prepareInStrand(*fileSystem);
         }
     );
     if (fut.wait_for(options_.futureTimeout) != std::future_status::ready)
@@ -721,7 +743,8 @@ std::expected<void, Operation::Error> DownloadOperation::prepare()
     return {};
 }
 
-std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
+std::expected<void, DownloadOperation::Error>
+DownloadOperation::prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     if (remotePath_.empty() || remotePath_.isRoot())
     {
@@ -731,7 +754,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
 
     if (!options_.entry)
     {
-        const auto fileInfo = sftp.lstatInStrand(remotePath_);
+        const auto fileInfo = fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_});
         if (!fileInfo.has_value())
         {
             Log::error("DownloadOperation: Failed to stat file.");
@@ -745,7 +768,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
         return {};
 
     const auto streamOpenResult =
-        sftp.openFileInStrand(remotePath_, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::unknown);
+        fileSystem.inStrand(RemoteIo::OpenFile{.path = remotePath_, .mode = RemoteIo::OpenMode::Read});
     if (!streamOpenResult.has_value())
     {
         Log::error("DownloadOperation: Failed to open remote sftp file: {}.", streamOpenResult.error().message);
@@ -787,7 +810,7 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
     unsafeFast_ = transfersUnsafeFast(options_.unsafeFastMode, options_.entry->size);
     // In the unsafe fast mode the buffer comes first: a bulk defers a file that finds none, its destination must still
     // be untouched then.
-    auto opened = unsafeFast_ ? leaseBufferInStrand(sftp, stream->readLengthLimit())
+    auto opened = unsafeFast_ ? leaseBufferInStrand(fileSystem, stream->readLengthLimit())
                                     .and_then(
                                         [this]()
                                         {
@@ -795,9 +818,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
                                         }
                                     )
                               : openOrAdoptFileInStrand(*stream).and_then(
-                                    [this, &sftp, &stream]()
+                                    [this, &fileSystem, &stream]()
                                     {
-                                        return leaseBufferInStrand(sftp, stream->readLengthLimit());
+                                        return leaseBufferInStrand(fileSystem, stream->readLengthLimit());
                                     }
                                 );
     if (!opened.has_value())
@@ -824,9 +847,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::prepareInStrand
 }
 
 std::expected<void, DownloadOperation::Error>
-DownloadOperation::leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit)
+DownloadOperation::leaseBufferInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::size_t lengthLimit)
 {
-    buffer_ = sftp.bufferProvider().leaseForTransfer(options_.entry->size, lengthLimit);
+    buffer_ = fileSystem.bufferProvider().leaseForTransfer(options_.entry->size, lengthLimit);
     if (buffer_.empty())
     {
         Log::error("DownloadOperation: No transfer buffer available from pool.");
@@ -873,28 +896,10 @@ void DownloadOperation::cleanup()
     localFile_.close();
 
     if (options_.doCleanup && !tempNativePath_.empty())
-    {
-        std::error_code removeError{};
-        std::filesystem::remove(tempNativePath_, removeError);
-        if (removeError)
-            Log::warn(
-                "DownloadOperation: Cannot remove '{}': {}",
-                Paths::nativeToUtf8(tempNativePath_),
-                Utility::errorMessage(removeError)
-            );
-    }
+        removeLocalFile(tempNativePath_);
     // Nothing continues a partial destination, so a stopped or failed download leaves none.
     if (std::exchange(openedDestination_, false))
-    {
-        std::error_code removeError{};
-        std::filesystem::remove(localNativePath_, removeError);
-        if (removeError)
-            Log::warn(
-                "DownloadOperation: Cannot remove '{}': {}",
-                options_.localPath.toUtf8(),
-                Utility::errorMessage(removeError)
-            );
-    }
+        removeLocalFile(localNativePath_);
 }
 
 void DownloadOperation::keepPartialFiles()
@@ -920,10 +925,10 @@ void DownloadOperation::pause(bool doPause)
 
 std::expected<void, DownloadOperation::Error> DownloadOperation::finalize()
 {
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return std::unexpected(channelClosedError());
-    auto fut = sftp->performPromise(
+    auto fut = fileSystem->performPromise(
         [this]()
         {
             return finalizeInStrand();
@@ -965,6 +970,24 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
         return std::unexpected(sizeMismatch());
     }
 
+    // Read from the stream before the transfer is finished, which closes it.
+    const auto permissions = finalPermissionsInStrand();
+    if (!permissions)
+        return std::unexpected(permissions.error());
+    if (const auto finished = finishTransferInStrand(fileStream_); !finished)
+    {
+        Log::error(
+            "DownloadOperation: The server did not confirm the download of '{}': {}",
+            options_.remotePath.value(),
+            finished.error().toString()
+        );
+        // Kept partial files or not, a later download must not continue it. The unsafe fast mode's destination goes
+        // with the failure.
+        if (!unsafeFast_)
+            removeLocalFile(tempPath);
+        return finished;
+    }
+
     // Marked before the rename, so the final file never exists without the mark. A filesystem without streams or
     // extended attributes, FAT for one, cannot carry it.
     if (options_.markAsDownloaded)
@@ -979,9 +1002,6 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
 
     // Times and permissions go on the temp file, so nothing can fail once the destination is replaced.
     applyModificationTime(tempPath);
-    const auto permissions = finalPermissionsInStrand();
-    if (!permissions)
-        return std::unexpected(permissions.error());
     std::error_code permissionsError{};
     std::filesystem::permissions(tempPath, *permissions, permissionsError);
     if (permissionsError)

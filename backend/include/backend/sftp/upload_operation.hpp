@@ -4,8 +4,7 @@
 #include <backend/sftp/unsafe_fast_mode.hpp>
 #include <log/toast.hpp>
 #include <remote_io/async/buffer_provider.hpp>
-#include <ssh/file_stream.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
@@ -110,7 +109,7 @@ class UploadOperation : public Operation
 
     RemoteIo::ProcessingStrand* strand() const override;
 
-    UploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, UploadOperationOptions options);
+    UploadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, UploadOperationOptions options);
     ~UploadOperation() override;
     UploadOperation(UploadOperation const&) = delete;
     UploadOperation(UploadOperation&&) = delete;
@@ -186,10 +185,10 @@ class UploadOperation : public Operation
     std::expected<bool, Error> writeOnce();
     std::expected<bool, Error> writeOnceInStrand();
 
-    SecureShell::IFileStream::SignedSizeType commitFileToBuffer(SecureShell::IFileStream::SignedSizeType bytes);
+    RemoteIo::IRemoteFileStream::SignedSizeType commitFileToBuffer(RemoteIo::IRemoteFileStream::SignedSizeType bytes);
 
     std::expected<void, Error> handleSymlink();
-    std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> handleSymlinkInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
      * @brief Checks the local source and opens it, or for a link that is not followed only notes it is one: a
@@ -203,18 +202,18 @@ class UploadOperation : public Operation
      */
     bool sourceIsGone() const;
 
-    std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
      * @brief The unsafe fast mode's open: the destination itself, created, or truncated when it may be overwritten.
      *        Nothing is checked before, an existing destination that may not be overwritten fails the open.
      */
-    std::expected<void, Error> openDestinationInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
      * @brief Leases the transfer buffer for chunks of at most @p lengthLimit bytes.
      */
-    std::expected<void, Error> leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit);
+    std::expected<void, Error> leaseBufferInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::size_t lengthLimit);
 
     /**
      * @brief The remote file the upload writes to: the destination in the unsafe fast mode, else the temp file.
@@ -225,18 +224,18 @@ class UploadOperation : public Operation
      * @brief Moves the temporary file of UploadOperationOptions::adoptPartialOf to tempPath_ when this upload has none
      *        there. A failure leaves the upload to start anew.
      */
-    void takeOverPartialFileInStrand(SecureShell::SftpSession& sftp);
+    void takeOverPartialFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /// Remote-heavy portion of prepare() — runs under a single strand umbrella.
-    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /// Remote-heavy portion of finalize() — runs under a single strand umbrella.
-    std::expected<void, Error> finalizeInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> finalizeInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
      * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
      */
-    bool tempBelongsToSourceInStrand(SecureShell::SftpSession& sftp, std::uint64_t tempSize);
+    bool tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize);
 
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
@@ -246,7 +245,7 @@ class UploadOperation : public Operation
      *  Must be called from within the processing thread.
      */
     std::expected<void, Error>
-    ensureRemoteDirectoryExistsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& dir);
+    ensureRemoteDirectoryExistsInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& dir);
 
     /**
      * @brief The mode the remote file is created with, always with owner write: the sanitized @p localPerms when
@@ -264,7 +263,7 @@ class UploadOperation : public Operation
      * @brief Gives the remote file it writes to, see writtenPath, the modification time of the local file. A failure
      *        is only logged.
      */
-    void applyModificationTimeInStrand(SecureShell::SftpSession& sftp);
+    void applyModificationTimeInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
      * @brief Tells UploadOperationOptions::onSent of the source once it replaced the destination, with its state
@@ -287,8 +286,8 @@ class UploadOperation : public Operation
     void removeRemoteFile(Paths::RemotePath const& path);
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
-    std::weak_ptr<SecureShell::IFileStream> fileStream_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
+    std::weak_ptr<RemoteIo::IRemoteFileStream> fileStream_;
     UploadOperationOptions options_;
     /** @brief options_.remotePath, unset when none was given. */
     Paths::RemotePath remotePath_{};

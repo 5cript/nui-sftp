@@ -4,7 +4,7 @@
 #include <log/toast.hpp>
 #include <paths/remote_path.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -35,7 +35,7 @@ namespace ComparedStateCheck
      * @brief What is at the remote @p path now, without following a link.
      */
     std::expected<SharedData::ComparedState, RemoteIo::RemoteError>
-    remoteStateOfInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path);
+    remoteStateOfInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path);
 
     /**
      * @brief Fails with ChangedSinceCompare when the local @p path no longer holds @p compared (see
@@ -50,7 +50,7 @@ namespace ComparedStateCheck
      *        tell.
      */
     std::expected<void, Operation::Error> requireUnchangedRemoteInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& path,
         std::optional<SharedData::ComparedState> const& compared
     );
@@ -66,12 +66,12 @@ namespace ComparedStateCheck
     );
 
     /**
-     * @brief SftpSession::moveIntoPlaceInStrand of a finished remote transfer, once
+     * @brief RemoteIo::moveIntoPlaceInStrand of a finished remote transfer, once
      *        @ref requireUnchangedRemoteInStrand passed for @p to.
      * @param failureToast Whether the error logged when the move fails is shown as a toast.
      */
     std::expected<void, Operation::Error> moveRemoteIntoPlaceInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& from,
         Paths::RemotePath const& to,
         bool replace,

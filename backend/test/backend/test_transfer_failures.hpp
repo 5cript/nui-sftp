@@ -490,6 +490,67 @@ namespace Test
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content");
     }
 
+    TEST_F(TransferFailureTests, UploadWhoseCloseTheServerRefusesKeepsExistingRemoteFile)
+    {
+        for (const bool bigFileOptimized : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(sftpServer);
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+            const auto localPath = localDirectory_.path() / "upload.txt";
+            writeLocalFile(localPath, alphabet(65536));
+            // The server closes the file but reports that its writes did not all land.
+            ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+            UploadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/file1.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = true,
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_FALSE(result.has_value()) << bigFileOptimized;
+            EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError) << bigFileOptimized;
+            ASSERT_TRUE(serverStartResult->command("failCloses", {{"enabled", false}}));
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content") << bigFileOptimized;
+            // A later upload would continue it and put the refused bytes in place.
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt.filepart"), "<missing>") << bigFileOptimized;
+        }
+    }
+
+    TEST_F(TransferFailureTests, DownloadWhoseCloseTheServerRefusesKeepsExistingFile)
+    {
+        for (const bool bigFileOptimized : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(sftpServer);
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+            const auto localPath = localDirectory_.path() / "file1.txt";
+            writeLocalFile(localPath, "original content");
+            ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/file1.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = true,
+                    // Kept partial files must not keep the refused one.
+                    .doCleanup = false,
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_FALSE(result.has_value()) << bigFileOptimized;
+            EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError) << bigFileOptimized;
+            EXPECT_EQ(readLocalFile(localPath), "original content") << bigFileOptimized;
+            EXPECT_FALSE(std::filesystem::exists(localPath.generic_string() + ".filepart")) << bigFileOptimized;
+        }
+    }
+
     TEST_F(TransferFailureTests, AsyncUploadResumesFromPartialRemoteFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

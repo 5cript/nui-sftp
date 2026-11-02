@@ -308,6 +308,22 @@ class Operation
     }
 
     /**
+     * @brief Waits until the server confirmed the transfer through @p stream, then closes it. A transfer it fails for
+     *        must not be used, even when every byte moved.
+     */
+    static std::expected<void, Error> finishTransferInStrand(std::weak_ptr<RemoteIo::IRemoteFileStream> const& stream)
+    {
+        const auto locked = stream.lock();
+        if (!locked)
+            return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
+        const auto finished = locked->finishInStrand();
+        locked->closeInStrand();
+        if (!finished)
+            return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = finished.error()});
+        return {};
+    }
+
+    /**
      * @brief The error of an async transfer that ended without completing.
      */
     static Error asyncTransferError(RemoteIo::AsyncTransferContext const& context)

@@ -1,13 +1,12 @@
 #include <backend/sftp/compared_state_check.hpp>
 #include <log/log.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
 #include <paths/native.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <utility/rename.hpp>
 
 #include <fmt/format.h>
-
-#include <libssh/sftp.h>
 
 namespace ComparedStateCheck
 {
@@ -86,9 +85,9 @@ namespace ComparedStateCheck
     }
 
     std::expected<SharedData::ComparedState, RemoteIo::RemoteError>
-    remoteStateOfInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
+    remoteStateOfInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path)
     {
-        const auto information = sftp.lstatInStrand(path);
+        const auto information = fileSystem.inStrand(RemoteIo::Lstat{.path = path});
         if (!information)
         {
             if (information.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
@@ -98,13 +97,14 @@ namespace ComparedStateCheck
         auto state = SharedData::comparedStateOf(*information);
         if (state.type != SharedData::FileType::Symlink)
             return state;
-        return sftp.readLinkInStrand(path).transform(
-            [&state](std::string literal)
-            {
-                state.linkTarget = std::move(literal);
-                return state;
-            }
-        );
+        return fileSystem.inStrand(RemoteIo::ReadLink{.path = path})
+            .transform(
+                [&state](std::string literal)
+                {
+                    state.linkTarget = std::move(literal);
+                    return state;
+                }
+            );
     }
 
     std::expected<void, Operation::Error>
@@ -130,14 +130,14 @@ namespace ComparedStateCheck
     }
 
     std::expected<void, Operation::Error> requireUnchangedRemoteInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& path,
         std::optional<SharedData::ComparedState> const& compared
     )
     {
         if (!compared)
             return {};
-        const auto current = remoteStateOfInStrand(sftp, path);
+        const auto current = remoteStateOfInStrand(fileSystem, path);
         if (!current)
             return std::unexpected(
                 Operation::Error{.type = Operation::ErrorType::SftpError, .remoteError = current.error()}
@@ -173,7 +173,7 @@ namespace ComparedStateCheck
     }
 
     std::expected<void, Operation::Error> moveRemoteIntoPlaceInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& from,
         Paths::RemotePath const& to,
         bool replace,
@@ -183,11 +183,12 @@ namespace ComparedStateCheck
         Log::Toast failureToast
     )
     {
-        return requireUnchangedRemoteInStrand(sftp, to, compared)
+        return requireUnchangedRemoteInStrand(fileSystem, to, compared)
             .and_then(
                 [&]() -> std::expected<void, Operation::Error>
                 {
-                    const auto moved = sftp.moveIntoPlaceInStrand(from, to, replace, asideSuffix, sourceType);
+                    const auto moved =
+                        RemoteIo::moveIntoPlaceInStrand(fileSystem, from, to, replace, asideSuffix, sourceType);
                     if (!moved)
                     {
                         Log::error(
