@@ -321,7 +321,7 @@ namespace Test
          * @brief A running replacement queue that adopted the backups of @p operationIds.
          */
         std::shared_ptr<OperationQueue> adoptInto(
-            SecureShell::SftpSession& sftp,
+            std::shared_ptr<RemoteIo::IRemoteFileSystem> const& sftp,
             BulkResumeRegistry& registry,
             std::vector<Ids::OperationId> const& operationIds
         )
@@ -381,7 +381,7 @@ namespace Test
          *        @p heard on the strand.
          */
         std::expected<void, Operation::Error> addOwnedDelete(
-            SecureShell::SftpSession& sftp,
+            std::shared_ptr<RemoteIo::IRemoteFileSystem> const& sftp,
             Ids::OperationId const& operationId,
             std::string const& path,
             std::shared_ptr<std::vector<SharedData::OperationCompleted>> const& heard
@@ -557,7 +557,7 @@ namespace Test
 
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 Ids::generateOperationId(),
                 toLocal(localDirectory_.path() / "big.bin"),
                 remote("/home/test/big.bin"),
@@ -594,7 +594,7 @@ namespace Test
         const auto paused = wakes->load();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 Ids::generateOperationId(),
                 toLocal(localDirectory_.path() / "file1.txt"),
                 remote("/home/test/file1.txt"),
@@ -625,7 +625,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 toLocal(localDirectory_.path() / "big.bin"),
                 remote("/home/test/big.bin"),
@@ -665,7 +665,7 @@ namespace Test
         const auto partial = localDirectory_.path() / "big.bin.filepart";
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 toLocal(localDirectory_.path() / "big.bin"),
                 remote("/home/test/big.bin"),
@@ -694,7 +694,7 @@ namespace Test
         EXPECT_TRUE(std::filesystem::exists(partial));
 
         runOnStrand([&]() {
-            queue->discardKept(*sftp, operationId);
+            queue->discardKept(sftp, operationId);
         });
         EXPECT_FALSE(std::filesystem::exists(partial));
     }
@@ -713,7 +713,7 @@ namespace Test
         const auto partial = localDirectory_.path() / "big.bin.filepart";
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 toLocal(localDirectory_.path() / "big.bin"),
                 remote("/home/test/big.bin"),
@@ -758,7 +758,7 @@ namespace Test
         const auto partial = localDirectory_.path() / "big.bin.filepart";
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 toLocal(localDirectory_.path() / "big.bin"),
                 remote("/home/test/big.bin"),
@@ -798,7 +798,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp, operationId, toLocal(localPath), remote("/home/test/big.bin"), false, true, false, false
+                sftp, operationId, toLocal(localPath), remote("/home/test/big.bin"), false, true, false, false
             );
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
@@ -819,7 +819,7 @@ namespace Test
         EXPECT_TRUE(remoteNames(*sftp, "/home/test").contains("big.bin.filepart"));
 
         runOnStrand([&]() {
-            queue->discardKept(*sftp, operationId);
+            queue->discardKept(sftp, operationId);
         });
         // Queued behind the removal on the processing thread.
         EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("big.bin.filepart"));
@@ -838,7 +838,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                    sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         ).has_value());
@@ -858,7 +858,7 @@ namespace Test
         ASSERT_TRUE(completions().front().keptPartialFiles);
 
         EXPECT_TRUE(runOnStrand([&]() {
-            return queue->continueKept(*sftp, operationId);
+            return queue->continueKept(sftp, operationId);
         }).has_value());
         workUntilCompletions(2);
         const auto finished = completions();
@@ -868,7 +868,7 @@ namespace Test
         EXPECT_TRUE(finished.back().failedEntries.empty()) << finished.back().failedEntries.front().first;
         EXPECT_EQ(localNames(localPath), (std::set<std::string>{"doc1.txt", "doc2.txt"}));
         EXPECT_FALSE(runOnStrand([&]() {
-            return queue->continueKept(*sftp, operationId);
+            return queue->continueKept(sftp, operationId);
         }).has_value()) << "continued once only";
     }
 
@@ -890,7 +890,7 @@ namespace Test
         const auto partial = localDirectory_.path() / "big.bin.filepart";
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp, operationId, toLocal(destination), remote("/home/test/big.bin"), false, false, false, false
+                sftp, operationId, toLocal(destination), remote("/home/test/big.bin"), false, false, false, false
             );
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
@@ -912,7 +912,7 @@ namespace Test
         std::ofstream{partial, std::ios::binary | std::ios::trunc} << 'Z' << std::string(1024 * 1024 - 1, 'x');
 
         EXPECT_TRUE(runOnStrand([&]() {
-            return queue->continueKept(*sftp, operationId);
+            return queue->continueKept(sftp, operationId);
         }).has_value());
         workUntilCompletions(2);
         const auto finished = completions();
@@ -938,7 +938,7 @@ namespace Test
         const auto partial = localDirectory_.path() / "big.bin.filepart";
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 toLocal(localDirectory_.path() / "big.bin"),
                 remote("/home/test/big.bin"),
@@ -968,7 +968,7 @@ namespace Test
         queue.reset();
         auto reconnected = makeQueue();
         runOnStrand([&]() {
-            reconnected->discardKept(*sftp, operationId);
+            reconnected->discardKept(sftp, operationId);
         });
         EXPECT_FALSE(std::filesystem::exists(partial));
         EXPECT_EQ(keptTransfers_->size(), 0u);
@@ -981,7 +981,7 @@ namespace Test
         auto queue = makeQueue();
 
         EXPECT_FALSE(runOnStrand([&]() {
-            return queue->continueKept(*sftp, Ids::generateOperationId());
+            return queue->continueKept(sftp, Ids::generateOperationId());
         }).has_value());
     }
 
@@ -998,7 +998,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                    sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         );
@@ -1029,7 +1029,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp, operationId, toLocal(localPath), remote("/home/test/uploaded"), false, false, false, false
+                    sftp, operationId, toLocal(localPath), remote("/home/test/uploaded"), false, false, false, false
                 );
             }
         );
@@ -1065,7 +1065,7 @@ namespace Test
                 [&]()
                 {
                     return queue->addUploadOperation(
-                        *sftp,
+                        sftp,
                         operationId,
                         toLocal(path),
                         remote("/home/test/" + path.filename().string()),
@@ -1112,7 +1112,7 @@ namespace Test
                 [&]()
                 {
                     return queue->addUploadOperation(
-                        *sftp,
+                        sftp,
                         Ids::generateOperationId(),
                         toLocal(localDirectory_.path() / name),
                         remote("/home/test/" + name),
@@ -1164,7 +1164,7 @@ namespace Test
             [&]()
             {
                 return queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -1227,7 +1227,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateOperationId(),
                     toLocal(file),
                     remote("/home/test/unreadable.txt"),
@@ -1290,7 +1290,7 @@ namespace Test
             [&]()
             {
                 return queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -1339,7 +1339,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp, operationId, toLocal(localPath), remote("/home/test/withLocked"), false, false, false, false
+                sftp, operationId, toLocal(localPath), remote("/home/test/withLocked"), false, false, false, false
             );
         }).has_value());
 
@@ -1375,7 +1375,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addArchiveUploadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 {toLocal(localPath)},
                 remote("/home/test/locked.tar"),
@@ -1412,7 +1412,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addArchiveUploadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 {toLocal(localPath)},
                 remote("/home/test/big.tar.gz"),
@@ -1451,7 +1451,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addArchiveDownloadOperation(
-                *sftp,
+                sftp,
                 operationId,
                 {SharedData::ArchiveDownloadRoot{
                     .path = remote("/home/test/big.bin"),
@@ -1498,7 +1498,7 @@ namespace Test
         const auto operationId = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp, operationId, toLocal(localPath), remote("/home/test/modes"), false, false, false, false
+                sftp, operationId, toLocal(localPath), remote("/home/test/modes"), false, false, false, false
             );
         }).has_value());
         workUntilCompletions(1);
@@ -1534,7 +1534,7 @@ namespace Test
         {
             ASSERT_TRUE(runOnStrand([&]() {
                 return queue->addDownloadOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateOperationId(),
                     toLocal(localDirectory_.path() / name),
                     remote(fmt::format("/home/test/{}", name)),
@@ -1554,7 +1554,7 @@ namespace Test
             std::ofstream{localPath, std::ios::app} << "edited\n";
             ASSERT_TRUE(runOnStrand([&]() {
                 return queue->addUploadOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateOperationId(),
                     toLocal(localPath),
                     remote(fmt::format("/home/test/{}", name)),
@@ -1591,7 +1591,7 @@ namespace Test
 
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp,
+                sftp,
                 Ids::generateOperationId(),
                 toLocal(localPath),
                 remote("/home/test/tree"),
@@ -1624,7 +1624,7 @@ namespace Test
         const auto downloaded = localDirectory_.path() / "script.sh";
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addDownloadOperation(
-                *sftp,
+                sftp,
                 Ids::generateOperationId(),
                 toLocal(downloaded),
                 remote("/home/test/script.sh"),
@@ -1642,7 +1642,7 @@ namespace Test
         std::filesystem::permissions(uploaded, static_cast<perms>(0755u));
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp,
+                sftp,
                 Ids::generateOperationId(),
                 toLocal(uploaded),
                 remote("/home/test/local.sh"),
@@ -1688,7 +1688,7 @@ namespace Test
                 [&]()
                 {
                     return queue->addBulkDownloadOperation(
-                        *sftp,
+                        sftp,
                         request,
                         [&entryIds](std::size_t index)
                         {
@@ -1739,7 +1739,7 @@ namespace Test
             [&]()
             {
                 return queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -1772,7 +1772,7 @@ namespace Test
         runOnStrand(
             [&]()
             {
-                replacement->adoptBulkResume(*sftp, card, *std::move(backup));
+                replacement->adoptBulkResume(sftp, card, *std::move(backup));
             }
         );
 
@@ -1804,7 +1804,7 @@ namespace Test
                 for (auto const& operationId : {kept, discarded})
                 {
                     const auto added = queue->addUploadOperation(
-                        *sftp,
+                        sftp,
                         operationId,
                         toLocal(localPath),
                         remote("/home/test/watched"),
@@ -1852,7 +1852,7 @@ namespace Test
             [&]()
             {
                 return queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -1886,7 +1886,7 @@ namespace Test
         EXPECT_GE(backup->finished.bytes, std::string_view{"partly_a.txt"}.size());
         registry.store(card, *std::move(backup));
 
-        adoptInto(*sftp, registry, {card});
+        adoptInto(sftp, registry, {card});
         workUntilCompletions(1);
         const auto finished = completions();
         ASSERT_EQ(finished.size(), 1u);
@@ -1924,7 +1924,7 @@ namespace Test
             [&]()
             {
                 return queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -1959,7 +1959,7 @@ namespace Test
         const auto appeared = resumed.entries.size();
         registry.store(card, *std::move(backup));
 
-        adoptInto(*sftp, registry, {card});
+        adoptInto(sftp, registry, {card});
         workUntilCompletions(1);
         const auto finished = completions();
         ASSERT_EQ(finished.size(), 1u);
@@ -1981,7 +1981,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                    sftp, operationId, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         ).has_value());
@@ -2009,7 +2009,7 @@ namespace Test
         EXPECT_EQ(backup->finished.entries, 1u);
         registry.store(operationId, *std::move(backup));
 
-        adoptInto(*sftp, registry, {operationId});
+        adoptInto(sftp, registry, {operationId});
         workUntilCompletions(1);
         const auto finished = completions();
         ASSERT_EQ(finished.size(), 1u);
@@ -2042,7 +2042,7 @@ namespace Test
         runOnStrand(
             [&]()
             {
-                queue_->adoptBulkResume(*sftp, operationId, std::move(backup));
+                queue_->adoptBulkResume(sftp, operationId, std::move(backup));
             }
         );
         EXPECT_TRUE(completedIdsAfterSettling().empty());
@@ -2062,7 +2062,7 @@ namespace Test
             [&]()
             {
                 return queue->addRenameOperation(
-                    *sftp, moved, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
+                    sftp, moved, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
                 );
             }
         ).has_value());
@@ -2070,7 +2070,7 @@ namespace Test
             [&]()
             {
                 return queue->addRenameOperation(
-                    *sftp, blocked, remote("/home/test/Documents/doc2.txt"), remote("/home/test/Documents/doc1.txt")
+                    sftp, blocked, remote("/home/test/Documents/doc2.txt"), remote("/home/test/Documents/doc1.txt")
                 );
             }
         ).has_value());
@@ -2101,10 +2101,10 @@ namespace Test
             [&]()
             {
                 ASSERT_TRUE(queue->addRenameOperation(
-                    *sftp, moved, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
+                    sftp, moved, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
                 ).has_value());
                 ASSERT_TRUE(queue->addRenameOperation(
-                    *sftp, blocked, remote("/home/test/Documents/doc2.txt"), remote("/home/test/Documents/doc1.txt")
+                    sftp, blocked, remote("/home/test/Documents/doc2.txt"), remote("/home/test/Documents/doc1.txt")
                 ).has_value());
                 queue->whenCompleted(
                     blocked,
@@ -2139,7 +2139,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp, upload, toLocal(localFile), remote("/home/test/observed.bin"), false, false, false, false
+                    sftp, upload, toLocal(localFile), remote("/home/test/observed.bin"), false, false, false, false
                 );
             }
         ).has_value());
@@ -2173,7 +2173,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp,
+                    sftp,
                     download,
                     toLocal(localDirectory_.path() / "large.txt"),
                     remote("/home/test/large.txt"),
@@ -2215,7 +2215,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp,
+                    sftp,
                     upload,
                     toLocal(localPath),
                     remote("/home/test/observedDirectory"),
@@ -2264,7 +2264,7 @@ namespace Test
             [&]()
             {
                 queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -2300,7 +2300,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp, upload, toLocal(localFile), remote("/home/test/stopped.bin"), false, false, false, false
+                    sftp, upload, toLocal(localFile), remote("/home/test/stopped.bin"), false, false, false, false
                 );
             }
         ).has_value());
@@ -2347,7 +2347,7 @@ namespace Test
                 [&]()
                 {
                     return queue->addUploadOperation(
-                        *sftp,
+                        sftp,
                         uploads.back(),
                         toLocal(localDirectory_.path() / name),
                         remote(fmt::format("/home/test/{}", name)),
@@ -2388,14 +2388,14 @@ namespace Test
             [&]()
             {
                 return queue_->addDownloadOperation(
-                    *sftp, operationId, toLocal(localPath), remote("/home/test/Pictures"), false, false, false, false
+                    sftp, operationId, toLocal(localPath), remote("/home/test/Pictures"), false, false, false, false
                 );
             }
         ).has_value());
 
         BulkResumeRegistry registry;
         tearDownInto(registry);
-        adoptInto(*sftp, registry, {operationId});
+        adoptInto(sftp, registry, {operationId});
 
         workUntilCompletions(1);
         EXPECT_EQ(completedIdsAfterSettling(), (std::multiset<std::string>{operationId.value()}));
@@ -2429,7 +2429,7 @@ namespace Test
             [&]()
             {
                 return queue_->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [&entryIds](std::size_t index)
                     {
@@ -2444,7 +2444,7 @@ namespace Test
         BulkResumeRegistry registry;
         tearDownInto(registry);
         EXPECT_EQ(registry.size(), 2u);
-        adoptInto(*sftp, registry, {card, entryIds[1]});
+        adoptInto(sftp, registry, {card, entryIds[1]});
 
         workUntilCompletions(2);
         EXPECT_EQ(completedIdsAfterSettling(), (std::multiset<std::string>{card.value(), entryIds[1].value()}));
@@ -2464,10 +2464,10 @@ namespace Test
         const auto directoryDelete = Ids::generateOperationId();
         const auto fileDelete = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, directoryDelete, remote("/home/test/victim"), true, false);
+            return queue->addDeleteOperation(sftp, directoryDelete, remote("/home/test/victim"), true, false);
         }).has_value());
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, fileDelete, remote("/home/test/file2.txt"), false, false);
+            return queue->addDeleteOperation(sftp, fileDelete, remote("/home/test/file2.txt"), false, false);
         }).has_value());
 
         // Starts the directory delete's scan, then cancels the unit while it scans.
@@ -2510,7 +2510,7 @@ namespace Test
                 },
         };
         EXPECT_EQ(runOnStrand([&]() {
-            return queue->addBulkDeleteOperation(*sftp, request, bulk);
+            return queue->addBulkDeleteOperation(sftp, request, bulk);
         }), 3u);
 
         workUntilCompletions(1);
@@ -2550,7 +2550,7 @@ namespace Test
         const auto card = Ids::generateOperationId();
         runOnStrand([&]() {
             return queue->addBulkUploadOperation(
-                *sftp, request, [](std::size_t) { return Ids::generateOperationId(); }, card
+                sftp, request, [](std::size_t) { return Ids::generateOperationId(); }, card
             );
         });
 
@@ -2582,7 +2582,7 @@ namespace Test
         const auto upload = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp, upload, toLocal(localFile), remote("/home/test/file1.txt"), false, false, false, false
+                sftp, upload, toLocal(localFile), remote("/home/test/file1.txt"), false, false, false, false
             );
         }).has_value());
 
@@ -2610,7 +2610,7 @@ namespace Test
                 [&]()
                 {
                     auto added = queue->addUploadOperation(
-                        *sftp,
+                        sftp,
                         operationId,
                         toLocal(localFile),
                         remote("/home/test/file1.txt"),
@@ -2653,7 +2653,7 @@ namespace Test
             [&]()
             {
                 queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {
@@ -2699,7 +2699,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp,
+                    sftp,
                     download,
                     toLocal(localDirectory_.path() / "large.txt"),
                     remote("/home/test/large.txt"),
@@ -2714,7 +2714,7 @@ namespace Test
             [&]()
             {
                 return queue->addRenameOperation(
-                    *sftp, rename, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
+                    sftp, rename, remote("/home/test/file1.txt"), remote("/home/test/moved.txt")
                 );
             }
         ).has_value());
@@ -2757,7 +2757,7 @@ namespace Test
             runOnStrand(
                 [&]()
                 {
-                    return queue->addBulkDeleteOperation(*sftp, request, bulk);
+                    return queue->addBulkDeleteOperation(sftp, request, bulk);
                 }
             ),
             3u
@@ -2805,7 +2805,7 @@ namespace Test
         const SharedData::BulkDeleteRequest request{
             .entries = {{.target = remote("/home/test/gone.txt")}, {.target = remote("/home/test/file2.txt")}},
         };
-        EXPECT_EQ(runOnStrand([&]() { return queue->addBulkDeleteOperation(*sftp, request, bulk); }), 2u);
+        EXPECT_EQ(runOnStrand([&]() { return queue->addBulkDeleteOperation(sftp, request, bulk); }), 2u);
 
         workUntilCompletions(1);
         const auto finished = completions();
@@ -2825,7 +2825,7 @@ namespace Test
 
         const auto remove = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, remove, remote("/home/test/Documents"), false, false);
+            return queue->addDeleteOperation(sftp, remove, remote("/home/test/Documents"), false, false);
         }).has_value());
 
         workUntilCompletions(1);
@@ -2860,7 +2860,7 @@ namespace Test
             .listedContentOnly = true,
         };
         EXPECT_EQ(runOnStrand([&]() {
-            return queue->addBulkDeleteOperation(*sftp, request, bulk);
+            return queue->addBulkDeleteOperation(sftp, request, bulk);
         }), 4u);
 
         workUntilCompletions(1);
@@ -2923,7 +2923,7 @@ namespace Test
         };
 
         const auto result = runOnStrand([&]() {
-            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            return queue->executeSyncPlan(sftp, session, std::move(plan), request, *localQueue_);
         });
         EXPECT_EQ(result.uploads, (std::vector<std::string>{"up.txt", "emptyA/emptyB"}));
         EXPECT_EQ(result.downloads, (std::vector<std::string>{"down.txt", "newLocal/dir"}));
@@ -3017,7 +3017,7 @@ namespace Test
         runOnStrand(
             [&]()
             {
-                return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+                return queue->executeSyncPlan(sftp, session, std::move(plan), request, *localQueue_);
             }
         );
 
@@ -3082,7 +3082,7 @@ namespace Test
         const auto result = runOnStrand(
             [&]()
             {
-                return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+                return queue->executeSyncPlan(sftp, session, std::move(plan), request, *localQueue_);
             }
         );
         EXPECT_EQ(result.downloads, (std::vector<std::string>{"linked/inside", "fresh/deep"}));
@@ -3205,7 +3205,7 @@ namespace Test
             return runOnStrand(
                 [&]()
                 {
-                    return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+                    return queue->executeSyncPlan(sftp, session, std::move(plan), request, *localQueue_);
                 }
             );
         };
@@ -3290,7 +3290,7 @@ namespace Test
         };
 
         const auto result = runOnStrand([&]() {
-            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            return queue->executeSyncPlan(sftp, session, std::move(plan), request, *localQueue_);
         });
         EXPECT_EQ(result.uploads, (std::vector<std::string>{"Ärger/Ölung.txt"}));
         EXPECT_EQ(result.downloads, (std::vector<std::string>{"東京.txt"}));
@@ -3365,7 +3365,7 @@ namespace Test
         };
 
         const auto result = runOnStrand([&]() {
-            return queue->executeSyncPlan(*sftp, session, std::move(plan), request, *localQueue_);
+            return queue->executeSyncPlan(sftp, session, std::move(plan), request, *localQueue_);
         });
         EXPECT_EQ(result.remoteDeletes, (std::vector<std::string>{"other.txt"}));
         EXPECT_EQ(result.localDeletes, (std::vector<std::string>{"loose.txt"}));
@@ -3408,7 +3408,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, first, toLocal(firstLocal), remote("/home/test/Documents"), false, false, false, false
+                    sftp, first, toLocal(firstLocal), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         ).has_value());
@@ -3416,7 +3416,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, second, toLocal(secondLocal), remote("/home/test/Pictures"), false, false, false, false
+                    sftp, second, toLocal(secondLocal), remote("/home/test/Pictures"), false, false, false, false
                 );
             }
         ).has_value());
@@ -3444,7 +3444,7 @@ namespace Test
 
         const auto deletion = Ids::generateOperationId();
         const auto heard = std::make_shared<std::vector<SharedData::OperationCompleted>>();
-        ASSERT_TRUE(addOwnedDelete(*sftp, deletion, "/home/test/file1.txt", heard).has_value());
+        ASSERT_TRUE(addOwnedDelete(sftp, deletion, "/home/test/file1.txt", heard).has_value());
         queue->cancel(deletion);
         runOnStrand([]() {});
 
@@ -3465,8 +3465,8 @@ namespace Test
         const auto first = Ids::generateOperationId();
         const auto second = Ids::generateOperationId();
         const auto heard = std::make_shared<std::vector<SharedData::OperationCompleted>>();
-        ASSERT_TRUE(addOwnedDelete(*sftp, first, "/home/test/file1.txt", heard).has_value());
-        ASSERT_TRUE(addOwnedDelete(*sftp, second, "/home/test/Documents/doc1.txt", heard).has_value());
+        ASSERT_TRUE(addOwnedDelete(sftp, first, "/home/test/file1.txt", heard).has_value());
+        ASSERT_TRUE(addOwnedDelete(sftp, second, "/home/test/Documents/doc1.txt", heard).has_value());
         queue->cancelAll();
         runOnStrand([]() {});
 
@@ -3484,7 +3484,7 @@ namespace Test
         auto queue = makeQueue();
 
         const auto heard = std::make_shared<std::vector<SharedData::OperationCompleted>>();
-        ASSERT_TRUE(addOwnedDelete(*sftp, Ids::generateOperationId(), "/home/test/file1.txt", heard).has_value());
+        ASSERT_TRUE(addOwnedDelete(sftp, Ids::generateOperationId(), "/home/test/file1.txt", heard).has_value());
         queue->dropAll();
         runOnStrand([]() {});
         setPaused(false);
@@ -3509,12 +3509,12 @@ namespace Test
         const auto upload = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addUploadOperation(
-                *sftp, upload, toLocal(big), remote("/home/test/big.bin"), true, false, false, false
+                sftp, upload, toLocal(big), remote("/home/test/big.bin"), true, false, false, false
             );
         }).has_value());
         const auto deletion = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            const auto added = queue->addDeleteOperation(*sftp, deletion, remote("/home/test/file1.txt"), false, false);
+            const auto added = queue->addDeleteOperation(sftp, deletion, remote("/home/test/file1.txt"), false, false);
             queue->whenCompleted(
                 deletion,
                 [weak = std::weak_ptr{queue}, upload](SharedData::OperationCompleted const&)
@@ -3527,7 +3527,7 @@ namespace Test
         }).has_value());
         const auto later = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, later, remote("/home/test/Documents/doc2.txt"), false, false);
+            return queue->addDeleteOperation(sftp, later, remote("/home/test/Documents/doc2.txt"), false, false);
         }).has_value());
         setPaused(false);
 
@@ -3557,7 +3557,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, first, toLocal(firstLocal), remote("/home/test/Documents"), false, false, false, false
+                    sftp, first, toLocal(firstLocal), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         ).has_value());
@@ -3565,7 +3565,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, second, toLocal(secondLocal), remote("/home/test/Pictures"), false, false, false, false
+                    sftp, second, toLocal(secondLocal), remote("/home/test/Pictures"), false, false, false, false
                 );
             }
         ).has_value());
@@ -3596,7 +3596,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp,
+                    sftp,
                     download,
                     toLocal(localDirectory_.path() / "Documents"),
                     remote("/home/test/Documents"),
@@ -3608,12 +3608,12 @@ namespace Test
             }
         ).has_value());
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, remove, remote("/home/test/Documents"), true, false);
+            return queue->addDeleteOperation(sftp, remove, remote("/home/test/Documents"), true, false);
         }).has_value());
         const auto archive = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
             return queue->addArchiveDownloadOperation(
-                *sftp,
+                sftp,
                 archive,
                 {SharedData::ArchiveDownloadRoot{
                     .path = remote("/home/test/Documents"),
@@ -3645,7 +3645,7 @@ namespace Test
 
         const auto remove = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, remove, remote("/home/test/linkdir"), true, false);
+            return queue->addDeleteOperation(sftp, remove, remote("/home/test/linkdir"), true, false);
         }).has_value());
 
         workUntilCompletions(1);
@@ -3665,19 +3665,19 @@ namespace Test
         for (auto const* target : {"/", "/home", "/home/test"})
         {
             const auto result = runOnStrand([&]() {
-                return queue->addDeleteOperation(*sftp, Ids::generateOperationId(), remote(target), true, false);
+                return queue->addDeleteOperation(sftp, Ids::generateOperationId(), remote(target), true, false);
             });
             ASSERT_FALSE(result.has_value()) << target;
             EXPECT_EQ(result.error().type, Operation::ErrorType::InvalidPath) << target;
         }
         const auto unset = runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, Ids::generateOperationId(), Paths::RemotePath{}, false, false);
+            return queue->addDeleteOperation(sftp, Ids::generateOperationId(), Paths::RemotePath{}, false, false);
         });
         EXPECT_FALSE(unset.has_value());
 
         const auto allowed = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, allowed, remote("/home/test/file2.txt"), false, false);
+            return queue->addDeleteOperation(sftp, allowed, remote("/home/test/file2.txt"), false, false);
         }).has_value());
         workUntilCompletions(1);
         ASSERT_EQ(completions().size(), 1u);
@@ -3739,7 +3739,7 @@ namespace Test
         const auto download = Ids::generateOperationId();
         runOnStrand([&]() {
             queue->addSyncScanOperation(
-                *sftp,
+                sftp,
                 syncSessionId,
                 remoteScan,
                 localScan,
@@ -3754,7 +3754,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp,
+                    sftp,
                     download,
                     toLocal(localDirectory_.path() / "Pictures"),
                     remote("/home/test/Pictures"),
@@ -3799,7 +3799,7 @@ namespace Test
             [&]()
             {
                 queue->addSyncScanOperation(
-                    *sftp,
+                    sftp,
                     syncSessionId,
                     Ids::generateOperationId(),
                     Ids::generateOperationId(),
@@ -3862,7 +3862,7 @@ namespace Test
             [&]()
             {
                 queue->addSyncScanOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateSyncSessionId(),
                     remoteScan,
                     localScan,
@@ -3906,7 +3906,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, download, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                    sftp, download, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         ).has_value());
@@ -3948,7 +3948,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp, download, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
+                    sftp, download, toLocal(localPath), remote("/home/test/Documents"), false, false, false, false
                 );
             }
         ).has_value());
@@ -3983,7 +3983,7 @@ namespace Test
             [&]()
             {
                 return queue->addDownloadOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateOperationId(),
                     toLocal(downloaded),
                     remote("/home/test/Grüße"),
@@ -4008,7 +4008,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateOperationId(),
                     toLocal(toUpload),
                     remote("/home/test/Jürgen"),
@@ -4040,7 +4040,7 @@ namespace Test
         const auto before = remoteNames(*sftp, "/home/test");
         const auto remove = Ids::generateOperationId();
         ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDeleteOperation(*sftp, remove, remote("/home/test/victim"), true, false);
+            return queue->addDeleteOperation(sftp, remove, remote("/home/test/victim"), true, false);
         }).has_value());
 
         workUntilCompletions(1);
@@ -4069,7 +4069,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp, Ids::generateOperationId(), toLocal(localPath), remote("/home/test/fast"), false, false, false, false
+                    sftp, Ids::generateOperationId(), toLocal(localPath), remote("/home/test/fast"), false, false, false, false
                 );
             }
         );
@@ -4098,7 +4098,7 @@ namespace Test
             [&]()
             {
                 return queue->addUploadOperation(
-                    *sftp,
+                    sftp,
                     Ids::generateOperationId(),
                     toLocal(localDirectory_.path() / "tracked.txt"),
                     remote("/home/test/tracked.txt"),
@@ -4146,7 +4146,7 @@ namespace Test
             [&]()
             {
                 queue->addBulkUploadOperation(
-                    *sftp,
+                    sftp,
                     request,
                     [](std::size_t)
                     {

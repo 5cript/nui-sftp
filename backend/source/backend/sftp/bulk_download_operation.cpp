@@ -1,7 +1,6 @@
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <utility/error_message.hpp>
 #include <paths/native.hpp>
-#include <constants/sftp.hpp>
 #include <log/log.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <utility/permissions.hpp>
@@ -123,7 +122,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
     downloadOptions.localPath = paths.local;
     downloadOptions.mayOverwrite = downloadOptions.mayOverwrite || paths.mayOverwrite;
     downloadOptions.comparedDestination = paths.comparedDestination;
-    downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
+    downloadOptions.bigFileOptimized = childTakesAsynchronousPath(entry.size);
     downloadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
         onProgress(current, max);

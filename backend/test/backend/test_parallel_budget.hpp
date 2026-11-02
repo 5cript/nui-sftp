@@ -6,6 +6,7 @@
 
 #include <deque>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace Test
@@ -137,5 +138,50 @@ namespace Test
         const auto eligible = collectEligibleOperations(queue, 0);
         ASSERT_EQ(eligible.size(), 1u);
         EXPECT_EQ(eligible[0].slots, 1);
+    }
+
+    TEST(ParallelBudgetTests, NoTransferLimitKeepsTheConfiguredParallelism)
+    {
+        const auto limits = parallelLimits(4, 3, std::nullopt);
+        EXPECT_EQ(limits.parallelism, 4);
+        EXPECT_EQ(limits.bulkConcurrency, 3);
+    }
+
+    TEST(ParallelBudgetTests, ATransferLimitLowersParallelismAndBulkConcurrency)
+    {
+        const auto limits = parallelLimits(4, 3, 2u);
+        EXPECT_EQ(limits.parallelism, 2);
+        EXPECT_EQ(limits.bulkConcurrency, 1);
+    }
+
+    TEST(ParallelBudgetTests, ATransferLimitAboveTheConfiguredParallelismChangesNothing)
+    {
+        const auto limits = parallelLimits(4, 3, 8u);
+        EXPECT_EQ(limits.parallelism, 4);
+        EXPECT_EQ(limits.bulkConcurrency, 3);
+    }
+
+    TEST(ParallelBudgetTests, ParallelismStaysAtLeastOne)
+    {
+        const auto limited = parallelLimits(4, 3, 0u);
+        EXPECT_EQ(limited.parallelism, 1);
+        EXPECT_EQ(limited.bulkConcurrency, 1);
+        const auto unconfigured = parallelLimits(0, 0, std::nullopt);
+        EXPECT_EQ(unconfigured.parallelism, 1);
+        EXPECT_EQ(unconfigured.bulkConcurrency, 1);
+    }
+
+    TEST(ParallelBudgetTests, BulkConcurrencyLeavesASlotForOtherOperations)
+    {
+        EXPECT_EQ(parallelLimits(4, 8, std::nullopt).bulkConcurrency, 3);
+        EXPECT_EQ(parallelLimits(8, 6, 4u).bulkConcurrency, 3);
+    }
+
+    TEST(ParallelBudgetTests, LimitingAgainKeepsTheLimits)
+    {
+        const auto first = parallelLimits(8, 6, 4u);
+        const auto again = parallelLimits(first.parallelism, first.bulkConcurrency, 4u);
+        EXPECT_EQ(again.parallelism, first.parallelism);
+        EXPECT_EQ(again.bulkConcurrency, first.bulkConcurrency);
     }
 }

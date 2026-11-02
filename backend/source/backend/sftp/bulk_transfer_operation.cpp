@@ -1,4 +1,5 @@
 #include <backend/sftp/bulk_transfer_operation.hpp>
+#include <backend/sftp/transfer_path.hpp>
 #include <log/log.hpp>
 #include <utility/directory_traversal.hpp>
 
@@ -651,6 +652,12 @@ BulkTransferOperation::entryPaths(std::size_t entryIndex) const
     if (prescanned())
         return prescannedPaths_[entryIndex];
     return BulkTransferDetail::treeEntryPaths(entries_, entryIndex, common_.remotePath, common_.localPath);
+}
+
+bool BulkTransferOperation::childTakesAsynchronousPath(std::uint64_t size) const
+{
+    const auto locked = fileSystem_.lock();
+    return takesAsynchronousPath(locked ? locked->capabilities() : RemoteIo::Capabilities{}, size);
 }
 
 namespace BulkTransferDetail

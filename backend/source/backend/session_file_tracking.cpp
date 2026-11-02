@@ -266,7 +266,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     ) override
     {
         return queue(
-            [&](OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId)
+            [&](OperationQueue& queue,
+                std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel,
+                Ids::OperationId const& operationId)
             {
                 return queue.addDownloadOperation(
                     channel,
@@ -295,7 +297,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         std::optional<Ids::OperationId> queuedAs{};
         auto queued = queue(
             [&request, &sent, &queuedAs, &observer](
-                OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId
+                OperationQueue& queue,
+                std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel,
+                Ids::OperationId const& operationId
             )
             {
                 auto added = queue.addUploadOperation(
@@ -359,8 +363,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     discardPartialUpload(Paths::RemotePath const& destination, OnEnded onEnded) override
     {
         return withChannel(
-            [&destination,
-                &onEnded](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
+            [&destination, &onEnded](
+                Session& session, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
+            ) -> std::expected<void, std::string>
             {
                 session.operationQueue_->discardPartialUpload(
                     channel,
@@ -380,7 +385,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     rename(Paths::RemotePath const& source, Paths::RemotePath const& destination, OnEnded onEnded) override
     {
         return queue(
-            [&](OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId)
+            [&](OperationQueue& queue,
+                std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel,
+                Ids::OperationId const& operationId)
             {
                 return queue.addRenameOperation(
                     channel, operationId, source, destination, SharedData::OperationMode::PriorityQueued
@@ -393,7 +400,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     std::expected<void, std::string> remove(Paths::RemotePath const& path, OnEnded onEnded) override
     {
         return queue(
-            [&path](OperationQueue& queue, SecureShell::SftpSession& channel, Ids::OperationId const& operationId)
+            [&path](
+                OperationQueue& queue,
+                std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel,
+                Ids::OperationId const& operationId
+            )
             {
                 return queue.addDeleteOperation(
                     channel,
@@ -415,9 +426,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     ) override
     {
         return withChannel(
-            [&requests,
-                &onEnded,
-                &onProgress](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
+            [&requests, &onEnded, &onProgress](
+                Session& session, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
+            ) -> std::expected<void, std::string>
             {
                 const auto sent = std::make_shared<SentFiles>();
                 SharedData::BulkUploadRequest bulk{
@@ -485,7 +496,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     removeAll(std::vector<Paths::RemotePath> const& paths, OnEntryEnded onEnded) override
     {
         return withChannel(
-            [&paths, &onEnded](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
+            [&paths, &onEnded](
+                Session& session, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
+            ) -> std::expected<void, std::string>
             {
                 SharedData::BulkDeleteRequest bulk{
                     .insertRefresh = true,
@@ -653,11 +666,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     {
         return withChannel(
             [&path, followLinks](
-                Session&, RemoteIo::IRemoteFileSystem& channel
+                Session&, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
             ) -> std::expected<std::optional<FileTracking::ServerState>, std::string>
             {
-                auto future = followLinks ? channel.later(RemoteIo::Stat{.path = path})
-                                          : channel.later(RemoteIo::Lstat{.path = path});
+                auto future = followLinks ? channel->later(RemoteIo::Stat{.path = path})
+                                          : channel->later(RemoteIo::Lstat{.path = path});
                 if (future.wait_for(Session::futureTimeout) != std::future_status::ready)
                     return std::unexpected{fmt::format("Asking the server about '{}' timed out", path.value())};
                 const auto result = future.get();
@@ -676,7 +689,8 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
      * @brief Calls @p function with the session and one of its file system channels, an error when it has none.
      */
     template <typename FunctionT>
-    auto withChannel(FunctionT&& function) const -> std::invoke_result_t<FunctionT, Session&, SecureShell::SftpSession&>
+    auto withChannel(FunctionT&& function) const
+        -> std::invoke_result_t<FunctionT, Session&, std::shared_ptr<RemoteIo::IRemoteFileSystem> const&>
     {
         const auto session = session_.lock();
         if (!session || !session->operationQueue_)
@@ -684,7 +698,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         const auto channel = session->anySftpChannel();
         if (!channel)
             return std::unexpected{std::string{"The session has no file system channel"}};
-        return std::forward<FunctionT>(function)(*session, *channel);
+        return std::forward<FunctionT>(function)(*session, channel);
     }
 
     /**
@@ -696,8 +710,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     queue(AddT&& add, std::function<void(SharedData::OperationCompleted const&)> onCompleted)
     {
         return withChannel(
-            [&add,
-                &onCompleted](Session& session, SecureShell::SftpSession& channel) -> std::expected<void, std::string>
+            [&add, &onCompleted](
+                Session& session, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
+            ) -> std::expected<void, std::string>
             {
                 const auto operationId = Ids::generateOperationId();
                 const auto added = add(*session.operationQueue_, channel, operationId);

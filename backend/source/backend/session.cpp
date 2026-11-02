@@ -4,6 +4,8 @@
 #include <backend/rpc_path_parameters.hpp>
 #include <utility/localized_message.hpp>
 #include <backend/existence_check.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
+#include <ssh/sftp_session.hpp>
 
 #include <paths/paths.hpp>
 
@@ -224,12 +226,14 @@ void Session::stop()
             }
             self->channels_.clear();
 
-            // Close all sftp channels
+            // Close all file system channels
             for (auto& [channelId, weakChannel] : self->sftpChannels_)
             {
                 if (auto channel = weakChannel.lock(); channel)
                 {
-                    Log::info("Closing sftp channel '{}' for session '{}'", channelId.value(), self->id_.value());
+                    Log::info(
+                        "Closing file system channel '{}' for session '{}'", channelId.value(), self->id_.value()
+                    );
                     channel->close();
                 }
             }
@@ -263,16 +267,17 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
                 Log::warn("Session::adoptBulkResumes called without a registry — ignoring");
                 return;
             }
-            // Resume needs an SFTP channel.  All currently-supported bulk
+            // Resume needs a file system channel.  All currently-supported bulk
             // kinds re-enter the same Session::sftp::addBulk* code paths,
             // which expect a channel id.  We adopt against the most-recently
-            // opened sftp channel by convention; if none exists, the resume
+            // opened channel by convention; if none exists, the resume
             // is dropped back into the registry for a later attempt.
-            const auto sftp = self->anySftpChannel();
-            if (!sftp)
+            const auto fileSystem = self->anySftpChannel();
+            if (!fileSystem)
             {
                 Log::warn(
-                    "Session::adoptBulkResumes: no sftp channel open yet — deferring {} resume(s)", operationIds.size()
+                    "Session::adoptBulkResumes: no file system channel open yet, deferring {} resume(s)",
+                    operationIds.size()
                 );
                 return;
             }
@@ -287,13 +292,13 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
                     );
                     continue;
                 }
-                self->operationQueue_->adoptBulkResume(*sftp, opId, std::move(*entry));
+                self->operationQueue_->adoptBulkResume(fileSystem, opId, std::move(*entry));
             }
         }
     );
 }
 
-std::shared_ptr<SecureShell::SftpSession> Session::anySftpChannel() const
+std::shared_ptr<RemoteIo::IRemoteFileSystem> Session::anySftpChannel() const
 {
     for (auto const& [channelId, weakChannel] : sftpChannels_)
     {
@@ -458,7 +463,9 @@ void Session::registerRpcCreateChannel()
                     }
 
                     const auto channelId = Ids::generateChannelId();
-                    self->sftpChannels_.emplace(channelId, std::move(weakChannel).value());
+                    self->sftpChannels_.emplace(channelId, weakChannel.value());
+                    if (const auto fileSystem = weakChannel.value().lock(); fileSystem && self->operationQueue_)
+                        self->operationQueue_->limitParallelism(fileSystem->capabilities().maxParallelTransfers);
 
                     Log::info(
                         "Created sftp channel with id '{}', sftp channel total is now '{}'.",
@@ -638,7 +645,7 @@ void Session::registerRpcSftpListDirectory()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->listDirectory(*remotePath);
+                        auto fut = channel->later(RemoteIo::ListDirectory{.path = *remotePath});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Timed out");
 
@@ -671,7 +678,7 @@ void Session::registerRpcSftpHomeDirectory()
                     Ids::makeChannelId(channelIdString),
                     [](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto fut = channel->homeDirectory();
+                        auto fut = channel->later(RemoteIo::HomeDirectory{});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to get home directory: timeout");
 
@@ -708,7 +715,18 @@ void Session::registerRpcSftpUserDirectories()
                         const auto homePath = RpcHelper::parseRemotePath(home);
                         if (!homePath)
                             return reply.error(homePath.error());
-                        auto fut = channel->userDirectories(*homePath);
+                        auto fut = channel->performPromise(
+                            [weakChannel = std::weak_ptr{channel}, home = *homePath]()
+                                -> std::expected<std::vector<Utility::UserDirectory>, RemoteIo::RemoteError>
+                            {
+                                const auto fileSystem = weakChannel.lock();
+                                if (!fileSystem)
+                                    return std::unexpected(
+                                        RemoteIo::RemoteError{.message = "The file system channel was closed"}
+                                    );
+                                return RemoteIo::userDirectoriesInStrand(*fileSystem, home);
+                            }
+                        );
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to read user directories: timeout");
 
@@ -758,13 +776,13 @@ void Session::registerRpcQueuedRemoves()
                     [paths = *std::move(parsed), recursive, insertRefresh, mode](
                         RpcHelper::RpcOnce&& reply,
                         Session& self,
-                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     ) mutable
                     {
                         if (!self.operationQueue_)
                             return reply.error("Session no longer exists");
 
-                        auto guard = self.operationQueue_->remoteDeleteGuard(*channel);
+                        auto guard = self.operationQueue_->remoteDeleteGuard(channel);
                         if (const auto refusal = refuseAnyProtected(guard, paths); refusal)
                             return replyRefusal(reply, *refusal);
 
@@ -774,7 +792,7 @@ void Session::registerRpcQueuedRemoves()
                             const auto newOperationId = Ids::generateOperationId();
                             const auto result = self.operationQueue_->addDeleteOperation(
                                 guard,
-                                *channel,
+                                channel,
                                 newOperationId,
                                 path,
                                 recursive,
@@ -816,7 +834,7 @@ void Session::registerRpcSftpCreateDirectory()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->createDirectory(*remotePath);
+                        auto fut = channel->later(RemoteIo::CreateNewDirectory{.path = *remotePath});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error(fmt::format("Failed to create directory '{}': timeout", path));
 
@@ -854,7 +872,7 @@ void Session::registerRpcSftpCreateFile()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->createFile(*remotePath);
+                        auto fut = channel->later(RemoteIo::CreateEmptyFile{.path = *remotePath});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to create file: timeout");
 
@@ -913,7 +931,7 @@ void Session::registerRpcSftpAddDownloadOperation()
                         bigFile,
                         insertRefresh,
                         createMissingDirectories,
-                        mode](OperationQueue& queue, SecureShell::SftpSession& channel)
+                        mode](OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel)
                     {
                         return queuedReply(queue.addDownloadOperation(
                             channel,
@@ -982,7 +1000,9 @@ void Session::registerRpcSftpAddArchiveDownloadOperation()
                         compression,
                         compressionOptions,
                         mayOverwrite,
-                        mode](OperationQueue& queue, SecureShell::SftpSession& channel) mutable
+                        mode](
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
+                    ) mutable
                     {
                         return queuedReply(queue.addArchiveDownloadOperation(
                             channel,
@@ -1047,7 +1067,9 @@ void Session::registerRpcSftpAddArchiveUploadOperation()
                         compression,
                         compressionOptions,
                         mayOverwrite,
-                        mode](OperationQueue& queue, SecureShell::SftpSession& channel) mutable
+                        mode](
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
+                    ) mutable
                     {
                         return queuedReply(queue.addArchiveUploadOperation(
                             channel,
@@ -1094,7 +1116,7 @@ void Session::registerRpcSftpAddBulkDownloadOperation()
                     Ids::makeChannelId(channelIdString),
                     std::move(description),
                     [operationIds = std::move(operationIdStrings), request = *std::move(request)](
-                        OperationQueue& queue, SecureShell::SftpSession& channel
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     ) mutable -> std::expected<nlohmann::json, std::string>
                     {
                         const auto bulkCardId = Ids::makeOperationId(operationIds.back());
@@ -1141,7 +1163,7 @@ void Session::registerRpcSftpAddBulkUploadOperation()
                     Ids::makeChannelId(channelIdString),
                     std::move(description),
                     [operationIds = std::move(operationIdStrings), request = *std::move(request)](
-                        OperationQueue& queue, SecureShell::SftpSession& channel
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     ) mutable -> std::expected<nlohmann::json, std::string>
                     {
                         const auto bulkCardId = Ids::makeOperationId(operationIds.back());
@@ -1202,7 +1224,7 @@ void Session::registerRpcSftpAddUploadOperation()
                         bigFile,
                         insertRefresh,
                         createMissingDirectories,
-                        mode](OperationQueue& queue, SecureShell::SftpSession& channel)
+                        mode](OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel)
                     {
                         return queuedReply(queue.addUploadOperation(
                             channel,
@@ -1255,7 +1277,7 @@ void Session::registerRpcSftpAddRenameOperation()
                     [operationId = Ids::makeOperationId(newOperationIdString),
                         source = *std::move(source),
                         destination = *std::move(destination),
-                        mode](OperationQueue& queue, SecureShell::SftpSession& channel)
+                        mode](OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel)
                     {
                         return queuedReply(queue.addRenameOperation(
                             channel, operationId, source, destination, static_cast<SharedData::OperationMode>(mode)
@@ -1333,14 +1355,14 @@ void Session::registerRpcSftpOpenSyncSession()
                         ignoreHidden](
                         RpcHelper::RpcOnce&& reply,
                         Session& self,
-                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     )
                     {
                         if (!self.operationQueue_)
                             return reply.error("Session no longer exists");
 
                         self.operationQueue_->addSyncScanOperation(
-                            *channel,
+                            channel,
                             Ids::makeSyncSessionId(syncSessionIdString),
                             Ids::makeOperationId(remoteScanIdString),
                             Ids::makeOperationId(localScanIdString),
@@ -1509,14 +1531,14 @@ void Session::registerRpcSftpExecuteSyncSelection()
                             [session, plan = std::move(plan), request = std::move(request)](
                                 RpcHelper::RpcOnce&& reply,
                                 Session& self,
-                                std::shared_ptr<SecureShell::SftpSession> const& channel
+                                std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                             ) mutable
                             {
                                 // A stopped session has no queue any more.
                                 if (!self.operationQueue_)
                                     return reply.error("Session no longer exists");
                                 auto result = self.operationQueue_->executeSyncPlan(
-                                    *channel, *session, std::move(plan), request, *self.localOperationQueue_
+                                    channel, *session, std::move(plan), request, *self.localOperationQueue_
                                 );
                                 self.wakeOperationQueue();
                                 nlohmann::json json;
@@ -1586,7 +1608,8 @@ void Session::registerRpcSftpPreDeleteChecks()
                         auto remotePaths = RpcHelper::parseRemotePaths(directories);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
-                        auto fut = channel->filterOutEmptyDirectories(*std::move(remotePaths));
+                        auto fut =
+                            channel->later(RemoteIo::FilterOutEmptyDirectories{.directories = *std::move(remotePaths)});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to perform pre-delete checks: timeout");
 
@@ -1617,7 +1640,7 @@ void Session::registerRpcSftpDeleteFiles()
                     [paths](
                         RpcHelper::RpcOnce&& reply,
                         Session& self,
-                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     )
                     {
                         if (!self.operationQueue_)
@@ -1625,10 +1648,10 @@ void Session::registerRpcSftpDeleteFiles()
                         auto remotePaths = RpcHelper::parseRemotePaths(paths);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
-                        auto guard = self.operationQueue_->remoteDeleteGuard(*channel);
+                        auto guard = self.operationQueue_->remoteDeleteGuard(channel);
                         if (const auto refusal = refuseAnyProtected(guard, *remotePaths); refusal)
                             return replyRefusal(reply, *refusal);
-                        auto fut = channel->removeAll(*std::move(remotePaths));
+                        auto fut = channel->later(RemoteIo::RemoveAll{.paths = *std::move(remotePaths)});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to delete files: timeout");
 
@@ -1664,7 +1687,7 @@ void Session::registerRpcSftpRename()
                     [oldName, newName, overwrite](
                         RpcHelper::RpcOnce&& reply,
                         Session& self,
-                        std::shared_ptr<SecureShell::SftpSession> const& channel
+                        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     )
                     {
                         const auto oldPath = Paths::RemotePath::make(oldName);
@@ -1680,12 +1703,14 @@ void Session::registerRpcSftpRename()
                                 asideSuffix = Persistence::asideFileSuffix(self.remoteTempFileSuffix_)]()
                                 -> std::expected<void, RemoteIo::RemoteError>
                             {
-                                const auto sftp = session.lock();
-                                if (!sftp)
+                                const auto fileSystem = session.lock();
+                                if (!fileSystem)
                                     return std::unexpected(
-                                        RemoteIo::RemoteError{.message = "The SFTP channel was closed"}
+                                        RemoteIo::RemoteError{.message = "The file system channel was closed"}
                                     );
-                                return sftp->moveIntoPlaceInStrand(oldPath, newPath, overwrite, asideSuffix);
+                                return RemoteIo::moveIntoPlaceInStrand(
+                                    *fileSystem, oldPath, newPath, overwrite, asideSuffix
+                                );
                             }
                         );
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
@@ -1723,7 +1748,7 @@ void Session::registerRpcSftpKeptTransfers()
                     Ids::makeChannelId(channelIdString),
                     fmt::format("the continuation of '{}'", operationIdString),
                     [operationId = Ids::makeOperationId(operationIdString)](
-                        OperationQueue& queue, SecureShell::SftpSession& channel
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     ) -> std::expected<nlohmann::json, std::string>
                     {
                         return queue.continueKept(channel, operationId)
@@ -1755,7 +1780,7 @@ void Session::registerRpcSftpKeptTransfers()
                     Ids::makeChannelId(channelIdString),
                     fmt::format("the discard of the partial files of {} transfer(s)", operationIdStrings.size()),
                     [operationIdStrings](
-                        OperationQueue& queue, SecureShell::SftpSession& channel
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     ) -> std::expected<nlohmann::json, std::string>
                     {
                         for (auto const& operationIdString : operationIdStrings)
@@ -1793,7 +1818,7 @@ void Session::registerRpcSftpAddBulkDeleteOperation()
                     Ids::makeChannelId(channelIdString),
                     std::move(description),
                     [operationId = Ids::makeOperationId(bulkOperationIdString), request = *std::move(request)](
-                        OperationQueue& queue, SecureShell::SftpSession& channel
+                        OperationQueue& queue, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
                     ) -> std::expected<nlohmann::json, std::string>
                     {
                         auto guard = queue.remoteDeleteGuard(channel);
@@ -1905,7 +1930,7 @@ void Session::registerRpcSftpStat()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->stat(*remotePath);
+                        auto fut = channel->later(RemoteIo::Stat{.path = *remotePath});
                         if (fut.wait_for(futureTimeout) != std::future_status::ready)
                             return reply.error("Failed to stat file: timeout");
 

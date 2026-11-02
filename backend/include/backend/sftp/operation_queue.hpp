@@ -9,7 +9,7 @@
 #include <backend/sync/sync_session.hpp>
 #include <log/toast.hpp>
 #include <persistence/state/state.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <nui/rpc.hpp>
 #include <ids/ids.hpp>
 #include <backend/rpc_helper.hpp>
@@ -71,6 +71,12 @@ class OperationQueue
     );
 
     /**
+     * @brief Runs at most @p maxParallelTransfers transfers at once from now on, as a file system of the session
+     *        demands. Nothing keeps the configured parallelism.
+     */
+    void limitParallelism(std::optional<std::size_t> maxParallelTransfers);
+
+    /**
      * @brief What a cancel of the user's does with the partial files of a transfer.
      */
     enum class PartialFilesOnCancel
@@ -99,16 +105,17 @@ class OperationQueue
 
     /**
      * @brief Goes on with the transfer @p id a cancel stopped with its partial files: queues it again under its id on
-     *        @p sftp, a bulk without what it finished. It continues its partial files whatever tryContinue says.
+     *        @p fileSystem, a bulk without what it finished. It continues its partial files whatever tryContinue says.
      * @return Why it was not queued: nothing kept under @p id, or it cannot continue. What it kept stays then, for
      *         discardKept.
      */
-    std::expected<void, std::string> continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id);
+    std::expected<void, std::string>
+    continueKept(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id);
 
     /**
-     * @brief Deletes the partial files the transfer @p id kept when it was canceled, remote ones on @p sftp.
+     * @brief Deletes the partial files the transfer @p id kept when it was canceled, remote ones on @p fileSystem.
      */
-    void discardKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id);
+    void discardKept(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id);
 
     /**
      * @brief Cancels the upload @p id like cancel(), the temporary file it wrote to stays for a later upload or goes,
@@ -117,11 +124,11 @@ class OperationQueue
     void cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial);
 
     /**
-     * @brief Removes the temporary file an upload to @p remotePath left on @p sftp, a cancelled one that kept it, and
-     *        calls @p onDone on the strand then. Nothing is removed when there is none.
+     * @brief Removes the temporary file an upload to @p remotePath left on @p fileSystem, a cancelled one that kept it,
+     *        and calls @p onDone on the strand then. Nothing is removed when there is none.
      */
     void discardPartialUpload(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Paths::RemotePath const& remotePath,
         std::function<void()> onDone
     );
@@ -159,7 +166,7 @@ class OperationQueue
     void setWake(std::function<void()> wake);
 
     std::expected<void, Operation::Error> addDownloadOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         Paths::LocalPath const& localPath,
         Paths::RemotePath const& remotePath,
@@ -186,7 +193,7 @@ class OperationQueue
      *        UploadOperation::UploadOperationOptions::failureToast.
      */
     std::expected<void, Operation::Error> addUploadOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         Paths::LocalPath const& localPath,
         Paths::RemotePath const& remotePath,
@@ -206,7 +213,7 @@ class OperationQueue
      * @brief Enqueue an archive-download operation: pack a set of remote files
      *        into a single tar[.gz|.bz2|.zst|.xz] file on the local side.
      *
-     * @param sftp               SFTP session providing the strand + remote access.
+     * @param fileSystem         The file system providing the strand and remote access.
      * @param operationId        Pre-generated id so the frontend can register
      *                           progress / completion callbacks before the RPC returns.
      * @param entries            Metadata for each remote file to pack. Sizes are
@@ -218,7 +225,7 @@ class OperationQueue
      * @param mode               Standard queued / priority placement.
      */
     std::expected<void, Operation::Error> addArchiveDownloadOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         std::vector<SharedData::ArchiveDownloadRoot> roots,
         Paths::LocalPath const& localArchivePath,
@@ -230,12 +237,12 @@ class OperationQueue
 
     /**
      * @brief Dual of addArchiveDownloadOperation: pack local files into a
-     *        tar[.ext] archive streamed straight into a remote SFTP file.
-     *        Each localPath is lstat'd on the SFTP strand at operation start;
+     *        tar[.ext] archive streamed straight into a remote file.
+     *        Each localPath is lstat'd on the file system's strand at operation start;
      *        non-regular files are silently skipped.
      */
     std::expected<void, Operation::Error> addArchiveUploadOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         std::vector<Paths::LocalPath> localPaths,
         Paths::RemotePath const& remoteArchivePath,
@@ -250,7 +257,7 @@ class OperationQueue
      *        directory or any directory that contains it.
      */
     std::expected<void, Operation::Error> addDeleteOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         Paths::RemotePath const& remotePath,
         bool recursive,
@@ -264,7 +271,7 @@ class OperationQueue
      */
     std::expected<void, Operation::Error> addDeleteOperation(
         RemoteDeleteGuard& guard,
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         Paths::RemotePath const& remotePath,
         bool recursive,
@@ -278,7 +285,7 @@ class OperationQueue
      *        content, as one bulk under @p bulkCardId. Sizes and times of files are taken as given, without an lstat.
      *        Each queued part keeps a resume backup under its id.
      *
-     * @param sftp SFTP session to use.
+     * @param fileSystem The file system to use.
      * @param request The entries; the card of the files works below its roots, unset the closest directories
      *        holding every source and every destination.
      * @param operationIdFor The id of the entry at an index, reserved by the frontend so it can register callbacks
@@ -288,7 +295,7 @@ class OperationQueue
      *         own. A request without any entry still queues the card, which then completes at once.
      */
     std::size_t addBulkDownloadOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         SharedData::BulkDownloadRequest request,
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
         Ids::OperationId const& bulkCardId
@@ -302,7 +309,7 @@ class OperationQueue
      *        addUploadOperation.
      */
     std::size_t addBulkUploadOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         SharedData::BulkUploadRequest request,
         std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
         Ids::OperationId const& bulkCardId,
@@ -316,14 +323,14 @@ class OperationQueue
      *        directory they lie in. Entries a @ref remoteDeleteGuard refuses, and directories that could not be
      *        looked up in time, are failed entries of that card.
      *
-     * @param sftp SFTP session to use.
+     * @param fileSystem The file system to use.
      * @param request The remote items; directories are scanned and deleted with their content, unless the request
      *        deletes listed content only.
      * @param bulkOperationId Operation id of the one card.
      * @return Number of entries queued for deletion; zero queues nothing, not even the card.
      */
     std::size_t addBulkDeleteOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         SharedData::BulkDeleteRequest const& request,
         Ids::OperationId bulkOperationId
     );
@@ -334,7 +341,7 @@ class OperationQueue
      */
     std::size_t addBulkDeleteOperation(
         RemoteDeleteGuard& guard,
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         SharedData::BulkDeleteRequest const& request,
         Ids::OperationId bulkOperationId
     );
@@ -346,7 +353,7 @@ class OperationQueue
      *        comes from @p plan, which resolved them below the sync roots.
      */
     SharedData::Sync::SyncExecutionResult executeSyncPlan(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         SyncSession const& session,
         SyncSession::ResolvedPlan plan,
         SharedData::Sync::SyncExecutionRequest const& request,
@@ -356,10 +363,10 @@ class OperationQueue
     /**
      * @brief A guard for the remote deletes of one request, sharing the home directory this queue looked up.
      */
-    RemoteDeleteGuard remoteDeleteGuard(SecureShell::SftpSession& sftp);
+    RemoteDeleteGuard remoteDeleteGuard(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem);
 
     std::expected<void, Operation::Error> addRenameOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId operationId,
         Paths::RemotePath const& sourcePath,
         Paths::RemotePath const& destinationPath,
@@ -371,14 +378,14 @@ class OperationQueue
      *        ScanNode trees directly and feed them into the session on completion.
      *        Emits @c onSyncScanPhaseDone(sessionId, isLocal) for each side.
      *
-     * @param sftp          SFTP session to use for the remote scan.
+     * @param fileSystem    The file system to use for the remote scan.
      * @param remoteScanId  Pre-assigned operation ID for the remote scan.
      * @param localScanId   Pre-assigned operation ID for the local scan.
      * @param remotePath    Remote directory root to scan.
      * @param localPath     Local directory root to scan.
      */
     void addSyncScanOperation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::SyncSessionId syncSessionId,
         Ids::OperationId remoteScanId,
         Ids::OperationId localScanId,
@@ -467,7 +474,11 @@ class OperationQueue
      *        @p entry out of the registry.
      * @return Whether it was queued.
      */
-    bool adoptBulkResume(SecureShell::SftpSession& sftp, Ids::OperationId const& operationId, BulkResumeEntry entry);
+    bool adoptBulkResume(
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
+        Ids::OperationId const& operationId,
+        BulkResumeEntry entry
+    );
 
   private:
     void completeOperation(OperationCompleted&& operationCompleted);
@@ -571,7 +582,7 @@ class OperationQueue
      * @return Why it was not queued.
      */
     std::expected<void, std::string> queueContinuation(
-        SecureShell::SftpSession& sftp,
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
         Ids::OperationId const& id,
         KeptContinuation continuation
     );
@@ -629,7 +640,7 @@ class OperationQueue
     std::unordered_set<Ids::OperationId, Ids::IdHash> failuresWithoutToast_{};
     // Transfer slots handed out per queue tick.
     int parallelism_{1};
-    // Upper bound on the slots a single bulk transfer may take, clamped to parallelism_.
+    // Upper bound on the slots a single bulk transfer may take, below parallelism_.
     int bulkConcurrency_{1};
     // Keyed by operationId.value(). Called when a sync-only scan completes and
     // hands off its ScanNode tree. The scan is known to be build-tree mode so
