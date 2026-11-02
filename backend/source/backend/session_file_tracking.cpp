@@ -57,9 +57,9 @@ namespace
     }
 
     /**
-     * @brief What the server has at uploaded destinations, asked for on the strand of an SFTP channel. Its delivery
-     *        gets the states on the session strand once they are known, or without them when the channel drops the
-     *        request unasked.
+     * @brief What the server has at uploaded destinations, asked for on the strand of a file system channel. Its
+     *        delivery gets the states on the session strand once they are known, or without them when the channel
+     *        drops the request unasked.
      */
     class DestinationStates
     {
@@ -86,11 +86,11 @@ namespace
         DestinationStates(DestinationStates&&) = delete;
         DestinationStates& operator=(DestinationStates&&) = delete;
 
-        void askInStrand(SecureShell::SftpSession& channel)
+        void askInStrand(RemoteIo::IRemoteFileSystem& channel)
         {
             for (std::size_t index = 0; index < paths_.size(); ++index)
             {
-                if (const auto information = channel.lstatInStrand(paths_[index]))
+                if (const auto information = channel.inStrand(RemoteIo::Lstat{.path = paths_[index]}))
                     states_[index] = FileTracking::ServerState{.mtime = information->mtime, .size = information->size};
             }
             deliver();
@@ -620,8 +620,9 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     }
 
     /**
-     * @brief Asks the server what it has at @p paths on the strand of one of its SFTP channels, so the session strand
-     *        that runs the queue does not wait for it. @p delivery gets the states on the session strand.
+     * @brief Asks the server what it has at @p paths on the strand of one of its file system channels, so the
+     *        session strand that runs the queue does not wait for it. @p delivery gets the states on the session
+     *        strand.
      */
     static void askStatesThen(
         std::weak_ptr<Session> const& session,
@@ -652,10 +653,11 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     {
         return withChannel(
             [&path, followLinks](
-                Session&, SecureShell::SftpSession& channel
+                Session&, RemoteIo::IRemoteFileSystem& channel
             ) -> std::expected<std::optional<FileTracking::ServerState>, std::string>
             {
-                auto future = followLinks ? channel.stat(path) : channel.lstat(path);
+                auto future = followLinks ? channel.later(RemoteIo::Stat{.path = path})
+                                          : channel.later(RemoteIo::Lstat{.path = path});
                 if (future.wait_for(Session::futureTimeout) != std::future_status::ready)
                     return std::unexpected{fmt::format("Asking the server about '{}' timed out", path.value())};
                 const auto result = future.get();
@@ -671,7 +673,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
     }
 
     /**
-     * @brief Calls @p function with the session and one of its SFTP channels, an error when it has none.
+     * @brief Calls @p function with the session and one of its file system channels, an error when it has none.
      */
     template <typename FunctionT>
     auto withChannel(FunctionT&& function) const -> std::invoke_result_t<FunctionT, Session&, SecureShell::SftpSession&>
@@ -681,7 +683,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
             return std::unexpected{std::string{"The session has ended"}};
         const auto channel = session->anySftpChannel();
         if (!channel)
-            return std::unexpected{std::string{"The session has no SFTP channel"}};
+            return std::unexpected{std::string{"The session has no file system channel"}};
         return std::forward<FunctionT>(function)(*session, *channel);
     }
 
