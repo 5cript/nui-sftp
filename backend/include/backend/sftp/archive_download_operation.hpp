@@ -6,8 +6,7 @@
 #include <paths/local_path.hpp>
 #include <remote_io/async/buffer_provider.hpp>
 #include <remote_io/async/transfer_context.hpp>
-#include <ssh/file_stream.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <tar_archive/archive.hpp>
 #include <tar_archive/writer.hpp>
 #include <tar_archive/entry_writer.hpp>
@@ -29,8 +28,8 @@
  * @brief Packs a set of remote files into a single tar[.gz|.bz2|.zst|.xz] archive
  *        written to a local path.
  *
- * Each entry is streamed: we open the remote SFTP file, read it in fixed-size
- * chunks on the SFTP strand, and feed each chunk to a TarArchive::EntryWriter
+ * Each entry is streamed: we open the remote file, read it in fixed-size
+ * chunks on the file system's strand, and feed each chunk to a TarArchive::EntryWriter
  * whose underlying sink writes to a local std::ofstream (plus a compression layer
  * when requested). Nothing is buffered whole — the largest resident buffer is the
  * per-chunk 64 KiB scratch buffer.
@@ -94,7 +93,7 @@ class ArchiveDownloadOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    ArchiveDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options);
+    ArchiveDownloadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, Options options);
     ~ArchiveDownloadOperation() override;
     ArchiveDownloadOperation(ArchiveDownloadOperation const&) = delete;
     ArchiveDownloadOperation& operator=(ArchiveDownloadOperation const&) = delete;
@@ -104,7 +103,7 @@ class ArchiveDownloadOperation : public Operation
     std::expected<WorkStatus, Error> work() override;
     std::expected<WorkStatus, Error> workInStrand() override;
 
-    // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
+    // The scan phase blocks on file system futures, so it runs off the strand like a standalone scan.
     bool usesStrand() const noexcept override
     {
         return scanPhase_ == nullptr;
@@ -137,7 +136,7 @@ class ArchiveDownloadOperation : public Operation
 
     RemoteIo::ProcessingStrand* strand() const override
     {
-        return strandOf(sftp_);
+        return strandOf(fileSystem_);
     }
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
@@ -154,9 +153,9 @@ class ArchiveDownloadOperation : public Operation
      *        @ref Options::roots.  Matching is by @p remoteRootPath, the
      *        path of the root.
      *
-     *        Threading: invoked on the queue's asio strand between SFTP-strand
-     *        work batches, so no extra synchronisation is required against
-     *        prepareInStrand (which runs on the SFTP strand).
+     *        Threading: invoked on the queue's asio strand between processing
+     *        strand work batches, so no extra synchronisation is required
+     *        against prepareInStrand (which runs on the processing strand).
      */
     void setScanResultForRoot(
         Paths::RemotePath const& remoteRootPath,
@@ -168,7 +167,7 @@ class ArchiveDownloadOperation : public Operation
     /**
      * @brief Pairs an archive-relative metadata record (what goes into the tar
      *        header) with the full remote path the operation actually opens
-     *        against the SFTP session. Directory entries have an empty remote
+     *        on the remote file system. Directory entries have an empty remote
      *        path since they carry no payload.
      */
     struct ResolvedEntry
@@ -177,11 +176,11 @@ class ArchiveDownloadOperation : public Operation
         Paths::RemotePath source{};
     };
 
-    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
     /**
      * @brief Resolves the roots into archive members: a file root by a fresh lstat, a directory root from its scan.
      */
-    std::expected<void, Error> flattenRootsInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> flattenRootsInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
     /**
      * @brief Expand a preceding ScanOperation's flat entry vector into the
      *        op's ResolvedEntry list, prefixing each entry's tar path with
@@ -195,7 +194,7 @@ class ArchiveDownloadOperation : public Operation
         Paths::RemotePath const& remoteRoot,
         Paths::RelativePath const& archivePrefix
     );
-    std::expected<void, Error> openNextEntryInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> openNextEntryInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
     std::expected<bool, Error> readChunkInStrand();
     std::expected<void, Error> finaliseEntryInStrand();
     std::expected<void, Error> finaliseArchiveInStrand();
@@ -204,12 +203,12 @@ class ArchiveDownloadOperation : public Operation
     void cleanup();
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     Options options_;
     std::vector<ResolvedEntry> resolvedEntries_{};
     std::optional<TarArchive::Writer> writer_{std::nullopt};
     std::optional<TarArchive::EntryWriter> currentEntry_{std::nullopt};
-    std::weak_ptr<SecureShell::IFileStream> currentStream_{};
+    std::weak_ptr<RemoteIo::IRemoteFileStream> currentStream_{};
     std::size_t currentEntryIndex_{0u};
     std::uint64_t currentEntryBytesRead_{0u};
     std::uint64_t totalBytesTransferred_{0u};

@@ -5,8 +5,7 @@
 #include <backend/sftp/scan_phase.hpp>
 #include <remote_io/async/buffer_provider.hpp>
 #include <remote_io/async/transfer_context.hpp>
-#include <ssh/file_stream.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
 #include <tar_archive/archive.hpp>
@@ -29,13 +28,13 @@
 
 /**
  * @brief Packs a set of local files into a tar[.gz|.bz2|.zst|.xz] archive that
- *        is streamed straight into a remote SFTP file.
+ *        is streamed straight into a remote file.
  *
  * Dual of ArchiveDownloadOperation: local files feed the tar writer, whose sink
- * writes into an SFTP FileStream. No temp file is staged — bytes go over the
- * wire as the archive is being built. SFTP's sftp_write() does not negotiate a
- * total size upfront, so this works without needing to know the compressed
- * output size ahead of time.
+ * writes into a remote file stream. No local temp file is staged, bytes go over
+ * the wire as the archive is being built. The stream needs no total size
+ * upfront, so this works without knowing the compressed output size ahead of
+ * time.
  *
  * V1 scope: only regular files. Directory entries in @p options.localPaths are
  * silently skipped (callers should flatten ahead of time).
@@ -75,7 +74,7 @@ class ArchiveUploadOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    ArchiveUploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options);
+    ArchiveUploadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, Options options);
     ~ArchiveUploadOperation() override;
     ArchiveUploadOperation(ArchiveUploadOperation const&) = delete;
     ArchiveUploadOperation& operator=(ArchiveUploadOperation const&) = delete;
@@ -118,7 +117,7 @@ class ArchiveUploadOperation : public Operation
 
     RemoteIo::ProcessingStrand* strand() const override
     {
-        return strandOf(sftp_);
+        return strandOf(fileSystem_);
     }
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
@@ -153,7 +152,7 @@ class ArchiveUploadOperation : public Operation
         Paths::LocalPath source{};
     };
 
-    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
     std::expected<void, Error> flattenRoots();
     /**
      * @brief Expand a preceding LocalScanOperation's flat entry vector into
@@ -170,19 +169,19 @@ class ArchiveUploadOperation : public Operation
     std::expected<void, Error> openNextEntryInStrand();
     std::expected<bool, Error> readChunkInStrand();
     std::expected<void, Error> finaliseEntryInStrand();
-    std::expected<void, Error> finaliseArchiveInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> finaliseArchiveInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
     bool isPayloadEntry(ResolvedEntry const& entry) const noexcept;
 
     void cleanup();
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     Options options_;
     std::vector<ResolvedEntry> resolvedEntries_{};
     std::optional<TarArchive::Writer> writer_{std::nullopt};
     std::optional<TarArchive::EntryWriter> currentEntry_{std::nullopt};
     std::ifstream currentLocalFile_{};
-    std::weak_ptr<SecureShell::IFileStream> remoteStream_{};
+    std::weak_ptr<RemoteIo::IRemoteFileStream> remoteStream_{};
     std::size_t currentEntryIndex_{0u};
     std::uint64_t currentEntryBytesRead_{0u};
     std::uint64_t totalBytesTransferred_{0u};

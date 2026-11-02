@@ -575,6 +575,35 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(archivePath.generic_string() + ".filepart"));
     }
 
+    TEST_F(ArchiveDownloadOperationTests, AnEntryWhoseCloseTheServerRefusesFailsTheArchive)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto archivePath = archiveDir_.path() / "refused.tar";
+        {
+            std::ofstream existing{archivePath, std::ios::binary};
+            existing << "existing";
+        }
+        ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+        ArchiveDownloadOperation operation{
+            sftp,
+            {
+                .roots = {makeFileEntry("/home/test/file1.txt", 17u)},
+                .localArchivePath = toLocal(archivePath),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+
+        const auto result = runToCompletion(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, ArchiveDownloadOperation::ErrorType::SftpError);
+        std::ifstream kept{archivePath, std::ios::binary};
+        EXPECT_EQ(std::string(std::istreambuf_iterator<char>{kept}, std::istreambuf_iterator<char>{}), "existing");
+        EXPECT_FALSE(std::filesystem::exists(archivePath.generic_string() + ".filepart"));
+    }
+
     TEST_F(ArchiveDownloadOperationTests, RefusesToOverwriteExistingArchive)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
