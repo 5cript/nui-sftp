@@ -69,8 +69,8 @@ namespace SecureShell
         }
 
         /**
-         * @brief Retrieves the last error that occurred. May contain success. A closed connection or channel is
-         *        SSH_FX_CONNECTION_LOST, whatever the server answered before.
+         * @brief Retrieves the last error that occurred. May contain success. A closed connection, channel or session
+         *        is SSH_FX_CONNECTION_LOST, whatever the server answered before.
          */
         SftpError lastError() const;
 
@@ -457,13 +457,15 @@ namespace SecureShell
 
       private:
         /**
-         * @brief Asserts the call runs in the processing thread and refuses an unset path before it reaches the
-         *        server, where an empty path would mean the start directory.
+         * @brief Asserts the call runs in the processing thread. Refuses a closed session, whose null libssh session
+         *        most libssh calls dereference, and an unset path, which the server would take as the start directory.
          */
         template <typename... PathTs>
         std::expected<void, Error> requireSetInStrand(PathTs const&... paths) const
         {
             assert(strand_->withinProcessingThread());
+            if (!session_)
+                return std::unexpected(lastError());
             if ((paths.empty() || ...))
                 return std::unexpected(unsetPathError());
             return {};
