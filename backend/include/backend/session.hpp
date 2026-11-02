@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ssh/session.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <ids/ids.hpp>
 #include <backend/sftp/operation_queue.hpp>
 #include <backend/local_operation_queue.hpp>
@@ -24,7 +24,7 @@
  * @brief This session is the implementation equivalent of one tab in the UI.
  * A tab in the UI represents everything related to one server address and port.
  *
- * These sessions are managed by SessionManager. Each session has an id, as well as ssh channels, sftp channels and
+ * These sessions are managed by SessionManager. Each session has an id, ssh channels and file system channels.
  */
 class Session
     : public RpcHelper::StrandRpc
@@ -79,7 +79,7 @@ class Session
 
   private:
     /**
-     * @brief The server side of the file tracker: this session's operation queue and SFTP channels.
+     * @brief The server side of the file tracker: this session's operation queue and file system channels.
      */
     class FileTrackingRemote;
 
@@ -100,9 +100,9 @@ class Session
     void registerRpcFileTracker();
 
     /**
-     * @brief An open SFTP channel of this session, nothing when there is none.
+     * @brief An open file system channel of this session, nothing when there is none.
      */
-    std::shared_ptr<SecureShell::SftpSession> anySftpChannel() const;
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> anySftpChannel() const;
 
     /**
      * Handles calls from the frontend to create a new channel with the following payload:
@@ -153,7 +153,7 @@ class Session
     void registerRpcChannelPtyResize();
 
     /**
-     * Handles calls from the frontend to list a directory over sftp with the following payload:
+     * Handles calls from the frontend to list a remote directory with the following payload:
      * {
      *     sftpChannelId: string,
      *     path: string
@@ -162,7 +162,7 @@ class Session
     void registerRpcSftpListDirectory();
 
     /**
-     * Handles calls from the frontend to get the remote home directory over sftp with the following payload:
+     * Handles calls from the frontend to get the remote home directory with the following payload:
      * {
      *     sftpChannelId: string
      * }
@@ -170,7 +170,7 @@ class Session
     void registerRpcSftpHomeDirectory();
 
     /**
-     * Handles calls from the frontend to read the XDG user directories over sftp with the following payload:
+     * Handles calls from the frontend to read the remote XDG user directories with the following payload:
      * {
      *     sftpChannelId: string,
      *     home: string
@@ -179,7 +179,7 @@ class Session
     void registerRpcSftpUserDirectories();
 
     /**
-     * Handles calls from the frontend to create a directory over sftp with the following payload:
+     * Handles calls from the frontend to create a remote directory with the following payload:
      * {
      *     sftpChannelId: string,
      *     path: string
@@ -188,7 +188,7 @@ class Session
     void registerRpcSftpCreateDirectory();
 
     /**
-     * Handles calls from the frontend to create a file over sftp with the following payload:
+     * Handles calls from the frontend to create a remote file with the following payload:
      * {
      *     sftpChannelId: string,
      *     path: string
@@ -197,7 +197,7 @@ class Session
     void registerRpcSftpCreateFile();
 
     /**
-     * Handles calls from the frontend to delete files over sftp with the following payload:
+     * Handles calls from the frontend to delete remote files with the following payload:
      * {
      *     sftpChannelId: string,
      *     paths: vector<string>
@@ -215,7 +215,7 @@ class Session
     void registerRpcSftpPreDeleteChecks();
 
     /**
-     * Handles calls from the frontend to rename a file over sftp with the following payload:
+     * Handles calls from the frontend to rename a remote file with the following payload:
      * {
      *     sftpChannelId: string,
      *     oldName: string,
@@ -225,7 +225,7 @@ class Session
     void registerRpcSftpRename();
 
     /**
-     * Handles calls from the frontend to stat a file over sftp with the following payload:
+     * Handles calls from the frontend to stat a remote file with the following payload:
      * {
      *     sftpChannelId: string,
      *     path: string
@@ -234,7 +234,7 @@ class Session
     void registerRpcSftpStat();
 
     /**
-     * Handles calls from the frontend to stat a file over sftp with the following payload:
+     * Handles calls from the frontend to stat a remote file with the following payload:
      * {
      *     sftpChannelId: string,
      *     paths: vector<path>
@@ -369,9 +369,9 @@ class Session
     }
 
     /**
-     * @brief Queues operations on the SFTP channel @p channelId with @p queue, called on the strand with the operation
-     *        queue and the channel, and answers @p reply with the JSON it returns or with the message it fails with,
-     *        which the log names as the failure to queue @p description. A queued request wakes the queue.
+     * @brief Queues operations on the file system channel @p channelId with @p queue, called on the strand with the
+     *        operation queue and the channel, and answers @p reply with the JSON it returns or with the message it
+     *        fails with, which the log names as the failure to queue @p description. A queued request wakes the queue.
      */
     template <typename QueueT>
     void queueOnChannel(RpcHelper::RpcOnce&& reply, Ids::ChannelId channelId, std::string description, QueueT&& queue)
@@ -379,12 +379,12 @@ class Session
         withSftpChannelDo(
             std::move(channelId),
             [description = std::move(description), queue = std::forward<QueueT>(queue)](
-                RpcHelper::RpcOnce&& reply, Session& self, std::shared_ptr<SecureShell::SftpSession> const& channel
+                RpcHelper::RpcOnce&& reply, Session& self, std::shared_ptr<RemoteIo::IRemoteFileSystem> const& channel
             ) mutable
             {
                 if (!self.operationQueue_)
                     return reply.error("Session no longer exists");
-                std::expected<nlohmann::json, std::string> queued = queue(*self.operationQueue_, *channel);
+                std::expected<nlohmann::json, std::string> queued = queue(*self.operationQueue_, channel);
                 if (!queued)
                 {
                     Log::error("Failed to queue {}: {}", description, queued.error());
@@ -425,7 +425,7 @@ class Session
     /// sessions it created.
     BulkResumeRegistry* bulkResumeRegistry_{};
     std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::Channel>, Ids::IdHash> channels_{};
-    std::unordered_map<Ids::ChannelId, std::weak_ptr<SecureShell::SftpSession>, Ids::IdHash> sftpChannels_{};
+    std::unordered_map<Ids::ChannelId, std::weak_ptr<RemoteIo::IRemoteFileSystem>, Ids::IdHash> sftpChannels_{};
     /** @brief The temp file suffix of uploads, which names where a replaced item is kept during a rename. */
     std::string remoteTempFileSuffix_;
     /** @brief Runs the local deletes of this session, which go on when it ends. */

@@ -1,4 +1,5 @@
 #include <backend/sftp/bulk_transfer_operation.hpp>
+#include <backend/sftp/transfer_path.hpp>
 #include <log/log.hpp>
 #include <utility/directory_traversal.hpp>
 
@@ -12,7 +13,7 @@ namespace
 {
     /**
      * @brief The skipped entry at @p index with why @p error says it was skipped: the local problem of a local
-     *        failure, the kind of a remote one.
+     *        failure, the kind of a remote one and the message of a plain remote failure.
      */
     SharedData::IndexedFailure indexedFailureOf(std::size_t index, Operation::Error const& error)
     {
@@ -22,11 +23,18 @@ namespace
                 return std::nullopt;
             return error.remoteError->kind;
         }();
+        const auto remoteMessage = [&error, &remoteKind]() -> std::optional<std::string>
+        {
+            if (remoteKind != RemoteIo::RemoteErrorKind::Failure || error.remoteError->message.empty())
+                return std::nullopt;
+            return error.remoteError->message;
+        }();
         return SharedData::IndexedFailure{
             .index = static_cast<std::uint32_t>(index),
             .type = error.type,
             .localProblem = error.localProblem,
             .remoteErrorKind = remoteKind,
+            .remoteMessage = remoteMessage,
         };
     }
 }
@@ -651,6 +659,12 @@ BulkTransferOperation::entryPaths(std::size_t entryIndex) const
     if (prescanned())
         return prescannedPaths_[entryIndex];
     return BulkTransferDetail::treeEntryPaths(entries_, entryIndex, common_.remotePath, common_.localPath);
+}
+
+bool BulkTransferOperation::childTakesAsynchronousPath(std::uint64_t size) const
+{
+    const auto locked = fileSystem_.lock();
+    return takesAsynchronousPath(locked ? locked->capabilities() : RemoteIo::Capabilities{}, size);
 }
 
 namespace BulkTransferDetail

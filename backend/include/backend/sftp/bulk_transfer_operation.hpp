@@ -281,6 +281,11 @@ class BulkTransferOperation : public Operation
     }
 
     /**
+     * @brief Whether a child transferring @p size bytes takes the asynchronous path, see takesAsynchronousPath.
+     */
+    bool childTakesAsynchronousPath(std::uint64_t size) const;
+
+    /**
      * @brief Tree mode only: creates the bulk's root directory from entries()[0].
      */
     virtual std::expected<void, Error>

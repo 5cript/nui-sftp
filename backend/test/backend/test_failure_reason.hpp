@@ -141,6 +141,28 @@ namespace Test::FailureReason
         );
     }
 
+    TEST(FailureReasonTests, NoFreeConnectionAnUntrustedServerAndAFailedLoginAreConnectionProblems)
+    {
+        EXPECT_EQ(failureInfoOf(remoteFailure(RemoteErrorKind::Busy)).reason, UploadFailureReason::ConnectionProblem);
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::TrustRequired)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::AuthenticationFailed)).reason,
+            UploadFailureReason::ConnectionProblem
+        );
+    }
+
+    TEST(FailureReasonTests, ACancelledOrTruncatedTransferIsNoRefusalOfTheServer)
+    {
+        const auto cancelled = failureInfoOf(remoteFailure(RemoteErrorKind::Cancelled, "Cancelled"));
+        EXPECT_EQ(cancelled.reason, UploadFailureReason::Unknown);
+        const auto truncated = failureInfoOf(remoteFailure(RemoteErrorKind::Truncated, "The file ended early"));
+        EXPECT_EQ(truncated.reason, UploadFailureReason::Unknown);
+        ASSERT_TRUE(truncated.detail.has_value());
+        EXPECT_NE(truncated.detail->find("The file ended early"), std::string::npos);
+    }
+
     TEST(FailureReasonTests, AGoneSessionOrAnSshErrorIsAConnectionProblem)
     {
         const auto wrapped = [](RemoteIo::WrapperErrors wrapperError)
@@ -225,6 +247,14 @@ namespace Test::FailureReason
             indexed({.type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::Failure});
         EXPECT_EQ(refused.reason, UploadFailureReason::ServerRefused);
         EXPECT_EQ(refused.detail, "Failure");
+
+        const auto told = indexed({
+            .type = OperationErrorType::SftpError,
+            .remoteErrorKind = RemoteErrorKind::Failure,
+            .remoteMessage = "Directory not empty",
+        });
+        EXPECT_EQ(told.reason, UploadFailureReason::ServerRefused);
+        EXPECT_EQ(told.detail, "Directory not empty");
 
         const auto unknown = indexed({.type = OperationErrorType::SizeMismatch});
         EXPECT_EQ(unknown.reason, UploadFailureReason::Unknown);

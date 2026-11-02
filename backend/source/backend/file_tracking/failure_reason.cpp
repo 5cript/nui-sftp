@@ -50,13 +50,16 @@ namespace FileTracking
         }
 
         /**
-         * @brief The reason of what went wrong on the remote side, nothing when it does not tell.
+         * @brief The reason of what went wrong on the remote side, nothing when it does not tell: a cancelled or
+         *        truncated transfer is no answer of the server.
          */
         std::optional<UploadFailureReason> remoteReasonOf(RemoteErrorKind kind)
         {
             switch (kind)
             {
                 case RemoteErrorKind::None:
+                case RemoteErrorKind::Cancelled:
+                case RemoteErrorKind::Truncated:
                     return std::nullopt;
                 case RemoteErrorKind::PermissionDenied:
                     return UploadFailureReason::PermissionDeniedOnServer;
@@ -66,11 +69,20 @@ namespace FileTracking
                 case RemoteErrorKind::NoConnection:
                 case RemoteErrorKind::ConnectionLost:
                 case RemoteErrorKind::ConnectionLimit:
+                case RemoteErrorKind::Busy:
                 case RemoteErrorKind::TimedOut:
+                case RemoteErrorKind::TrustRequired:
+                case RemoteErrorKind::AuthenticationFailed:
                     return UploadFailureReason::ConnectionProblem;
-                default:
+                case RemoteErrorKind::NoSuchFile:
+                case RemoteErrorKind::AlreadyExists:
+                case RemoteErrorKind::Unsupported:
+                case RemoteErrorKind::EndOfFile:
+                case RemoteErrorKind::ProtocolViolation:
+                case RemoteErrorKind::Failure:
                     return UploadFailureReason::ServerRefused;
             }
+            return std::nullopt;
         }
 
         /**
@@ -158,7 +170,9 @@ namespace FileTracking
         if (failure.remoteErrorKind)
         {
             if (const auto remote = remoteReasonOf(*failure.remoteErrorKind))
-                return {.reason = *remote, .detail = kindInWords(*failure.remoteErrorKind)};
+                return {
+                    .reason = *remote, .detail = failure.remoteMessage.value_or(kindInWords(*failure.remoteErrorKind))
+                };
         }
         return {
             .reason = UploadFailureReason::Unknown,

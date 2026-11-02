@@ -1,5 +1,4 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
-#include <constants/sftp.hpp>
 #include <log/log.hpp>
 #include <utility/checked_symlink_status.hpp>
 #include <utility/permissions.hpp>
@@ -155,7 +154,7 @@ std::unique_ptr<Operation> BulkUploadOperation::makeChild(
     uploadOptions.localPath = paths.local;
     uploadOptions.mayOverwrite = uploadOptions.mayOverwrite || paths.mayOverwrite;
     uploadOptions.comparedDestination = paths.comparedDestination;
-    uploadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
+    uploadOptions.bigFileOptimized = childTakesAsynchronousPath(entry.size);
     uploadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
         onProgress(current, max);

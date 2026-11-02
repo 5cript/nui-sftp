@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace SharedData
@@ -31,8 +32,10 @@ namespace SharedData
         std::optional<LocalFileProblem> localProblem{};
         /** @brief What went wrong on the remote side, for a remote error. */
         std::optional<RemoteIo::RemoteErrorKind> remoteErrorKind{};
+        /** @brief The message of a remote error of the kind Failure, which tells nothing by itself. */
+        std::optional<std::string> remoteMessage{};
     };
-    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type, localProblem, remoteErrorKind))
+    BOOST_DESCRIBE_STRUCT(IndexedFailure, (), (index, type, localProblem, remoteErrorKind, remoteMessage))
 
     struct OperationCompleted
     {

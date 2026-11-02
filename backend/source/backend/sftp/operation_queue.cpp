@@ -1,5 +1,4 @@
 #include <backend/sftp/operation_queue.hpp>
-#include <constants/sftp.hpp>
 #include <utility/error_message.hpp>
 #include <utility/localized_message.hpp>
 #include <backend/rpc_helper.hpp>
@@ -9,6 +8,7 @@
 #include <backend/local_delete_guard.hpp>
 #include <backend/sftp/parallel_budget.hpp>
 #include <backend/sftp/sequential_scan_progress.hpp>
+#include <backend/sftp/transfer_path.hpp>
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
@@ -364,14 +364,19 @@ OperationQueue::OperationQueue(
     : RpcHelper::StrandRpc{executor, strand, wnd, hub}
     , sftpOpts_{std::move(sftpOpts)}
     , sessionId_{std::move(sessionId)}
-    , parallelism_{std::max(1, parallelism)}
-    , bulkConcurrency_{std::clamp(
-          sftpOpts_.bulkConcurrency.value_or(Persistence::defaultBulkConcurrency),
-          1,
-          std::max(1, parallelism_ - 1)
-      )}
+    , parallelism_{parallelism}
+    , bulkConcurrency_{sftpOpts_.bulkConcurrency.value_or(Persistence::defaultBulkConcurrency)}
     , keptTransfers_{std::move(keptTransfers)}
-{}
+{
+    limitParallelism(std::nullopt);
+}
+
+void OperationQueue::limitParallelism(std::optional<std::size_t> maxParallelTransfers)
+{
+    const auto limits = parallelLimits(parallelism_, bulkConcurrency_, maxParallelTransfers);
+    parallelism_ = limits.parallelism;
+    bulkConcurrency_ = limits.bulkConcurrency;
+}
 
 std::string OperationQueue::rpcName(std::string_view event) const
 {
@@ -388,7 +393,7 @@ auto OperationQueue::makeScanProgressCallback(std::string_view eventName, Ids::O
         auto self = weak.lock();
         if (!self)
             return;
-        // May be invoked from the SFTP processing strand (batched umbrella), so the RPC call goes back onto the asio
+        // May be invoked from the processing strand (batched umbrella), so the RPC call goes back onto the asio
         // strand that owns the hub, in order with the transfer progress of the same batch.
         deliverProgress(
             *self,
@@ -443,7 +448,7 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
         auto self = weak.lock();
         if (!self)
             return;
-        // Invoked from the SFTP processing strand, marshal the RPC call back onto the asio
+        // Invoked from the processing strand, marshal the RPC call back onto the asio
         // strand that owns the hub.
         progress.operationId = operationId;
         deliverProgress(
@@ -523,7 +528,8 @@ void OperationQueue::cancel(Ids::OperationId id, PartialFilesOnCancel partialFil
     );
 }
 
-std::expected<void, std::string> OperationQueue::continueKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
+std::expected<void, std::string>
+OperationQueue::continueKept(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id)
 {
     auto kept = keptTransfers_->take(id);
     if (!kept)
@@ -535,14 +541,14 @@ std::expected<void, std::string> OperationQueue::continueKept(SecureShell::SftpS
     }
     // A failed continuation queued nothing, so the files it kept stay for another try or a discard.
     auto continuation = *kept->continuation;
-    auto queued = queueContinuation(sftp, id, std::move(continuation));
+    auto queued = queueContinuation(fileSystem, id, std::move(continuation));
     if (!queued)
         keptTransfers_->store(id, *std::move(kept));
     return queued;
 }
 
 std::expected<void, std::string> OperationQueue::queueContinuation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId const& id,
     KeptContinuation continuation
 )
@@ -557,7 +563,7 @@ std::expected<void, std::string> OperationQueue::queueContinuation(
         Utility::overloaded{
             [&](BulkResumeEntry& bulk) -> std::expected<void, std::string>
             {
-                if (!adoptBulkResume(sftp, id, std::move(bulk)))
+                if (!adoptBulkResume(fileSystem, id, std::move(bulk)))
                     return std::unexpected(fmt::format("the backup of '{}' was refused", id.value()));
                 return {};
             },
@@ -566,7 +572,7 @@ std::expected<void, std::string> OperationQueue::queueContinuation(
                 // The big-file path, the small-file path does not continue a partial file.
                 const auto added = single.type == SharedData::OperationType::Download
                     ? addDownloadOperation(
-                          sftp,
+                          fileSystem,
                           id,
                           single.localPath,
                           single.remotePath,
@@ -576,7 +582,7 @@ std::expected<void, std::string> OperationQueue::queueContinuation(
                           single.createMissingDirectories
                       )
                     : addUploadOperation(
-                          sftp,
+                          fileSystem,
                           id,
                           single.localPath,
                           single.remotePath,
@@ -594,7 +600,10 @@ std::expected<void, std::string> OperationQueue::queueContinuation(
     );
 }
 
-void OperationQueue::discardKept(SecureShell::SftpSession& sftp, Ids::OperationId const& id)
+void OperationQueue::discardKept(
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
+    Ids::OperationId const& id
+)
 {
     auto kept = keptTransfers_->take(id);
     if (!kept)
@@ -612,16 +621,16 @@ void OperationQueue::discardKept(SecureShell::SftpSession& sftp, Ids::OperationI
     }
     if (partialFiles.remote.empty())
         return;
-    sftp.perform(
-        [weak = sftp.weak_from_this(), remote = std::move(partialFiles.remote)]()
+    fileSystem->perform(
+        [weak = std::weak_ptr<RemoteIo::IRemoteFileSystem>{fileSystem}, remote = std::move(partialFiles.remote)]()
         {
-            const auto session = weak.lock();
-            if (!session)
+            const auto locked = weak.lock();
+            if (!locked)
                 return;
             // Entries that never started have none.
             for (auto const& path : remote)
             {
-                if (session->removeFileInStrand(path).has_value())
+                if (locked->inStrand(RemoteIo::RemoveFile{.path = path}).has_value())
                     Log::info("OperationQueue: removed the partial upload '{}'.", path.value());
             }
         }
@@ -649,7 +658,7 @@ void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialF
 }
 
 void OperationQueue::discardPartialUpload(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Paths::RemotePath const& remotePath,
     std::function<void()> onDone
 )
@@ -664,12 +673,15 @@ void OperationQueue::discardPartialUpload(
         boost::asio::post(*strand_, std::move(onDone));
         return;
     }
-    sftp.perform(
-        [weak = sftp.weak_from_this(), partial = *partial, strand = strand_, onDone = std::move(onDone)]()
+    fileSystem->perform(
+        [weak = std::weak_ptr<RemoteIo::IRemoteFileSystem>{fileSystem},
+            partial = *partial,
+            strand = strand_,
+            onDone = std::move(onDone)]()
         {
-            if (const auto session = weak.lock())
+            if (const auto locked = weak.lock())
             {
-                if (const auto removed = session->removeFileInStrand(partial); removed.has_value())
+                if (const auto removed = locked->inStrand(RemoteIo::RemoveFile{.path = partial}); removed.has_value())
                     Log::info("OperationQueue: removed the partial upload '{}'.", partial.value());
             }
             boost::asio::post(*strand, onDone);
@@ -956,7 +968,7 @@ void OperationQueue::leaveOutFinished(Operation const& operation, BulkResumeEntr
 }
 
 bool OperationQueue::adoptBulkResume(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId const& operationId,
     BulkResumeEntry entry
 )
@@ -1005,15 +1017,15 @@ bool OperationQueue::adoptBulkResume(
         Utility::overloaded{
             [&](SharedData::BulkDownloadRequest& request)
             {
-                addBulkDownloadOperation(sftp, std::move(request), operationIdFor, operationId);
+                addBulkDownloadOperation(fileSystem, std::move(request), operationIdFor, operationId);
             },
             [&](SharedData::BulkUploadRequest& request)
             {
-                addBulkUploadOperation(sftp, std::move(request), operationIdFor, operationId);
+                addBulkUploadOperation(fileSystem, std::move(request), operationIdFor, operationId);
             },
             [&](SharedData::BulkDeleteRequest const& request)
             {
-                addBulkDeleteOperation(sftp, request, operationId);
+                addBulkDeleteOperation(fileSystem, request, operationId);
             },
         },
         entry.request
@@ -1045,7 +1057,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     if (eligible.empty())
         return false;
 
-    // Any strand-using op lets us share a single SFTP processing-thread umbrella across
+    // Any strand-using op lets us share a single processing-thread umbrella across
     // every eligible op's workInStrand() call. Ops that do not use the strand run on the
     // caller afterwards: their work() blocks on that very thread and would deadlock inside it.
     RemoteIo::ProcessingStrand* strand = nullptr;
@@ -1128,7 +1140,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
                     std::unexpected(
                         Operation::Error{
                             .type = Operation::ErrorType::ChannelClosed,
-                            .extraInfo = "The SFTP processing thread no longer runs tasks",
+                            .extraInfo = "The processing thread no longer runs tasks",
                         }
                     )}
             );
@@ -1380,7 +1392,7 @@ std::size_t OperationQueue::splitBulkRequest(
 }
 
 std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     Paths::LocalPath const& localPath,
     Paths::RemotePath const& remotePath,
@@ -1394,17 +1406,17 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
     const WakeOnReturn wakeOnReturn{*this};
     // Assumed in strand
 
-    auto fut = sftp.lstat(remotePath);
+    auto fut = fileSystem->later(RemoteIo::Lstat{.path = remotePath});
     if (fut.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
     {
-        Log::error("Failed to stat remote sftp file: timeout");
+        Log::error("Failed to stat remote file: timeout");
         return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
     }
 
     const auto result = fut.get();
     if (!result.has_value())
     {
-        Log::error("Failed to stat remote sftp file: {}", result.error().message);
+        Log::error("Failed to stat remote file: {}", result.error().message);
         return std::unexpected(
             Operation::Error{.type = Operation::ErrorType::SftpError, .remoteError = result.error()}
         );
@@ -1422,7 +1434,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         opts.remotePath = remotePath;
         opts.localPath = localPath;
         // The caller's size can be missing, the slow path reports no speed.
-        opts.bigFileOptimized = isBigFile || result->size >= Constants::bigFileCutOff;
+        opts.bigFileOptimized = isBigFile || takesAsynchronousPath(fileSystem->capabilities(), result->size);
         opts.entry = result.value();
         opts.createMissingDirectories = createMissingDirectories;
         opts.unsafeFastMode = unsafeFastModeFor();
@@ -1433,7 +1445,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
             auto self = weak.lock();
             if (!self)
                 return;
-            // Invoked from the SFTP processing strand via workInStrand, marshal back.
+            // Invoked from the processing strand via workInStrand, marshal back.
             deliverProgress(
                 *self,
                 [weak, name, operationId, min, max, current, bytesPerSecond]()
@@ -1455,9 +1467,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         };
 
         auto& targetQueue = queueFor(mode);
-        targetQueue.emplace_back(
-            operationId, std::make_unique<DownloadOperation>(sftp.weak_from_this(), std::move(opts))
-        );
+        targetQueue.emplace_back(operationId, std::make_unique<DownloadOperation>(fileSystem, std::move(opts)));
 
         Log::info("Calling OperationQueue::{}::onOperationAdded", sessionId_.value());
         RpcHelper::callRemoteSafely(
@@ -1483,7 +1493,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         auto individualOptions = resolveDownloadOptions(transferOptions, resolvedTimeout);
         individualOptions.unsafeFastMode = unsafeFastModeFor();
         auto bulk = std::make_unique<BulkDownloadOperation>(
-            sftp.weak_from_this(),
+            fileSystem,
             BulkDownloadOperation::BulkDownloadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", operationId),
                 .remotePath = remotePath,
@@ -1497,7 +1507,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
         // The scan is part of the bulk, so cancelling or moving the card acts on both.
         bulk->scanFirst(
             std::make_unique<ScanOperation>(
-                sftp.weak_from_this(),
+                fileSystem,
                 ScanOperation::ScanOperationOptions{
                     .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                     .remotePath = remotePath,
@@ -1543,7 +1553,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
 }
 
 std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     std::vector<SharedData::ArchiveDownloadRoot> roots,
     Paths::LocalPath const& localArchivePath,
@@ -1640,12 +1650,12 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
     auto& targetQueue = queueFor(mode);
 
     // Directory roots are scanned by the archive operation itself before it packs.
-    auto archive = std::make_unique<ArchiveDownloadOperation>(sftp.weak_from_this(), std::move(opts));
+    auto archive = std::make_unique<ArchiveDownloadOperation>(fileSystem, std::move(opts));
     for (auto const& rootPath : directoryRootPaths)
     {
         archive->addScanRoot(
             std::make_unique<ScanOperation>(
-                sftp.weak_from_this(),
+                fileSystem,
                 ScanOperation::ScanOperationOptions{
                     .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                     .remotePath = rootPath,
@@ -1684,7 +1694,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
 }
 
 std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     std::vector<Paths::LocalPath> localPaths,
     Paths::RemotePath const& remoteArchivePath,
@@ -1771,7 +1781,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
     auto& targetQueue = queueFor(mode);
 
     // Directory roots are scanned by the archive operation itself before it packs.
-    auto archive = std::make_unique<ArchiveUploadOperation>(sftp.weak_from_this(), std::move(opts));
+    auto archive = std::make_unique<ArchiveUploadOperation>(fileSystem, std::move(opts));
     for (auto const& rootPath : directoryRootPaths)
     {
         archive->addScanRoot(std::make_unique<LocalScanOperation>(LocalScanOperation::ScanOperationOptions{
@@ -1808,7 +1818,7 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
 }
 
 std::size_t OperationQueue::addBulkDownloadOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     SharedData::BulkDownloadRequest request,
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
     Ids::OperationId const& bulkCardId
@@ -1828,7 +1838,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
         [&](std::size_t index, SharedData::BulkDownloadEntry const& entry, SharedData::BulkDownloadRequest const& unit)
         {
             const auto result = addDownloadOperation(
-                sftp,
+                fileSystem,
                 operationIdFor(index),
                 entry.destination,
                 entry.source,
@@ -1880,7 +1890,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
             downloadOptions.createMissingDirectories = true;
             downloadOptions.unsafeFastMode = unsafeFastModeFor();
             auto bulk = std::make_unique<BulkDownloadOperation>(
-                sftp.weak_from_this(),
+                fileSystem,
                 BulkDownloadOperation::BulkDownloadOperationOptions{
                     .overallProgressCallback = makeBulkProgressCallback("onBulkDownloadProgress", bulkCardId),
                     .remotePath = *unit.remoteRoot,
@@ -1910,7 +1920,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
 }
 
 std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     Paths::LocalPath const& localPath,
     Paths::RemotePath const& remotePath,
@@ -1962,7 +1972,8 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         opts.remotePath = remotePath;
         opts.localPath = localPath;
         // A dropped or tracked file comes without a size, the slow path reports no speed.
-        opts.bigFileOptimized = isBigFile || (!isSymlink && localFileSize(localNativePath) >= Constants::bigFileCutOff);
+        opts.bigFileOptimized = isBigFile ||
+            takesAsynchronousPath(fileSystem->capabilities(), isSymlink ? 0u : localFileSize(localNativePath));
         opts.createMissingDirectories = createMissingDirectories;
         opts.sourceMayVanish = sourceMayVanish;
         opts.comparedDestination = std::move(comparedDestination);
@@ -1998,9 +2009,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         };
 
         auto& targetQueue = queueFor(mode);
-        targetQueue.emplace_back(
-            operationId, std::make_unique<UploadOperation>(sftp.weak_from_this(), std::move(opts))
-        );
+        targetQueue.emplace_back(operationId, std::make_unique<UploadOperation>(fileSystem, std::move(opts)));
         rememberFailureToast(operationId, failureToast);
 
         RpcHelper::callRemoteSafely(
@@ -2028,7 +2037,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
         individualOptions.unsafeFastMode = unsafeFastModeFor(individualOptions.onSent);
         individualOptions.failureToast = failureToast;
         auto bulk = std::make_unique<BulkUploadOperation>(
-            sftp.weak_from_this(),
+            fileSystem,
             BulkUploadOperation::BulkUploadOperationOptions{
                 .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", operationId),
                 .remotePath = remotePath,
@@ -2087,7 +2096,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
 }
 
 std::size_t OperationQueue::addBulkUploadOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     SharedData::BulkUploadRequest request,
     std::function<Ids::OperationId(std::size_t)> const& operationIdFor,
     Ids::OperationId const& bulkCardId,
@@ -2110,7 +2119,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
         [&](std::size_t index, SharedData::BulkUploadEntry const& entry, SharedData::BulkUploadRequest const& unit)
         {
             const auto result = addUploadOperation(
-                sftp,
+                fileSystem,
                 operationIdFor(index),
                 entry.source,
                 entry.destination,
@@ -2168,7 +2177,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
             uploadOptions.unsafeFastMode = unsafeFastModeFor(onSent);
             uploadOptions.failureToast = failureToast;
             auto bulk = std::make_unique<BulkUploadOperation>(
-                sftp.weak_from_this(),
+                fileSystem,
                 BulkUploadOperation::BulkUploadOperationOptions{
                     .overallProgressCallback = makeBulkProgressCallback("onBulkUploadProgress", bulkCardId),
                     .remotePath = *unit.remoteRoot,
@@ -2199,7 +2208,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
 }
 
 SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     SyncSession const& session,
     SyncSession::ResolvedPlan plan,
     SharedData::Sync::SyncExecutionRequest const& request,
@@ -2226,7 +2235,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     std::vector<Paths::LocalPath> localDeletes;
     std::vector<SharedData::ComparedState> localDeletesCompared;
     const auto localHomes = localHomeDirectories();
-    auto remoteGuard = remoteDeleteGuard(sftp);
+    auto remoteGuard = remoteDeleteGuard(fileSystem);
     remoteGuard.trustScannedBelow(session.remoteRoot());
 
     // The plan lists a directory before its content, so a refused directory refuses every entry below it.
@@ -2339,7 +2348,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     if (!uploads.entries.empty())
     {
         addBulkUploadOperation(
-            sftp,
+            fileSystem,
             std::move(uploads),
             [](std::size_t)
             {
@@ -2351,7 +2360,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     if (!downloads.entries.empty())
     {
         addBulkDownloadOperation(
-            sftp,
+            fileSystem,
             std::move(downloads),
             [](std::size_t)
             {
@@ -2361,7 +2370,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
         );
     }
     if (!remoteDeletes.entries.empty() &&
-        addBulkDeleteOperation(remoteGuard, sftp, remoteDeletes, request.remoteDeleteId) == 0)
+        addBulkDeleteOperation(remoteGuard, fileSystem, remoteDeletes, request.remoteDeleteId) == 0)
     {
         std::ranges::move(result.remoteDeletes, std::back_inserter(result.failed));
         result.remoteDeletes.clear();
@@ -2393,13 +2402,13 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
     return result;
 }
 
-RemoteDeleteGuard OperationQueue::remoteDeleteGuard(SecureShell::SftpSession& sftp)
+RemoteDeleteGuard OperationQueue::remoteDeleteGuard(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem)
 {
-    return RemoteDeleteGuard{sftp, remoteHome_, sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)};
+    return RemoteDeleteGuard{*fileSystem, remoteHome_, sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)};
 }
 
 std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     Paths::RemotePath const& remotePath,
     bool recursive,
@@ -2408,13 +2417,13 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 )
 {
     const WakeOnReturn wakeOnReturn{*this};
-    auto guard = remoteDeleteGuard(sftp);
-    return addDeleteOperation(guard, sftp, std::move(operationId), remotePath, recursive, insertRefresh, mode);
+    auto guard = remoteDeleteGuard(fileSystem);
+    return addDeleteOperation(guard, fileSystem, std::move(operationId), remotePath, recursive, insertRefresh, mode);
 }
 
 std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     RemoteDeleteGuard& guard,
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     Paths::RemotePath const& remotePath,
     bool recursive,
@@ -2435,7 +2444,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     }
 
     // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.
-    auto statFut = sftp.lstat(remotePath);
+    auto statFut = fileSystem->later(RemoteIo::Lstat{.path = remotePath});
     if (statFut.wait_for(sftpOpts_.operationTimeout.value_or(defaultFutureTimeout)) != std::future_status::ready)
     {
         Log::error("addDeleteOperation: lstat timed out for '{}'", remotePath.value());
@@ -2446,7 +2455,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
     const auto isBulk = recursive && isDirectory;
 
     auto operation = std::make_unique<DeleteOperation>(
-        sftp.weak_from_this(),
+        fileSystem,
         DeleteOperation::DeleteOperationOptions{
             .filesRemovedProgress = makeDeleteProgressCallback(operationId),
             .remotePath = remotePath,
@@ -2459,7 +2468,7 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
         // The scan is part of the delete, so cancelling or moving the card acts on both.
         operation->addScanRoot(
             std::make_unique<ScanOperation>(
-                sftp.weak_from_this(),
+                fileSystem,
                 ScanOperation::ScanOperationOptions{
                     .progressCallback = makeScanProgressCallback("onScanProgress", operationId),
                     .remotePath = remotePath,
@@ -2488,19 +2497,19 @@ std::expected<void, Operation::Error> OperationQueue::addDeleteOperation(
 }
 
 std::size_t OperationQueue::addBulkDeleteOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     SharedData::BulkDeleteRequest const& request,
     Ids::OperationId bulkOperationId
 )
 {
     const WakeOnReturn wakeOnReturn{*this};
-    auto guard = remoteDeleteGuard(sftp);
-    return addBulkDeleteOperation(guard, sftp, request, std::move(bulkOperationId));
+    auto guard = remoteDeleteGuard(fileSystem);
+    return addBulkDeleteOperation(guard, fileSystem, request, std::move(bulkOperationId));
 }
 
 std::size_t OperationQueue::addBulkDeleteOperation(
     RemoteDeleteGuard& guard,
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     SharedData::BulkDeleteRequest const& request,
     Ids::OperationId bulkOperationId
 )
@@ -2512,7 +2521,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
     const auto resolvedTimeout = sftpOpts_.operationTimeout.value_or(defaultFutureTimeout);
 
     auto operation = std::make_unique<DeleteOperation>(
-        sftp.weak_from_this(),
+        fileSystem,
         DeleteOperation::DeleteOperationOptions{
             .filesRemovedProgress = makeDeleteProgressCallback(bulkOperationId),
             .futureTimeout = resolvedTimeout,
@@ -2545,7 +2554,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
         if (entry.isDirectory && !request.listedContentOnly)
         {
             // lstat: a symlink to a directory is removed as a link, recursing would delete the target's content.
-            auto statFuture = sftp.lstat(entry.target);
+            auto statFuture = fileSystem->later(RemoteIo::Lstat{.path = entry.target});
             if (statFuture.wait_for(resolvedTimeout) != std::future_status::ready)
             {
                 Log::error("Bulk delete: lstat timed out for '{}'", entry.target.value());
@@ -2557,7 +2566,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
             {
                 operation->addScanRoot(
                     std::make_unique<ScanOperation>(
-                        sftp.weak_from_this(),
+                        fileSystem,
                         ScanOperation::ScanOperationOptions{
                             .progressCallback = scanProgressOfNextRoot(),
                             .remotePath = entry.target,
@@ -2608,7 +2617,7 @@ std::size_t OperationQueue::addBulkDeleteOperation(
 }
 
 std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::OperationId operationId,
     Paths::RemotePath const& sourcePath,
     Paths::RemotePath const& destinationPath,
@@ -2619,7 +2628,7 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
     // Assumed in strand
 
     auto operation = std::make_unique<RenameOperation>(
-        sftp.weak_from_this(),
+        fileSystem,
         RenameOperation::RenameOperationOptions{
             .sourcePath = sourcePath,
             .destinationPath = destinationPath,
@@ -2646,7 +2655,7 @@ std::expected<void, Operation::Error> OperationQueue::addRenameOperation(
 }
 
 void OperationQueue::addSyncScanOperation(
-    SecureShell::SftpSession& sftp,
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
     Ids::SyncSessionId syncSessionId,
     Ids::OperationId remoteScanId,
     Ids::OperationId localScanId,
@@ -2664,7 +2673,7 @@ void OperationQueue::addSyncScanOperation(
     {
         if (RemoteDeleteGuardDetail::looksCaseFolding(remotePath))
             return true;
-        const auto home = remoteDeleteGuard(sftp).homeDirectory();
+        const auto home = remoteDeleteGuard(fileSystem).homeDirectory();
         return home && RemoteDeleteGuardDetail::looksCaseFolding(*home);
     }();
     auto session = std::make_shared<SyncSession>(
@@ -2702,7 +2711,7 @@ void OperationQueue::addSyncScanOperation(
     };
 
     auto remoteScan = std::make_unique<ScanOperation>(
-        sftp.weak_from_this(),
+        fileSystem,
         ScanOperation::ScanOperationOptions{
             .progressCallback = makeScanProgressCallback("onScanProgress", remoteScanId),
             .remotePath = remotePath,
