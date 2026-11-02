@@ -883,6 +883,15 @@ namespace SecureShell::Test
         EXPECT_EQ(openOnServer(), 1);
     }
 
+    TEST_F(SftpTests, LastErrorOfAClosedSftpSessionIsAConnectionLoss)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [client, sftp] = createSftpSession(serverStartResult->port);
+        ASSERT_TRUE(sftp->close());
+
+        EXPECT_EQ(sftp->lastError().sftpError, SSH_FX_CONNECTION_LOST);
+    }
+
     TEST_F(SftpTests, ClosingTheSftpSessionClosesItsOpenFilesOnTheServer)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

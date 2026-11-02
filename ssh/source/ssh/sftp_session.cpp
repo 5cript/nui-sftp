@@ -505,7 +505,7 @@ namespace SecureShell
     bool SftpSession::supportsExtensionInStrand(char const* name, char const* version) const
     {
         assert(strand_->withinProcessingThread());
-        return sftp_extension_supported(session_.get(), name, version) == 1;
+        return session_ && sftp_extension_supported(session_.get(), name, version) == 1;
     }
 
     std::expected<void, SftpSession::Error> SftpSession::renameNoReplaceInStrand(
@@ -771,6 +771,8 @@ namespace SecureShell
         assert(strand_->withinProcessingThread());
         if (auto home = canonicalHomeDirectoryInStrand(); home)
             return home;
+        if (!session_)
+            return std::unexpected(lastError());
 
         char* rawUser = nullptr;
         const auto optionResult = ssh_options_get(session_->session, SSH_OPTIONS_USER, &rawUser);
@@ -868,6 +870,8 @@ namespace SecureShell
 
     SftpError SftpSession::lastError() const
     {
+        if (!session_)
+            return SftpError{.message = "The SFTP session is closed", .sftpError = SSH_FX_CONNECTION_LOST};
         // libssh keeps the status of the last answer when the connection breaks.
         if ((ssh_get_status(session_->session) & (SSH_CLOSED | SSH_CLOSED_ERROR)) != 0 ||
             ssh_channel_is_open(session_->channel) == 0)
