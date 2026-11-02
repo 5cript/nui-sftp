@@ -141,6 +141,28 @@ namespace Test::FailureReason
         );
     }
 
+    TEST(FailureReasonTests, NoFreeConnectionAnUntrustedServerAndAFailedLoginAreConnectionProblems)
+    {
+        EXPECT_EQ(failureInfoOf(remoteFailure(RemoteErrorKind::Busy)).reason, UploadFailureReason::ConnectionProblem);
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::TrustRequired)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::AuthenticationFailed)).reason,
+            UploadFailureReason::ConnectionProblem
+        );
+    }
+
+    TEST(FailureReasonTests, ACancelledOrTruncatedTransferIsNoRefusalOfTheServer)
+    {
+        const auto cancelled = failureInfoOf(remoteFailure(RemoteErrorKind::Cancelled, "Cancelled"));
+        EXPECT_EQ(cancelled.reason, UploadFailureReason::Unknown);
+        const auto truncated = failureInfoOf(remoteFailure(RemoteErrorKind::Truncated, "The file ended early"));
+        EXPECT_EQ(truncated.reason, UploadFailureReason::Unknown);
+        ASSERT_TRUE(truncated.detail.has_value());
+        EXPECT_NE(truncated.detail->find("The file ended early"), std::string::npos);
+    }
+
     TEST(FailureReasonTests, AGoneSessionOrAnSshErrorIsAConnectionProblem)
     {
         const auto wrapped = [](RemoteIo::WrapperErrors wrapperError)
