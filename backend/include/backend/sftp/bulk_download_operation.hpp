@@ -30,7 +30,7 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::chrono::milliseconds progressEmitInterval{100};
     };
 
-    BulkDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, BulkDownloadOperationOptions options);
+    BulkDownloadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, BulkDownloadOperationOptions options);
     ~BulkDownloadOperation() override;
     BulkDownloadOperation(BulkDownloadOperation const&) = delete;
     BulkDownloadOperation(BulkDownloadOperation&&) = delete;
@@ -78,9 +78,12 @@ class BulkDownloadOperation : public BulkTransferOperation
 
   protected:
     std::expected<void, Error>
-    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error>
-    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) override;
+    prepareRootInStrand(RemoteIo::IRemoteFileSystem& fileSystem, SharedData::DirectoryEntry const& root) override;
+    std::expected<void, Error> createDirectoryInStrand(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        std::size_t entryIndex,
+        EntryPaths const& paths
+    ) override;
     std::unique_ptr<Operation> makeChild(
         std::size_t entryIndex,
         EntryPaths const& paths,
