@@ -26,7 +26,7 @@ class BulkUploadOperation : public BulkTransferOperation
         std::chrono::milliseconds progressEmitInterval{100};
     };
 
-    BulkUploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, BulkUploadOperationOptions options);
+    BulkUploadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, BulkUploadOperationOptions options);
     ~BulkUploadOperation() override;
     BulkUploadOperation(BulkUploadOperation const&) = delete;
     BulkUploadOperation(BulkUploadOperation&&) = delete;
@@ -71,9 +71,12 @@ class BulkUploadOperation : public BulkTransferOperation
 
   protected:
     std::expected<void, Error>
-    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error>
-    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) override;
+    prepareRootInStrand(RemoteIo::IRemoteFileSystem& fileSystem, SharedData::DirectoryEntry const& root) override;
+    std::expected<void, Error> createDirectoryInStrand(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        std::size_t entryIndex,
+        EntryPaths const& paths
+    ) override;
     std::unique_ptr<Operation> makeChild(
         std::size_t entryIndex,
         EntryPaths const& paths,
@@ -97,9 +100,9 @@ class BulkUploadOperation : public BulkTransferOperation
      * @brief Creates the missing directories between the bulk's remote root and @p path, not @p path itself.
      */
     std::expected<void, Error>
-    createMissingParentsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path);
+    createMissingParentsInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path);
     std::expected<void, Error> createRemoteDirectoryInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& path,
         SharedData::DirectoryEntry const& entry
     );

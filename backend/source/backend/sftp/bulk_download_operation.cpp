@@ -26,10 +26,10 @@ namespace
 }
 
 BulkDownloadOperation::BulkDownloadOperation(
-    std::weak_ptr<SecureShell::SftpSession> sftp,
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
     BulkDownloadOperationOptions options
 )
-    : BulkTransferOperation{std::move(sftp), toCommon(options)}
+    : BulkTransferOperation{std::move(fileSystem), toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
 {
     individualOptions_.verifiedDirectories = std::make_shared<Utility::VerifiedDirectories>();
@@ -43,14 +43,14 @@ SharedData::OperationType BulkDownloadOperation::type() const
 }
 
 std::expected<void, BulkDownloadOperation::Error>
-BulkDownloadOperation::prepareRootInStrand(SecureShell::SftpSession&, SharedData::DirectoryEntry const& root)
+BulkDownloadOperation::prepareRootInStrand(RemoteIo::IRemoteFileSystem&, SharedData::DirectoryEntry const& root)
 {
     // Base directory of the download, everything after this will be relative to this:
     return createLocalDirectory(common().localPath, root);
 }
 
 std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::createDirectoryInStrand(
-    SecureShell::SftpSession&,
+    RemoteIo::IRemoteFileSystem&,
     std::size_t entryIndex,
     EntryPaths const& paths
 )
@@ -131,7 +131,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
     downloadOptions.entry = entry;
     downloadOptions.linkFreeRoot = common().localPath;
 
-    return std::make_unique<DownloadOperation>(sftp(), std::move(downloadOptions));
+    return std::make_unique<DownloadOperation>(fileSystem(), std::move(downloadOptions));
 }
 
 bool BulkDownloadOperation::isSkippableError(Error const& error) const
