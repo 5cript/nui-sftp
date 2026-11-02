@@ -170,7 +170,9 @@ namespace FileTracking
         if (failure.remoteErrorKind)
         {
             if (const auto remote = remoteReasonOf(*failure.remoteErrorKind))
-                return {.reason = *remote, .detail = kindInWords(*failure.remoteErrorKind)};
+                return {
+                    .reason = *remote, .detail = failure.remoteMessage.value_or(kindInWords(*failure.remoteErrorKind))
+                };
         }
         return {
             .reason = UploadFailureReason::Unknown,

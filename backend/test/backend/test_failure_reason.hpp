@@ -248,6 +248,14 @@ namespace Test::FailureReason
         EXPECT_EQ(refused.reason, UploadFailureReason::ServerRefused);
         EXPECT_EQ(refused.detail, "Failure");
 
+        const auto told = indexed({
+            .type = OperationErrorType::SftpError,
+            .remoteErrorKind = RemoteErrorKind::Failure,
+            .remoteMessage = "Directory not empty",
+        });
+        EXPECT_EQ(told.reason, UploadFailureReason::ServerRefused);
+        EXPECT_EQ(told.detail, "Directory not empty");
+
         const auto unknown = indexed({.type = OperationErrorType::SizeMismatch});
         EXPECT_EQ(unknown.reason, UploadFailureReason::Unknown);
         EXPECT_EQ(unknown.detail, "SizeMismatch");

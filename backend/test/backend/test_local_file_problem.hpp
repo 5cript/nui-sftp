@@ -410,6 +410,34 @@ namespace Test
         EXPECT_EQ(failure.index, 0u);
         EXPECT_EQ(failure.type, SharedData::OperationErrorType::SftpError);
         EXPECT_EQ(failure.remoteErrorKind, RemoteIo::RemoteErrorKind::NoSuchFile);
+        EXPECT_FALSE(failure.remoteMessage.has_value());
         EXPECT_FALSE(failure.localProblem.has_value());
+    }
+
+    TEST_F(LocalFileProblemUploadTests, ABulkUploadTellsTheMessageOfAnEntryThatFailedPlainly)
+    {
+        writeSource(sources_.path() / "Documents", "a file over a directory");
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [session, sftp] = createSftpSession(serverStartResult->port);
+        BulkUploadOperation operation{
+            sftp, {.remotePath = remote("/home/test"), .localPath = toLocal(sources_.path()), .failFast = false}
+        };
+        operation.setPrescannedFileList({
+            {
+                .source = toLocal(sources_.path() / "Documents"),
+                .destination = remote("/home/test/Documents"),
+                .sizeBytes = 23u,
+                .mayOverwrite = true,
+            },
+        });
+
+        const auto ended = workUntilEnded(operation);
+
+        ASSERT_TRUE(ended.has_value()) << ended.error().toString();
+        ASSERT_EQ(operation.indexedFailures().size(), 1u);
+        auto const& failure = operation.indexedFailures().front();
+        EXPECT_EQ(failure.remoteErrorKind, RemoteIo::RemoteErrorKind::Failure);
+        ASSERT_TRUE(failure.remoteMessage.has_value());
+        EXPECT_NE(failure.remoteMessage->find("is a directory"), std::string::npos) << *failure.remoteMessage;
     }
 }

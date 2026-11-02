@@ -13,7 +13,7 @@ namespace
 {
     /**
      * @brief The skipped entry at @p index with why @p error says it was skipped: the local problem of a local
-     *        failure, the kind of a remote one.
+     *        failure, the kind of a remote one and the message of a plain remote failure.
      */
     SharedData::IndexedFailure indexedFailureOf(std::size_t index, Operation::Error const& error)
     {
@@ -23,11 +23,18 @@ namespace
                 return std::nullopt;
             return error.remoteError->kind;
         }();
+        const auto remoteMessage = [&error, &remoteKind]() -> std::optional<std::string>
+        {
+            if (remoteKind != RemoteIo::RemoteErrorKind::Failure || error.remoteError->message.empty())
+                return std::nullopt;
+            return error.remoteError->message;
+        }();
         return SharedData::IndexedFailure{
             .index = static_cast<std::uint32_t>(index),
             .type = error.type,
             .localProblem = error.localProblem,
             .remoteErrorKind = remoteKind,
+            .remoteMessage = remoteMessage,
         };
     }
 }
