@@ -7,6 +7,7 @@ add_executable(
     openssh_client.cpp
     openssh_server.cpp
     operation_driver.cpp
+    queue_client.cpp
     report.cpp
     workload.cpp
 )
