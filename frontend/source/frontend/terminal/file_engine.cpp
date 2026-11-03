@@ -1103,11 +1103,10 @@ void FileEngine::remove(
                             filesAndEmptyDirs.push_back(std::move(directory));
                     }
 
-                    // Always route through the queue (bulk delete), never a synchronous
-                    // deleteFiles RPC: a large selection blows the single futureTimeout
-                    // even though the server keeps deleting, surfacing a spurious
-                    // "Failed to delete files: timeout". nonEmpties may be empty, in which
-                    // case the caller enqueues the file/empty-dir batch immediately.
+                    // Always route through the queue (bulk delete), never the deleteFiles RPC:
+                    // that removes the whole selection in one call on the processing thread,
+                    // without progress and without a way to cancel it. nonEmpties may be empty,
+                    // in which case the caller enqueues the file/empty-dir batch immediately.
                     onNonEmptyDirectoriesFound(std::move(filesAndEmptyDirs), std::move(nonEmpties));
                 },
                 channelId.value().value(),
