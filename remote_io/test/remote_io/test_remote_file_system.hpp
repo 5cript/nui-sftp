@@ -18,6 +18,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -226,6 +227,24 @@ namespace RemoteIo::Test
                     }
                 );
             };
+        }
+
+        /**
+         * @brief Pushes to the strand from @p other, a new thread, and tells whether that got through within
+         *        replyTimeout, which it cannot while this thread holds the strand's lock. Join @p other afterwards.
+         */
+        bool anotherThreadPushes(std::thread& other) const
+        {
+            auto pushed = std::make_shared<std::promise<void>>();
+            auto done = pushed->get_future();
+            other = std::thread{
+                [pushed, strand = strand_.get()]()
+                {
+                    std::ignore = strand->pushTask([]() {});
+                    pushed->set_value();
+                }
+            };
+            return done.wait_for(replyTimeout) == std::future_status::ready;
         }
 
         ProcessingThread processingThread_{};
@@ -598,5 +617,49 @@ namespace RemoteIo::Test
         ASSERT_FALSE(answered->has_value());
         EXPECT_EQ(answered->error().wrapperError, WrapperErrors::TaskPushFailed);
         EXPECT_FALSE(ran);
+    }
+
+    TEST_F(RemoteFileSystemTests, TheCallbackOfARefusedTaskRunsWithoutTheStrandsLock)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        processingThread_.stop();
+        using Returned = std::expected<bool, RemoteError>;
+        std::optional<bool> pushedMeanwhile{};
+        std::thread other{};
+
+        fileSystem->perform(
+            []() -> Returned
+            {
+                return true;
+            },
+            [&](Returned)
+            {
+                pushedMeanwhile = anotherThreadPushes(other);
+            }
+        );
+        other.join();
+
+        ASSERT_TRUE(pushedMeanwhile.has_value()) << "a refused task completes before perform returns";
+        EXPECT_TRUE(*pushedMeanwhile) << "another thread waited for the strand while the callback ran";
+    }
+
+    TEST_F(RemoteFileSystemTests, TheCallbackOfAnOperationRefusedLaterRunsWithoutTheStrandsLock)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        processingThread_.stop();
+        std::optional<bool> pushedMeanwhile{};
+        std::thread other{};
+
+        fileSystem->later(
+            Lstat{.path = remote("/home/user/file.txt")},
+            [&](OperationResult<Lstat>)
+            {
+                pushedMeanwhile = anotherThreadPushes(other);
+            }
+        );
+        other.join();
+
+        ASSERT_TRUE(pushedMeanwhile.has_value()) << "a refused operation completes before later returns";
+        EXPECT_TRUE(*pushedMeanwhile) << "another thread waited for the strand while the callback ran";
     }
 }

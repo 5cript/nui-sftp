@@ -30,7 +30,8 @@ namespace RemoteIo
         /**
          * @brief Pushes a task, but not if the strand has been finalized and not simultaneously with any other push.
          *
-         * @param task The task to push.
+         * @param task The task to push. A refused one is destroyed after the lock is released: what it holds may
+         *        complete then, and other threads push meanwhile.
          * @return true If the task was pushed.
          * @return false If the strand has been finalized or the task was empty.
          */
