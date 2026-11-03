@@ -162,7 +162,8 @@ class OperationQueue
 
     /**
      * @brief Runs @p request on the strand once no batch of this queue works on a processing thread, at once when
-     *        none does. The requests that cancel, drop, move or pause queued operations go through here. On the strand.
+     *        none does. The requests that cancel, drop, move or pause queued operations go through here. It only runs
+     *        while the queue exists, so it may refer to it. On the strand.
      */
     void afterBatch(std::function<void()> request);
 
@@ -556,15 +557,21 @@ class OperationQueue
      */
     bool applyResults(
         QueuedOperations& queue,
-        std::vector<WorkResult>& results,
+        std::vector<WorkResult> const& results,
         std::vector<std::function<void()>>& heldProgress
     );
 
     /**
-     * @brief afterBatch on the strand, callable from any thread.
+     * @brief Runs @p request with the queue on the strand, callable from any thread. Nothing runs once the queue is
+     *        gone.
      */
     template <typename FunctionT>
-    void afterBatchWithinStrand(FunctionT&& function);
+    void onStrand(FunctionT&& request);
+
+    /**
+     * @brief Moves the queued operation @p operationId to @p newIndex, see moveOperation(). On the strand.
+     */
+    void reorder(Ids::OperationId const& operationId, std::size_t newIndex);
 
     /**
      * @brief The queue an operation of @p mode goes to.

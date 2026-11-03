@@ -385,9 +385,8 @@ struct OperationQueue::Batch
     std::vector<WorkResult> results{};
     std::vector<HeldProgress::Delivery> heldProgress{};
     bool ran{false};
+    /** @brief Set once the batch left its processing thread, run or dropped. */
     std::atomic_bool returned{false};
-    std::promise<void> returning{};
-    std::shared_future<void> hasReturned{returning.get_future().share()};
 
     void run()
     {
@@ -397,13 +396,21 @@ struct OperationQueue::Batch
     }
 
     /**
+     * @brief Blocks until the batch left its processing thread.
+     */
+    void waitUntilReturned() const
+    {
+        returned.wait(false);
+    }
+
+    /**
      * @brief Hands @p batch back to the strand of its queue, once.
      */
     static void returnToStrand(std::shared_ptr<Batch> const& batch)
     {
         if (batch->returned.exchange(true))
             return;
-        batch->returning.set_value();
+        batch->returned.notify_all();
         boost::asio::post(
             *batch->queueStrand,
             [batch]()
@@ -436,13 +443,13 @@ struct OperationQueue::Batch
 };
 
 template <typename FunctionT>
-void OperationQueue::afterBatchWithinStrand(FunctionT&& function)
+void OperationQueue::onStrand(FunctionT&& request)
 {
     within_strand_do(
-        [weak = weak_from_this(), function = std::forward<FunctionT>(function)]() mutable
+        [weak = weak_from_this(), request = std::forward<FunctionT>(request)]() mutable
         {
             if (const auto self = weak.lock())
-                self->afterBatch(std::move(function));
+                request(*self);
         }
     );
 }
@@ -564,22 +571,23 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
 void OperationQueue::cancelAll(PartialFilesOnCancel partialFiles)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    afterBatchWithinStrand(
-        [weak = weak_from_this(), partialFiles]()
+    onStrand(
+        [partialFiles](OperationQueue& self)
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            // Taken out first: an owner hearing of its cancel may queue anew.
-            auto cancelled = std::exchange(self->priorityOperations_, {});
-            std::ranges::move(std::exchange(self->operations_, {}), std::back_inserter(cancelled));
-            auto waiting = std::exchange(self->syncScanCallbacks_, {});
-            for (auto& [id, callback] : waiting)
-                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
-            for (auto& [id, operation] : cancelled)
-                self->completeCancelledByUser(id, *operation, partialFiles);
-            Log::info("All operations in the queue have been canceled.");
+            self.afterBatch(
+                [&self, partialFiles]()
+                {
+                    // Taken out first: an owner hearing of its cancel may queue anew.
+                    auto cancelled = std::exchange(self.priorityOperations_, {});
+                    std::ranges::move(std::exchange(self.operations_, {}), std::back_inserter(cancelled));
+                    auto waiting = std::exchange(self.syncScanCallbacks_, {});
+                    for (auto& [id, callback] : waiting)
+                        callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
+                    for (auto& [id, operation] : cancelled)
+                        self.completeCancelledByUser(id, *operation, partialFiles);
+                    Log::info("All operations in the queue have been canceled.");
+                }
+            );
         }
     );
 }
@@ -587,21 +595,22 @@ void OperationQueue::cancelAll(PartialFilesOnCancel partialFiles)
 void OperationQueue::dropAll()
 {
     const WakeOnReturn wakeOnReturn{*this};
-    afterBatchWithinStrand(
-        [weak = weak_from_this()]()
+    onStrand(
+        [](OperationQueue& self)
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            self->operations_.clear();
-            self->priorityOperations_.clear();
-            // Progress they reported may still be on its way to the strand.
-            self->progressObservers_.clear();
-            auto waiting = std::exchange(self->syncScanCallbacks_, {});
-            for (auto& [id, callback] : waiting)
-                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
-            Log::info("All operations in the queue have been dropped.");
+            self.afterBatch(
+                [&self]()
+                {
+                    self.operations_.clear();
+                    self.priorityOperations_.clear();
+                    // Progress they reported may still be on its way to the strand.
+                    self.progressObservers_.clear();
+                    auto waiting = std::exchange(self.syncScanCallbacks_, {});
+                    for (auto& [id, callback] : waiting)
+                        callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
+                    Log::info("All operations in the queue have been dropped.");
+                }
+            );
         }
     );
 }
@@ -609,17 +618,18 @@ void OperationQueue::dropAll()
 void OperationQueue::cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    afterBatchWithinStrand(
-        [weak = weak_from_this(), id = std::move(id), partialFiles]()
+    onStrand(
+        [id = std::move(id), partialFiles](OperationQueue& self)
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            const auto cancelled = self->takeOperation(id);
-            self->failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
-            if (cancelled)
-                self->completeCancelledByUser(id, *cancelled, partialFiles);
+            self.afterBatch(
+                [&self, id, partialFiles]()
+                {
+                    const auto cancelled = self.takeOperation(id);
+                    self.failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
+                    if (cancelled)
+                        self.completeCancelledByUser(id, *cancelled, partialFiles);
+                }
+            );
         }
     );
 }
@@ -736,19 +746,20 @@ void OperationQueue::discardKept(
 void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    afterBatchWithinStrand(
-        [weak = weak_from_this(), id = std::move(id), partial]()
+    onStrand(
+        [id = std::move(id), partial](OperationQueue& self)
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            const auto cancelled = self->takeOperation(id);
-            if (!cancelled)
-                return;
-            if (cancelled->type() == SharedData::OperationType::Upload)
-                static_cast<UploadOperation&>(*cancelled).partialFileOnCancel(partial);
-            self->completeCancelled(id, *cancelled);
+            self.afterBatch(
+                [&self, id, partial]()
+                {
+                    const auto cancelled = self.takeOperation(id);
+                    if (!cancelled)
+                        return;
+                    if (cancelled->type() == SharedData::OperationType::Upload)
+                        static_cast<UploadOperation&>(*cancelled).partialFileOnCancel(partial);
+                    self.completeCancelled(id, *cancelled);
+                }
+            );
         }
     );
 }
@@ -843,89 +854,95 @@ bool OperationQueue::rememberKeptPartialFiles(Ids::OperationId const& id, Operat
 void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    afterBatchWithinStrand(
-        [weak = weak_from_this(), operationId = std::move(operationId), newIndex]() mutable
+    onStrand(
+        [operationId = std::move(operationId), newIndex](OperationQueue& self)
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            // Pessimistic resolution: every exit path emits onOperationsReordered
-            // so the frontend always gets a definitive "this move was/was not
-            // applied", never silently dropped. The frontend's listener relies
-            // on this to apply or discard the user's intended reorder.
-            auto emitResolution = [&self, &operationId](std::size_t resolvedIndex, bool applied)
-            {
-                RpcHelper::callRemoteSafely(
-                    *self->hub_,
-                    self->rpcName("onOperationsReordered"),
-                    SharedData::OperationsReordered{
-                        .operationId = operationId,
-                        .newIndex = static_cast<std::int32_t>(resolvedIndex),
-                        .applied = applied,
-                    }
-                );
-            };
-
-            // Only a paused queue reorders, a running one would hand the moved operation slots it is not due.
-            if (!self->paused_)
-            {
-                Log::warn("OperationQueue::moveOperation refused, the queue is not paused (op '{}')", operationId.value());
-                return emitResolution(newIndex, false);
-            }
-
-            // Priority queue is intentionally not user-reorderable.
-            for (auto const& [pid, _op] : self->priorityOperations_)
-            {
-                if (pid == operationId)
+            self.afterBatch(
+                [&self, operationId, newIndex]()
                 {
-                    Log::warn("OperationQueue::moveOperation refused, '{}' is a priority op", operationId.value());
-                    return emitResolution(newIndex, false);
+                    self.reorder(operationId, newIndex);
                 }
-            }
-
-            auto& queue = self->operations_;
-            std::size_t oldIndex = 0;
-            bool found = false;
-            for (std::size_t idx = 0; idx < queue.size(); ++idx)
-            {
-                if (queue[idx].first == operationId)
-                {
-                    oldIndex = idx;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-            {
-                // Op completed/canceled between click and strand tick: silent
-                // resolution; the frontend already removed the card via
-                // onOperationCompleted, so applied=false is purely informational.
-                return emitResolution(newIndex, false);
-            }
-
-            if (queue.empty())
-                return emitResolution(newIndex, false);
-            if (newIndex >= queue.size())
-                newIndex = queue.size() - 1;
-            if (oldIndex == newIndex)
-                return emitResolution(newIndex, false);
-
-            auto entry = std::move(queue[oldIndex]);
-            queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(oldIndex));
-            queue.insert(queue.begin() + static_cast<std::ptrdiff_t>(newIndex), std::move(entry));
-
-            Log::info(
-                "OperationQueue::moveOperation '{}' from {} to {} (queue size {})",
-                operationId.value(),
-                oldIndex,
-                newIndex,
-                queue.size()
             );
-
-            emitResolution(newIndex, true);
         }
     );
+}
+
+void OperationQueue::reorder(Ids::OperationId const& operationId, std::size_t newIndex)
+{
+    // Pessimistic resolution: every exit path emits onOperationsReordered
+    // so the frontend always gets a definitive "this move was/was not
+    // applied", never silently dropped. The frontend's listener relies
+    // on this to apply or discard the user's intended reorder.
+    const auto emitResolution = [this, &operationId](std::size_t resolvedIndex, bool applied)
+    {
+        RpcHelper::callRemoteSafely(
+            *hub_,
+            rpcName("onOperationsReordered"),
+            SharedData::OperationsReordered{
+                .operationId = operationId,
+                .newIndex = static_cast<std::int32_t>(resolvedIndex),
+                .applied = applied,
+            }
+        );
+    };
+
+    // Only a paused queue reorders, a running one would hand the moved operation slots it is not due.
+    if (!paused_)
+    {
+        Log::warn("OperationQueue::moveOperation refused, the queue is not paused (op '{}')", operationId.value());
+        return emitResolution(newIndex, false);
+    }
+
+    // Priority queue is intentionally not user-reorderable.
+    for (auto const& [pid, _op] : priorityOperations_)
+    {
+        if (pid == operationId)
+        {
+            Log::warn("OperationQueue::moveOperation refused, '{}' is a priority op", operationId.value());
+            return emitResolution(newIndex, false);
+        }
+    }
+
+    auto& queue = operations_;
+    std::size_t oldIndex = 0;
+    bool found = false;
+    for (std::size_t idx = 0; idx < queue.size(); ++idx)
+    {
+        if (queue[idx].first == operationId)
+        {
+            oldIndex = idx;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+    {
+        // Op completed/canceled between click and strand tick: silent
+        // resolution; the frontend already removed the card via
+        // onOperationCompleted, so applied=false is purely informational.
+        return emitResolution(newIndex, false);
+    }
+
+    if (queue.empty())
+        return emitResolution(newIndex, false);
+    if (newIndex >= queue.size())
+        newIndex = queue.size() - 1;
+    if (oldIndex == newIndex)
+        return emitResolution(newIndex, false);
+
+    auto entry = std::move(queue[oldIndex]);
+    queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(oldIndex));
+    queue.insert(queue.begin() + static_cast<std::ptrdiff_t>(newIndex), std::move(entry));
+
+    Log::info(
+        "OperationQueue::moveOperation '{}' from {} to {} (queue size {})",
+        operationId.value(),
+        oldIndex,
+        newIndex,
+        queue.size()
+    );
+
+    emitResolution(newIndex, true);
 }
 
 void OperationQueue::completeOperation(SharedData::OperationCompleted&& operationCompleted)
@@ -1175,7 +1192,7 @@ bool OperationQueue::workQueue(QueuedOperations& queue)
     }
 
     std::vector<HeldProgress::Delivery> heldProgress;
-    auto results = [&]()
+    const auto results = [&]()
     {
         const HeldProgress holding{this, heldProgress};
         return workHead(queue, eligible.size(), std::nullopt);
@@ -1287,7 +1304,7 @@ bool OperationQueue::finishBatch(std::shared_ptr<Batch> const& batch)
 
 bool OperationQueue::applyResults(
     QueuedOperations& queue,
-    std::vector<WorkResult>& results,
+    std::vector<WorkResult> const& results,
     std::vector<std::function<void()>>& heldProgress
 )
 {
@@ -1306,7 +1323,7 @@ bool OperationQueue::applyResults(
     };
 
     bool moreWork = false;
-    for (auto& item : results)
+    for (auto const& item : results)
     {
         if (!item.result.has_value())
         {
@@ -1361,7 +1378,7 @@ bool OperationQueue::drainBatch()
     if (!batch_)
         return false;
     const auto batch = batch_;
-    batch->hasReturned.wait();
+    batch->waitUntilReturned();
     return finishBatch(batch);
 }
 
@@ -1374,15 +1391,12 @@ void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
         *strand_,
         [weak = weak_from_this(), id]()
         {
-            auto self = weak.lock();
-            if (!self)
+            const auto locked = weak.lock();
+            if (!locked)
                 return;
-            self->afterBatch(
-                [weak, id]()
+            locked->afterBatch(
+                [&self = *locked, id]()
                 {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
                     const auto matches = [&id](auto& operation)
                     {
                         if (operation.first != id)
@@ -1390,11 +1404,10 @@ void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
                         std::ignore = operation.second->cancel(true);
                         return true;
                     };
-                    const WakeOnReturn wakeOnReturn{*self};
-                    if (std::erase_if(self->priorityOperations_, matches) + std::erase_if(self->operations_, matches) >
-                        0)
+                    const WakeOnReturn wakeOnReturn{self};
+                    if (std::erase_if(self.priorityOperations_, matches) + std::erase_if(self.operations_, matches) > 0)
                     {
-                        self->completeOperation(
+                        self.completeOperation(
                             SharedData::OperationCompleted{
                                 .reason = SharedData::OperationCompletionReason::Canceled,
                                 .operationId = id,
@@ -1501,20 +1514,15 @@ bool OperationQueue::hasPriorityWork() const
 void OperationQueue::paused(bool pause)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    within_strand_do(
-        [weak = weak_from_this(), pause]()
+    onStrand(
+        [pause](OperationQueue& self)
         {
-            auto self = weak.lock();
-            if (!self)
-                return;
-
-            self->paused_ = pause;
+            self.paused_ = pause;
             // The operations of a batch out pause once they are back.
-            self->afterBatch(
-                [weak]()
+            self.afterBatch(
+                [&self]()
                 {
-                    if (auto self = weak.lock())
-                        self->deepPause(self->paused_);
+                    self.deepPause(self.paused_);
                 }
             );
         }
