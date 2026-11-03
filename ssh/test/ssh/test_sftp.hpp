@@ -657,6 +657,25 @@ namespace SecureShell::Test
         EXPECT_TRUE(result->empty());
     }
 
+    TEST_F(SftpTests, AReadOfAWholeFileStopsAtItsMaximumSize)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+        auto whole =
+            sftp->later(RemoteIo::ReadFile{.path = remote("/home/test/large.txt"), .maximumSize = 1024u * 1024u});
+        auto cut = sftp->later(RemoteIo::ReadFile{.path = remote("/home/test/large.txt"), .maximumSize = 100u});
+        ASSERT_EQ(whole.wait_for(replyTimeout), std::future_status::ready);
+        ASSERT_EQ(cut.wait_for(replyTimeout), std::future_status::ready);
+        const auto wholeContent = whole.get();
+        const auto cutContent = cut.get();
+
+        ASSERT_TRUE(wholeContent.has_value()) << wholeContent.error().toString();
+        ASSERT_TRUE(cutContent.has_value()) << cutContent.error().toString();
+        EXPECT_EQ(wholeContent->size(), 64u * 1024u);
+        EXPECT_EQ(*cutContent, wholeContent->substr(0, 100u));
+    }
+
     TEST_F(SftpTests, CanRenameFile)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

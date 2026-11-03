@@ -950,6 +950,11 @@ namespace SecureShell
             );
     }
 
+    RemoteIo::OperationResult<RemoteIo::ReadFile> SftpSession::run(RemoteIo::ReadFile const& operation)
+    {
+        return RemoteIo::readSmallFileInStrand(*this, operation.path, operation.maximumSize);
+    }
+
     std::expected<std::weak_ptr<FileStream>, SftpSession::Error>
     SftpSession::openFileInStrand(Paths::RemotePath const& path, OpenType openType, std::filesystem::perms permissions)
     {

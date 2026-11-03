@@ -247,7 +247,7 @@ namespace RemoteIo
             );
         }
         const auto file = home / *Paths::RelativePath::make(".config/user-dirs.dirs");
-        return readSmallFileInStrand(fileSystem, file, maximumFileSize)
+        return fileSystem.inStrand(ReadFile{.path = file, .maximumSize = maximumFileSize})
             .transform(
                 [&home](std::string const& content)
                 {

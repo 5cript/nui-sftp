@@ -528,6 +528,7 @@ namespace SecureShell
         RemoteIo::OperationResult<RemoteIo::Rename> run(RemoteIo::Rename const& operation);
         RemoteIo::OperationResult<RemoteIo::LinkIntoPlace> run(RemoteIo::LinkIntoPlace const& operation);
         RemoteIo::OperationResult<RemoteIo::OpenFile> run(RemoteIo::OpenFile const& operation);
+        RemoteIo::OperationResult<RemoteIo::ReadFile> run(RemoteIo::ReadFile const& operation);
         RemoteIo::OperationResult<RemoteIo::SetModificationTime> run(RemoteIo::SetModificationTime const& operation);
         RemoteIo::OperationResult<RemoteIo::HomeDirectory> run(RemoteIo::HomeDirectory const& operation);
         RemoteIo::OperationResult<RemoteIo::CanonicalHomeDirectory>
