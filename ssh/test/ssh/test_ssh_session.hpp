@@ -321,6 +321,30 @@ namespace SecureShell::Test
         EXPECT_FALSE(session.has_value());
     }
 
+    TEST(SshTimeoutTests, WithoutATimeoutEveryCallGetsTheConnectDefault)
+    {
+        EXPECT_EQ(fallbackTimeoutSeconds(Persistence::SshOptions{}), 10);
+    }
+
+    TEST(SshTimeoutTests, ZeroTimeoutsAreNoTimeout)
+    {
+        Persistence::SshOptions options{};
+        options.connectTimeoutSeconds = 0;
+        options.connectTimeoutUSeconds = 0;
+        EXPECT_EQ(fallbackTimeoutSeconds(options), 10);
+    }
+
+    TEST(SshTimeoutTests, ASetTimeoutNeedsNoFallback)
+    {
+        Persistence::SshOptions seconds{};
+        seconds.connectTimeoutSeconds = 3;
+        EXPECT_EQ(fallbackTimeoutSeconds(seconds), std::nullopt);
+
+        Persistence::SshOptions microseconds{};
+        microseconds.connectTimeoutUSeconds = 500'000;
+        EXPECT_EQ(fallbackTimeoutSeconds(microseconds), std::nullopt);
+    }
+
     TEST_F(SshSessionTests, ConnectFailsWithWrongAddressWithinTheTimeout)
     {
         // Shorter than the fixture's, where the address is routed the connect waits all of it.

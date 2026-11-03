@@ -303,6 +303,15 @@ namespace SecureShell
         );
     }
 
+    std::optional<long> fallbackTimeoutSeconds(Persistence::SshOptions const& options)
+    {
+        // What libssh waits to connect without a timeout.
+        constexpr long connectDefault = 10;
+        if (options.connectTimeoutSeconds.value_or(0) > 0 || options.connectTimeoutUSeconds.value_or(0) > 0)
+            return std::nullopt;
+        return connectDefault;
+    }
+
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
         Persistence::SshSessionOptions const& sessionOptions,
         AskPassCallback askPass,
@@ -417,6 +426,15 @@ namespace SecureShell
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_TIMEOUT_USEC, &timeout);
                 }
                 return 0;
+            },
+            [&]
+            {
+                const auto fallback = fallbackTimeoutSeconds(sshOptions);
+                if (!fallback)
+                    return 0;
+                lastAttemptedAppliedOption = "Fallback Timeout";
+                long timeout = *fallback;
+                return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_TIMEOUT, &timeout);
             },
             [&]
             {

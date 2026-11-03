@@ -117,6 +117,12 @@ namespace SecureShell
         std::optional<std::string> password;
     };
 
+    /**
+     * @brief The libssh timeout in seconds for @p options that set none. libssh then waits 10 s to connect but forever
+     *        for every later call, and file system calls rely on it to end. Nothing when @p options set one.
+     */
+    std::optional<long> fallbackTimeoutSeconds(Persistence::SshOptions const& options);
+
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
         Persistence::SshSessionOptions const& sessionOptions,
         AskPassCallback askPass,
