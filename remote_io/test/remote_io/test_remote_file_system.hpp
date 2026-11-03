@@ -528,7 +528,10 @@ namespace RemoteIo::Test
         auto answered = answering->get_future();
 
         fileSystem->later(Lstat{.path = remote("/home/user/file.txt")}, answerInto(std::move(answering)));
-        fileSystem->takeStarted().reset();
+        auto started = fileSystem->takeStarted();
+        ASSERT_TRUE(started.has_value()) << "the file system never started the Lstat";
+        EXPECT_EQ(answered.wait_for(std::chrono::seconds{0}), std::future_status::timeout);
+        started.reset();
 
         ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
         const auto answer = answered.get();
