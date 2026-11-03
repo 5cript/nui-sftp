@@ -346,27 +346,19 @@ class Session
                     ((*self).*remove)(channelId);
                     return reply.error("Failed to lock channel");
                 }
-                try
-                {
-                    if constexpr (
-                        std::is_invocable_v<FunctionT&, RpcHelper::RpcOnce&&, Session&, std::shared_ptr<ChannelT>>
-                    )
-                        func(std::move(reply), *self, std::move(channel));
-                    else
-                        func(std::move(reply), std::move(channel));
-                }
-                catch (std::exception const& exception)
-                {
-                    Log::error(
-                        "A call on channel '{}' failed: {}", channelId.value(), Utility::errorMessage(exception)
-                    );
-                    reply.error(Utility::errorMessage(exception));
-                }
-                catch (...)
-                {
-                    Log::error("A call on channel '{}' failed with an unknown exception", channelId.value());
-                    reply.error("Unknown error");
-                }
+                RpcHelper::answeringExceptions(
+                    reply,
+                    fmt::format("A call on channel '{}'", channelId.value()),
+                    [&]()
+                    {
+                        if constexpr (
+                            std::is_invocable_v<FunctionT&, RpcHelper::RpcOnce&&, Session&, std::shared_ptr<ChannelT>>
+                        )
+                            func(std::move(reply), *self, std::move(channel));
+                        else
+                            func(std::move(reply), std::move(channel));
+                    }
+                );
             }
         );
     }
