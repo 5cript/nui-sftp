@@ -237,13 +237,13 @@ namespace RemoteIo::Test
         {
             auto pushed = std::make_shared<std::promise<void>>();
             auto done = pushed->get_future();
-            other = std::thread{
+            other = std::thread(
                 [pushed, strand = strand_.get()]()
                 {
                     std::ignore = strand->pushTask([]() {});
                     pushed->set_value();
                 }
-            };
+            );
             return done.wait_for(replyTimeout) == std::future_status::ready;
         }
 
