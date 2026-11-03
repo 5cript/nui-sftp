@@ -289,9 +289,7 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
 {
-    // Flattened again when the open after it waited for a connection.
     resolvedEntries_.clear();
-    totalPayloadBytes_ = 0u;
     resolvedEntries_.reserve(options_.localPaths.size());
 
     for (auto const& localRoot : options_.localPaths)
@@ -421,15 +419,21 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Re
         );
     }
 
-    const auto flattenResult = flattenRoots();
-    if (!flattenResult.has_value())
-        return std::unexpected(flattenResult.error());
-
+    // Flattened once, preparing again after a wait for a connection only opens again. Flattening to nothing fails.
     if (resolvedEntries_.empty())
-        return std::unexpected(Error{
-            .type = ErrorType::FileNotFound,
-            .extraInfo = "no local files could be stat'd",
-        });
+    {
+        const auto flattenResult = flattenRoots();
+        if (!flattenResult.has_value())
+            return std::unexpected(flattenResult.error());
+
+        if (resolvedEntries_.empty())
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::FileNotFound,
+                    .extraInfo = "no local files could be stat'd",
+                }
+            );
+    }
 
     // Fail early instead of packing everything first, the final rename refuses to replace it anyway.
     if (!options_.mayOverwrite && fileSystem.inStrand(RemoteIo::Lstat{.path = remoteArchivePath_}).has_value())
