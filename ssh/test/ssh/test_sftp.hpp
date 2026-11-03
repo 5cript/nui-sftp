@@ -1019,6 +1019,63 @@ namespace SecureShell::Test
         EXPECT_EQ(losses.load(), 1);
     }
 
+    TEST_F(SftpTests, ADownloadTheServerStopsAnsweringFailsAsALostConnection)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("stallReadsAfter", {{"bytes", 16384}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+        auto opened = sftp->openFile(
+            remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+        );
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        std::shared_ptr<AsyncTransferContext> context{};
+        auto ended = std::make_shared<std::promise<void>>();
+        auto endedFuture = ended->get_future();
+        // Observed from the processing thread before the first turn, like the operations do.
+        auto started = file->strand()->pushPromiseTask(
+            [&]()
+            {
+                auto result = file->readAsyncInStrand(
+                    fileSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [](IFileStream::SignedSizeType)
+                    {
+                        return true;
+                    }
+                );
+                if (!result.has_value())
+                    return false;
+                context = result.value();
+                context->observe(
+                    [ended, weakContext = std::weak_ptr{context}, told = std::make_shared<std::atomic_bool>(false)]()
+                    {
+                        if (auto observed = weakContext.lock();
+                            observed && observed->hasEnded() && !told->exchange(true))
+                            ended->set_value();
+                    }
+                );
+                return true;
+            }
+        );
+        ASSERT_EQ(started.wait_for(replyTimeout), std::future_status::ready);
+        ASSERT_TRUE(started.get());
+        ASSERT_EQ(endedFuture.wait_for(replyTimeout), std::future_status::ready);
+
+        EXPECT_EQ(context->outcome(), AsyncTransferContext::Outcome::Failed);
+        const auto error = context->error();
+        ASSERT_TRUE(error.has_value());
+        EXPECT_EQ(error->kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(error->message, fmt::format("Reading the remote file failed: {}", unansweredWithinASecond));
+        EXPECT_EQ(losses.load(), 1);
+    }
+
     TEST_F(SftpTests, ASftpChannelTheServerEndsReportsTheConnectionLost)
     {
         CREATE_SERVER_AND_JOINER(Sftp);

@@ -164,6 +164,8 @@ let realpathDotMode = 'conforming';
 // Fault injection and server behaviour switches, configured over the command line interface.
 const faults = {
     failReadsAfter: null,
+    // READs after this many bytes are never answered, like a server that hangs mid transfer.
+    stallReadsAfter: null,
     // Largest answer to a READ, null for what was asked. Emulates servers that answer reads short.
     capReads: null,
     failWritesAfter: null,
@@ -537,6 +539,10 @@ const server = new Server({
                     if (faults.dropAfterBytes !== null && faults.bytesRead + faults.bytesWritten >= faults.dropAfterBytes) {
                         logMessage('Fault: dropping the connection during READ');
                         return client.end();
+                    }
+                    if (faults.stallReadsAfter !== null && faults.bytesRead >= faults.stallReadsAfter) {
+                        logMessage('Fault: leaving READ unanswered');
+                        return;
                     }
                     if (faults.failReadsAfter !== null && faults.bytesRead >= faults.failReadsAfter) {
                         logMessage('Fault: failing READ');
@@ -1028,6 +1034,10 @@ cli.on('removeHome', () => {
 const nullableBytes = (command) => (command.bytes === undefined || command.bytes === null) ? null : Number(command.bytes);
 cli.on('failReadsAfter', (command) => {
     faults.failReadsAfter = nullableBytes(command);
+    faults.bytesRead = 0;
+});
+cli.on('stallReadsAfter', (command) => {
+    faults.stallReadsAfter = nullableBytes(command);
     faults.bytesRead = 0;
 });
 cli.on('capReads', (command) => {

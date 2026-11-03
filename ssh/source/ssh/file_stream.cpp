@@ -46,10 +46,15 @@ namespace SecureShell
             );
         }
 
+        /**
+         * @brief The error of @p what, with what libssh said about a lost connection, a timeout for one.
+         */
         RemoteIo::RemoteError transferError(SftpSession& sftp, std::string_view what)
         {
             auto error = sftp.lastError();
-            error.message = std::string{what};
+            error.message = error.kind == RemoteIo::RemoteErrorKind::ConnectionLost && !error.message.empty()
+                ? fmt::format("{}: {}", what, error.message)
+                : std::string{what};
             return error;
         }
 
@@ -400,6 +405,12 @@ namespace SecureShell
         return std::invoke(std::forward<FunctionT>(function), std::forward<ArgumentTs>(arguments)...);
     }
 
+    sftp_file FileStream::answeringFile() const
+    {
+        const auto sftp = sftp_.lock();
+        return sftp && !sftp->givenUp() ? file_.get() : nullptr;
+    }
+
     FileStream::FileStream(std::shared_ptr<SftpSession> sftp, sftp_file file, sftp_limits_struct limits)
         : sftp_{std::move(sftp)}
         , file_{file, makeFileDeleter()}
@@ -443,7 +454,7 @@ namespace SecureShell
         assert(sftp->strand_->withinProcessingThread());
         // The transfer may only see that it ended after this, when it can no longer wait for its requests.
         if (discardInFlight_)
-            std::exchange(discardInFlight_, {})(file_.get());
+            std::exchange(discardInFlight_, {})(answeringFile());
         file_.reset();
         sftp->fileStreamRemoveItself(this, isBackElement);
     }
@@ -821,7 +832,7 @@ namespace SecureShell
             assert(sftp->strand_->withinProcessingThread());
         VERIFY_FILE_STREAM();
         if (discardInFlight_)
-            std::exchange(discardInFlight_, {})(file_.get());
+            std::exchange(discardInFlight_, {})(answeringFile());
         // sftp_close frees the file even when the server refuses the CLOSE.
         if (awaitServer(sftp_close, file_.release()) != SSH_NO_ERROR)
             return std::unexpected(lastError());
@@ -882,10 +893,10 @@ namespace SecureShell
             {
                 auto stream = weakStream.lock();
                 auto sftp = stream ? stream->sftp_.lock() : nullptr;
-                // Waiting needs the session and the open file, without them the requests are only freed.
+                // Waiting needs the open file of a channel that still answers, without it the requests are only freed.
                 const auto discardPipeline = [&]()
                 {
-                    pipeline->discard(sftp ? stream->file_.get() : nullptr);
+                    pipeline->discard(stream ? stream->answeringFile() : nullptr);
                 };
                 const auto failTransfer = [&](RemoteIo::RemoteError const& error)
                 {
@@ -1042,10 +1053,10 @@ namespace SecureShell
             {
                 auto stream = weakStream.lock();
                 auto sftp = stream ? stream->sftp_.lock() : nullptr;
-                // Waiting needs the session and the open file, without them the requests are only freed.
+                // Waiting needs the open file of a channel that still answers, without it the requests are only freed.
                 const auto discardPipeline = [&]()
                 {
-                    pipeline->discard(sftp ? stream->file_.get() : nullptr);
+                    pipeline->discard(stream ? stream->answeringFile() : nullptr);
                 };
                 const auto failTransfer = [&](RemoteIo::RemoteError const& error)
                 {

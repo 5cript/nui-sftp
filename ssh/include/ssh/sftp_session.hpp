@@ -100,6 +100,15 @@ namespace SecureShell
         }
 
         /**
+         * @brief Whether the channel was given up, see giveUpChannel. Nothing sent before is answered any more, a wait
+         *        for it would last the whole timeout. On the processing thread.
+         */
+        bool givenUp() const
+        {
+            return givenUp_.has_value();
+        }
+
+        /**
          * @brief Lists the contents of a directory.
          *
          * @param path
