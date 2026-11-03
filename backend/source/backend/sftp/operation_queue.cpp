@@ -29,6 +29,7 @@
 #include <array>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <iterator>
 #include <optional>
 #include <span>
@@ -86,10 +87,11 @@ namespace
         using Delivery = std::function<void()>;
 
         /**
-         * @brief Holds back the progress of the operations of @p queue in @p deliveries until destroyed.
+         * @brief Holds back the progress of the operations of @p queue in @p deliveries until destroyed. @p queue is
+         *        only compared, it may be gone.
          */
-        HeldProgress(OperationQueue const& queue, std::vector<Delivery>& deliveries)
-            : queue_{&queue}
+        HeldProgress(OperationQueue const* queue, std::vector<Delivery>& deliveries)
+            : queue_{queue}
             , deliveries_{&deliveries}
             , outer_{std::exchange(current_, this)}
         {}
@@ -143,6 +145,14 @@ namespace
             return;
         const auto observer = found->second;
         observer(OperationQueue::OperationProgress{progress});
+    }
+
+    /**
+     * @brief Whether @p result ends its operation, completed or failed.
+     */
+    bool endsOperation(std::expected<Operation::WorkStatus, Operation::Error> const& result)
+    {
+        return !result.has_value() || result.value() == Operation::WorkStatus::Complete;
     }
 
     bool changedSinceCompare(SharedData::OperationError const& error)
@@ -351,6 +361,92 @@ namespace
     }
 }
 
+struct OperationQueue::WorkResult
+{
+    /** @brief The index of the operation at the head of its queue. */
+    std::size_t index;
+    std::expected<Operation::WorkStatus, Operation::Error> result;
+};
+
+/**
+ * @brief Operations from the head of one queue that work on a processing thread while the strand stays free. It owns
+ *        them until it returned to the strand, run or dropped, where finishBatch puts them back.
+ */
+struct OperationQueue::Batch
+{
+    std::weak_ptr<OperationQueue> queue{};
+    /** @brief The queue, only compared. */
+    OperationQueue const* identity{nullptr};
+    std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> queueStrand{};
+    bool priority{false};
+    /** @brief The operation that fails for all when the processing thread drops the batch. */
+    std::size_t strandIndex{0};
+    QueuedOperations operations{};
+    std::vector<WorkResult> results{};
+    std::vector<HeldProgress::Delivery> heldProgress{};
+    bool ran{false};
+    std::atomic_bool returned{false};
+    std::promise<void> returning{};
+    std::shared_future<void> hasReturned{returning.get_future().share()};
+
+    void run()
+    {
+        const HeldProgress holding{identity, heldProgress};
+        results = workHead(operations, operations.size(), true);
+        ran = true;
+    }
+
+    /**
+     * @brief Hands @p batch back to the strand of its queue, once.
+     */
+    static void returnToStrand(std::shared_ptr<Batch> const& batch)
+    {
+        if (batch->returned.exchange(true))
+            return;
+        batch->returning.set_value();
+        boost::asio::post(
+            *batch->queueStrand,
+            [batch]()
+            {
+                if (const auto queue = batch->queue.lock())
+                    queue->finishBatch(batch);
+            }
+        );
+    }
+
+    /**
+     * @brief Returns its batch when the processing thread drops the task without running it.
+     */
+    struct Dispatched
+    {
+        explicit Dispatched(std::shared_ptr<Batch> dispatched)
+            : batch{std::move(dispatched)}
+        {}
+        ~Dispatched()
+        {
+            returnToStrand(batch);
+        }
+        Dispatched(Dispatched const&) = delete;
+        Dispatched& operator=(Dispatched const&) = delete;
+        Dispatched(Dispatched&&) = delete;
+        Dispatched& operator=(Dispatched&&) = delete;
+
+        std::shared_ptr<Batch> batch;
+    };
+};
+
+template <typename FunctionT>
+void OperationQueue::afterBatchWithinStrand(FunctionT&& function)
+{
+    within_strand_do(
+        [weak = weak_from_this(), function = std::forward<FunctionT>(function)]() mutable
+        {
+            if (const auto self = weak.lock())
+                self->afterBatch(std::move(function));
+        }
+    );
+}
+
 OperationQueue::OperationQueue(
     boost::asio::any_io_executor executor,
     std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand,
@@ -468,7 +564,7 @@ auto OperationQueue::makeBulkProgressCallback(std::string_view eventName, Ids::O
 void OperationQueue::cancelAll(PartialFilesOnCancel partialFiles)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    within_strand_do(
+    afterBatchWithinStrand(
         [weak = weak_from_this(), partialFiles]()
         {
             auto self = weak.lock();
@@ -491,7 +587,7 @@ void OperationQueue::cancelAll(PartialFilesOnCancel partialFiles)
 void OperationQueue::dropAll()
 {
     const WakeOnReturn wakeOnReturn{*this};
-    within_strand_do(
+    afterBatchWithinStrand(
         [weak = weak_from_this()]()
         {
             auto self = weak.lock();
@@ -513,7 +609,7 @@ void OperationQueue::dropAll()
 void OperationQueue::cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    within_strand_do(
+    afterBatchWithinStrand(
         [weak = weak_from_this(), id = std::move(id), partialFiles]()
         {
             auto self = weak.lock();
@@ -640,7 +736,7 @@ void OperationQueue::discardKept(
 void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    within_strand_do(
+    afterBatchWithinStrand(
         [weak = weak_from_this(), id = std::move(id), partial]()
         {
             auto self = weak.lock();
@@ -747,7 +843,7 @@ bool OperationQueue::rememberKeptPartialFiles(Ids::OperationId const& id, Operat
 void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t newIndex)
 {
     const WakeOnReturn wakeOnReturn{*this};
-    within_strand_do(
+    afterBatchWithinStrand(
         [weak = weak_from_this(), operationId = std::move(operationId), newIndex]() mutable
         {
             auto self = weak.lock();
@@ -771,9 +867,7 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
                 );
             };
 
-            // Pause is the only safe window: while running, work() can be
-            // mid-batch with raw pointers into the deque (see workQueue()),
-            // and reordering would alter the indices it iterates.
+            // Only a paused queue reorders, a running one would hand the moved operation slots it is not due.
             if (!self->paused_)
             {
                 Log::warn("OperationQueue::moveOperation refused, the queue is not paused (op '{}')", operationId.value());
@@ -1048,7 +1142,7 @@ void OperationQueue::deepPause(bool pause)
         operation->pause(pause);
 }
 
-bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue)
+bool OperationQueue::workQueue(QueuedOperations& queue)
 {
     // Assumed in (asio) strand.
 
@@ -1057,9 +1151,8 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     if (eligible.empty())
         return false;
 
-    // Any strand-using op lets us share a single processing-thread umbrella across
-    // every eligible op's workInStrand() call. Ops that do not use the strand run on the
-    // caller afterwards: their work() blocks on that very thread and would deadlock inside it.
+    // The operations that use a strand share one batch on the processing thread of the first one's. Those that do not
+    // run on the strand afterwards: their work() blocks on that very thread and would deadlock inside it.
     RemoteIo::ProcessingStrand* strand = nullptr;
     std::size_t strandIndex = 0;
     for (const auto& item : eligible)
@@ -1075,92 +1168,134 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         }
     }
 
-    struct ItemResult
+    if (strand)
     {
-        std::size_t queueIndex;
-        std::expected<Operation::WorkStatus, Operation::Error> result;
-    };
+        startBatch(queue, eligible.size(), *strand, strandIndex);
+        return false;
+    }
 
-    const auto isTerminal = [](ItemResult const& item)
-    {
-        return !item.result.has_value() || item.result.value() == Operation::WorkStatus::Complete;
-    };
-
-    // Posted, the progress of the batch would reach the strand only after the completions handed on below.
     std::vector<HeldProgress::Delivery> heldProgress;
+    auto results = [&]()
+    {
+        const HeldProgress holding{this, heldProgress};
+        return workHead(queue, eligible.size(), std::nullopt);
+    }();
+    return applyResults(queue, results, heldProgress);
+}
+
+auto OperationQueue::workHead(QueuedOperations& operations, std::size_t count, std::optional<bool> onlyUsesStrand)
+    -> std::vector<WorkResult>
+{
+    std::vector<WorkResult> results;
+    results.reserve(count);
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        auto& operation = *operations[index].second;
+        if (onlyUsesStrand.has_value() && operation.usesStrand() != *onlyUsesStrand)
+            continue;
+        results.push_back({index, operation.usesStrand() ? operation.workInStrand() : operation.work()});
+        // One completion per cycle: the others see the queue without the ended one on the next.
+        if (endsOperation(results.back().result))
+            break;
+    }
+    return results;
+}
+
+void OperationQueue::startBatch(
+    QueuedOperations& queue,
+    std::size_t count,
+    RemoteIo::ProcessingStrand& strand,
+    std::size_t strandIndex
+)
+{
+    auto batch = std::make_shared<Batch>();
+    batch->queue = weak_from_this();
+    batch->identity = this;
+    batch->queueStrand = strand_;
+    batch->priority = &queue == &priorityOperations_;
+    batch->strandIndex = strandIndex;
+    const auto end = queue.begin() + static_cast<std::ptrdiff_t>(count);
+    std::move(queue.begin(), end, std::back_inserter(batch->operations));
+    queue.erase(queue.begin(), end);
+    batch_ = batch;
+
+    // A refused or dropped task returns the batch unrun.
+    strand.pushTask(
+        [dispatched = std::make_shared<Batch::Dispatched>(batch)]()
+        {
+            dispatched->batch->run();
+            Batch::returnToStrand(dispatched->batch);
+        }
+    );
+}
+
+bool OperationQueue::finishBatch(std::shared_ptr<Batch> const& batch)
+{
+    if (batch_ != batch)
+        return false;
+    batch_.reset();
+
+    // In front of what was queued meanwhile, in the order they left.
+    auto& queue = batch->priority ? priorityOperations_ : operations_;
+    const auto count = batch->operations.size();
+    queue.insert(
+        queue.begin(),
+        std::make_move_iterator(batch->operations.begin()),
+        std::make_move_iterator(batch->operations.end())
+    );
+    batch->operations.clear();
+
+    std::vector<WorkResult> results;
+    if (!batch->ran)
+    {
+        // The processing thread no longer runs tasks, the operations that need it fail one per cycle.
+        results.push_back(
+            {batch->strandIndex,
+                std::unexpected(
+                    Operation::Error{
+                        .type = Operation::ErrorType::ChannelClosed,
+                        .extraInfo = "The processing thread no longer runs tasks",
+                    }
+                )}
+        );
+    }
+    else
+    {
+        results = std::move(batch->results);
+        if (std::ranges::none_of(
+                results,
+                [](auto const& item)
+                {
+                    return endsOperation(item.result);
+                }
+            ))
+        {
+            const HeldProgress holding{this, batch->heldProgress};
+            auto local = workHead(queue, count, false);
+            results.insert(results.end(), std::make_move_iterator(local.begin()), std::make_move_iterator(local.end()));
+        }
+    }
+
+    const bool asked = std::exchange(workAskedDuringBatch_, false);
+    const bool moreWork = applyResults(queue, results, batch->heldProgress) || asked;
+    for (auto& request : std::exchange(afterBatch_, {}))
+        request();
+    if (moreWork)
+        wake();
+    return moreWork;
+}
+
+bool OperationQueue::applyResults(
+    QueuedOperations& queue,
+    std::vector<WorkResult>& results,
+    std::vector<std::function<void()>>& heldProgress
+)
+{
     const auto deliverHeldProgress = [&heldProgress]()
     {
         for (auto const& delivery : std::exchange(heldProgress, {}))
             delivery();
     };
-
-    auto runBatch = [this, &queue, &eligible, &isTerminal, &heldProgress](std::optional<bool> onlyUsesStrand)
-    {
-        const HeldProgress holding{*this, heldProgress};
-        std::vector<ItemResult> out;
-        out.reserve(eligible.size());
-        for (const auto& item : eligible)
-        {
-            const auto index = item.index;
-            auto* operation = queue[index].second.get();
-            if (onlyUsesStrand.has_value() && operation->usesStrand() != *onlyUsesStrand)
-                continue;
-            auto res = operation->usesStrand() ? operation->workInStrand() : operation->work();
-            out.push_back({index, std::move(res)});
-            // Match the single-completion-per-workQueue-cycle semantics of the original
-            // sequential driver: stop as soon as anybody completes or fails so subsequent
-            // ops see the resulting queue mutation on the next cycle.
-            if (isTerminal(out.back()))
-                break;
-        }
-        return out;
-    };
-
-    std::vector<ItemResult> results;
-    if (strand)
-    {
-        using Batch = std::optional<std::vector<ItemResult>>;
-        auto batch = strand
-                         ->pushPromiseTask(
-                             [&runBatch]() -> Batch
-                             {
-                                 return runBatch(true);
-                             },
-                             []() -> Batch
-                             {
-                                 return std::nullopt;
-                             }
-                         )
-                         .get();
-        // The processing thread no longer runs tasks, the operations that need it fail one per cycle.
-        if (!batch)
-        {
-            results.push_back(
-                {strandIndex,
-                    std::unexpected(
-                        Operation::Error{
-                            .type = Operation::ErrorType::ChannelClosed,
-                            .extraInfo = "The processing thread no longer runs tasks",
-                        }
-                    )}
-            );
-        }
-        else
-        {
-            results = std::move(batch).value();
-            if (std::ranges::none_of(results, isTerminal))
-            {
-                auto local = runBatch(false);
-                results.insert(
-                    results.end(), std::make_move_iterator(local.begin()), std::make_move_iterator(local.end())
-                );
-            }
-        }
-    }
-    else
-    {
-        results = runBatch(std::nullopt);
-    }
 
     // Out of the queue before its owner hears of its progress or end, who may cancel or queue operations then.
     const auto takeFinished = [&queue](std::size_t index)
@@ -1175,7 +1310,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     {
         if (!item.result.has_value())
         {
-            const auto [id, operation] = takeFinished(item.queueIndex);
+            const auto [id, operation] = takeFinished(item.index);
             deliverHeldProgress();
             failSyncScan(
                 id,
@@ -1194,7 +1329,7 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
         const auto workStatus = item.result.value();
         if (workStatus == Operation::WorkStatus::Complete)
         {
-            const auto [id, operation] = takeFinished(item.queueIndex);
+            const auto [id, operation] = takeFinished(item.index);
             deliverHeldProgress();
             deliverSyncScan(id, *operation);
             // An upload whose source may vanish and was gone ends cancelled, nothing went.
@@ -1214,6 +1349,22 @@ bool OperationQueue::workQueue(std::deque<std::pair<Ids::OperationId, std::uniqu
     return moreWork;
 }
 
+void OperationQueue::afterBatch(std::function<void()> request)
+{
+    if (!batch_)
+        return request();
+    afterBatch_.push_back(std::move(request));
+}
+
+bool OperationQueue::drainBatch()
+{
+    if (!batch_)
+        return false;
+    const auto batch = batch_;
+    batch->hasReturned.wait();
+    return finishBatch(batch);
+}
+
 void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
 {
     // Assumed in strand. The sync waits for both scans, so the other one is of no use once one failed.
@@ -1226,24 +1377,33 @@ void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
             auto self = weak.lock();
             if (!self)
                 return;
-            const auto matches = [&id](auto& operation)
-            {
-                if (operation.first != id)
-                    return false;
-                std::ignore = operation.second->cancel(true);
-                return true;
-            };
-            const WakeOnReturn wakeOnReturn{*self};
-            if (std::erase_if(self->priorityOperations_, matches) + std::erase_if(self->operations_, matches) > 0)
-            {
-                self->completeOperation(
-                    SharedData::OperationCompleted{
-                        .reason = SharedData::OperationCompletionReason::Canceled,
-                        .operationId = id,
-                        .completionTime = std::chrono::system_clock::now(),
+            self->afterBatch(
+                [weak, id]()
+                {
+                    auto self = weak.lock();
+                    if (!self)
+                        return;
+                    const auto matches = [&id](auto& operation)
+                    {
+                        if (operation.first != id)
+                            return false;
+                        std::ignore = operation.second->cancel(true);
+                        return true;
+                    };
+                    const WakeOnReturn wakeOnReturn{*self};
+                    if (std::erase_if(self->priorityOperations_, matches) + std::erase_if(self->operations_, matches) >
+                        0)
+                    {
+                        self->completeOperation(
+                            SharedData::OperationCompleted{
+                                .reason = SharedData::OperationCompletionReason::Canceled,
+                                .operationId = id,
+                                .completionTime = std::chrono::system_clock::now(),
+                            }
+                        );
                     }
-                );
-            }
+                }
+            );
         }
     );
 }
@@ -1277,6 +1437,13 @@ void OperationQueue::deliverSyncScan(Ids::OperationId const& id, Operation& oper
 bool OperationQueue::work()
 {
     // Assumed in strand
+
+    // One batch at a time, it wakes the queue once it returned.
+    if (batch_)
+    {
+        workAskedDuringBatch_ = true;
+        return false;
+    }
 
     // Priority queue always runs, regardless of paused state.
     // Regular queue is effectively paused while priority items are being processed.
@@ -1328,7 +1495,7 @@ UnsafeFastMode OperationQueue::unsafeFastModeFor(UploadOperation::OnSent const& 
 
 bool OperationQueue::hasPriorityWork() const
 {
-    return !priorityOperations_.empty();
+    return !priorityOperations_.empty() || (batch_ && batch_->priority);
 }
 
 void OperationQueue::paused(bool pause)
@@ -1342,7 +1509,14 @@ void OperationQueue::paused(bool pause)
                 return;
 
             self->paused_ = pause;
-            self->deepPause(pause);
+            // The operations of a batch out pause once they are back.
+            self->afterBatch(
+                [weak]()
+                {
+                    if (auto self = weak.lock())
+                        self->deepPause(self->paused_);
+                }
+            );
         }
     );
 }

@@ -637,7 +637,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -677,7 +677,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -725,7 +725,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -770,7 +770,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -803,7 +803,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -846,7 +846,7 @@ namespace Test
             runOnStrand(
                 [&]()
                 {
-                    return queue->work();
+                    return queue->work() || queue->drainBatch();
                 }
             );
         ASSERT_EQ(localNames(localPath).size(), 1u);
@@ -895,7 +895,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -950,7 +950,7 @@ namespace Test
         }).has_value());
         // Worked until it waits for its transfer, nothing else drives it then.
         for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -1422,7 +1422,7 @@ namespace Test
             );
         }).has_value());
         for (int step = 0; step < 20 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -1466,7 +1466,7 @@ namespace Test
             );
         }).has_value());
         for (int step = 0; step < 20 && runOnStrand([&]() {
-                 return queue->work();
+                 return queue->work() || queue->drainBatch();
              });
              ++step)
         {
@@ -1867,7 +1867,7 @@ namespace Test
             runOnStrand(
                 [&]()
                 {
-                    return queue->work();
+                    return queue->work() || queue->drainBatch();
                 }
             );
         ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("partly_a.txt"));
@@ -1938,7 +1938,7 @@ namespace Test
             runOnStrand(
                 [&]()
                 {
-                    return queue->work();
+                    return queue->work() || queue->drainBatch();
                 }
             );
         ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("compared_a.txt"));
@@ -1989,7 +1989,7 @@ namespace Test
             runOnStrand(
                 [&]()
                 {
-                    return queue->work();
+                    return queue->work() || queue->drainBatch();
                 }
             );
         ASSERT_EQ(localNames(localPath).size(), 1u);
@@ -4164,7 +4164,7 @@ namespace Test
             runOnStrand(
                 [&]()
                 {
-                    return queue->work();
+                    return queue->work() || queue->drainBatch();
                 }
             );
         }

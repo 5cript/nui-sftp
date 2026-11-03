@@ -152,12 +152,26 @@ class OperationQueue
     void moveOperation(Ids::OperationId operationId, std::size_t newIndex);
 
     /**
-     * @brief Works the operations at the head of the queue once.
+     * @brief Works the operations at the head of the queue once. Those that need a processing thread work there as
+     *        one batch while the strand stays free; the batch wakes the queue when it returned and wants more.
      *
-     * @return true to be called again right away, false when every operation waits or nothing can run: then the
-     *         queue calls its wake once there is work again.
+     * @return true to be called again right away, false when a batch is out, every operation waits or nothing can
+     *         run: then the queue calls its wake once there is work again.
      */
     bool work();
+
+    /**
+     * @brief Runs @p request on the strand once no batch of this queue works on a processing thread, at once when
+     *        none does. The requests that cancel, drop, move or pause queued operations go through here. On the strand.
+     */
+    void afterBatch(std::function<void()> request);
+
+    /**
+     * @brief Waits until the batch out on a processing thread returned and puts its operations back. Blocks the strand,
+     *        for a teardown that needs every operation. On the strand.
+     * @return Whether the queue wants to be worked again right away, false when no batch was out.
+     */
+    bool drainBatch();
 
     /**
      * @brief Sets what is called, from any thread, once the queue has work after work returned false: an operation
@@ -509,7 +523,48 @@ class OperationQueue
         -> std::function<void(std::string const&, std::uint64_t, std::uint64_t)>;
 
   private:
-    bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
+    using QueuedOperations = std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>;
+    struct WorkResult;
+    struct Batch;
+
+    bool workQueue(QueuedOperations& queue);
+
+    /**
+     * @brief Works the first @p count operations of @p operations in order, only those whose usesStrand equals
+     *        @p onlyUsesStrand when set, and stops after the first that completed or failed.
+     */
+    static std::vector<WorkResult>
+    workHead(QueuedOperations& operations, std::size_t count, std::optional<bool> onlyUsesStrand);
+
+    /**
+     * @brief Hands the first @p count operations of @p queue to @p strand as one batch, see Batch.
+     */
+    void
+    startBatch(QueuedOperations& queue, std::size_t count, RemoteIo::ProcessingStrand& strand, std::size_t strandIndex);
+
+    /**
+     * @brief Puts the operations of @p batch back at the head of their queue and applies what they did, unless it is
+     *        not the batch out any more. Then runs the requests that waited for it.
+     * @return Whether the queue wants to be worked again right away, which also wakes it.
+     */
+    bool finishBatch(std::shared_ptr<Batch> const& batch);
+
+    /**
+     * @brief Applies @p results of the operations at the head of @p queue: one that completed or failed leaves the
+     *        queue after @p heldProgress went out, and its owner hears of it.
+     * @return Whether the queue wants to be worked again right away.
+     */
+    bool applyResults(
+        QueuedOperations& queue,
+        std::vector<WorkResult>& results,
+        std::vector<std::function<void()>>& heldProgress
+    );
+
+    /**
+     * @brief afterBatch on the strand, callable from any thread.
+     */
+    template <typename FunctionT>
+    void afterBatchWithinStrand(FunctionT&& function);
 
     /**
      * @brief The queue an operation of @p mode goes to.
@@ -533,7 +588,7 @@ class OperationQueue
     );
 
     /**
-     * @brief The queued or running operation @p operationId, none when there is none.
+     * @brief The queued operation @p operationId, none when there is none or it is in the batch out.
      */
     Operation* findOperation(Ids::OperationId const& operationId);
 
@@ -624,8 +679,14 @@ class OperationQueue
     std::function<void()> wake_{};
     Persistence::SftpOptions sftpOpts_{};
     Ids::SessionId sessionId_{};
-    std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};
-    std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
+    QueuedOperations priorityOperations_{};
+    QueuedOperations operations_{};
+    /** @brief The batch out on a processing thread, nothing while none is. */
+    std::shared_ptr<Batch> batch_{};
+    /** @brief What waits for batch_ to return, see afterBatch(). */
+    std::vector<std::function<void()>> afterBatch_{};
+    /** @brief work() was called while batch_ was out, so the queue is woken once it returned. */
+    bool workAskedDuringBatch_{false};
     std::atomic_bool paused_{true};
     /** @brief Shared with the transfers, which read it on the processing thread when they open a file. */
     std::shared_ptr<std::atomic_bool> unsafeFast_{std::make_shared<std::atomic_bool>(false)};
