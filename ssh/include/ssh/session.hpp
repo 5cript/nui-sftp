@@ -9,6 +9,7 @@
 
 #include <libssh/libsshpp.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <expected>
 #include <map>
@@ -107,6 +108,11 @@ namespace SecureShell
         void removeAllSftpSessions();
 
         /**
+         * @brief Calls the connection loss callback once, never while the session shuts down.
+         */
+        void reportConnectionLoss();
+
+        /**
          * @brief Shuts down the session and closes all channels.
          * The session is not usable after this.
          */
@@ -116,6 +122,8 @@ namespace SecureShell
 
       private:
         std::function<void()> onConnectionLoss_;
+        /** @brief Set once the loss was reported or the session shuts down. */
+        std::atomic_bool connectionLossReported_{false};
         std::chrono::microseconds callTimeout_{std::chrono::microseconds::max()};
         RemoteIo::ProcessingThread processingThread_;
         ssh::Session session_;

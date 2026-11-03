@@ -117,10 +117,9 @@ namespace SecureShell
             {
                 // not yet needed
             },
-            [onConnectionLoss = onConnectionLoss_]()
+            [this]()
             {
-                if (onConnectionLoss)
-                    onConnectionLoss();
+                reportConnectionLoss();
             }
         );
     }
@@ -139,8 +138,15 @@ namespace SecureShell
         return SSH_OK;
     }
 
+    void Session::reportConnectionLoss()
+    {
+        if (!connectionLossReported_.exchange(true) && onConnectionLoss_)
+            onConnectionLoss_();
+    }
+
     void Session::shutdown()
     {
+        connectionLossReported_ = true;
         removeAllChannels();
         removeAllSftpSessions();
         processingThread_.stop();
