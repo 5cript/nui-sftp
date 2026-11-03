@@ -9,6 +9,9 @@
 #include <fmt/format.h>
 #include <libssh/sftp.h>
 
+#include <algorithm>
+#include <chrono>
+
 namespace SecureShell
 {
     namespace
@@ -120,6 +123,20 @@ namespace SecureShell
                     onConnectionLoss();
             }
         );
+    }
+
+    int Session::setCallTimeout(std::chrono::microseconds timeout)
+    {
+        long seconds = std::chrono::duration_cast<std::chrono::seconds>(timeout).count();
+        long microseconds = (timeout - std::chrono::seconds{seconds}).count();
+        if (const auto result = ssh_options_set(session_.getCSession(), SSH_OPTIONS_TIMEOUT, &seconds);
+            result != SSH_OK)
+            return result;
+        if (const auto result = ssh_options_set(session_.getCSession(), SSH_OPTIONS_TIMEOUT_USEC, &microseconds);
+            result != SSH_OK)
+            return result;
+        callTimeout_ = timeout;
+        return SSH_OK;
     }
 
     void Session::shutdown()
@@ -303,13 +320,14 @@ namespace SecureShell
         );
     }
 
-    std::optional<long> fallbackTimeoutSeconds(Persistence::SshOptions const& options)
+    std::chrono::microseconds callTimeoutOf(Persistence::SshOptions const& options)
     {
-        // What libssh waits to connect without a timeout.
-        constexpr long connectDefault = 10;
-        if (options.connectTimeoutSeconds.value_or(0) > 0 || options.connectTimeoutUSeconds.value_or(0) > 0)
-            return std::nullopt;
-        return connectDefault;
+        constexpr auto withoutTimeout = std::chrono::seconds{30};
+        const auto timeout = std::chrono::seconds{std::max(0, options.connectTimeoutSeconds.value_or(0))} +
+            std::chrono::microseconds{std::max(0, options.connectTimeoutUSeconds.value_or(0))};
+        if (timeout == std::chrono::microseconds::zero())
+            return withoutTimeout;
+        return timeout;
     }
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
@@ -426,15 +444,6 @@ namespace SecureShell
                     return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_TIMEOUT_USEC, &timeout);
                 }
                 return 0;
-            },
-            [&]
-            {
-                const auto fallback = fallbackTimeoutSeconds(sshOptions);
-                if (!fallback)
-                    return 0;
-                lastAttemptedAppliedOption = "Fallback Timeout";
-                long timeout = *fallback;
-                return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_TIMEOUT, &timeout);
             },
             [&]
             {
@@ -591,6 +600,11 @@ namespace SecureShell
                 // clear last attempted option, option setting succeeded, so remove it for the error message
                 lastAttemptedAppliedOption = std::nullopt;
                 return static_cast<ssh::Session&>(*session).connect();
+            },
+            [&]
+            {
+                // After the connect, which keeps the 10 s libssh gives it without a timeout.
+                return session->setCallTimeout(callTimeoutOf(sshOptions));
             },
 #ifdef _WIN32
             []()

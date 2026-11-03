@@ -321,9 +321,9 @@ namespace SecureShell::Test
         EXPECT_FALSE(session.has_value());
     }
 
-    TEST(SshTimeoutTests, WithoutATimeoutEveryCallGetsTheConnectDefault)
+    TEST(SshTimeoutTests, WithoutATimeoutEveryCallAfterTheConnectGetsThirtySeconds)
     {
-        EXPECT_EQ(fallbackTimeoutSeconds(Persistence::SshOptions{}), 10);
+        EXPECT_EQ(callTimeoutOf(Persistence::SshOptions{}), std::chrono::seconds{30});
     }
 
     TEST(SshTimeoutTests, ZeroTimeoutsAreNoTimeout)
@@ -331,18 +331,23 @@ namespace SecureShell::Test
         Persistence::SshOptions options{};
         options.connectTimeoutSeconds = 0;
         options.connectTimeoutUSeconds = 0;
-        EXPECT_EQ(fallbackTimeoutSeconds(options), 10);
+        EXPECT_EQ(callTimeoutOf(options), std::chrono::seconds{30});
     }
 
-    TEST(SshTimeoutTests, ASetTimeoutNeedsNoFallback)
+    TEST(SshTimeoutTests, EveryCallGetsTheTimeoutOfTheProfile)
     {
         Persistence::SshOptions seconds{};
         seconds.connectTimeoutSeconds = 3;
-        EXPECT_EQ(fallbackTimeoutSeconds(seconds), std::nullopt);
+        EXPECT_EQ(callTimeoutOf(seconds), std::chrono::seconds{3});
 
         Persistence::SshOptions microseconds{};
         microseconds.connectTimeoutUSeconds = 500'000;
-        EXPECT_EQ(fallbackTimeoutSeconds(microseconds), std::nullopt);
+        EXPECT_EQ(callTimeoutOf(microseconds), std::chrono::milliseconds{500});
+
+        Persistence::SshOptions both{};
+        both.connectTimeoutSeconds = 2;
+        both.connectTimeoutUSeconds = 250'000;
+        EXPECT_EQ(callTimeoutOf(both), std::chrono::milliseconds{2250});
     }
 
     TEST_F(SshSessionTests, ConnectFailsWithWrongAddressWithinTheTimeout)
