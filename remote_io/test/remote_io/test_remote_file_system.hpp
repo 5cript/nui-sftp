@@ -17,6 +17,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace RemoteIo::Test
@@ -196,6 +198,34 @@ namespace RemoteIo::Test
         void TearDown() override
         {
             processingThread_.stop();
+        }
+
+        /**
+         * @brief What the callback of an Lstat was called with, and where.
+         */
+        struct Answer
+        {
+            OperationResult<Lstat> result{};
+            std::thread::id thread{};
+            bool onProcessingThread{false};
+        };
+
+        /**
+         * @brief A callback of an Lstat that hands what it was called with to @p answering. It holds the promise
+         *        uniquely, so it can only move.
+         */
+        auto answerInto(std::unique_ptr<std::promise<Answer>> answering) const
+        {
+            return [answering = std::move(answering), strand = strand_.get()](OperationResult<Lstat> result)
+            {
+                answering->set_value(
+                    Answer{
+                        .result = std::move(result),
+                        .thread = std::this_thread::get_id(),
+                        .onProcessingThread = strand->withinProcessingThread(),
+                    }
+                );
+            };
         }
 
         ProcessingThread processingThread_{};
@@ -436,5 +466,137 @@ namespace RemoteIo::Test
         const auto promisedOnStrand = promised.get();
         ASSERT_TRUE(promisedOnStrand.has_value());
         EXPECT_TRUE(*promisedOnStrand);
+    }
+
+    TEST_F(RemoteFileSystemTests, AnOperationStartedLaterCallsBackOnTheThreadThatCompletesIt)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        auto answering = std::make_unique<std::promise<Answer>>();
+        auto answered = answering->get_future();
+
+        fileSystem->later(Lstat{.path = remote("/home/user/file.txt")}, answerInto(std::move(answering)));
+
+        ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
+        const auto answer = answered.get();
+        ASSERT_TRUE(answer.result.has_value()) << answer.result.error().toString();
+        EXPECT_EQ(answer.result->size, 42u);
+        EXPECT_TRUE(answer.onProcessingThread);
+    }
+
+    TEST_F(RemoteFileSystemTests, ACallbackWaitsWithoutBlockingForAFileSystemThatCompletesLater)
+    {
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand_.get());
+        auto answering = std::make_unique<std::promise<Answer>>();
+        auto answered = answering->get_future();
+
+        fileSystem->later(Lstat{.path = remote("/home/user/file.txt")}, answerInto(std::move(answering)));
+        auto started = fileSystem->takeStarted();
+        ASSERT_TRUE(started.has_value());
+        EXPECT_EQ(answered.wait_for(std::chrono::seconds{0}), std::future_status::timeout);
+        started->complete(FileInformation{.size = 9u});
+
+        ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
+        const auto answer = answered.get();
+        ASSERT_TRUE(answer.result.has_value()) << answer.result.error().toString();
+        EXPECT_EQ(answer.result->size, 9u);
+        EXPECT_EQ(answer.thread, std::this_thread::get_id());
+    }
+
+    TEST_F(RemoteFileSystemTests, ACallbackOfAnOperationTheFileSystemDropsGetsTheUnfinishedResult)
+    {
+        auto fileSystem = std::make_shared<DeferredFileSystem>(strand_.get());
+        auto answering = std::make_unique<std::promise<Answer>>();
+        auto answered = answering->get_future();
+
+        fileSystem->later(Lstat{.path = remote("/home/user/file.txt")}, answerInto(std::move(answering)));
+        fileSystem->takeStarted().reset();
+
+        ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
+        const auto answer = answered.get();
+        ASSERT_FALSE(answer.result.has_value());
+        EXPECT_EQ(answer.result.error().wrapperError, WrapperErrors::TaskPushFailed);
+    }
+
+    TEST_F(RemoteFileSystemTests, ACallbackStartedLaterOnAStoppedStrandGetsTheUnfinishedResult)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        processingThread_.stop();
+        auto answering = std::make_unique<std::promise<Answer>>();
+        auto answered = answering->get_future();
+
+        fileSystem->later(Lstat{.path = remote("/home/user/file.txt")}, answerInto(std::move(answering)));
+
+        ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
+        const auto answer = answered.get();
+        ASSERT_FALSE(answer.result.has_value());
+        EXPECT_EQ(answer.result.error().wrapperError, WrapperErrors::TaskPushFailed);
+        EXPECT_EQ(fileSystem->started.load(), 0);
+    }
+
+    TEST_F(RemoteFileSystemTests, ACallbackOfAnUnsetPathIsCalledBeforeLaterReturns)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        auto answering = std::make_unique<std::promise<Answer>>();
+        auto answered = answering->get_future();
+
+        fileSystem->later(Lstat{}, answerInto(std::move(answering)));
+
+        ASSERT_EQ(answered.wait_for(std::chrono::seconds{0}), std::future_status::ready);
+        const auto answer = answered.get();
+        ASSERT_FALSE(answer.result.has_value());
+        EXPECT_EQ(answer.result.error().wrapperError, WrapperErrors::InvalidPath);
+        EXPECT_EQ(answer.thread, std::this_thread::get_id());
+        EXPECT_EQ(fileSystem->started.load(), 0);
+    }
+
+    TEST_F(RemoteFileSystemTests, APerformedTaskHandsWhatItReturnedToItsCallbackOnTheStrand)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        using Returned = std::expected<bool, RemoteError>;
+        auto answering = std::make_shared<std::promise<std::pair<Returned, bool>>>();
+        auto answered = answering->get_future();
+
+        fileSystem->perform(
+            [strand = strand_.get()]() -> Returned
+            {
+                return strand->withinProcessingThread();
+            },
+            [answering, strand = strand_.get()](Returned returned)
+            {
+                answering->set_value({std::move(returned), strand->withinProcessingThread()});
+            }
+        );
+
+        ASSERT_EQ(answered.wait_for(replyTimeout), std::future_status::ready);
+        const auto [returned, calledOnStrand] = answered.get();
+        ASSERT_TRUE(returned.has_value()) << returned.error().toString();
+        EXPECT_TRUE(*returned) << "the task ran on the strand";
+        EXPECT_TRUE(calledOnStrand);
+    }
+
+    TEST_F(RemoteFileSystemTests, ATaskTheStrandRefusesHandsItsCallbackTheUnfinishedResult)
+    {
+        auto fileSystem = std::make_shared<ImmediateFileSystem>(strand_.get());
+        processingThread_.stop();
+        using Returned = std::expected<bool, RemoteError>;
+        std::optional<Returned> answered{};
+        bool ran = false;
+
+        fileSystem->perform(
+            [&ran]() -> Returned
+            {
+                ran = true;
+                return true;
+            },
+            [&answered](Returned returned)
+            {
+                answered = std::move(returned);
+            }
+        );
+
+        ASSERT_TRUE(answered.has_value()) << "a refused task completes before perform returns";
+        ASSERT_FALSE(answered->has_value());
+        EXPECT_EQ(answered->error().wrapperError, WrapperErrors::TaskPushFailed);
+        EXPECT_FALSE(ran);
     }
 }

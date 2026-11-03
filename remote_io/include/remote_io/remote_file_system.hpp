@@ -143,32 +143,41 @@ namespace RemoteIo
         }
 
         /**
-         * @brief Runs @p operation from any thread, the future holds its result. The file system must be owned by a
-         *        shared_ptr: when it is gone before the operation starts, the operation completes as unfinished.
+         * @brief Runs @p operation from any thread and calls @p onCompleted once with its result, on the thread that
+         *        completes it: the processing thread, a thread of the protocol, or the caller's when the operation
+         *        fails before it starts. The file system must be owned by a shared_ptr: when it is gone before the
+         *        operation starts, the operation completes as unfinished.
+         */
+        template <typename OperationT, typename CallbackT>
+        void later(OperationT operation, CallbackT&& onCompleted)
+        {
+            Completion<OperationT> completion{
+                sharedCallback<OperationResult<OperationT>>(std::forward<CallbackT>(onCompleted))
+            };
+            if (hasUnsetPath(operation))
+                return completion(std::unexpected(unsetPathError()));
+            auto pending = std::make_shared<Pending<OperationT>>(std::move(operation), std::move(completion));
+            dispatchWhileOwned(
+                [pending = std::move(pending)](IRemoteFileSystem& fileSystem)
+                {
+                    fileSystem.start(std::move(*pending));
+                }
+            );
+        }
+
+        /**
+         * @brief Runs @p operation from any thread, the future holds its result, see later(operation, onCompleted).
          */
         template <typename OperationT>
         std::future<OperationResult<OperationT>> later(OperationT operation)
         {
             auto promise = std::make_shared<std::promise<OperationResult<OperationT>>>();
             auto future = promise->get_future();
-            if (hasUnsetPath(operation))
-            {
-                promise->set_value(std::unexpected(unsetPathError()));
-                return future;
-            }
-            auto pending = std::make_shared<Pending<OperationT>>(
+            later(
                 std::move(operation),
-                Completion<OperationT>(
-                    [promise = std::move(promise)](OperationResult<OperationT> result)
-                    {
-                        promise->set_value(std::move(result));
-                    }
-                )
-            );
-            dispatchWhileOwned(
-                [pending = std::move(pending)](IRemoteFileSystem& fileSystem)
+                [promise = std::move(promise)](OperationResult<OperationT> result)
                 {
-                    fileSystem.start(std::move(*pending));
+                    promise->set_value(std::move(result));
                 }
             );
             return future;
@@ -178,6 +187,27 @@ namespace RemoteIo
         void perform(FunctionT&& function)
         {
             strand()->pushTask(std::forward<FunctionT>(function));
+        }
+
+        /**
+         * @brief Runs @p function on the processing thread of the strand and calls @p onCompleted once with what it
+         *        returned, there, or with the unfinished result, see UnfinishedTaskResult, where the strand refuses or
+         *        drops the task.
+         */
+        template <typename FunctionT, typename CallbackT>
+        void perform(FunctionT&& function, CallbackT&& onCompleted)
+        {
+            using ResultT = std::invoke_result_t<std::decay_t<FunctionT>&>;
+            auto completion = std::make_shared<ResultCompletion<ResultT>>(
+                sharedCallback<ResultT>(std::forward<CallbackT>(onCompleted))
+            );
+            // A refused task is destroyed at once, a dropped one with the thread's queue: both complete as unfinished.
+            strand()->pushTask(
+                [function = std::forward<FunctionT>(function), completion = std::move(completion)]() mutable
+                {
+                    (*completion)(function());
+                }
+            );
         }
 
         template <
@@ -229,6 +259,19 @@ namespace RemoteIo
          *        does.
          */
         virtual void dispatchWhileOwned(std::function<void(IRemoteFileSystem&)> start) = 0;
+
+        /**
+         * @brief @p callback as the copyable function a completion holds, so a callback that can only move fits too.
+         */
+        template <typename ResultT, typename CallbackT>
+        static std::function<void(ResultT)> sharedCallback(CallbackT&& callback)
+        {
+            auto shared = std::make_shared<std::decay_t<CallbackT>>(std::forward<CallbackT>(callback));
+            return [shared = std::move(shared)](ResultT result)
+            {
+                (*shared)(std::move(result));
+            };
+        }
 
         template <typename ResultT>
         struct InStrandCall
