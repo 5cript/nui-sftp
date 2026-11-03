@@ -2,8 +2,11 @@
 #include <log/log.hpp>
 #include <remote_io/remote_file_system.hpp>
 
-#include <string>
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <utility>
 
 ScanOperation::ScanOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, ScanOperationOptions options)
     : fileSystem_{std::move(fileSystem)}
@@ -21,34 +24,20 @@ ScanOperation::~ScanOperation() = default;
 
 namespace
 {
+    /** @brief Larger ignore files are cut, no real one comes near it. */
+    constexpr std::size_t maximumIgnoreFileSize = 1024u * 1024u;
+
     std::optional<std::string>
     readRemoteFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
-        auto openFut = fileSystem.later(RemoteIo::OpenFile{.path = path, .mode = RemoteIo::OpenMode::Read});
-        if (openFut.wait_for(timeout) != std::future_status::ready)
+        // A read of its own, it does not wait for a connection the queue's transfers hold.
+        auto read = fileSystem.later(RemoteIo::ReadFile{.path = path, .maximumSize = maximumIgnoreFileSize});
+        if (read.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
-        auto openResult = openFut.get();
-        if (!openResult.has_value())
+        auto content = read.get();
+        if (!content.has_value())
             return std::nullopt;
-        auto stream = openResult.value().lock();
-        if (!stream)
-            return std::nullopt;
-
-        std::string contents;
-        auto readFut = stream->readAll([&contents](std::string_view chunk) {
-            contents.append(chunk);
-            return true;
-        });
-        if (readFut.wait_for(timeout) != std::future_status::ready)
-        {
-            stream->close();
-            return std::nullopt;
-        }
-        auto readResult = readFut.get();
-        stream->close();
-        if (!readResult.has_value())
-            return std::nullopt;
-        return contents;
+        return std::move(content).value();
     }
 }
 

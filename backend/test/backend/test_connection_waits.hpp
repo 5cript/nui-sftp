@@ -2,12 +2,14 @@
 
 #include "test_operation_queue_batches.hpp"
 
+#include <backend/sftp/scan_operation.hpp>
 #include <persistence/state/sftp_options.hpp>
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <fstream>
+#include <set>
 #include <string>
 
 namespace Test
@@ -270,5 +272,32 @@ namespace Test
                     EXPECT_EQ(std::get<SharedData::TransferProgress>(progress).max, uploadedContent().size());
             }
         );
+    }
+
+    TEST_F(ConnectionWaitTests, AScanReadsItsIgnoreFileWhileEveryConnectionIsTaken)
+    {
+        fake_->addFile(remote("/home/test/tree/.gitignore"), "skipped.txt\n");
+        fake_->addFile(remote("/home/test/tree/kept.txt"), "kept");
+        fake_->addFile(remote("/home/test/tree/skipped.txt"), "skipped");
+        fake_->takeAllConnections();
+        ScanOperation scan{
+            fake_,
+            ScanOperation::ScanOperationOptions{
+                .remotePath = remote("/home/test/tree"),
+                .respectIgnoreFiles = true,
+            }
+        };
+
+        auto status = scan.work();
+        for (int step = 0; status.has_value() && *status != Operation::WorkStatus::Complete && step < 100; ++step)
+            status = scan.work();
+
+        ASSERT_TRUE(status.has_value()) << status.error().toString();
+        ASSERT_EQ(*status, Operation::WorkStatus::Complete);
+        std::set<std::string> names;
+        for (auto const& entry : scan.ejectEntries())
+            names.insert(entry.name);
+        EXPECT_TRUE(names.contains("kept.txt"));
+        EXPECT_FALSE(names.contains("skipped.txt")) << "the scan did not read its ignore file";
     }
 }
