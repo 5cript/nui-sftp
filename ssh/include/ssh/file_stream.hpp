@@ -225,6 +225,18 @@ namespace SecureShell
         template <typename FunctionT>
         auto performPromise(FunctionT&& func);
 
+        /**
+         * @brief SftpSession::awaitServer of the session of this stream, the bare call when it is gone.
+         */
+        template <typename FunctionT, typename... ArgumentTs>
+        auto awaitServer(FunctionT&& function, ArgumentTs&&... arguments);
+
+        /**
+         * @brief The open file whose answers in flight can still be waited for, null when it is closed or its channel
+         *        was given up.
+         */
+        sftp_file answeringFile() const;
+
         RemoteIo::RemoteError lastError() const;
 
         void writePart(

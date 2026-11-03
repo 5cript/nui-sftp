@@ -13,6 +13,7 @@
 #include <traits/functions.hpp>
 
 #include <string>
+#include <string_view>
 #include <concepts>
 #include <ranges>
 #include <memory>
@@ -244,6 +245,51 @@ namespace RpcHelper
         mutable std::string responseId_;
         mutable bool called_{false};
     };
+
+    /**
+     * @brief Calls @p function and answers @p reply with the message of an exception it throws, which the log names as
+     *        the failure of @p failing.
+     */
+    template <typename ReplyT, typename FunctionT>
+    void answeringExceptions(ReplyT const& reply, std::string_view failing, FunctionT&& function)
+    {
+        try
+        {
+            std::forward<FunctionT>(function)();
+        }
+        catch (std::exception const& exception)
+        {
+            Log::error("{} failed: {}", failing, Utility::errorMessage(exception));
+            reply.error(Utility::errorMessage(exception));
+        }
+        catch (...)
+        {
+            Log::error("{} failed with an unknown exception", failing);
+            reply.error("Unknown error");
+        }
+    }
+
+    /**
+     * @brief A completion callback that answers @p reply, an RpcOnce or what answers like one, with @p answer, called
+     *        as (reply, result) on the thread that completes the call. An exception @p answer throws is answered with
+     *        its message.
+     */
+    template <typename ReplyT, typename AnswerT>
+    auto answerOnCompletion(ReplyT&& reply, AnswerT&& answer)
+    {
+        return [reply = std::forward<ReplyT>(reply),
+                   answer = std::forward<AnswerT>(answer)]<typename ResultT>(ResultT&& result) mutable
+        {
+            answeringExceptions(
+                reply,
+                "Answering a completed call",
+                [&]()
+                {
+                    answer(std::as_const(reply), std::forward<ResultT>(result));
+                }
+            );
+        };
+    }
 
     class ParameterVerifyView
     {

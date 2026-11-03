@@ -17,9 +17,11 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <future>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <expected>
 #include <filesystem>
@@ -78,9 +80,33 @@ namespace SecureShell
 
         /**
          * @brief Retrieves the last error that occurred. May contain success. A closed connection, channel or session
-         *        is ConnectionLost, whatever the server answered before.
+         *        is ConnectionLost, whatever the server answered before. So is a call that timed out and a packet
+         *        libssh could not read whole, which also end the session, see giveUpChannel. On the processing thread.
          */
-        Error lastError() const;
+        Error lastError();
+
+        /**
+         * @brief Calls @p function, a libssh call that waits for the server, with @p arguments and keeps how long it
+         *        waited for lastError: libssh sets no error when it gives up waiting. On the processing thread.
+         */
+        template <typename FunctionT, typename... ArgumentTs>
+        auto awaitServer(FunctionT&& function, ArgumentTs&&... arguments)
+        {
+            const auto started = std::chrono::steady_clock::now();
+            auto result = std::invoke(std::forward<FunctionT>(function), std::forward<ArgumentTs>(arguments)...);
+            lastServerWait_ =
+                std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started);
+            return result;
+        }
+
+        /**
+         * @brief Whether the channel was given up, see giveUpChannel. Nothing sent before is answered any more, a wait
+         *        for it would last the whole timeout. On the processing thread.
+         */
+        bool givenUp() const
+        {
+            return givenUp_.has_value();
+        }
 
         /**
          * @brief Lists the contents of a directory.
@@ -523,7 +549,7 @@ namespace SecureShell
          *        most libssh calls dereference, and an unset path, which the server would take as the start directory.
          */
         template <typename... PathTs>
-        std::expected<void, Error> requireSetInStrand(PathTs const&... paths) const
+        std::expected<void, Error> requireSetInStrand(PathTs const&... paths)
         {
             assert(strand_->withinProcessingThread());
             if (!session_)
@@ -543,11 +569,22 @@ namespace SecureShell
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);
         void removeAllFileStreams();
 
+        /**
+         * @brief Gives the channel up after a call that timed out or a packet libssh could not read whole, both leave
+         *        the SFTP stream out of step: closes it, so every later call on it fails at once instead of reading on,
+         *        and reports the connection as lost, which ends the session. Later errors keep @p reason.
+         */
+        void giveUpChannel(std::string reason);
+
       private:
         Session* owner_;
         std::unique_ptr<RemoteIo::ProcessingStrand> strand_;
         /** @brief Freed by close on the processing thread, null afterwards. */
         NativeSession session_;
+        /** @brief How long the last call through awaitServer waited, until lastError takes it. */
+        std::chrono::microseconds lastServerWait_{};
+        /** @brief Why the channel was given up, see giveUpChannel. */
+        std::optional<std::string> givenUp_{};
         std::shared_ptr<RemoteIo::IBufferProvider> bufferProvider_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
         TransferChunkController chunkController_{};

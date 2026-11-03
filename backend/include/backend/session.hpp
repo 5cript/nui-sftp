@@ -301,6 +301,13 @@ class Session
     void removeSftpChannel(Ids::ChannelId channelId);
 
     /**
+     * @brief Blocks the strand until the processing thread of @p channel ran what is queued there: the operation
+     *        queue's batch and the calls that answer from a completion. For a call that then waits for that thread with
+     *        a timeout, which would count them otherwise.
+     */
+    static void waitForProcessingThread(RemoteIo::IRemoteFileSystem const& channel);
+
+    /**
      * @brief Runs @p func on the strand with the channel @p channelId of @p channels, as (reply, channel) or
      *        (reply, session, channel). @p reply is always answered: when the session is gone, when there is no such
      *        channel, and with the message of an exception @p func throws.
@@ -339,34 +346,19 @@ class Session
                     ((*self).*remove)(channelId);
                     return reply.error("Failed to lock channel");
                 }
-                // Calls on a file system wait for its processing thread with a timeout, the queue's batch there must
-                // not count against it.
-                if constexpr (std::is_same_v<ChannelT, RemoteIo::IRemoteFileSystem>)
-                {
-                    if (self->operationQueue_)
-                        self->operationQueue_->waitForBatch();
-                }
-                try
-                {
-                    if constexpr (
-                        std::is_invocable_v<FunctionT&, RpcHelper::RpcOnce&&, Session&, std::shared_ptr<ChannelT>>
-                    )
-                        func(std::move(reply), *self, std::move(channel));
-                    else
-                        func(std::move(reply), std::move(channel));
-                }
-                catch (std::exception const& exception)
-                {
-                    Log::error(
-                        "A call on channel '{}' failed: {}", channelId.value(), Utility::errorMessage(exception)
-                    );
-                    reply.error(Utility::errorMessage(exception));
-                }
-                catch (...)
-                {
-                    Log::error("A call on channel '{}' failed with an unknown exception", channelId.value());
-                    reply.error("Unknown error");
-                }
+                RpcHelper::answeringExceptions(
+                    reply,
+                    fmt::format("A call on channel '{}'", channelId.value()),
+                    [&]()
+                    {
+                        if constexpr (
+                            std::is_invocable_v<FunctionT&, RpcHelper::RpcOnce&&, Session&, std::shared_ptr<ChannelT>>
+                        )
+                            func(std::move(reply), *self, std::move(channel));
+                        else
+                            func(std::move(reply), std::move(channel));
+                    }
+                );
             }
         );
     }
@@ -383,6 +375,10 @@ class Session
         );
     }
 
+    /**
+     * @brief withLockedChannelDo for the file system channels. A call that waits for the file system with a timeout
+     *        calls waitForProcessingThread first.
+     */
     template <typename FunctionT>
     void withSftpChannelDo(Ids::ChannelId channelId, FunctionT&& func, RpcHelper::RpcOnce&& reply)
     {
@@ -411,6 +407,8 @@ class Session
             {
                 if (!self.operationQueue_)
                     return reply.error("Session no longer exists");
+                // Queueing asks the server with a timeout.
+                waitForProcessingThread(*channel);
                 std::expected<nlohmann::json, std::string> queued = queue(*self.operationQueue_, channel);
                 if (!queued)
                 {

@@ -193,11 +193,11 @@ namespace RemoteIo
         /**
          * @brief Pushes a task to the processing thread.
          *
-         * @param task The task to push.
+         * @param task The task to push, left with the caller when refused, who destroys it outside its own locks.
          * @return true If the task was pushed.
          * @return false If the processing thread was stopped and not started again, or its loop ended on an exception.
          */
-        bool pushTask(std::function<void()> task);
+        bool pushTask(std::function<void()>&& task);
 
         /**
          * @brief Pushes a task that must run, a strand's final task. It is queued like pushTask while the loop or the

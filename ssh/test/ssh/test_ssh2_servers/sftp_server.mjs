@@ -164,9 +164,13 @@ let realpathDotMode = 'conforming';
 // Fault injection and server behaviour switches, configured over the command line interface.
 const faults = {
     failReadsAfter: null,
+    // READs after this many bytes are never answered, like a server that hangs mid transfer.
+    stallReadsAfter: null,
     // Largest answer to a READ, null for what was asked. Emulates servers that answer reads short.
     capReads: null,
     failWritesAfter: null,
+    // WRITEs after this many bytes are never answered, like a server that hangs mid transfer.
+    stallWritesAfter: null,
     dropAfterBytes: null,
     failRenames: false,
     // Renames that still succeed before failRenames applies, null for none.
@@ -183,6 +187,10 @@ const faults = {
     closesFailing: null,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
+    // STAT of these paths is never answered, like a server that hangs on them.
+    unansweredStats: new Set(),
+    // STAT of these paths ends the SFTP channel instead of answering, like an SFTP server process that dies.
+    endingStats: new Set(),
     // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
     answerNoSuchPath: false,
     bytesRead: 0,
@@ -458,6 +466,11 @@ const server = new Server({
                     if (!handle) {
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
                     }
+                    // Before the offset check, which would answer the writes behind an unanswered one.
+                    if (faults.stallWritesAfter !== null && faults.bytesWritten >= faults.stallWritesAfter) {
+                        logMessage('Fault: leaving WRITE unanswered');
+                        return;
+                    }
 
                     // Fake the write operation
                     const result = fakeFilesystem.find(handle.path);
@@ -534,6 +547,10 @@ const server = new Server({
                         logMessage('Fault: dropping the connection during READ');
                         return client.end();
                     }
+                    if (faults.stallReadsAfter !== null && faults.bytesRead >= faults.stallReadsAfter) {
+                        logMessage('Fault: leaving READ unanswered');
+                        return;
+                    }
                     if (faults.failReadsAfter !== null && faults.bytesRead >= faults.failReadsAfter) {
                         logMessage('Fault: failing READ');
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
@@ -599,6 +616,15 @@ const server = new Server({
                     path = resolveFileName(path);
 
                     logMessage('STAT', path);
+
+                    if (faults.unansweredStats.has(path)) {
+                        logMessage('Fault: leaving STAT unanswered');
+                        return;
+                    }
+                    if (faults.endingStats.has(path)) {
+                        logMessage('Fault: ending the SFTP channel');
+                        return sftpStream.end();
+                    }
 
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
@@ -1017,11 +1043,19 @@ cli.on('failReadsAfter', (command) => {
     faults.failReadsAfter = nullableBytes(command);
     faults.bytesRead = 0;
 });
+cli.on('stallReadsAfter', (command) => {
+    faults.stallReadsAfter = nullableBytes(command);
+    faults.bytesRead = 0;
+});
 cli.on('capReads', (command) => {
     faults.capReads = nullableBytes(command);
 });
 cli.on('failWritesAfter', (command) => {
     faults.failWritesAfter = nullableBytes(command);
+    faults.bytesWritten = 0;
+});
+cli.on('stallWritesAfter', (command) => {
+    faults.stallWritesAfter = nullableBytes(command);
     faults.bytesWritten = 0;
 });
 cli.on('dropAfterBytes', (command) => {
@@ -1053,6 +1087,12 @@ cli.on('denyDirectory', (command) => {
 // LSTAT of the path answers permission denied.
 cli.on('denyStat', (command) => {
     faults.deniedStats.add(command.path);
+});
+cli.on('leaveStatUnanswered', (command) => {
+    faults.unansweredStats.add(command.path);
+});
+cli.on('endSftpChannelOnStat', (command) => {
+    faults.endingStats.add(command.path);
 });
 cli.on('answerNoSuchPath', (command) => {
     faults.answerNoSuchPath = command.enabled !== false;

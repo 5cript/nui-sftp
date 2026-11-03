@@ -9,6 +9,8 @@
 
 #include <libssh/libsshpp.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <expected>
 #include <map>
 #include <string>
@@ -45,6 +47,21 @@ namespace SecureShell
          *
          */
         void start() override;
+
+        /**
+         * @brief Sets how long every libssh call waits for the server, before start.
+         * @return What libssh returned, SSH_OK when it took the timeout.
+         */
+        int setCallTimeout(std::chrono::microseconds timeout);
+
+        /**
+         * @brief How long a libssh call waits for the server, see setCallTimeout. The maximum when it was never set,
+         *        libssh then waits forever.
+         */
+        std::chrono::microseconds callTimeout() const
+        {
+            return callTimeout_;
+        }
 
         struct PtyCreationOptions
         {
@@ -91,6 +108,11 @@ namespace SecureShell
         void removeAllSftpSessions();
 
         /**
+         * @brief Calls the connection loss callback once, never while the session shuts down.
+         */
+        void reportConnectionLoss();
+
+        /**
          * @brief Shuts down the session and closes all channels.
          * The session is not usable after this.
          */
@@ -100,6 +122,9 @@ namespace SecureShell
 
       private:
         std::function<void()> onConnectionLoss_;
+        /** @brief Set once the loss was reported or the session shuts down. */
+        std::atomic_bool connectionLossReported_{false};
+        std::chrono::microseconds callTimeout_{std::chrono::microseconds::max()};
         RemoteIo::ProcessingThread processingThread_;
         ssh::Session session_;
         std::shared_ptr<Channel> hiddenChannel_;
@@ -116,6 +141,13 @@ namespace SecureShell
         std::optional<int> port;
         std::optional<std::string> password;
     };
+
+    /**
+     * @brief How long every libssh call after the connect waits for the server: the timeout @p options set, 30 s when
+     *        they set none, since libssh then waits forever and file system calls rely on it to end. A ConnectTimeout
+     *        of the ssh config bounds the connect only.
+     */
+    std::chrono::microseconds callTimeoutOf(Persistence::SshOptions const& options);
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
         Persistence::SshSessionOptions const& sessionOptions,

@@ -308,6 +308,72 @@ namespace RemoteIo::Test
         EXPECT_FALSE(refused.get());
     }
 
+    TEST_F(ProcessingThreadTest, WaitingForPushedTasksWaitsUntilTheTasksBeforeRan)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        std::promise<void> release{};
+        std::atomic_bool ran{false};
+        strand->pushTask(
+            [held = release.get_future().share(), &ran]()
+            {
+                held.wait();
+                ran = true;
+            }
+        );
+
+        auto waited = std::async(
+            std::launch::async,
+            [&strand, &ran]()
+            {
+                strand->waitForPushedTasks();
+                return ran.load();
+            }
+        );
+        EXPECT_EQ(waited.wait_for(50ms), std::future_status::timeout) << "returned while a task before it was held";
+        release.set_value();
+
+        ASSERT_EQ(waited.wait_for(5s), std::future_status::ready);
+        EXPECT_TRUE(waited.get());
+        processingThread.stop();
+    }
+
+    TEST_F(ProcessingThreadTest, WaitingForPushedTasksOfAStoppedThreadReturnsAtOnce)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        processingThread.stop();
+
+        auto waited = std::async(
+            std::launch::async,
+            [&strand]()
+            {
+                strand->waitForPushedTasks();
+            }
+        );
+        EXPECT_EQ(waited.wait_for(5s), std::future_status::ready);
+    }
+
+    TEST_F(ProcessingThreadTest, WaitingForPushedTasksOfAFinalizedStrandReturnsAtOnce)
+    {
+        ProcessingThread processingThread;
+        processingThread.start(std::chrono::milliseconds{1});
+        auto strand = processingThread.createStrand();
+        strand->pushFinalTask([]() {});
+
+        auto waited = std::async(
+            std::launch::async,
+            [&strand]()
+            {
+                strand->waitForPushedTasks();
+            }
+        );
+        EXPECT_EQ(waited.wait_for(5s), std::future_status::ready);
+        processingThread.stop();
+    }
+
     TEST_F(ProcessingThreadTest, ThrowingPromiseTaskCompletesWithTheUnfinishedResult)
     {
         ProcessingThread processingThread;

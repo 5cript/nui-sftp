@@ -53,13 +53,86 @@ namespace SecureShell::Test
             auto session = makePasswordTestSession(port);
             if (!session.has_value())
                 throw std::runtime_error("Failed to create session");
+            return startSftpSession(std::move(session).value());
+        }
 
-            (*session)->start();
-            auto sftpFuture = (*session)->createSftpSession();
+        /**
+         * @brief Like createSftpSession, but every libssh call after the connect times out after @p callTimeout and
+         *        @p losses counts the reports of a lost connection.
+         */
+        std::pair<std::unique_ptr<Session>, std::shared_ptr<SftpSession>>
+        createTimingOutSftpSession(unsigned short port, std::chrono::seconds callTimeout, std::atomic_int& losses)
+        {
+            auto session = makePasswordTestSession(
+                port,
+                [&losses]()
+                {
+                    ++losses;
+                }
+            );
+            if (!session.has_value())
+                throw std::runtime_error("Failed to create session");
+            if ((*session)->setCallTimeout(callTimeout) != SSH_OK)
+                throw std::runtime_error("Failed to set the timeout");
+            return startSftpSession(std::move(session).value());
+        }
+
+        /**
+         * @brief Starts @p session and opens an SFTP session on it.
+         */
+        static std::pair<std::unique_ptr<Session>, std::shared_ptr<SftpSession>>
+        startSftpSession(std::unique_ptr<Session> session)
+        {
+            session->start();
+            auto sftpFuture = session->createSftpSession();
             if (sftpFuture.wait_for(10s) != std::future_status::ready)
                 throw std::runtime_error("Failed to create sftp session");
 
-            return std::make_pair(std::move(session).value(), sftpFuture.get().value().lock());
+            auto sftp = sftpFuture.get().value().lock();
+            return std::make_pair(std::move(session), std::move(sftp));
+        }
+
+        /**
+         * @brief A transfer observed from before its first turn, like the operations do.
+         */
+        struct ObservedTransfer
+        {
+            /** @brief Null when the transfer did not start in time. */
+            std::shared_ptr<AsyncTransferContext> context{};
+            /** @brief Ready once the transfer ended. */
+            std::future<void> ended{};
+        };
+
+        /**
+         * @brief Starts a transfer of @p file with @p start, which runs on the processing thread and returns the
+         *        context of readAsyncInStrand or writeAsyncInStrand.
+         */
+        template <typename StartT>
+        static ObservedTransfer observeTransfer(FileStream& file, StartT start)
+        {
+            auto ended = std::make_shared<std::promise<void>>();
+            auto started = file.strand()->pushPromiseTask(
+                [ended, start = std::move(start)]() mutable
+                {
+                    auto result = start();
+                    if (result.has_value())
+                        (*result)->observe(
+                            [ended, weakContext = std::weak_ptr{*result}, told = std::make_shared<std::atomic_bool>()]()
+                            {
+                                if (auto context = weakContext.lock();
+                                    context && context->hasEnded() && !told->exchange(true))
+                                    ended->set_value();
+                            }
+                        );
+                    return result;
+                }
+            );
+            if (started.wait_for(replyTimeout) != std::future_status::ready)
+                return {};
+            auto result = started.get();
+            if (!result.has_value())
+                return {};
+            return ObservedTransfer{.context = *std::move(result), .ended = ended->get_future()};
         }
 
         /**
@@ -921,6 +994,174 @@ namespace SecureShell::Test
         const auto counts = serverStartResult->query("requestCounts");
         ASSERT_TRUE(counts.has_value());
         EXPECT_EQ(counts->value("CLOSE", 0), 2) << counts->dump();
+    }
+
+    /** @brief What a call says that the server left unanswered for the second the timing out sessions wait. */
+    constexpr std::string_view unansweredWithinASecond = "The server did not answer within 1 s";
+
+    TEST_F(SftpTests, AnUnansweredRequestReportsTheConnectionLost)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("leaveStatUnanswered", {{"path", "/home/test/file1.txt"}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+
+        auto stat = sftp->later(RemoteIo::Stat{.path = remote("/home/test/file1.txt")});
+        ASSERT_EQ(stat.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = stat.get();
+
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(result.error().message, unansweredWithinASecond);
+        EXPECT_EQ(losses.load(), 1);
+    }
+
+    TEST_F(SftpTests, AnUnansweredRequestDoesNotReportTheErrorOfTheCallBefore)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("leaveStatUnanswered", {{"path", "/home/test/file1.txt"}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+        auto missing = sftp->later(RemoteIo::Stat{.path = remote("/home/test/missing.txt")});
+        ASSERT_EQ(missing.wait_for(replyTimeout), std::future_status::ready);
+        const auto missingResult = missing.get();
+        ASSERT_FALSE(missingResult.has_value());
+        ASSERT_EQ(missingResult.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+
+        auto stat = sftp->later(RemoteIo::Stat{.path = remote("/home/test/file1.txt")});
+        ASSERT_EQ(stat.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = stat.get();
+
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << result.error().toString();
+        EXPECT_EQ(result.error().message, unansweredWithinASecond);
+    }
+
+    TEST_F(SftpTests, ACallAfterAnUnansweredRequestFailsWithoutReachingTheServer)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("leaveStatUnanswered", {{"path", "/home/test/file1.txt"}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+        ASSERT_EQ(
+            sftp->later(RemoteIo::Stat{.path = remote("/home/test/file1.txt")}).wait_for(replyTimeout),
+            std::future_status::ready
+        );
+        ASSERT_TRUE(serverStartResult->command("resetRequestCounts", {}));
+
+        auto listing = sftp->later(RemoteIo::ListDirectory{.path = remote("/home/test")});
+        ASSERT_EQ(listing.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = listing.get();
+
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(result.error().message, unansweredWithinASecond);
+        const auto counts = serverStartResult->query("requestCounts");
+        ASSERT_TRUE(counts.has_value());
+        EXPECT_EQ(counts->value("OPENDIR", 0), 0) << counts->dump();
+        EXPECT_EQ(losses.load(), 1);
+    }
+
+    TEST_F(SftpTests, ADownloadTheServerStopsAnsweringFailsAsALostConnection)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("stallReadsAfter", {{"bytes", 16384}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+        auto opened = sftp->openFile(
+            remote("/home/test/large.txt"), SftpSession::OpenType::Read, std::filesystem::perms::owner_read
+        );
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        auto transfer = observeTransfer(
+            *file,
+            [&]()
+            {
+                return file->readAsyncInStrand(
+                    fileSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [](IFileStream::SignedSizeType)
+                    {
+                        return true;
+                    }
+                );
+            }
+        );
+        ASSERT_TRUE(transfer.context);
+        ASSERT_EQ(transfer.ended.wait_for(replyTimeout), std::future_status::ready);
+
+        EXPECT_EQ(transfer.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        const auto error = transfer.context->error();
+        ASSERT_TRUE(error.has_value());
+        EXPECT_EQ(error->kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(error->message, fmt::format("Reading the remote file failed: {}", unansweredWithinASecond));
+        EXPECT_EQ(losses.load(), 1);
+    }
+
+    TEST_F(SftpTests, AnUploadTheServerStopsAnsweringFailsAsALostConnection)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("stallWritesAfter", {{"bytes", 16384}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+        auto opened = sftp->openFile(
+            remote("/home/test/uploaded.bin"),
+            SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
+            std::filesystem::perms{0644u}
+        );
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        auto transfer = observeTransfer(
+            *file,
+            [&]()
+            {
+                return file->writeAsyncInStrand(
+                    fileSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [&buffer](IFileStream::SignedSizeType bytes)
+                    {
+                        const auto length = std::min(bytes, static_cast<IFileStream::SignedSizeType>(buffer.size()));
+                        std::fill_n(buffer.begin(), length, 'x');
+                        return length;
+                    }
+                );
+            }
+        );
+        ASSERT_TRUE(transfer.context);
+        ASSERT_EQ(transfer.ended.wait_for(replyTimeout), std::future_status::ready);
+
+        EXPECT_EQ(transfer.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        const auto error = transfer.context->error();
+        ASSERT_TRUE(error.has_value());
+        EXPECT_EQ(error->kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(error->message, fmt::format("Writing the remote file failed: {}", unansweredWithinASecond));
+        EXPECT_EQ(losses.load(), 1);
+    }
+
+    TEST_F(SftpTests, ASftpChannelTheServerEndsReportsTheConnectionLost)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("endSftpChannelOnStat", {{"path", "/home/test/file1.txt"}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 5s, losses);
+
+        auto stat = sftp->later(RemoteIo::Stat{.path = remote("/home/test/file1.txt")});
+        ASSERT_EQ(stat.wait_for(replyTimeout), std::future_status::ready);
+        const auto result = stat.get();
+
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << result.error().toString();
+        EXPECT_EQ(losses.load(), 1);
     }
 
     TEST_F(SftpTests, CanStatFileUsingFileStream)

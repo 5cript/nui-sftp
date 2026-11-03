@@ -423,7 +423,7 @@ namespace Test
             EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed);
     }
 
-    TEST_F(OperationQueueBatchTests, ARequestThatWaitsForTheBatchFirstOutlastsABatchLongerThanItsTimeout)
+    TEST_F(OperationQueueBatchTests, ARequestThatWaitsForTheProcessingThreadFirstOutlastsABatchLongerThanItsTimeout)
     {
         constexpr auto operationTimeout = std::chrono::seconds{1};
         const auto held = holdFirstOpen();
@@ -445,7 +445,7 @@ namespace Test
             [&]()
             {
                 // As the session does before a request that waits for the processing thread.
-                queue->waitForBatch();
+                fake_->strand()->waitForPushedTasks();
                 return queue->addDownloadOperation(
                     fake_,
                     Ids::generateOperationId(),
@@ -465,6 +465,49 @@ namespace Test
         ASSERT_EQ(added.wait_for(waitLimit), std::future_status::ready);
         const auto result = added.get();
         EXPECT_TRUE(result.has_value()) << result.error().toString();
+    }
+
+    TEST_F(OperationQueueBatchTests, AnOperationOffTheStrandOutlastsWorkQueuedOnTheProcessingThreadBeforeIt)
+    {
+        constexpr auto operationTimeout = std::chrono::seconds{1};
+        Persistence::SftpOptions options{};
+        options.operationTimeout = operationTimeout;
+        auto queue = makeQueue(std::move(options));
+        setPaused(false);
+        const auto remotePath = addRemoteFile("removed.txt");
+        const auto operationId = Ids::generateOperationId();
+        const auto added = runOnStrand(
+            [&]()
+            {
+                return queue->addDeleteOperation(fake_, operationId, remotePath, false, false);
+            }
+        );
+        ASSERT_TRUE(added.has_value()) << added.error().toString();
+
+        // Work nobody waits for, as a call answered from its completion queues it.
+        std::promise<void> release{};
+        fakeStrand_->pushTask(
+            [held = release.get_future().share()]()
+            {
+                held.wait();
+            }
+        );
+        auto worked = postToStrand(
+            [&queue]()
+            {
+                queue->work();
+            }
+        );
+        // Held past the delete's timeout: a delete that counted the held work gave up meanwhile.
+        EXPECT_EQ(worked.wait_for(2 * operationTimeout), std::future_status::timeout) << "the delete worked while held";
+        release.set_value();
+        ASSERT_EQ(worked.wait_for(waitLimit), std::future_status::ready);
+
+        workUntilCompletions(1);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().operationId, operationId);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Completed);
+        EXPECT_FALSE(fake_->exists(remotePath));
     }
 
     TEST_F(OperationQueueBatchTests, ACancelAllWhileTheBatchIsOutLeavesWhatIsQueuedAfterIt)

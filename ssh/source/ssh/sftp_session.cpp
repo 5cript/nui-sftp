@@ -8,6 +8,9 @@
 #include <cassert>
 #include <chrono>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <utility>
 
 #include <fcntl.h>
@@ -16,6 +19,16 @@ namespace SecureShell
 {
     namespace
     {
+        /**
+         * @brief Whether @p message is what libssh's sftp_packet_read says when it could not read a packet whole: a
+         *        timeout, the end of the channel or a size no packet has. libssh tells it apart by the message only.
+         */
+        bool isFailedPacketRead(std::string_view message)
+        {
+            return message.starts_with("Timeout while reading sftp packet") ||
+                message.starts_with("Received EOF while reading sftp packet") || message == "Invalid sftp packet size!";
+        }
+
         RemoteIo::Capabilities capabilitiesOf(sftp_session session)
         {
             return RemoteIo::Capabilities{
@@ -129,12 +142,12 @@ namespace SecureShell
 
         {
             std::unique_ptr<sftp_dir_struct, std::function<void(sftp_dir_struct*)>> dir{
-                sftp_opendir(session_.get(), path.c_str()),
+                awaitServer(sftp_opendir, session_.get(), path.c_str()),
                 [&](sftp_dir_struct* dir)
                 {
                     if (dir != nullptr)
                     {
-                        closeResult = sftp_closedir(dir);
+                        closeResult = awaitServer(sftp_closedir, dir);
                     }
                 }
             };
@@ -145,10 +158,10 @@ namespace SecureShell
 
             {
                 std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> entry{
-                    sftp_readdir(session_.get(), dir.get()), sftp_attributes_free
+                    awaitServer(sftp_readdir, session_.get(), dir.get()), sftp_attributes_free
                 };
 
-                for (; entry != nullptr; entry.reset(sftp_readdir(session_.get(), dir.get())))
+                for (; entry != nullptr; entry.reset(awaitServer(sftp_readdir, session_.get(), dir.get())))
                 {
                     entries.push_back(fromSftpAttributes(entry.get()));
                 }
@@ -175,7 +188,7 @@ namespace SecureShell
                 const auto fullPath = path / *name;
 
                 std::unique_ptr<char, decltype(&ssh_string_free_char)> linkLiteral{
-                    sftp_readlink(session_.get(), fullPath.c_str()), ssh_string_free_char
+                    awaitServer(sftp_readlink, session_.get(), fullPath.c_str()), ssh_string_free_char
                 };
                 if (linkLiteral)
                 {
@@ -184,7 +197,7 @@ namespace SecureShell
                 }
 
                 std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> targetAttrs{
-                    sftp_stat(session_.get(), fullPath.c_str()), sftp_attributes_free
+                    awaitServer(sftp_stat, session_.get(), fullPath.c_str()), sftp_attributes_free
                 };
                 if (targetAttrs != nullptr)
                     entry.resolvedTarget =
@@ -210,7 +223,9 @@ namespace SecureShell
     RemoteIo::OperationResult<RemoteIo::CreateNewDirectory>
     SftpSession::run(RemoteIo::CreateNewDirectory const& operation)
     {
-        const auto result = sftp_mkdir(session_.get(),
+        const auto result = awaitServer(
+            sftp_mkdir,
+            session_.get(),
             operation.path.c_str(),
             static_cast<unsigned long>(operation.permissions & std::filesystem::perms::mask)
         );
@@ -236,11 +251,15 @@ namespace SecureShell
     {
         auto const& path = operation.path;
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-            sftp_lstat(session_.get(), path.c_str()), sftp_attributes_free
+            awaitServer(sftp_lstat, session_.get(), path.c_str()), sftp_attributes_free
         };
         if (!attributes)
         {
-            const auto result = sftp_mkdir(session_.get(), path.c_str(), static_cast<unsigned long>(operation.permissions & std::filesystem::perms::mask)
+            const auto result = awaitServer(
+                sftp_mkdir,
+                session_.get(),
+                path.c_str(),
+                static_cast<unsigned long>(operation.permissions & std::filesystem::perms::mask)
             );
             if (result != SSH_OK)
                 return std::unexpected(lastError());
@@ -279,7 +298,9 @@ namespace SecureShell
     {
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
             // O_EXCL: an existing file is an error, not reported as created.
-            sftp_open(session_.get(),
+            awaitServer(
+                sftp_open,
+                session_.get(),
                 operation.path.c_str(),
                 O_CREAT | O_EXCL,
                 static_cast<unsigned long>(operation.permissions & std::filesystem::perms::mask)
@@ -313,7 +334,7 @@ namespace SecureShell
 
     RemoteIo::OperationResult<RemoteIo::RemoveFile> SftpSession::run(RemoteIo::RemoveFile const& operation)
     {
-        const auto result = sftp_unlink(session_.get(), operation.path.c_str());
+        const auto result = awaitServer(sftp_unlink, session_.get(), operation.path.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -332,7 +353,7 @@ namespace SecureShell
     RemoteIo::OperationResult<RemoteIo::RemoveEmptyDirectory>
     SftpSession::run(RemoteIo::RemoveEmptyDirectory const& operation)
     {
-        const auto result = sftp_rmdir(session_.get(), operation.path.c_str());
+        const auto result = awaitServer(sftp_rmdir, session_.get(), operation.path.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -355,7 +376,7 @@ namespace SecureShell
         for (const auto& path : operation.directories)
         {
             std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                sftp_lstat(session_.get(), path.c_str()), sftp_attributes_free
+                awaitServer(sftp_lstat, session_.get(), path.c_str()), sftp_attributes_free
             };
 
             if (attributes == nullptr)
@@ -368,12 +389,12 @@ namespace SecureShell
             bool nonEmpty = false;
             {
                 std::unique_ptr<sftp_dir_struct, std::function<void(sftp_dir_struct*)>> dir{
-                    sftp_opendir(session_.get(), path.c_str()),
-                    [&closeResult](sftp_dir_struct* dir)
+                    awaitServer(sftp_opendir, session_.get(), path.c_str()),
+                    [this, &closeResult](sftp_dir_struct* dir)
                     {
                         if (dir != nullptr)
                         {
-                            closeResult = sftp_closedir(dir);
+                            closeResult = awaitServer(sftp_closedir, dir);
                         }
                     }
                 };
@@ -383,7 +404,7 @@ namespace SecureShell
                 }
 
                 std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> entry{
-                    sftp_readdir(session_.get(), dir.get()), sftp_attributes_free
+                    awaitServer(sftp_readdir, session_.get(), dir.get()), sftp_attributes_free
                 };
                 using namespace std::string_literals;
 
@@ -393,7 +414,7 @@ namespace SecureShell
                         return false;
                     if (entry->name == ".."s || entry->name == "."s)
                     {
-                        entry.reset(sftp_readdir(session_.get(), dir.get()));
+                        entry.reset(awaitServer(sftp_readdir, session_.get(), dir.get()));
                         return false;
                     }
                     else
@@ -425,7 +446,7 @@ namespace SecureShell
         for (const auto& path : operation.paths)
         {
             std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                sftp_lstat(session_.get(), path.c_str()), sftp_attributes_free
+                awaitServer(sftp_lstat, session_.get(), path.c_str()), sftp_attributes_free
             };
 
             if (attributes == nullptr)
@@ -433,13 +454,13 @@ namespace SecureShell
 
             if (attributes->type == SSH_FILEXFER_TYPE_DIRECTORY)
             {
-                const auto result = sftp_rmdir(session_.get(), path.c_str());
+                const auto result = awaitServer(sftp_rmdir, session_.get(), path.c_str());
                 if (result != SSH_OK)
                     return std::unexpected(lastError());
             }
             else
             {
-                const auto result = sftp_unlink(session_.get(), path.c_str());
+                const auto result = awaitServer(sftp_unlink, session_.get(), path.c_str());
                 if (result != SSH_OK)
                     return std::unexpected(lastError());
             }
@@ -456,7 +477,7 @@ namespace SecureShell
     {
         const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-            sftp_stat(session_.get(), operation.path.c_str()), sftp_attributes_free
+            awaitServer(sftp_stat, session_.get(), operation.path.c_str()), sftp_attributes_free
         };
         chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
         if (attributes == nullptr)
@@ -479,7 +500,7 @@ namespace SecureShell
     {
         const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-            sftp_lstat(session_.get(), operation.path.c_str()), sftp_attributes_free
+            awaitServer(sftp_lstat, session_.get(), operation.path.c_str()), sftp_attributes_free
         };
         chunkController_.recordRoundTrip(std::chrono::steady_clock::now() - callStart);
         if (attributes == nullptr)
@@ -504,7 +525,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        const auto result = sftp_setstat(session_.get(), path.c_str(), attributes);
+        const auto result = awaitServer(sftp_setstat, session_.get(), path.c_str(), attributes);
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -543,7 +564,7 @@ namespace SecureShell
         attributes.flags = SSH_FILEXFER_ATTR_ACMODTIME;
         attributes.atime = static_cast<std::uint32_t>(seconds);
         attributes.mtime = static_cast<std::uint32_t>(seconds);
-        if (sftp_setstat(session_.get(), operation.path.c_str(), &attributes) != SSH_OK)
+        if (awaitServer(sftp_setstat, session_.get(), operation.path.c_str(), &attributes) != SSH_OK)
             return std::unexpected(lastError());
         return {};
     }
@@ -558,7 +579,8 @@ namespace SecureShell
 
     RemoteIo::OperationResult<RemoteIo::Rename> SftpSession::run(RemoteIo::Rename const& operation)
     {
-        const auto result = sftp_rename(session_.get(), operation.source.c_str(), operation.destination.c_str());
+        const auto result =
+            awaitServer(sftp_rename, session_.get(), operation.source.c_str(), operation.destination.c_str());
         if (result != SSH_OK)
         {
             return std::unexpected(lastError());
@@ -592,7 +614,7 @@ namespace SecureShell
         auto const& source = operation.source;
         auto const& destination = operation.destination;
         const auto linksSupported = supportsExtensionInStrand("hardlink@openssh.com");
-        if (linksSupported && sftp_hardlink(session_.get(), source.c_str(), destination.c_str()) == SSH_OK)
+        if (linksSupported && awaitServer(sftp_hardlink, session_.get(), source.c_str(), destination.c_str()) == SSH_OK)
         {
             if (auto removed = run(RemoteIo::RemoveFile{.path = source}); !removed.has_value())
             {
@@ -657,7 +679,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        const auto result = sftp_chown(session_.get(), path.c_str(), owner, group);
+        const auto result = awaitServer(sftp_chown, session_.get(), path.c_str(), owner, group);
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -679,7 +701,7 @@ namespace SecureShell
     {
         if (auto valid = requireSetInStrand(path); !valid)
             return std::unexpected(valid.error());
-        const auto result = sftp_chmod(session_.get(), path.c_str(), static_cast<mode_t>(perms));
+        const auto result = awaitServer(sftp_chmod, session_.get(), path.c_str(), static_cast<mode_t>(perms));
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};
@@ -700,7 +722,7 @@ namespace SecureShell
     {
         assert(strand_->withinProcessingThread());
         const std::unique_ptr<char, decltype(&ssh_string_free_char)> canonical{
-            sftp_canonicalize_path(session_.get(), path), ssh_string_free_char
+            awaitServer(sftp_canonicalize_path, session_.get(), path), ssh_string_free_char
         };
         if (canonical == nullptr)
             return std::unexpected(lastError());
@@ -803,19 +825,37 @@ namespace SecureShell
         );
     }
 
-    SftpSession::Error SftpSession::lastError() const
+    SftpSession::Error SftpSession::lastError()
     {
         if (!session_)
             return toRemoteError(
                 SftpError{.message = "The SFTP session is closed", .sftpError = SSH_FX_CONNECTION_LOST}
             );
+        const auto waited = std::exchange(lastServerWait_, {});
+        const std::string_view message = ssh_get_error(session_->session);
+        if (!givenUp_)
+        {
+            // libssh sets no error when it gives up waiting, its clock may run a little ahead of this one.
+            if (const auto timeout = owner_->callTimeout(); waited >= timeout - timeout / 10)
+                giveUpChannel(
+                    fmt::format(
+                        "The server did not answer within {:g} s", std::chrono::duration<double>(timeout).count()
+                    )
+                );
+            else if (isFailedPacketRead(message))
+                giveUpChannel(std::string{message});
+        }
+        if (givenUp_)
+            return toRemoteError(SftpError{.message = *givenUp_, .sftpError = SSH_FX_CONNECTION_LOST});
         // libssh keeps the status of the last answer when the connection breaks.
         if ((ssh_get_status(session_->session) & (SSH_CLOSED | SSH_CLOSED_ERROR)) != 0 ||
             ssh_channel_is_open(session_->channel) == 0)
         {
+            // The session cannot go on without its channel, even when only the channel ended.
+            owner_->reportConnectionLoss();
             return toRemoteError(
                 SftpError{
-                    .message = ssh_get_error(session_->session),
+                    .message = std::string{message},
                     .sshError = ssh_get_error_code(session_->session),
                     .sftpError = SSH_FX_CONNECTION_LOST,
                 }
@@ -824,12 +864,21 @@ namespace SecureShell
         return toRemoteError(SftpError{.sftpError = sftp_get_error(session_.get())});
     }
 
+    void SftpSession::giveUpChannel(std::string reason)
+    {
+        Log::error("Ending the session, its SFTP channel is out of step: {}", reason);
+        givenUp_ = std::move(reason);
+        // Sent without waiting for the server's answer.
+        std::ignore = ssh_channel_close(session_->channel);
+        owner_->reportConnectionLoss();
+    }
+
     std::expected<sftp_limits_struct, SftpSession::Error> SftpSession::limitsInStrand()
     {
         assert(strand_->withinProcessingThread());
         // A copy the caller frees.
         const std::unique_ptr<sftp_limits_struct, decltype(&sftp_limits_free)> limits{
-            sftp_limits(session_.get()), &sftp_limits_free
+            awaitServer(sftp_limits, session_.get()), &sftp_limits_free
         };
         if (!limits)
             return std::unexpected(lastError());
@@ -861,7 +910,12 @@ namespace SecureShell
     {
         const auto callStart = std::chrono::steady_clock::now();
         std::unique_ptr<sftp_file_struct, std::function<void(sftp_file_struct*)>> file{
-            sftp_open(session_.get(), path.c_str(), flags, static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
+            awaitServer(
+                sftp_open,
+                session_.get(),
+                path.c_str(),
+                flags,
+                static_cast<unsigned long>(permissions & std::filesystem::perms::mask)
             ),
             [&](sftp_file_struct* file)
             {
@@ -928,7 +982,7 @@ namespace SecureShell
         for (int depth = 0; depth < operation.maxDepth; ++depth)
         {
             std::unique_ptr<sftp_attributes_struct, decltype(&sftp_attributes_free)> attributes{
-                sftp_lstat(session_.get(), currentPath.c_str()), sftp_attributes_free
+                awaitServer(sftp_lstat, session_.get(), currentPath.c_str()), sftp_attributes_free
             };
             if (attributes == nullptr)
             {
@@ -954,7 +1008,7 @@ namespace SecureShell
             }
 
             const auto readLinkResult = std::unique_ptr<char, decltype(&ssh_string_free_char)>(
-                sftp_readlink(session_.get(), currentPath.c_str()), ssh_string_free_char
+                awaitServer(sftp_readlink, session_.get(), currentPath.c_str()), ssh_string_free_char
             );
             if (readLinkResult == nullptr)
                 return std::unexpected(lastError());
@@ -1002,7 +1056,7 @@ namespace SecureShell
     RemoteIo::OperationResult<RemoteIo::ReadLink> SftpSession::run(RemoteIo::ReadLink const& operation)
     {
         const std::unique_ptr<char, decltype(&ssh_string_free_char)> literal{
-            sftp_readlink(session_.get(), operation.path.c_str()), ssh_string_free_char
+            awaitServer(sftp_readlink, session_.get(), operation.path.c_str()), ssh_string_free_char
         };
         if (!literal)
             return std::unexpected(lastError());
@@ -1016,7 +1070,8 @@ namespace SecureShell
 
     RemoteIo::OperationResult<RemoteIo::CreateSymLink> SftpSession::run(RemoteIo::CreateSymLink const& operation)
     {
-        const auto result = sftp_symlink(session_.get(), operation.target.c_str(), operation.linkPath.c_str());
+        const auto result =
+            awaitServer(sftp_symlink, session_.get(), operation.target.c_str(), operation.linkPath.c_str());
         if (result != SSH_OK)
             return std::unexpected(lastError());
         return {};

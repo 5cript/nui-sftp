@@ -1233,11 +1233,17 @@ auto OperationQueue::workHead(QueuedOperations& operations, std::size_t count, s
 {
     std::vector<WorkResult> results;
     results.reserve(count);
+    RemoteIo::ProcessingStrand const* waitedFor = nullptr;
     for (std::size_t index = 0; index < count; ++index)
     {
         auto& operation = *operations[index].second;
         if (onlyUsesStrand.has_value() && operation.usesStrand() != *onlyUsesStrand)
             continue;
+        if (auto* const strand = operation.strand(); !operation.usesStrand() && strand && strand != waitedFor)
+        {
+            strand->waitForPushedTasks();
+            waitedFor = strand;
+        }
         results.push_back({index, operation.usesStrand() ? operation.workInStrand() : operation.work()});
         // One completion per cycle: the others see the queue without the ended one on the next.
         if (endsOperation(results.back().result))
@@ -1425,12 +1431,6 @@ bool OperationQueue::drainBatch()
     const auto batch = batch_;
     batch->waitUntilReturned();
     return finishBatch(batch);
-}
-
-void OperationQueue::waitForBatch() const
-{
-    if (batch_)
-        batch_->waitUntilReturned();
 }
 
 void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)

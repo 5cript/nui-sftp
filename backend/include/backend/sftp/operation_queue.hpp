@@ -170,13 +170,6 @@ class OperationQueue
     bool drainBatch();
 
     /**
-     * @brief Blocks the strand until the batch out left its processing thread, at once when none is out. For a request
-     *        that is about to wait for that thread with a timeout, which would count the batch's time otherwise. The
-     *        batch still returns to the queue as posted. On the strand.
-     */
-    void waitForBatch() const;
-
-    /**
      * @brief Sets what is called, from any thread, once the queue has work after work returned false: an operation
      *        was added, cancelled, moved, paused or resumed, or a transfer progressed or ended.
      */
@@ -534,7 +527,8 @@ class OperationQueue
 
     /**
      * @brief Works the first @p count operations of @p operations in order, only those whose usesStrand equals
-     *        @p onlyUsesStrand when set, and stops after the first that completed or failed.
+     *        @p onlyUsesStrand when set, and stops after the first that completed or failed. One that does not use
+     *        the strand waits with a timeout for its processing thread, so that thread runs what is queued there first.
      */
     static std::vector<WorkResult>
     workHead(QueuedOperations& operations, std::size_t count, std::optional<bool> onlyUsesStrand);

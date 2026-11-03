@@ -114,7 +114,7 @@ namespace RemoteIo
             // Outside the loop no task ends anything, a promise task completes with its unfinished result.
         }
     }
-    bool ProcessingThread::pushTask(std::function<void()> task)
+    bool ProcessingThread::pushTask(std::function<void()>&& task)
     {
         if (!task)
         {

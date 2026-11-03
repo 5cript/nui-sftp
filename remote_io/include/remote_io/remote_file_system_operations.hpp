@@ -332,37 +332,44 @@ namespace RemoteIo
     using OperationResult = std::expected<typename OperationT::Result, RemoteError>;
 
     /**
-     * @brief Completes an operation exactly once: with its first result, later ones are ignored, or with the unfinished
-     *        result when it is destroyed before, because the operation never started or whoever ran it dropped it.
+     * @brief Hands over a result exactly once: the first one, later ones are ignored, or the unfinished result when it
+     *        is destroyed before, because whatever makes the result never started or whoever ran it dropped it.
      */
-    template <typename OperationT>
-    class Completion
+    template <typename ResultT>
+    class ResultCompletion
     {
       public:
-        explicit Completion(std::function<void(OperationResult<OperationT>)> complete)
+        explicit ResultCompletion(std::function<void(ResultT)> complete)
             : complete_{std::move(complete)}
         {}
-        ~Completion()
+        ~ResultCompletion()
         {
             if (complete_)
-                complete_(UnfinishedTaskResult<OperationResult<OperationT>>{}());
+                complete_(UnfinishedTaskResult<ResultT>{}());
         }
-        Completion(Completion const&) = delete;
-        Completion& operator=(Completion const&) = delete;
-        Completion(Completion&& other) noexcept
+        ResultCompletion(ResultCompletion const&) = delete;
+        ResultCompletion& operator=(ResultCompletion const&) = delete;
+        ResultCompletion(ResultCompletion&& other) noexcept
             : complete_{std::exchange(other.complete_, nullptr)}
         {}
-        Completion& operator=(Completion&&) = delete;
+        ResultCompletion& operator=(ResultCompletion&&) = delete;
 
-        void operator()(OperationResult<OperationT> result)
+        void operator()(ResultT result)
         {
             if (complete_)
                 std::exchange(complete_, nullptr)(std::move(result));
         }
 
       private:
-        std::function<void(OperationResult<OperationT>)> complete_;
+        std::function<void(ResultT)> complete_;
     };
+
+    /**
+     * @brief Completes an operation exactly once, see ResultCompletion: unfinished when the operation never started or
+     *        whoever ran it dropped it.
+     */
+    template <typename OperationT>
+    using Completion = ResultCompletion<OperationResult<OperationT>>;
 
     /**
      * @brief An operation on its way to the file system, with what to do with its result.
