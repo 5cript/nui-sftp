@@ -315,6 +315,37 @@ namespace RemoteIo::Test
                 .size = node->content.size(),
             };
         }
+        /**
+         * @brief Like Lstat, the fake has no links.
+         */
+        OperationResult<Stat> run(Stat const& operation)
+        {
+            return run(Lstat{.path = operation.path});
+        }
+        OperationResult<ListDirectory> run(ListDirectory const& operation)
+        {
+            auto const* directory = find(operation.path);
+            if (directory == nullptr)
+                return std::unexpected(noSuchFile(operation.path));
+            if (directory->type != SharedData::FileType::Directory)
+                return std::unexpected(errorOf(RemoteErrorKind::Failure, "Not a directory"));
+            std::vector<FileInformation> entries;
+            for (auto const& [path, node] : nodes_)
+            {
+                const auto entry = Paths::RemotePath::make(path).value();
+                if (entry.parent() != operation.path)
+                    continue;
+                const auto name = entry.filename();
+                entries.push_back(
+                    FileInformation{
+                        .name = name ? std::string{name->view()} : std::string{},
+                        .type = node.type,
+                        .size = node.content.size(),
+                    }
+                );
+            }
+            return entries;
+        }
         OperationResult<RemoveFile> run(RemoveFile const& operation)
         {
             auto const* node = find(operation.path);
