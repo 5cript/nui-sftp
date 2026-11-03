@@ -61,7 +61,7 @@ class RealServerTests : public ::testing::Test
   protected:
     void SetUp() override
     {
-        std::ofstream privateKeyFile{temporaryRoot / "key.private", std::ios_base::binary};
+        std::ofstream privateKeyFile{isolateDirectory_.path() / "key.private", std::ios_base::binary};
         privateKeyFile.write(privateKey, std::strlen(privateKey));
     }
 
@@ -140,7 +140,8 @@ class RealServerTests : public ::testing::Test
     }
 
   protected:
-    Utility::TemporaryDirectory isolateDirectory_{temporaryRoot, false};
+    /** @brief The test's own directory for its server, removed with the test. temporaryRoot outlives every test. */
+    Utility::TemporaryDirectory isolateDirectory_{temporaryRoot};
     boost::asio::thread_pool pool_{1};
     nlohmann::json defaultPackageJson_ = nlohmann::json({
         {"name", "test"},
