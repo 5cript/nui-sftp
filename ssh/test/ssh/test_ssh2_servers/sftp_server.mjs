@@ -183,6 +183,10 @@ const faults = {
     closesFailing: null,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
+    // STAT of these paths is never answered, like a server that hangs on them.
+    unansweredStats: new Set(),
+    // STAT of these paths ends the SFTP channel instead of answering, like an SFTP server process that dies.
+    endingStats: new Set(),
     // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
     answerNoSuchPath: false,
     bytesRead: 0,
@@ -599,6 +603,15 @@ const server = new Server({
                     path = resolveFileName(path);
 
                     logMessage('STAT', path);
+
+                    if (faults.unansweredStats.has(path)) {
+                        logMessage('Fault: leaving STAT unanswered');
+                        return;
+                    }
+                    if (faults.endingStats.has(path)) {
+                        logMessage('Fault: ending the SFTP channel');
+                        return sftpStream.end();
+                    }
 
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
@@ -1053,6 +1066,12 @@ cli.on('denyDirectory', (command) => {
 // LSTAT of the path answers permission denied.
 cli.on('denyStat', (command) => {
     faults.deniedStats.add(command.path);
+});
+cli.on('leaveStatUnanswered', (command) => {
+    faults.unansweredStats.add(command.path);
+});
+cli.on('endSftpChannelOnStat', (command) => {
+    faults.endingStats.add(command.path);
 });
 cli.on('answerNoSuchPath', (command) => {
     faults.answerNoSuchPath = command.enabled !== false;
