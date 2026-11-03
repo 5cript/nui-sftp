@@ -169,6 +169,8 @@ const faults = {
     // Largest answer to a READ, null for what was asked. Emulates servers that answer reads short.
     capReads: null,
     failWritesAfter: null,
+    // WRITEs after this many bytes are never answered, like a server that hangs mid transfer.
+    stallWritesAfter: null,
     dropAfterBytes: null,
     failRenames: false,
     // Renames that still succeed before failRenames applies, null for none.
@@ -463,6 +465,11 @@ const server = new Server({
                     const handle = handles.get(handleString);
                     if (!handle) {
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
+                    // Before the offset check, which would answer the writes behind an unanswered one.
+                    if (faults.stallWritesAfter !== null && faults.bytesWritten >= faults.stallWritesAfter) {
+                        logMessage('Fault: leaving WRITE unanswered');
+                        return;
                     }
 
                     // Fake the write operation
@@ -1045,6 +1052,10 @@ cli.on('capReads', (command) => {
 });
 cli.on('failWritesAfter', (command) => {
     faults.failWritesAfter = nullableBytes(command);
+    faults.bytesWritten = 0;
+});
+cli.on('stallWritesAfter', (command) => {
+    faults.stallWritesAfter = nullableBytes(command);
     faults.bytesWritten = 0;
 });
 cli.on('dropAfterBytes', (command) => {

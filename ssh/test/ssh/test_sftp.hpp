@@ -93,6 +93,49 @@ namespace SecureShell::Test
         }
 
         /**
+         * @brief A transfer observed from before its first turn, like the operations do.
+         */
+        struct ObservedTransfer
+        {
+            /** @brief Null when the transfer did not start in time. */
+            std::shared_ptr<AsyncTransferContext> context{};
+            /** @brief Ready once the transfer ended. */
+            std::future<void> ended{};
+        };
+
+        /**
+         * @brief Starts a transfer of @p file with @p start, which runs on the processing thread and returns the
+         *        context of readAsyncInStrand or writeAsyncInStrand.
+         */
+        template <typename StartT>
+        static ObservedTransfer observeTransfer(FileStream& file, StartT start)
+        {
+            auto ended = std::make_shared<std::promise<void>>();
+            auto started = file.strand()->pushPromiseTask(
+                [ended, start = std::move(start)]() mutable
+                {
+                    auto result = start();
+                    if (result.has_value())
+                        (*result)->observe(
+                            [ended, weakContext = std::weak_ptr{*result}, told = std::make_shared<std::atomic_bool>()]()
+                            {
+                                if (auto context = weakContext.lock();
+                                    context && context->hasEnded() && !told->exchange(true))
+                                    ended->set_value();
+                            }
+                        );
+                    return result;
+                }
+            );
+            if (started.wait_for(replyTimeout) != std::future_status::ready)
+                return {};
+            auto result = started.get();
+            if (!result.has_value())
+                return {};
+            return ObservedTransfer{.context = *std::move(result), .ended = ended->get_future()};
+        }
+
+        /**
          * @brief Ends the processing loop of @p sftp with a throwing task, then waits until promise tasks come back
          *        with an error at once.
          */
@@ -1034,14 +1077,11 @@ namespace SecureShell::Test
 
         constexpr IFileStream::SignedSizeType fileSize = 65536;
         std::array<char, 1024> buffer{};
-        std::shared_ptr<AsyncTransferContext> context{};
-        auto ended = std::make_shared<std::promise<void>>();
-        auto endedFuture = ended->get_future();
-        // Observed from the processing thread before the first turn, like the operations do.
-        auto started = file->strand()->pushPromiseTask(
+        auto transfer = observeTransfer(
+            *file,
             [&]()
             {
-                auto result = file->readAsyncInStrand(
+                return file->readAsyncInStrand(
                     fileSize,
                     buffer.data(),
                     static_cast<IFileStream::SignedSizeType>(buffer.size()),
@@ -1050,29 +1090,61 @@ namespace SecureShell::Test
                         return true;
                     }
                 );
-                if (!result.has_value())
-                    return false;
-                context = result.value();
-                context->observe(
-                    [ended, weakContext = std::weak_ptr{context}, told = std::make_shared<std::atomic_bool>(false)]()
-                    {
-                        if (auto observed = weakContext.lock();
-                            observed && observed->hasEnded() && !told->exchange(true))
-                            ended->set_value();
-                    }
-                );
-                return true;
             }
         );
-        ASSERT_EQ(started.wait_for(replyTimeout), std::future_status::ready);
-        ASSERT_TRUE(started.get());
-        ASSERT_EQ(endedFuture.wait_for(replyTimeout), std::future_status::ready);
+        ASSERT_TRUE(transfer.context);
+        ASSERT_EQ(transfer.ended.wait_for(replyTimeout), std::future_status::ready);
 
-        EXPECT_EQ(context->outcome(), AsyncTransferContext::Outcome::Failed);
-        const auto error = context->error();
+        EXPECT_EQ(transfer.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        const auto error = transfer.context->error();
         ASSERT_TRUE(error.has_value());
         EXPECT_EQ(error->kind, RemoteIo::RemoteErrorKind::ConnectionLost);
         EXPECT_EQ(error->message, fmt::format("Reading the remote file failed: {}", unansweredWithinASecond));
+        EXPECT_EQ(losses.load(), 1);
+    }
+
+    TEST_F(SftpTests, AnUploadTheServerStopsAnsweringFailsAsALostConnection)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        ASSERT_TRUE(serverStartResult->command("stallWritesAfter", {{"bytes", 16384}}));
+        std::atomic_int losses{0};
+        auto [session, sftp] = createTimingOutSftpSession(serverStartResult->port, 1s, losses);
+        auto opened = sftp->openFile(
+            remote("/home/test/uploaded.bin"),
+            SftpSession::OpenType::Write | SftpSession::OpenType::Create | SftpSession::OpenType::Truncate,
+            std::filesystem::perms{0644u}
+        );
+        ASSERT_EQ(opened.wait_for(replyTimeout), std::future_status::ready);
+        auto file = opened.get().value().lock();
+        ASSERT_TRUE(file);
+
+        constexpr IFileStream::SignedSizeType fileSize = 65536;
+        std::array<char, 1024> buffer{};
+        auto transfer = observeTransfer(
+            *file,
+            [&]()
+            {
+                return file->writeAsyncInStrand(
+                    fileSize,
+                    buffer.data(),
+                    static_cast<IFileStream::SignedSizeType>(buffer.size()),
+                    [&buffer](IFileStream::SignedSizeType bytes)
+                    {
+                        const auto length = std::min(bytes, static_cast<IFileStream::SignedSizeType>(buffer.size()));
+                        std::fill_n(buffer.begin(), length, 'x');
+                        return length;
+                    }
+                );
+            }
+        );
+        ASSERT_TRUE(transfer.context);
+        ASSERT_EQ(transfer.ended.wait_for(replyTimeout), std::future_status::ready);
+
+        EXPECT_EQ(transfer.context->outcome(), AsyncTransferContext::Outcome::Failed);
+        const auto error = transfer.context->error();
+        ASSERT_TRUE(error.has_value());
+        EXPECT_EQ(error->kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(error->message, fmt::format("Writing the remote file failed: {}", unansweredWithinASecond));
         EXPECT_EQ(losses.load(), 1);
     }
 
