@@ -146,7 +146,9 @@ namespace RemoteIo
          * @brief Runs @p operation from any thread and calls @p onCompleted once with its result, on the thread that
          *        completes it: the processing thread, a thread of the protocol, or the caller's when the operation
          *        fails before it starts. The file system must be owned by a shared_ptr: when it is gone before the
-         *        operation starts, the operation completes as unfinished.
+         *        operation starts, the operation completes as unfinished. Separate calls run in order only where the
+         *        protocol starts operations on the strand, a caller that needs one after another starts it from the
+         *        first one's completion.
          */
         template <typename OperationT, typename CallbackT>
         void later(OperationT operation, CallbackT&& onCompleted)
@@ -192,7 +194,7 @@ namespace RemoteIo
         /**
          * @brief Runs @p function on the processing thread of the strand and calls @p onCompleted once with what it
          *        returned, there, or with the unfinished result, see UnfinishedTaskResult, where the strand refuses or
-         *        drops the task.
+         *        drops the task. It is not ordered with operations that later() starts outside the strand.
          */
         template <typename FunctionT, typename CallbackT>
         void perform(FunctionT&& function, CallbackT&& onCompleted)
