@@ -261,16 +261,21 @@ namespace RemoteIo
         virtual void dispatchWhileOwned(std::function<void(IRemoteFileSystem&)> start) = 0;
 
         /**
-         * @brief @p callback as the copyable function a completion holds, so a callback that can only move fits too.
+         * @brief @p callback as the copyable function a completion holds, shared when it can only move.
          */
         template <typename ResultT, typename CallbackT>
         static std::function<void(ResultT)> sharedCallback(CallbackT&& callback)
         {
-            auto shared = std::make_shared<std::decay_t<CallbackT>>(std::forward<CallbackT>(callback));
-            return [shared = std::move(shared)](ResultT result)
+            if constexpr (std::is_copy_constructible_v<std::decay_t<CallbackT>>)
+                return std::forward<CallbackT>(callback);
+            else
             {
-                (*shared)(std::move(result));
-            };
+                auto shared = std::make_shared<std::decay_t<CallbackT>>(std::forward<CallbackT>(callback));
+                return [shared = std::move(shared)](ResultT result)
+                {
+                    (*shared)(std::move(result));
+                };
+            }
         }
 
         template <typename ResultT>
