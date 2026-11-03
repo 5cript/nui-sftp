@@ -32,7 +32,7 @@ namespace Test
             return Paths::nativeToUtf8(root_.path() / relative);
         }
 
-        Utility::TemporaryDirectory root_{temporaryRoot, false};
+        Utility::TemporaryDirectory root_{temporaryRoot};
     };
 
     TEST_F(ExistenceCheckTests, LocalMissingPathIsAbsentAndExistingPathsExist)
