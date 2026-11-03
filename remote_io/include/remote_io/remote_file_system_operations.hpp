@@ -225,7 +225,8 @@ namespace RemoteIo
     {
         using Result = std::string;
         Paths::RemotePath path;
-        std::size_t maximumSize{0};
+        /** @brief The read stops there, 1 MiB unless set. */
+        std::size_t maximumSize{1024u * 1024u};
     };
     BOOST_DESCRIBE_STRUCT(ReadFile, (), (path, maximumSize))
 
