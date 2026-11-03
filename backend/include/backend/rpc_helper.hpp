@@ -245,6 +245,33 @@ namespace RpcHelper
         mutable bool called_{false};
     };
 
+    /**
+     * @brief A completion callback that answers @p reply with @p answer, called as (reply, result) on the thread that
+     *        completes the call. An exception @p answer throws is answered with its message.
+     */
+    template <typename AnswerT>
+    auto answerOnCompletion(RpcOnce&& reply, AnswerT&& answer)
+    {
+        return [reply = std::move(reply),
+                   answer = std::forward<AnswerT>(answer)]<typename ResultT>(ResultT&& result) mutable
+        {
+            try
+            {
+                answer(std::as_const(reply), std::forward<ResultT>(result));
+            }
+            catch (std::exception const& exception)
+            {
+                Log::error("Answering a completed call failed: {}", Utility::errorMessage(exception));
+                reply.error(Utility::errorMessage(exception));
+            }
+            catch (...)
+            {
+                Log::error("Answering a completed call failed with an unknown exception");
+                reply.error("Unknown error");
+            }
+        };
+    }
+
     class ParameterVerifyView
     {
       private:
