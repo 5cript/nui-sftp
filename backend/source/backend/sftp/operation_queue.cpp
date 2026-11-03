@@ -1212,6 +1212,7 @@ bool OperationQueue::workQueue(QueuedOperations& queue)
         }
     }
 
+    // The eligible operations are the head of the queue, so their count says which.
     if (strand)
     {
         startBatch(queue, eligible.size(), *strand, strandIndex);

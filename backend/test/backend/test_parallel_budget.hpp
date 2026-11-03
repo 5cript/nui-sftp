@@ -132,6 +132,15 @@ namespace Test
         EXPECT_EQ(eligible[1].index, 1u);
     }
 
+    TEST(ParallelBudgetTests, EligibleOperationsAreTheHeadOfTheQueueInOrder)
+    {
+        auto queue = makeQueue({{2, false}, {0, false}, {1, false}, {3, false}, {1, true}, {1, false}});
+        const auto eligible = collectEligibleOperations(queue, 8);
+        ASSERT_EQ(eligible.size(), 5u);
+        for (std::size_t index = 0; index < eligible.size(); ++index)
+            EXPECT_EQ(eligible[index].index, index);
+    }
+
     TEST(ParallelBudgetTests, NonPositiveBudgetStillAdvancesTheHead)
     {
         auto queue = makeQueue({{1, false}, {1, false}});
