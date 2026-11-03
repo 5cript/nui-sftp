@@ -142,8 +142,8 @@ class OperationQueue
      *        front) is therefore safely repositioned.
      *
      *        No-ops silently when:
-     *          - the queue is not paused (the frontend must pause first;
-     *            this is the safety belt for races against unpause),
+     *          - the queue is not paused when asked (the frontend must pause
+     *            first; this is the safety belt for races against unpause),
      *          - the id refers to a priority op (priority queue is not
      *            user-reorderable in this UI),
      *          - the id is no longer in the queue (op completed meanwhile).
@@ -594,9 +594,16 @@ class OperationQueue
     void cancelQueued(Ids::OperationId const& id, PartialFilesOnCancel partialFiles);
 
     /**
-     * @brief Moves the queued operation @p operationId to @p newIndex, see moveOperation(). On the strand.
+     * @brief Moves the queued operation @p operationId to @p newIndex of the paused queue, see moveOperation(). On the
+     *        strand.
      */
     void reorder(Ids::OperationId const& operationId, std::size_t newIndex);
+
+    /**
+     * @brief Tells the frontend whether the move of @p operationId to @p index was @p applied. Every move ends in one,
+     *        the frontend's listener applies or discards its reorder by it.
+     */
+    void reportReorder(Ids::OperationId const& operationId, std::size_t index, bool applied);
 
     /**
      * @brief The queue an operation of @p mode goes to.

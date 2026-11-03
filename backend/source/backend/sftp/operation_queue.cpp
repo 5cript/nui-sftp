@@ -884,6 +884,15 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
     onStrand(
         [operationId = std::move(operationId), newIndex](OperationQueue& self)
         {
+            // Only a paused queue reorders, a running one would hand the moved operation slots it is not due. Decided
+            // when asked, so a resume while the batch is out does not refuse a move made while paused.
+            if (!self.paused_)
+            {
+                Log::warn(
+                    "OperationQueue::moveOperation refused, the queue is not paused (op '{}')", operationId.value()
+                );
+                return self.reportReorder(operationId, newIndex, false);
+            }
             self.afterBatch(
                 [&self, operationId, newIndex]()
                 {
@@ -894,39 +903,28 @@ void OperationQueue::moveOperation(Ids::OperationId operationId, std::size_t new
     );
 }
 
+void OperationQueue::reportReorder(Ids::OperationId const& operationId, std::size_t index, bool applied)
+{
+    RpcHelper::callRemoteSafely(
+        *hub_,
+        rpcName("onOperationsReordered"),
+        SharedData::OperationsReordered{
+            .operationId = operationId,
+            .newIndex = static_cast<std::int32_t>(index),
+            .applied = applied,
+        }
+    );
+}
+
 void OperationQueue::reorder(Ids::OperationId const& operationId, std::size_t newIndex)
 {
-    // Pessimistic resolution: every exit path emits onOperationsReordered
-    // so the frontend always gets a definitive "this move was/was not
-    // applied", never silently dropped. The frontend's listener relies
-    // on this to apply or discard the user's intended reorder.
-    const auto emitResolution = [this, &operationId](std::size_t resolvedIndex, bool applied)
-    {
-        RpcHelper::callRemoteSafely(
-            *hub_,
-            rpcName("onOperationsReordered"),
-            SharedData::OperationsReordered{
-                .operationId = operationId,
-                .newIndex = static_cast<std::int32_t>(resolvedIndex),
-                .applied = applied,
-            }
-        );
-    };
-
-    // Only a paused queue reorders, a running one would hand the moved operation slots it is not due.
-    if (!paused_)
-    {
-        Log::warn("OperationQueue::moveOperation refused, the queue is not paused (op '{}')", operationId.value());
-        return emitResolution(newIndex, false);
-    }
-
     // Priority queue is intentionally not user-reorderable.
     for (auto const& [pid, _op] : priorityOperations_)
     {
         if (pid == operationId)
         {
             Log::warn("OperationQueue::moveOperation refused, '{}' is a priority op", operationId.value());
-            return emitResolution(newIndex, false);
+            return reportReorder(operationId, newIndex, false);
         }
     }
 
@@ -947,15 +945,15 @@ void OperationQueue::reorder(Ids::OperationId const& operationId, std::size_t ne
         // Op completed/canceled between click and strand tick: silent
         // resolution; the frontend already removed the card via
         // onOperationCompleted, so applied=false is purely informational.
-        return emitResolution(newIndex, false);
+        return reportReorder(operationId, newIndex, false);
     }
 
     if (queue.empty())
-        return emitResolution(newIndex, false);
+        return reportReorder(operationId, newIndex, false);
     if (newIndex >= queue.size())
         newIndex = queue.size() - 1;
     if (oldIndex == newIndex)
-        return emitResolution(newIndex, false);
+        return reportReorder(operationId, newIndex, false);
 
     auto entry = std::move(queue[oldIndex]);
     queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(oldIndex));
@@ -969,7 +967,7 @@ void OperationQueue::reorder(Ids::OperationId const& operationId, std::size_t ne
         queue.size()
     );
 
-    emitResolution(newIndex, true);
+    reportReorder(operationId, newIndex, true);
 }
 
 void OperationQueue::completeOperation(SharedData::OperationCompleted&& operationCompleted)

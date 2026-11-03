@@ -343,6 +343,37 @@ namespace Test
         EXPECT_EQ(completedIds(), (std::vector<std::string>{third.value(), first.value(), second.value()}));
     }
 
+    TEST_F(OperationQueueBatchTests, AMoveMadeWhilePausedAppliesWhenTheQueueResumesBeforeTheBatchReturned)
+    {
+        const auto held = holdFirstOpen();
+        auto queue = makeQueue();
+        runOnStrand(
+            [&queue]()
+            {
+                queue->limitParallelism(1u);
+            }
+        );
+        setPaused(false);
+        const auto first = addDownload(*queue, "a.txt");
+        const auto second = addDownload(*queue, "b.txt");
+        const auto third = addDownload(*queue, "c.txt");
+
+        postToStrand(
+            [&queue]()
+            {
+                queue->work();
+            }
+        );
+        ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
+        queue->paused(true);
+        queue->moveOperation(third, 0);
+        queue->paused(false);
+        held->release();
+
+        workUntilCompletions(3);
+        EXPECT_EQ(completedIds(), (std::vector<std::string>{third.value(), first.value(), second.value()}));
+    }
+
     TEST_F(OperationQueueBatchTests, AQueueGoneWhileItsBatchIsOutLeavesItsOperationsToTheBatch)
     {
         const auto held = holdFirstOpen();
