@@ -698,8 +698,8 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
         const auto channel = session->anySftpChannel();
         if (!channel)
             return std::unexpected{std::string{"The session has no file system channel"}};
-        // Its calls wait for the processing thread with a timeout, the queue's batch there must not count against it.
-        session->operationQueue_->waitForBatch();
+        // Its calls wait for the processing thread with a timeout.
+        Session::waitForProcessingThread(*channel);
         return std::forward<FunctionT>(function)(*session, channel);
     }
 

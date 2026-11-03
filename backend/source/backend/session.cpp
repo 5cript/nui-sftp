@@ -287,8 +287,8 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
                 );
                 return;
             }
-            // Queueing asks the server with a timeout, the queue's batch on the processing thread must not count.
-            self->operationQueue_->waitForBatch();
+            // Queueing asks the server with a timeout.
+            waitForProcessingThread(*fileSystem);
 
             for (auto const& opId : operationIds)
             {
@@ -402,6 +402,12 @@ void Session::removeSftpChannel(Ids::ChannelId channelId)
             }
         }
     );
+}
+
+void Session::waitForProcessingThread(RemoteIo::IRemoteFileSystem const& channel)
+{
+    if (auto* const strand = channel.strand())
+        strand->waitForPushedTasks();
 }
 
 void Session::registerRpcCreateChannel()
@@ -672,8 +678,7 @@ void Session::registerRpcSftpListDirectory()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -711,8 +716,7 @@ void Session::registerRpcSftpHomeDirectory()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -766,8 +770,7 @@ void Session::registerRpcSftpUserDirectories()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -805,6 +808,8 @@ void Session::registerRpcQueuedRemoves()
                         if (!self.operationQueue_)
                             return reply.error("Session no longer exists");
 
+                        // The guard asks the server with a timeout.
+                        waitForProcessingThread(*channel);
                         auto guard = self.operationQueue_->remoteDeleteGuard(channel);
                         if (const auto refusal = refuseAnyProtected(guard, paths); refusal)
                             return replyRefusal(reply, *refusal);
@@ -876,8 +881,7 @@ void Session::registerRpcSftpCreateDirectory()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -917,8 +921,7 @@ void Session::registerRpcSftpCreateFile()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -1396,6 +1399,8 @@ void Session::registerRpcSftpOpenSyncSession()
                         if (!self.operationQueue_)
                             return reply.error("Session no longer exists");
 
+                        // Queueing the scan asks the server for the home directory with a timeout.
+                        waitForProcessingThread(*channel);
                         self.operationQueue_->addSyncScanOperation(
                             channel,
                             Ids::makeSyncSessionId(syncSessionIdString),
@@ -1572,6 +1577,8 @@ void Session::registerRpcSftpExecuteSyncSelection()
                                 // A stopped session has no queue any more.
                                 if (!self.operationQueue_)
                                     return reply.error("Session no longer exists");
+                                // Its delete guard asks the server with a timeout.
+                                waitForProcessingThread(*channel);
                                 auto result = self.operationQueue_->executeSyncPlan(
                                     channel, *session, std::move(plan), request, *self.localOperationQueue_
                                 );
@@ -1658,8 +1665,7 @@ void Session::registerRpcSftpPreDeleteChecks()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -1689,6 +1695,8 @@ void Session::registerRpcSftpDeleteFiles()
                         auto remotePaths = RpcHelper::parseRemotePaths(paths);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
+                        // The guard asks the server with a timeout.
+                        waitForProcessingThread(*channel);
                         auto guard = self.operationQueue_->remoteDeleteGuard(channel);
                         if (const auto refusal = refuseAnyProtected(guard, *remotePaths); refusal)
                             return replyRefusal(reply, *refusal);
@@ -1772,8 +1780,7 @@ void Session::registerRpcSftpRename()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );
@@ -1944,6 +1951,7 @@ void Session::registerRpcSftpExistsBatch()
                     Ids::makeChannelId(channelIdString),
                     [paths](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
+                        waitForProcessingThread(*channel);
                         auto results = remotePathsExist(*channel, paths, futureTimeout);
                         if (!results)
                         {
@@ -1996,8 +2004,7 @@ void Session::registerRpcSftpStat()
                             )
                         );
                     },
-                    std::move(reply),
-                    BatchWait::None
+                    std::move(reply)
                 );
             }
         );

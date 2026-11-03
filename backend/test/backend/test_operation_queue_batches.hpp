@@ -423,7 +423,7 @@ namespace Test
             EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed);
     }
 
-    TEST_F(OperationQueueBatchTests, ARequestThatWaitsForTheBatchFirstOutlastsABatchLongerThanItsTimeout)
+    TEST_F(OperationQueueBatchTests, ARequestThatWaitsForTheProcessingThreadFirstOutlastsABatchLongerThanItsTimeout)
     {
         constexpr auto operationTimeout = std::chrono::seconds{1};
         const auto held = holdFirstOpen();
@@ -445,7 +445,7 @@ namespace Test
             [&]()
             {
                 // As the session does before a request that waits for the processing thread.
-                queue->waitForBatch();
+                fake_->strand()->waitForPushedTasks();
                 return queue->addDownloadOperation(
                     fake_,
                     Ids::generateOperationId(),

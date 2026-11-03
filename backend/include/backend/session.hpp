@@ -301,22 +301,16 @@ class Session
     void removeSftpChannel(Ids::ChannelId channelId);
 
     /**
-     * @brief Whether a call on a file system channel waits for the operation queue's batch first, see
-     *        OperationQueue::waitForBatch().
+     * @brief Blocks the strand until the processing thread of @p channel ran what is queued there: the operation
+     *        queue's batch and the calls that answer from a completion. For a call that then waits for that thread with
+     *        a timeout, which would count them otherwise.
      */
-    enum class BatchWait
-    {
-        // The call waits for the processing thread with a timeout, which must not count the batch.
-        First,
-        // The call answers from a completion and waits for nothing on the strand.
-        None,
-    };
+    static void waitForProcessingThread(RemoteIo::IRemoteFileSystem const& channel);
 
     /**
      * @brief Runs @p func on the strand with the channel @p channelId of @p channels, as (reply, channel) or
      *        (reply, session, channel). @p reply is always answered: when the session is gone, when there is no such
-     *        channel, and with the message of an exception @p func throws. A file system channel waits for the
-     *        operation queue's batch first unless @p batchWait is None.
+     *        channel, and with the message of an exception @p func throws.
      */
     template <typename ChannelT, typename FunctionT>
     void withLockedChannelDo(
@@ -324,8 +318,7 @@ class Session
         void (Session::*remove)(Ids::ChannelId),
         Ids::ChannelId channelId,
         FunctionT&& func,
-        RpcHelper::RpcOnce&& reply,
-        BatchWait batchWait = BatchWait::First
+        RpcHelper::RpcOnce&& reply
     )
     {
         within_strand_do(
@@ -334,8 +327,7 @@ class Session
                 remove,
                 channelId = std::move(channelId),
                 func = std::forward<FunctionT>(func),
-                reply = std::move(reply),
-                batchWait]() mutable
+                reply = std::move(reply)]() mutable
             {
                 auto self = weak.lock();
                 if (!self)
@@ -354,9 +346,6 @@ class Session
                     ((*self).*remove)(channelId);
                     return reply.error("Failed to lock channel");
                 }
-                if (std::is_same_v<ChannelT, RemoteIo::IRemoteFileSystem> && batchWait == BatchWait::First &&
-                    self->operationQueue_)
-                    self->operationQueue_->waitForBatch();
                 try
                 {
                     if constexpr (
@@ -394,21 +383,19 @@ class Session
         );
     }
 
+    /**
+     * @brief withLockedChannelDo for the file system channels. A call that waits for the file system with a timeout
+     *        calls waitForProcessingThread first.
+     */
     template <typename FunctionT>
-    void withSftpChannelDo(
-        Ids::ChannelId channelId,
-        FunctionT&& func,
-        RpcHelper::RpcOnce&& reply,
-        BatchWait batchWait = BatchWait::First
-    )
+    void withSftpChannelDo(Ids::ChannelId channelId, FunctionT&& func, RpcHelper::RpcOnce&& reply)
     {
         withLockedChannelDo(
             &Session::sftpChannels_,
             &Session::removeSftpChannel,
             std::move(channelId),
             std::forward<FunctionT>(func),
-            std::move(reply),
-            batchWait
+            std::move(reply)
         );
     }
 
@@ -428,6 +415,8 @@ class Session
             {
                 if (!self.operationQueue_)
                     return reply.error("Session no longer exists");
+                // Queueing asks the server with a timeout.
+                waitForProcessingThread(*channel);
                 std::expected<nlohmann::json, std::string> queued = queue(*self.operationQueue_, channel);
                 if (!queued)
                 {

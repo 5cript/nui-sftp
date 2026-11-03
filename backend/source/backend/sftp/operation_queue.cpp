@@ -1427,12 +1427,6 @@ bool OperationQueue::drainBatch()
     return finishBatch(batch);
 }
 
-void OperationQueue::waitForBatch() const
-{
-    if (batch_)
-        batch_->waitUntilReturned();
-}
-
 void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
 {
     // Assumed in strand. The sync waits for both scans, so the other one is of no use once one failed.
