@@ -18,6 +18,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -238,13 +240,10 @@ class Operation
 
     /**
      * @brief The level a failure with @p error is logged at: a destination that changed since its compare is no error,
-     *        the compare kept it on purpose and the owner of the operation reports it, an open that waits for a
-     *        connection no failure at all.
+     *        the compare kept it on purpose and the owner of the operation reports it.
      */
     static Log::Level failureLevelOf(Error const& error)
     {
-        if (waitsForConnection(error))
-            return Log::Level::Debug;
         return error.type == ErrorType::ChangedSinceCompare ? Log::Level::Warning : Log::Level::Error;
     }
 
@@ -288,6 +287,17 @@ class Operation
     static bool waitsForConnection(Error const& error)
     {
         return error.remoteError.has_value() && error.remoteError->kind == RemoteIo::RemoteErrorKind::Busy;
+    }
+
+    /**
+     * @brief @p error of an open from wakingOpen, logged after @p what: at Debug when it waits for a connection,
+     *        which the caller waits out, else at failureLevelOf.
+     */
+    static Error loggedOpenFailure(Error error, std::string_view what, Log::Toast toast = Log::Toast::Show)
+    {
+        const auto level = waitsForConnection(error) ? Log::Level::Debug : failureLevelOf(error);
+        Log::log(level, toast, "{}: {}", what, error.remoteError ? error.remoteError->message : std::string{});
+        return error;
     }
 
     /**

@@ -509,18 +509,14 @@ ArchiveDownloadOperation::openNextEntryInStrand(RemoteIo::IRemoteFileSystem& fil
     const auto streamOpenResult = fileSystem.inStrand(wakingOpen(resolved.source, RemoteIo::OpenMode::Read));
     if (!streamOpenResult.has_value())
     {
-        Error error{
-            .type = ErrorType::SftpError,
-            .remoteError = streamOpenResult.error(),
-            .extraInfo = fmt::format("Opening remote file: {}", resolved.source.value()),
-        };
-        Log::log(
-            failureLevelOf(error),
-            "ArchiveDownloadOperation: cannot open remote '{}': {}",
-            resolved.source.value(),
-            streamOpenResult.error().message
-        );
-        return std::unexpected(std::move(error));
+        return std::unexpected(loggedOpenFailure(
+            {
+                .type = ErrorType::SftpError,
+                .remoteError = streamOpenResult.error(),
+                .extraInfo = fmt::format("Opening remote file: {}", resolved.source.value()),
+            },
+            fmt::format("ArchiveDownloadOperation: cannot open remote '{}'", resolved.source.value())
+        ));
     }
     currentStream_ = streamOpenResult.value();
 

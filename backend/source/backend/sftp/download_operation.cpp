@@ -775,17 +775,14 @@ DownloadOperation::prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
     const auto streamOpenResult = fileSystem.inStrand(wakingOpen(remotePath_, RemoteIo::OpenMode::Read));
     if (!streamOpenResult.has_value())
     {
-        Error error{
-            .type = ErrorType::SftpError,
-            .remoteError = streamOpenResult.error(),
-            .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value()),
-        };
-        Log::log(
-            failureLevelOf(error),
-            "DownloadOperation: Failed to open remote file: {}.",
-            streamOpenResult.error().message
-        );
-        return std::unexpected(std::move(error));
+        return std::unexpected(loggedOpenFailure(
+            {
+                .type = ErrorType::SftpError,
+                .remoteError = streamOpenResult.error(),
+                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value()),
+            },
+            "DownloadOperation: Failed to open remote file"
+        ));
     }
 
     fileStream_ = streamOpenResult.value();

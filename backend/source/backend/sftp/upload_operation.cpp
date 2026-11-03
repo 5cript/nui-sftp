@@ -562,14 +562,11 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     ));
     if (!openResult.has_value())
     {
-        Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
-        Log::log(
-            failureLevelOf(error),
-            options_.failureToast,
-            "Failed to open remote file for upload: {}",
-            openResult.error().message
-        );
-        return std::unexpected(std::move(error));
+        return std::unexpected(loggedOpenFailure(
+            {.type = ErrorType::SftpError, .remoteError = openResult.error()},
+            "UploadOperation: Failed to open remote file for upload",
+            options_.failureToast
+        ));
     }
 
     fileStream_ = openResult.value();
@@ -595,18 +592,18 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     if (!openResult.has_value())
     {
         Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
-        if (waitsForConnection(error))
-            return std::unexpected(std::move(error));
         // Servers of SFTP version 3 refuse an exclusive open of an existing file with a plain failure.
-        if (!options_.mayOverwrite && fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_}).has_value())
+        if (!waitsForConnection(error) && !options_.mayOverwrite &&
+            fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_}).has_value())
         {
             Log::warn(
                 "UploadOperation: Remote file '{}' already exists and may not be overwritten.", remotePath_.value()
             );
             return std::unexpected(Error{.type = ErrorType::FileExists});
         }
-        Log::error(options_.failureToast, "Failed to open remote sftp file for upload: {}", openResult.error().message);
-        return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = openResult.error()});
+        return std::unexpected(loggedOpenFailure(
+            std::move(error), "UploadOperation: Failed to open remote file for upload", options_.failureToast
+        ));
     }
 
     fileStream_ = openResult.value();
@@ -652,14 +649,11 @@ std::expected<void, UploadOperation::Error> UploadOperation::continueTemporaryFi
     const auto openResult = fileSystem.inStrand(wakingOpen(tempPath_, RemoteIo::OpenMode::Write, permissions));
     if (!openResult.has_value())
     {
-        Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
-        Log::log(
-            failureLevelOf(error),
-            options_.failureToast,
-            "Failed to open remote file for continue: {}",
-            openResult.error().message
-        );
-        return std::unexpected(std::move(error));
+        return std::unexpected(loggedOpenFailure(
+            {.type = ErrorType::SftpError, .remoteError = openResult.error()},
+            "UploadOperation: Failed to open remote file for continue",
+            options_.failureToast
+        ));
     }
     fileStream_ = openResult.value();
     openedTemporaryFile_ = true;

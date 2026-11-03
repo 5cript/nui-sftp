@@ -447,18 +447,14 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Re
     ));
     if (!openResult.has_value())
     {
-        Error error{
-            .type = ErrorType::SftpError,
-            .remoteError = openResult.error(),
-            .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
-        };
-        Log::log(
-            failureLevelOf(error),
-            "ArchiveUploadOperation: cannot open remote '{}': {}",
-            options_.remoteArchivePath.value(),
-            openResult.error().message
-        );
-        return std::unexpected(std::move(error));
+        return std::unexpected(loggedOpenFailure(
+            {
+                .type = ErrorType::SftpError,
+                .remoteError = openResult.error(),
+                .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
+            },
+            fmt::format("ArchiveUploadOperation: cannot open remote '{}'", options_.remoteArchivePath.value())
+        ));
     }
     remoteStream_ = openResult.value();
     tempCreated_ = true;
