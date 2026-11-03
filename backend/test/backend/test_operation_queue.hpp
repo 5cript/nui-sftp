@@ -99,11 +99,11 @@ namespace Test
         }
 
         /**
-         * @brief Runs @p function on the queue's strand and waits for it, so it orders with the
-         *        tasks the queue posts there itself.
+         * @brief Runs @p function on the queue's strand without waiting for it.
+         * @return What it returned, once it ran.
          */
         template <typename FunctionT>
-        auto runOnStrand(FunctionT&& function) -> std::invoke_result_t<FunctionT>
+        auto postToStrand(FunctionT&& function) -> std::future<std::invoke_result_t<FunctionT>>
         {
             using ResultT = std::invoke_result_t<FunctionT>;
             auto promise = std::make_shared<std::promise<ResultT>>();
@@ -121,7 +121,17 @@ namespace Test
                         promise->set_value(function());
                 }
             );
-            return future.get();
+            return future;
+        }
+
+        /**
+         * @brief Runs @p function on the queue's strand and waits for it, so it orders with the
+         *        tasks the queue posts there itself.
+         */
+        template <typename FunctionT>
+        auto runOnStrand(FunctionT&& function) -> std::invoke_result_t<FunctionT>
+        {
+            return postToStrand(std::forward<FunctionT>(function)).get();
         }
 
         /**
@@ -353,7 +363,7 @@ namespace Test
                 runOnStrand(
                     [this]()
                     {
-                        return queue_->work();
+                        return queue_->work() || queue_->drainBatch();
                     }
                 );
                 std::this_thread::sleep_for(2ms);
@@ -456,7 +466,7 @@ namespace Test
                 runOnStrand(
                     [this]()
                     {
-                        return queue_->work();
+                        return queue_->work() || queue_->drainBatch();
                     }
                 );
                 runOnStrand([]() {});

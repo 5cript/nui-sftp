@@ -16,6 +16,8 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <vector>
 
 namespace Test
 {
@@ -33,6 +35,13 @@ namespace Test
         {
             fakeThread_.stop();
         }
+
+        void TearDown() override
+        {
+            // A test that failed while it held an open, the queue's teardown waits for that batch.
+            releaseHeldOpens();
+            OperationQueueTests::TearDown();
+        }
         OperationQueueBatchTests(OperationQueueBatchTests const&) = delete;
         OperationQueueBatchTests& operator=(OperationQueueBatchTests const&) = delete;
         OperationQueueBatchTests(OperationQueueBatchTests&&) = delete;
@@ -47,23 +56,29 @@ namespace Test
         {
             std::promise<void> entering{};
             std::shared_future<void> hasEntered{entering.get_future().share()};
-            std::promise<void> releasing{};
-            std::shared_future<void> released{releasing.get_future().share()};
+            std::atomic_bool released{false};
+
+            void release()
+            {
+                released = true;
+                released.notify_all();
+            }
         };
 
         /**
-         * @brief Holds the first open on the fake until the test releases it.
+         * @brief Holds the first open on the fake until the test releases it, or until the test ends.
          */
         std::shared_ptr<HeldOpen> holdFirstOpen()
         {
             auto held = std::make_shared<HeldOpen>();
+            heldOpens_.push_back(held);
             fake_->failWhen<RemoteIo::OpenFile>(
                 [held, first = std::make_shared<std::atomic_bool>(true)](RemoteIo::OpenFile const&)
                 {
                     if (first->exchange(false))
                     {
                         held->entering.set_value();
-                        held->released.wait();
+                        held->released.wait(false);
                     }
                     return false;
                 },
@@ -72,24 +87,26 @@ namespace Test
             return held;
         }
 
-        /**
-         * @brief Runs @p function on the queue's strand without waiting for it.
-         * @return Ready once it ran.
-         */
-        std::future<void> postToStrand(std::function<void()> function = {})
+        void releaseHeldOpens()
         {
-            auto promise = std::make_shared<std::promise<void>>();
-            auto future = promise->get_future();
-            boost::asio::post(
-                *strand_,
-                [promise, function = std::move(function)]()
-                {
-                    if (function)
-                        function();
-                    promise->set_value();
-                }
-            );
-            return future;
+            for (auto const& held : heldOpens_)
+                held->release();
+        }
+
+        /**
+         * @brief Runs @p function on the queue's strand and waits for it while an open is held. A strand that waits
+         *        for the held batch fails the test and gets the opens released, so it ends.
+         */
+        template <typename FunctionT>
+        auto runOnStrandWhileHeld(FunctionT&& function) -> std::invoke_result_t<FunctionT>
+        {
+            auto future = postToStrand(std::forward<FunctionT>(function));
+            if (future.wait_for(waitLimit) != std::future_status::ready)
+            {
+                ADD_FAILURE() << "the strand waited for the batch";
+                releaseHeldOpens();
+            }
+            return future.get();
         }
 
         /**
@@ -97,8 +114,8 @@ namespace Test
          */
         void waitForTheBatchToReturn()
         {
-            fakeStrand_->pushPromiseTask([]() {}).wait();
-            runOnStrand([]() {});
+            EXPECT_EQ(fakeStrand_->pushPromiseTask([]() {}).wait_for(waitLimit), std::future_status::ready);
+            runOnStrandWhileHeld([]() {});
         }
 
         /**
@@ -150,6 +167,7 @@ namespace Test
             return ids;
         }
 
+        std::vector<std::shared_ptr<HeldOpen>> heldOpens_{};
         RemoteIo::ProcessingThread fakeThread_{};
         std::unique_ptr<RemoteIo::ProcessingStrand> fakeStrand_{fakeThread_.createStrand()};
         std::shared_ptr<RemoteIo::Test::FakeRemoteFileSystem> fake_{
@@ -174,8 +192,8 @@ namespace Test
             }
         );
         ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
-        EXPECT_EQ(postToStrand().wait_for(waitLimit), std::future_status::ready) << "the strand waited for the batch";
-        held->releasing.set_value();
+        runOnStrandWhileHeld([]() {});
+        held->release();
 
         workUntilCompletions(1);
         ASSERT_EQ(completions().size(), 1u);
@@ -199,7 +217,7 @@ namespace Test
         );
         ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
         queue->cancel(operationId);
-        held->releasing.set_value();
+        held->release();
 
         workUntilCompletions(1);
         ASSERT_EQ(completions().size(), 1u);
@@ -229,9 +247,9 @@ namespace Test
             }
         );
         ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
-        setPaused(true);
+        queue->paused(true);
         queue->moveOperation(third, 0);
-        held->releasing.set_value();
+        held->release();
         waitForTheBatchToReturn();
 
         setPaused(false);
@@ -253,16 +271,16 @@ namespace Test
             }
         );
         ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
-        runOnStrand(
+        runOnStrandWhileHeld(
             [&]()
             {
                 queue.reset();
                 queue_.reset();
             }
         );
-        held->releasing.set_value();
+        held->release();
         waitForTheBatchToReturn();
-        fakeStrand_->pushPromiseTask([]() {}).wait();
+        EXPECT_EQ(fakeStrand_->pushPromiseTask([]() {}).wait_for(waitLimit), std::future_status::ready);
 
         EXPECT_TRUE(completions().empty());
         EXPECT_EQ(fake_->openStreams(), 0u) << "the download ended with its batch";
