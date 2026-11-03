@@ -524,7 +524,7 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     }
     else if (tempResult.has_value() && options_.tryContinue)
     {
-        const auto belongs = tempBelongsToSourceInStrand(fileSystem, tempResult->size);
+        const auto belongs = tempBelongsToSourceInStrand(fileSystem, *tempResult);
         if (!belongs)
             return std::unexpected(belongs.error());
         if (*belongs)
@@ -672,12 +672,32 @@ std::expected<void, UploadOperation::Error> UploadOperation::continueTemporaryFi
     return {};
 }
 
-std::expected<bool, UploadOperation::Error>
-UploadOperation::tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize)
+std::expected<bool, UploadOperation::Error> UploadOperation::tempBelongsToSourceInStrand(
+    RemoteIo::IRemoteFileSystem& fileSystem,
+    RemoteIo::FileInformation const& temp
+)
 {
     // Another program's partial file or a part of an older version of the source must not be continued.
-    if (tempSize == 0)
+    if (temp.size == 0)
         return false;
+    const CheckedPart part{
+        .size = temp.size,
+        .modified = temp.mtime,
+        .modifiedNanoseconds = temp.mtimeNsec,
+        .source = sourceBeforeOpening_,
+    };
+    // The open after the check may wait for the connection the check just gave back, checking again would take it.
+    if (tailCheck_ && tailCheck_->first == part)
+        return tailCheck_->second;
+    const auto belongs = tailMatchesInStrand(fileSystem, temp.size);
+    if (belongs)
+        tailCheck_.emplace(part, *belongs);
+    return belongs;
+}
+
+std::expected<bool, UploadOperation::Error>
+UploadOperation::tailMatchesInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize)
+{
     const auto opened = fileSystem.inStrand(wakingOpen(tempPath_, RemoteIo::OpenMode::Read));
     if (!opened)
     {

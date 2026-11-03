@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <string>
 
@@ -82,6 +83,31 @@ namespace Test
             for (int index = 0; content.size() < 8u * 1024u; ++index)
                 content += fmt::format("line {}\n", index);
             return content;
+        }
+
+        /**
+         * @brief Puts the first half of @p content on the fake as the part an earlier upload to @p target left.
+         * @return The path of the part.
+         */
+        Paths::RemotePath addPart(Paths::RemotePath const& target, std::string const& content)
+        {
+            const auto part = remote(fmt::format("{}{}", target.value(), Persistence::defaultTempFileSuffix));
+            fake_->addFile(part, content.substr(0, content.size() / 2));
+            return part;
+        }
+
+        /**
+         * @brief Fails every open that truncates, as starting over does with the part.
+         */
+        void failStartingOver()
+        {
+            fake_->failWhen<RemoteIo::OpenFile>(
+                [](RemoteIo::OpenFile const& open)
+                {
+                    return RemoteIo::contains(open.mode, RemoteIo::OpenMode::Truncate);
+                },
+                RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::Failure, .message = "The upload started over"}
+            );
         }
 
         void expectCompleted()
@@ -167,18 +193,8 @@ namespace Test
         auto queue = makeWakingQueue();
         const auto target = remote("/home/test/uploaded.txt");
         const auto content = uploadedContent();
-        fake_->addFile(
-            remote(fmt::format("/home/test/uploaded.txt{}", Persistence::defaultTempFileSuffix)),
-            content.substr(0, content.size() / 2)
-        );
-        // Starting over truncates the part.
-        fake_->failWhen<RemoteIo::OpenFile>(
-            [](RemoteIo::OpenFile const& open)
-            {
-                return RemoteIo::contains(open.mode, RemoteIo::OpenMode::Truncate);
-            },
-            RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::Failure, .message = "The upload started over"}
-        );
+        addPart(target, content);
+        failStartingOver();
         fake_->takeAllConnections();
         queueUpload(*queue, writeLocalFile("uploaded.txt", content), target);
 
@@ -191,6 +207,44 @@ namespace Test
 
         ASSERT_NO_FATAL_FAILURE(expectCompleted());
         EXPECT_EQ(fake_->contentOf(target), content);
+    }
+
+    TEST_F(ConnectionWaitTests, AnUploadWhoseContinueWaitsForAConnectionChecksItsPartOnce)
+    {
+        auto queue = makeWakingQueue();
+        const auto target = remote("/home/test/uploaded.txt");
+        const auto content = uploadedContent();
+        const auto part = addPart(target, content);
+        failStartingOver();
+        const auto tailChecks = std::make_shared<std::atomic_int>(0);
+        fake_->failWhen<RemoteIo::OpenFile>(
+            [part, tailChecks](RemoteIo::OpenFile const& open)
+            {
+                if (open.path == part && open.mode == RemoteIo::OpenMode::Read)
+                    ++*tailChecks;
+                return false;
+            },
+            {}
+        );
+        // The connection the tail check gave back is not free yet when the part is opened to continue it.
+        fake_->takeConnectionsFor(
+            [part](RemoteIo::OpenFile const& open)
+            {
+                return open.path == part && RemoteIo::contains(open.mode, RemoteIo::OpenMode::Write);
+            }
+        );
+        queueUpload(*queue, writeLocalFile("uploaded.txt", content), target);
+
+        EXPECT_TRUE(workUntilWaiting(*queue));
+        EXPECT_TRUE(completions().empty()) << "the upload ended while its part waited for a connection";
+        EXPECT_EQ(fake_->busyOpens(), 1u);
+
+        fake_->freeConnections();
+        workUntilCompletions(1);
+
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
+        EXPECT_EQ(fake_->contentOf(target), content);
+        EXPECT_EQ(tailChecks->load(), 1) << "the part's tail was checked again after the wait";
     }
 
     TEST_F(ConnectionWaitTests, ABulkDownloadWaitsWithoutFailingUntilAConnectionIsFree)
