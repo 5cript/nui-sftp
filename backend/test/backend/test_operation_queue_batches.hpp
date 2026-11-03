@@ -1,6 +1,7 @@
 #pragma once
 
 #include "test_operation_queue.hpp"
+#include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/operation_queue.hpp>
 #include <remote_io/async/processing_thread.hpp>
 #include <remote_io/fake_remote_file_system.hpp>
@@ -11,12 +12,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace Test
@@ -66,16 +69,18 @@ namespace Test
         };
 
         /**
-         * @brief Holds the first open on the fake until the test releases it, or until the test ends.
+         * @brief Holds the first open on the fake that @p matches until the test releases it, or until the test ends.
          */
-        std::shared_ptr<HeldOpen> holdFirstOpen()
+        std::shared_ptr<HeldOpen> holdOpen(std::function<bool(RemoteIo::OpenFile const&)> matches)
         {
             auto held = std::make_shared<HeldOpen>();
             heldOpens_.push_back(held);
             fake_->failWhen<RemoteIo::OpenFile>(
-                [held, first = std::make_shared<std::atomic_bool>(true)](RemoteIo::OpenFile const&)
+                [held, matches = std::move(matches), first = std::make_shared<std::atomic_bool>(true)](
+                    RemoteIo::OpenFile const& open
+                )
                 {
-                    if (first->exchange(false))
+                    if (matches(open) && first->exchange(false))
                     {
                         held->entering.set_value();
                         held->released.wait(false);
@@ -85,6 +90,16 @@ namespace Test
                 {}
             );
             return held;
+        }
+
+        std::shared_ptr<HeldOpen> holdFirstOpen()
+        {
+            return holdOpen(
+                [](RemoteIo::OpenFile const&)
+                {
+                    return true;
+                }
+            );
         }
 
         void releaseHeldOpens()
@@ -174,6 +189,60 @@ namespace Test
         {
             addRemoteFile(name);
             return queueDownload(queue, name);
+        }
+
+        /**
+         * @brief Queues the download of the fake's files @p names as one bulk, which asks the server nothing until it
+         *        runs, so it is queued while an open is held too.
+         * @return The id of its card.
+         */
+        Ids::OperationId queueBulkDownload(OperationQueue& queue, std::vector<std::string> const& names)
+        {
+            SharedData::BulkDownloadRequest request{};
+            for (auto const& name : names)
+            {
+                request.entries.push_back({
+                    .source = remote(fmt::format("/home/test/{}", name)),
+                    .destination = toLocal(localDirectory_.path() / name),
+                    .sizeBytes = 8u * 1024u,
+                });
+            }
+            auto card = Ids::generateOperationId();
+            const auto queued = runOnStrandWhileHeld(
+                [&]()
+                {
+                    return queue.addBulkDownloadOperation(
+                        fake_,
+                        std::move(request),
+                        [](std::size_t)
+                        {
+                            return Ids::generateOperationId();
+                        },
+                        card
+                    );
+                }
+            );
+            EXPECT_EQ(queued, names.size());
+            return card;
+        }
+
+        /**
+         * @brief Works @p queue until @p held holds its open.
+         */
+        void workUntilHeld(OperationQueue& queue, HeldOpen const& held)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + 20 * waitLimit;
+            while (held.hasEntered.wait_for(std::chrono::milliseconds{2}) != std::future_status::ready)
+            {
+                if (std::chrono::steady_clock::now() > deadline)
+                    return ADD_FAILURE() << "the open was never held";
+                runOnStrandWhileHeld(
+                    [&queue]()
+                    {
+                        queue.work();
+                    }
+                );
+            }
         }
 
         std::vector<std::string> completedIds()
@@ -365,5 +434,115 @@ namespace Test
         ASSERT_EQ(added.wait_for(waitLimit), std::future_status::ready);
         const auto result = added.get();
         EXPECT_TRUE(result.has_value()) << result.error().toString();
+    }
+
+    TEST_F(OperationQueueBatchTests, ACancelAllWhileTheBatchIsOutLeavesWhatIsQueuedAfterIt)
+    {
+        const auto held = holdFirstOpen();
+        auto queue = makeQueue();
+        setPaused(false);
+        const auto cancelled = addDownload(*queue, "cancelled.txt");
+        addRemoteFile("later.txt");
+
+        postToStrand(
+            [&queue]()
+            {
+                queue->work();
+            }
+        );
+        ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
+        queue->cancelAll();
+        const auto later = queueBulkDownload(*queue, {"later.txt"});
+        held->release();
+
+        workUntilCompletions(2);
+        ASSERT_EQ(completions().size(), 2u);
+        EXPECT_EQ(completions().front().operationId, cancelled);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_EQ(completions().back().operationId, later);
+        EXPECT_EQ(completions().back().reason, SharedData::OperationCompletionReason::Completed);
+    }
+
+    TEST_F(OperationQueueBatchTests, ACancelOfAnOperationOutsideTheBatchAppliesWhileTheBatchIsOut)
+    {
+        const auto held = holdFirstOpen();
+        auto queue = makeQueue();
+        runOnStrand(
+            [&queue]()
+            {
+                queue->limitParallelism(1u);
+            }
+        );
+        setPaused(false);
+        addDownload(*queue, "held.txt");
+        const auto queued = addDownload(*queue, "queued.txt");
+        const auto completing = std::make_shared<std::promise<SharedData::OperationCompletionReason>>();
+        runOnStrand(
+            [&]()
+            {
+                queue->whenCompleted(
+                    queued,
+                    [completing](OperationQueue::OperationCompleted const& completed)
+                    {
+                        completing->set_value(completed.reason);
+                    }
+                );
+            }
+        );
+
+        postToStrand(
+            [&queue]()
+            {
+                queue->work();
+            }
+        );
+        ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
+        queue->cancel(queued);
+        auto completed = completing->get_future();
+        EXPECT_EQ(completed.wait_for(waitLimit), std::future_status::ready)
+            << "the cancel waited for a batch its operation is not in";
+        held->release();
+
+        ASSERT_EQ(completed.wait_for(waitLimit), std::future_status::ready);
+        EXPECT_EQ(completed.get(), SharedData::OperationCompletionReason::Canceled);
+    }
+
+    TEST_F(OperationQueueBatchTests, ABulkInTheBatchOutLeavesWhatItFinishedOutOfItsBackup)
+    {
+        addRemoteFile("bulk_a.txt");
+        addRemoteFile("bulk_b.txt");
+        const auto second = remote("/home/test/bulk_b.txt");
+        const auto held = holdOpen(
+            [&second](RemoteIo::OpenFile const& open)
+            {
+                return open.path == second;
+            }
+        );
+        auto queue = makeQueue();
+        setPaused(false);
+        const auto card = queueBulkDownload(*queue, {"bulk_a.txt", "bulk_b.txt"});
+        workUntilHeld(*queue, *held);
+        ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
+
+        // As a session teardown does, while the bulk is out with its second file.
+        BulkResumeRegistry registry;
+        std::promise<void> dumping;
+        auto dumped = postToStrand(
+            [&]()
+            {
+                dumping.set_value();
+                queue->dumpBulkResumes(registry);
+            }
+        );
+        ASSERT_EQ(dumping.get_future().wait_for(waitLimit), std::future_status::ready);
+        held->release();
+        ASSERT_EQ(dumped.wait_for(waitLimit), std::future_status::ready);
+
+        const auto backup = registry.take(card);
+        ASSERT_TRUE(backup.has_value());
+        ASSERT_TRUE(std::holds_alternative<SharedData::BulkDownloadRequest>(backup->request));
+        auto const& entries = std::get<SharedData::BulkDownloadRequest>(backup->request).entries;
+        ASSERT_EQ(entries.size(), 1u) << "the backup holds the finished file too";
+        EXPECT_EQ(entries.front().source, second);
     }
 }

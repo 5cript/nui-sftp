@@ -87,19 +87,21 @@ class OperationQueue
     };
 
     /**
-     * @brief Cancels every queued operation, each completes as cancelled.
+     * @brief Cancels every queued operation, each completes as cancelled. Those in the batch out are cancelled once
+     *        they are back, what is queued after this stays.
      */
     void cancelAll(PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
 
     /**
      * @brief Drops every queued operation without completing any, for a session that goes: a reconnect may adopt
-     *        their backups, see dumpBulkResumes(), and the frontend keeps their cards until then.
+     *        their backups, see dumpBulkResumes(), and the frontend keeps their cards until then. Waits for the batch
+     *        out first, which blocks the strand.
      */
     void dropAll();
 
     /**
-     * @brief Cancels the operation @p id, it completes as cancelled. A transfer that keeps its partial files can
-     *        continue later, see continueKept and discardKept.
+     * @brief Cancels the operation @p id, it completes as cancelled, once it is back when it is in the batch out. A
+     *        transfer that keeps its partial files can continue later, see continueKept and discardKept.
      */
     void cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
 
@@ -159,13 +161,6 @@ class OperationQueue
      *         run: then the queue calls its wake once there is work again.
      */
     bool work();
-
-    /**
-     * @brief Runs @p request on the strand once no batch of this queue works on a processing thread, at once when
-     *        none does. The requests that cancel, drop, move or pause queued operations go through here. It only runs
-     *        while the queue exists, so it may refer to it. On the strand.
-     */
-    void afterBatch(std::function<void()> request);
 
     /**
      * @brief Waits until the batch out on a processing thread returned and puts its operations back. Blocks the strand,
@@ -485,7 +480,7 @@ class OperationQueue
      *        A bulk transfer that has its entries already leaves only the entries it has not finished, as a flat
      *        list below its roots, and records how many entries and bytes it finished, which the resumed card counts
      *        as done; a running file in it starts over unless its partial file can be continued. A bulk that did not
-     *        start yet or is still scanning keeps its request.
+     *        start yet or is still scanning keeps its request. Waits for the batch out first, which blocks the strand.
      */
     void dumpBulkResumes(BulkResumeRegistry& registry);
 
@@ -574,6 +569,29 @@ class OperationQueue
      */
     template <typename FunctionT>
     void onStrand(FunctionT&& request);
+
+    /**
+     * @brief Runs @p request once no batch of this queue works on a processing thread, at once when none does. A
+     *        request on the whole queue, a move or a pause, goes through here. It only runs while the queue exists, so
+     *        it may refer to it. On the strand.
+     */
+    void afterBatch(std::function<void()> request);
+
+    /**
+     * @brief Runs @p request once the operation @p id is back from the batch out, at once when it is queued or gone. A
+     *        request on one operation, a cancel, goes through here. It only runs while the queue exists. On the strand.
+     */
+    void onOperation(Ids::OperationId const& id, std::function<void()> request);
+
+    /**
+     * @brief The ids of the operations in the batch out, none while none is.
+     */
+    std::vector<Ids::OperationId> batchOperationIds() const;
+
+    /**
+     * @brief Cancels the queued operation @p id as cancel() does, its sync scan fails. On the strand.
+     */
+    void cancelQueued(Ids::OperationId const& id, PartialFilesOnCancel partialFiles);
 
     /**
      * @brief Moves the queued operation @p operationId to @p newIndex, see moveOperation(). On the strand.
@@ -697,7 +715,7 @@ class OperationQueue
     QueuedOperations operations_{};
     /** @brief The batch out on a processing thread, nothing while none is. */
     std::shared_ptr<Batch> batch_{};
-    /** @brief What waits for batch_ to return, see afterBatch(). */
+    /** @brief What waits for batch_ to return, see afterBatch() and onOperation(). */
     std::vector<std::function<void()>> afterBatch_{};
     /** @brief work() was called while batch_ was out, so the queue is woken once it returned. */
     bool workAskedDuringBatch_{false};

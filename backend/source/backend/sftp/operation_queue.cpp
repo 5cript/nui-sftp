@@ -574,20 +574,43 @@ void OperationQueue::cancelAll(PartialFilesOnCancel partialFiles)
     onStrand(
         [partialFiles](OperationQueue& self)
         {
-            self.afterBatch(
-                [&self, partialFiles]()
+            // Taken out first: an owner hearing of its cancel may queue anew.
+            auto cancelled = std::exchange(self.priorityOperations_, {});
+            std::ranges::move(std::exchange(self.operations_, {}), std::back_inserter(cancelled));
+            // Those in the batch out are cancelled once they are back, what is queued after this stays.
+            const auto batched = self.batchOperationIds();
+            std::vector<decltype(self.syncScanCallbacks_)::mapped_type> waiting;
+            for (auto iter = self.syncScanCallbacks_.begin(); iter != self.syncScanCallbacks_.end();)
+            {
+                const auto inBatch = std::ranges::any_of(
+                    batched,
+                    [&iter](Ids::OperationId const& id)
+                    {
+                        return id.value() == iter->first;
+                    }
+                );
+                if (inBatch)
                 {
-                    // Taken out first: an owner hearing of its cancel may queue anew.
-                    auto cancelled = std::exchange(self.priorityOperations_, {});
-                    std::ranges::move(std::exchange(self.operations_, {}), std::back_inserter(cancelled));
-                    auto waiting = std::exchange(self.syncScanCallbacks_, {});
-                    for (auto& [id, callback] : waiting)
-                        callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
-                    for (auto& [id, operation] : cancelled)
-                        self.completeCancelledByUser(id, *operation, partialFiles);
-                    Log::info("All operations in the queue have been canceled.");
+                    ++iter;
+                    continue;
                 }
-            );
+                waiting.push_back(std::move(iter->second));
+                iter = self.syncScanCallbacks_.erase(iter);
+            }
+            for (auto& callback : waiting)
+                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
+            for (auto& [id, operation] : cancelled)
+                self.completeCancelledByUser(id, *operation, partialFiles);
+            for (auto const& id : batched)
+            {
+                self.afterBatch(
+                    [&self, id, partialFiles]()
+                    {
+                        self.cancelQueued(id, partialFiles);
+                    }
+                );
+            }
+            Log::info("All operations in the queue have been canceled.");
         }
     );
 }
@@ -598,19 +621,16 @@ void OperationQueue::dropAll()
     onStrand(
         [](OperationQueue& self)
         {
-            self.afterBatch(
-                [&self]()
-                {
-                    self.operations_.clear();
-                    self.priorityOperations_.clear();
-                    // Progress they reported may still be on its way to the strand.
-                    self.progressObservers_.clear();
-                    auto waiting = std::exchange(self.syncScanCallbacks_, {});
-                    for (auto& [id, callback] : waiting)
-                        callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
-                    Log::info("All operations in the queue have been dropped.");
-                }
-            );
+            // The operations of the batch out back first, so they are dropped too.
+            self.drainBatch();
+            self.operations_.clear();
+            self.priorityOperations_.clear();
+            // Progress they reported may still be on its way to the strand.
+            self.progressObservers_.clear();
+            auto waiting = std::exchange(self.syncScanCallbacks_, {});
+            for (auto& [id, callback] : waiting)
+                callback(std::unexpected(Utility::localizedMessage("backend.sync.scanCancelled")));
+            Log::info("All operations in the queue have been dropped.");
         }
     );
 }
@@ -621,17 +641,23 @@ void OperationQueue::cancel(Ids::OperationId id, PartialFilesOnCancel partialFil
     onStrand(
         [id = std::move(id), partialFiles](OperationQueue& self)
         {
-            self.afterBatch(
+            self.onOperation(
+                id,
                 [&self, id, partialFiles]()
                 {
-                    const auto cancelled = self.takeOperation(id);
-                    self.failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
-                    if (cancelled)
-                        self.completeCancelledByUser(id, *cancelled, partialFiles);
+                    self.cancelQueued(id, partialFiles);
                 }
             );
         }
     );
+}
+
+void OperationQueue::cancelQueued(Ids::OperationId const& id, PartialFilesOnCancel partialFiles)
+{
+    const auto cancelled = takeOperation(id);
+    failSyncScan(id, Utility::localizedMessage("backend.sync.scanCancelled"));
+    if (cancelled)
+        completeCancelledByUser(id, *cancelled, partialFiles);
 }
 
 std::expected<void, std::string>
@@ -749,7 +775,8 @@ void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialF
     onStrand(
         [id = std::move(id), partial](OperationQueue& self)
         {
-            self.afterBatch(
+            self.onOperation(
+                id,
                 [&self, id, partial]()
                 {
                     const auto cancelled = self.takeOperation(id);
@@ -1018,6 +1045,8 @@ void OperationQueue::rememberFailureToast(Ids::OperationId const& operationId, L
 
 void OperationQueue::dumpBulkResumes(BulkResumeRegistry& registry)
 {
+    // A bulk out in the batch leaves out what it finished too.
+    drainBatch();
     if (bulkResumeStash_.empty())
         return;
     Log::info("OperationQueue::dumpBulkResumes: persisting {} bulk-operation backup(s)", bulkResumeStash_.size());
@@ -1373,6 +1402,23 @@ void OperationQueue::afterBatch(std::function<void()> request)
     afterBatch_.push_back(std::move(request));
 }
 
+void OperationQueue::onOperation(Ids::OperationId const& id, std::function<void()> request)
+{
+    if (std::ranges::contains(batchOperationIds(), id))
+        return afterBatch_.push_back(std::move(request));
+    request();
+}
+
+std::vector<Ids::OperationId> OperationQueue::batchOperationIds() const
+{
+    std::vector<Ids::OperationId> ids;
+    if (!batch_)
+        return ids;
+    // The processing thread works the operations, it never changes the deque or their ids.
+    std::ranges::transform(batch_->operations, std::back_inserter(ids), &QueuedOperations::value_type::first);
+    return ids;
+}
+
 bool OperationQueue::drainBatch()
 {
     if (!batch_)
@@ -1400,7 +1446,8 @@ void OperationQueue::cancelSiblingScan(Ids::OperationId const& id)
             const auto locked = weak.lock();
             if (!locked)
                 return;
-            locked->afterBatch(
+            locked->onOperation(
+                id,
                 [&self = *locked, id]()
                 {
                     const auto matches = [&id](auto& operation)
