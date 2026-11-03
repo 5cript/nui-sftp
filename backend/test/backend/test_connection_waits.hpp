@@ -274,6 +274,53 @@ namespace Test
             EXPECT_TRUE(std::filesystem::exists(localDirectory_.path() / name)) << name;
     }
 
+    TEST_F(ConnectionWaitTests, AnUploadWhosePartCannotBeCheckedForALostConnectionKeepsIt)
+    {
+        auto queue = makeWakingQueue();
+        const auto target = remote("/home/test/uploaded.txt");
+        const auto content = uploadedContent();
+        const auto part = addPart(target, content);
+        fake_->failWhen<RemoteIo::OpenFile>(
+            [part](RemoteIo::OpenFile const& open)
+            {
+                return open.path == part && open.mode == RemoteIo::OpenMode::Read;
+            },
+            RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::ConnectionLost, .message = "The connection broke"}
+        );
+        queueUpload(*queue, writeLocalFile("uploaded.txt", content), target);
+
+        workUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Failed);
+        ASSERT_TRUE(completions().front().error.has_value());
+        ASSERT_TRUE(completions().front().error->remoteError.has_value());
+        EXPECT_EQ(completions().front().error->remoteError->kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(fake_->contentOf(part), content.substr(0, content.size() / 2)) << "the part was started over";
+    }
+
+    TEST_F(ConnectionWaitTests, AnUploadWhosePartCannotBeReadStartsOver)
+    {
+        auto queue = makeWakingQueue();
+        const auto target = remote("/home/test/uploaded.txt");
+        const auto content = uploadedContent();
+        const auto part = addPart(target, content);
+        // A server that only takes uploads never lets the part be read back.
+        fake_->failWhen<RemoteIo::OpenFile>(
+            [part](RemoteIo::OpenFile const& open)
+            {
+                return open.path == part && open.mode == RemoteIo::OpenMode::Read;
+            },
+            RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::PermissionDenied, .message = "Write only"}
+        );
+        queueUpload(*queue, writeLocalFile("uploaded.txt", content), target);
+
+        workUntilCompletions(1);
+
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
+        EXPECT_EQ(fake_->contentOf(target), content);
+    }
+
     TEST_F(ConnectionWaitTests, AnArchiveDownloadWaitsWithoutFailingUntilAConnectionIsFree)
     {
         auto queue = makeWakingQueue();

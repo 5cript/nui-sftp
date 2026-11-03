@@ -11,6 +11,8 @@
 #include <utility/error_message.hpp>
 #include <utility/permissions.hpp>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -47,6 +49,19 @@ namespace
             .extraInfo = cause ? std::optional<std::string>{Utility::errorMessage(cause)} : std::nullopt,
             .localProblem = localFileProblemOf(cause),
         };
+    }
+
+    /**
+     * @brief Whether @p error tells of the connection, not of the file: Busy, a lost, missing or refused connection, a
+     *        timeout, a cancel or a session that is gone.
+     */
+    bool isConnectionFailure(RemoteIo::RemoteError const& error)
+    {
+        using enum RemoteIo::RemoteErrorKind;
+        constexpr std::array connectionKinds{Busy, NoConnection, ConnectionLost, ConnectionLimit, TimedOut, Cancelled};
+        return std::ranges::contains(connectionKinds, error.kind) ||
+            error.wrapperError == RemoteIo::WrapperErrors::OwnerNull ||
+            error.wrapperError == RemoteIo::WrapperErrors::SharedPtrDestroyed;
     }
 }
 
@@ -698,20 +713,19 @@ std::expected<bool, UploadOperation::Error> UploadOperation::tempBelongsToSource
 std::expected<bool, UploadOperation::Error>
 UploadOperation::tailMatchesInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize)
 {
+    // A failed connection says nothing about the file, starting over would throw the part away.
     const auto opened = fileSystem.inStrand(wakingOpen(tempPath_, RemoteIo::OpenMode::Read));
+    if (!opened && isConnectionFailure(opened.error()))
+        return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = opened.error()});
     if (!opened)
-    {
-        // Busy says nothing about the file, starting over would throw the part away.
-        Error error{.type = ErrorType::SftpError, .remoteError = opened.error()};
-        if (waitsForConnection(error))
-            return std::unexpected(std::move(error));
         return false;
-    }
     auto stream = opened->lock();
     if (!stream)
-        return false;
+        return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     const auto matches = ResumeCheck::tailsMatchInStrand(*stream, localNativePath_, tempSize);
     stream->closeInStrand();
+    if (!matches && isConnectionFailure(matches.error()))
+        return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = matches.error()});
     return matches.value_or(false);
 }
 

@@ -234,9 +234,10 @@ class UploadOperation : public Operation
     std::expected<void, Error> finalizeInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
-     * @brief Whether the existing remote temp file @p temp ends like the same range of the source. Fails only when
-     *        its open waits for a connection, see waitsForConnection. The verdict on the same part and source is kept,
-     *        so preparing again after a wait opens no extra stream.
+     * @brief Whether the existing remote temp file @p temp ends like the same range of the source. Fails when the
+     *        connection let it not tell, a part thrown away for that would be lost; an open that waits for a
+     *        connection, see waitsForConnection, is one of those. The verdict on the same part and source is kept, so
+     *        preparing again after a wait opens no extra stream.
      */
     std::expected<bool, Error>
     tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, RemoteIo::FileInformation const& temp);
