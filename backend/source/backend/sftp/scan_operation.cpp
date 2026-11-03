@@ -24,19 +24,28 @@ ScanOperation::~ScanOperation() = default;
 
 namespace
 {
-    /** @brief Larger ignore files are cut, no real one comes near it. */
-    constexpr std::size_t maximumIgnoreFileSize = 1024u * 1024u;
-
     std::optional<std::string>
-    readRemoteFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
+    readIgnoreFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
-        // A read of its own, it does not wait for a connection the queue's transfers hold.
-        auto read = fileSystem.later(RemoteIo::ReadFile{.path = path, .maximumSize = maximumIgnoreFileSize});
+        constexpr auto maximumSize = ScanOperation::maximumIgnoreFileSize;
+        // A read of its own, it does not wait for a connection the queue's transfers hold. One byte more tells a cut.
+        auto read = fileSystem.later(RemoteIo::ReadFile{.path = path, .maximumSize = maximumSize + 1u});
         if (read.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
         auto content = read.get();
         if (!content.has_value())
             return std::nullopt;
+        if (content->size() > maximumSize)
+        {
+            // A rule cut in two would match what it never meant to.
+            content->resize(maximumSize);
+            content->erase(content->find_last_of('\n') + 1u);
+            Log::warn(
+                "ScanOperation: '{}' is over {} bytes, the rules after its last whole line there are dropped.",
+                path.value(),
+                maximumSize
+            );
+        }
         return std::move(content).value();
     }
 }
@@ -98,7 +107,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*fileSystem, path / *entry.nameSegment(), futureTimeout_))
+        if (auto content = readIgnoreFile(*fileSystem, path / *entry.nameSegment(), futureTimeout_))
             ignoreMatcher_.addFile(relative, *content);
     }
 

@@ -110,6 +110,29 @@ namespace Test
             );
         }
 
+        /**
+         * @brief The names a scan of @p root on the fake found, its ignore files respected.
+         */
+        std::set<std::string> scannedNames(Paths::RemotePath const& root)
+        {
+            ScanOperation scan{
+                fake_,
+                ScanOperation::ScanOperationOptions{
+                    .remotePath = root,
+                    .respectIgnoreFiles = true,
+                }
+            };
+            auto status = scan.work();
+            for (int step = 0; status.has_value() && *status != Operation::WorkStatus::Complete && step < 100; ++step)
+                status = scan.work();
+            EXPECT_TRUE(status.has_value()) << status.error().toString();
+            EXPECT_EQ(status.value_or(Operation::WorkStatus::MoreWork), Operation::WorkStatus::Complete);
+            std::set<std::string> names;
+            for (auto const& entry : scan.ejectEntries())
+                names.insert(entry.name);
+            return names;
+        }
+
         void expectCompleted()
         {
             ASSERT_EQ(completions().size(), 1u);
@@ -410,24 +433,29 @@ namespace Test
         fake_->addFile(remote("/home/test/tree/kept.txt"), "kept");
         fake_->addFile(remote("/home/test/tree/skipped.txt"), "skipped");
         fake_->takeAllConnections();
-        ScanOperation scan{
-            fake_,
-            ScanOperation::ScanOperationOptions{
-                .remotePath = remote("/home/test/tree"),
-                .respectIgnoreFiles = true,
-            }
-        };
 
-        auto status = scan.work();
-        for (int step = 0; status.has_value() && *status != Operation::WorkStatus::Complete && step < 100; ++step)
-            status = scan.work();
+        const auto names = scannedNames(remote("/home/test/tree"));
 
-        ASSERT_TRUE(status.has_value()) << status.error().toString();
-        ASSERT_EQ(*status, Operation::WorkStatus::Complete);
-        std::set<std::string> names;
-        for (auto const& entry : scan.ejectEntries())
-            names.insert(entry.name);
         EXPECT_TRUE(names.contains("kept.txt"));
         EXPECT_FALSE(names.contains("skipped.txt")) << "the scan did not read its ignore file";
+    }
+
+    TEST_F(ConnectionWaitTests, AScanAppliesAnIgnoreFileTooLargeOnlyUpToItsLastWholeLine)
+    {
+        const std::string rules = "skipped.txt\n";
+        const std::string cutRule = "kernel.bin\n";
+        std::string ignoreFile = rules;
+        while (ignoreFile.size() < ScanOperation::maximumIgnoreFileSize - 2u)
+            ignoreFile += "#\n";
+        ignoreFile += cutRule;
+        ASSERT_EQ(ignoreFile.substr(ScanOperation::maximumIgnoreFileSize - 2u, 2u), "ke");
+        fake_->addFile(remote("/home/test/tree/.gitignore"), ignoreFile);
+        fake_->addFile(remote("/home/test/tree/ke"), "ke");
+        fake_->addFile(remote("/home/test/tree/skipped.txt"), "skipped");
+
+        const auto names = scannedNames(remote("/home/test/tree"));
+
+        EXPECT_TRUE(names.contains("ke")) << "the rule cut at the size limit was applied";
+        EXPECT_FALSE(names.contains("skipped.txt")) << "the rules before the cut were dropped";
     }
 }
