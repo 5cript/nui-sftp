@@ -203,6 +203,9 @@ void Session::stop()
 
             Log::info("Stopping session '{}'", self->id_.value());
 
+            // Every operation back in its queue, so the teardown below reaches all of them.
+            self->operationQueue_->drainBatch();
+
             // Before the queue goes, whose cancellations would otherwise reach the tracker. The copies of the session
             // count as orphaned from now on.
             self->stopFileTracking();
@@ -284,6 +287,8 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
                 );
                 return;
             }
+            // Queueing asks the server with a timeout, the queue's batch on the processing thread must not count.
+            self->operationQueue_->waitForBatch();
 
             for (auto const& opId : operationIds)
             {

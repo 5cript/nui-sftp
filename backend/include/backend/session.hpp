@@ -339,6 +339,13 @@ class Session
                     ((*self).*remove)(channelId);
                     return reply.error("Failed to lock channel");
                 }
+                // Calls on a file system wait for its processing thread with a timeout, the queue's batch there must
+                // not count against it.
+                if constexpr (std::is_same_v<ChannelT, RemoteIo::IRemoteFileSystem>)
+                {
+                    if (self->operationQueue_)
+                        self->operationQueue_->waitForBatch();
+                }
                 try
                 {
                     if constexpr (

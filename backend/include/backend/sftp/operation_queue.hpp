@@ -87,19 +87,21 @@ class OperationQueue
     };
 
     /**
-     * @brief Cancels every queued operation, each completes as cancelled.
+     * @brief Cancels every queued operation, each completes as cancelled. Those in the batch out are cancelled once
+     *        they are back, what is queued after this stays.
      */
     void cancelAll(PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
 
     /**
      * @brief Drops every queued operation without completing any, for a session that goes: a reconnect may adopt
-     *        their backups, see dumpBulkResumes(), and the frontend keeps their cards until then.
+     *        their backups, see dumpBulkResumes(), and the frontend keeps their cards until then. Waits for the batch
+     *        out first, which blocks the strand.
      */
     void dropAll();
 
     /**
-     * @brief Cancels the operation @p id, it completes as cancelled. A transfer that keeps its partial files can
-     *        continue later, see continueKept and discardKept.
+     * @brief Cancels the operation @p id, it completes as cancelled, once it is back when it is in the batch out. A
+     *        transfer that keeps its partial files can continue later, see continueKept and discardKept.
      */
     void cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
 
@@ -140,8 +142,8 @@ class OperationQueue
      *        front) is therefore safely repositioned.
      *
      *        No-ops silently when:
-     *          - the queue is not paused (the frontend must pause first;
-     *            this is the safety belt for races against unpause),
+     *          - the queue is not paused when asked (the frontend must pause
+     *            first; this is the safety belt for races against unpause),
      *          - the id refers to a priority op (priority queue is not
      *            user-reorderable in this UI),
      *          - the id is no longer in the queue (op completed meanwhile).
@@ -152,12 +154,27 @@ class OperationQueue
     void moveOperation(Ids::OperationId operationId, std::size_t newIndex);
 
     /**
-     * @brief Works the operations at the head of the queue once.
+     * @brief Works the operations at the head of the queue once. Those that need a processing thread work there as
+     *        one batch while the strand stays free; the batch wakes the queue when it returned and wants more.
      *
-     * @return true to be called again right away, false when every operation waits or nothing can run: then the
-     *         queue calls its wake once there is work again.
+     * @return true to be called again right away, false when a batch is out, every operation waits or nothing can
+     *         run: then the queue calls its wake once there is work again.
      */
     bool work();
+
+    /**
+     * @brief Waits until the batch out on a processing thread returned and puts its operations back. Blocks the strand,
+     *        for a teardown that needs every operation. On the strand.
+     * @return Whether the queue wants to be worked again right away, false when no batch was out.
+     */
+    bool drainBatch();
+
+    /**
+     * @brief Blocks the strand until the batch out left its processing thread, at once when none is out. For a request
+     *        that is about to wait for that thread with a timeout, which would count the batch's time otherwise. The
+     *        batch still returns to the queue as posted. On the strand.
+     */
+    void waitForBatch() const;
 
     /**
      * @brief Sets what is called, from any thread, once the queue has work after work returned false: an operation
@@ -463,7 +480,7 @@ class OperationQueue
      *        A bulk transfer that has its entries already leaves only the entries it has not finished, as a flat
      *        list below its roots, and records how many entries and bytes it finished, which the resumed card counts
      *        as done; a running file in it starts over unless its partial file can be continued. A bulk that did not
-     *        start yet or is still scanning keeps its request.
+     *        start yet or is still scanning keeps its request. Waits for the batch out first, which blocks the strand.
      */
     void dumpBulkResumes(BulkResumeRegistry& registry);
 
@@ -509,7 +526,84 @@ class OperationQueue
         -> std::function<void(std::string const&, std::uint64_t, std::uint64_t)>;
 
   private:
-    bool workQueue(std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>& queue);
+    using QueuedOperations = std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>>;
+    struct WorkResult;
+    struct Batch;
+
+    bool workQueue(QueuedOperations& queue);
+
+    /**
+     * @brief Works the first @p count operations of @p operations in order, only those whose usesStrand equals
+     *        @p onlyUsesStrand when set, and stops after the first that completed or failed.
+     */
+    static std::vector<WorkResult>
+    workHead(QueuedOperations& operations, std::size_t count, std::optional<bool> onlyUsesStrand);
+
+    /**
+     * @brief Hands the first @p count operations of @p queue to @p strand as one batch, see Batch.
+     */
+    void
+    startBatch(QueuedOperations& queue, std::size_t count, RemoteIo::ProcessingStrand& strand, std::size_t strandIndex);
+
+    /**
+     * @brief Puts the operations of @p batch back at the head of their queue and applies what they did, unless it is
+     *        not the batch out any more. Then runs the requests that waited for it.
+     * @return Whether the queue wants to be worked again right away, which also wakes it.
+     */
+    bool finishBatch(std::shared_ptr<Batch> const& batch);
+
+    /**
+     * @brief Applies @p results of the operations at the head of @p queue: one that completed or failed leaves the
+     *        queue after @p heldProgress went out, and its owner hears of it.
+     * @return Whether the queue wants to be worked again right away.
+     */
+    bool applyResults(
+        QueuedOperations& queue,
+        std::vector<WorkResult> const& results,
+        std::vector<std::function<void()>>& heldProgress
+    );
+
+    /**
+     * @brief Runs @p request with the queue on the strand, callable from any thread. Nothing runs once the queue is
+     *        gone.
+     */
+    template <typename FunctionT>
+    void onStrand(FunctionT&& request);
+
+    /**
+     * @brief Runs @p request once no batch of this queue works on a processing thread, at once when none does. A
+     *        request on the whole queue, a move or a pause, goes through here. It only runs while the queue exists, so
+     *        it may refer to it. On the strand.
+     */
+    void afterBatch(std::function<void()> request);
+
+    /**
+     * @brief Runs @p request once the operation @p id is back from the batch out, at once when it is queued or gone. A
+     *        request on one operation, a cancel, goes through here. It only runs while the queue exists. On the strand.
+     */
+    void onOperation(Ids::OperationId const& id, std::function<void()> request);
+
+    /**
+     * @brief The ids of the operations in the batch out, none while none is.
+     */
+    std::vector<Ids::OperationId> batchOperationIds() const;
+
+    /**
+     * @brief Cancels the queued operation @p id as cancel() does, its sync scan fails. On the strand.
+     */
+    void cancelQueued(Ids::OperationId const& id, PartialFilesOnCancel partialFiles);
+
+    /**
+     * @brief Moves the queued operation @p operationId to @p newIndex of the paused queue, see moveOperation(). On the
+     *        strand.
+     */
+    void reorder(Ids::OperationId const& operationId, std::size_t newIndex);
+
+    /**
+     * @brief Tells the frontend whether the move of @p operationId to @p index was @p applied. Every move ends in one,
+     *        the frontend's listener applies or discards its reorder by it.
+     */
+    void reportReorder(Ids::OperationId const& operationId, std::size_t index, bool applied);
 
     /**
      * @brief The queue an operation of @p mode goes to.
@@ -533,7 +627,7 @@ class OperationQueue
     );
 
     /**
-     * @brief The queued or running operation @p operationId, none when there is none.
+     * @brief The queued operation @p operationId, none when there is none or it is in the batch out.
      */
     Operation* findOperation(Ids::OperationId const& operationId);
 
@@ -624,8 +718,14 @@ class OperationQueue
     std::function<void()> wake_{};
     Persistence::SftpOptions sftpOpts_{};
     Ids::SessionId sessionId_{};
-    std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> priorityOperations_{};
-    std::deque<std::pair<Ids::OperationId, std::unique_ptr<Operation>>> operations_{};
+    QueuedOperations priorityOperations_{};
+    QueuedOperations operations_{};
+    /** @brief The batch out on a processing thread, nothing while none is. */
+    std::shared_ptr<Batch> batch_{};
+    /** @brief What waits for batch_ to return, see afterBatch() and onOperation(). */
+    std::vector<std::function<void()>> afterBatch_{};
+    /** @brief work() was called while batch_ was out, so the queue is woken once it returned. */
+    bool workAskedDuringBatch_{false};
     std::atomic_bool paused_{true};
     /** @brief Shared with the transfers, which read it on the processing thread when they open a file. */
     std::shared_ptr<std::atomic_bool> unsafeFast_{std::make_shared<std::atomic_bool>(false)};

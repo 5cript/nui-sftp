@@ -24,6 +24,7 @@ struct EligibleOperation
  *
  * @param queue Anything indexable whose elements expose `.second` as a pointer-like Operation.
  * @param budget Slots available this tick; treated as at least 1.
+ * @return The head of @p queue in order, entry i for queue[i], none skipped: the queue works its first that many.
  */
 template <typename QueueT>
 std::vector<EligibleOperation> collectEligibleOperations(QueueT const& queue, int budget)
