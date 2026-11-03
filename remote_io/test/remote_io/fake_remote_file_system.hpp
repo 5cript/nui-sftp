@@ -231,6 +231,15 @@ namespace RemoteIo::Test
         }
 
         /**
+         * @brief How many reads the streams of the fake took, each a round trip on a real server.
+         */
+        std::size_t streamReads() const
+        {
+            std::scoped_lock lock{mutex_};
+            return streamReads_;
+        }
+
+        /**
          * @brief How many opens of @p path failed with Busy.
          */
         std::size_t busyOpensOf(Paths::RemotePath const& path) const
@@ -523,6 +532,7 @@ namespace RemoteIo::Test
         std::array<std::size_t, RemoteFileSystemOperations::size> started_{};
         std::array<std::vector<FailureRule>, RemoteFileSystemOperations::size> failures_{};
         std::function<bool(OpenFile const&)> takenFor_{};
+        std::size_t streamReads_{0};
         std::size_t busyOpens_{0};
         std::map<std::string, std::size_t> busyOpensByPath_{};
         std::vector<std::function<void()>> wakesWhenFree_{};
@@ -545,6 +555,7 @@ namespace RemoteIo::Test
         if (!fileSystem)
             return std::unexpected(RemoteError{.wrapperError = WrapperErrors::SharedPtrDestroyed});
         std::scoped_lock lock{fileSystem->mutex_};
+        ++fileSystem->streamReads_;
         auto const* node = fileSystem->find(path_);
         if (node == nullptr)
             return std::unexpected(FakeRemoteFileSystem::noSuchFile(path_));

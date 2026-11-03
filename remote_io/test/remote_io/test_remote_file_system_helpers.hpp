@@ -408,6 +408,26 @@ namespace RemoteIo::Test
         EXPECT_EQ(missing.error().kind, RemoteErrorKind::NoSuchFile);
     }
 
+    TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileReadsInPiecesAsLargeAsTheStreamAllows)
+    {
+        fileSystem_ = makeFileSystem({.readLengthLimit = 16u * 1024u});
+        const std::string content(64u * 1024u, 'x');
+        fileSystem_->addFile(remotePath("/home/user/notes.txt"), content);
+
+        const auto read = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return readSmallFileInStrand(*fileSystem_, remotePath("/home/user/notes.txt"), 1024u * 1024u);
+            }
+        );
+
+        ASSERT_TRUE(read.has_value()) << read.error().toString();
+        EXPECT_EQ(*read, content);
+        // Four whole pieces and the read that finds the end.
+        EXPECT_EQ(fileSystem_->streamReads(), 5u);
+    }
+
     TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileFailsOnAStreamThatReadsNothing)
     {
         fileSystem_ = makeFileSystem({.readLengthLimit = 0u});
