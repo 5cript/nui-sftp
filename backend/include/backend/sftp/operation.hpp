@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 template <>
@@ -236,10 +237,13 @@ class Operation
 
     /**
      * @brief The level a failure with @p error is logged at: a destination that changed since its compare is no error,
-     *        the compare kept it on purpose and the owner of the operation reports it.
+     *        the compare kept it on purpose and the owner of the operation reports it, an open that waits for a
+     *        connection no failure at all.
      */
     static Log::Level failureLevelOf(Error const& error)
     {
+        if (waitsForConnection(error))
+            return Log::Level::Debug;
         return error.type == ErrorType::ChangedSinceCompare ? Log::Level::Warning : Log::Level::Error;
     }
 
@@ -250,6 +254,29 @@ class Operation
     void observeTransfer(RemoteIo::AsyncTransferContext& context) const
     {
         context.observe(wake_);
+    }
+
+    /**
+     * @brief An open of @p path in @p mode that wakes the queue after it failed with Busy, see waitsForConnection.
+     */
+    RemoteIo::OpenFile wakingOpen(
+        Paths::RemotePath path,
+        RemoteIo::OpenMode mode,
+        std::filesystem::perms permissions = RemoteIo::OpenFile{}.permissions
+    ) const
+    {
+        return RemoteIo::OpenFile{
+            .path = std::move(path), .mode = mode, .permissions = permissions, .wakeWhenFree = wake_
+        };
+    }
+
+    /**
+     * @brief Whether @p error is an open that found every connection taken: the operation answers Waiting and opens
+     *        again once the file system woke it, an open from wakingOpen passed the wake.
+     */
+    static bool waitsForConnection(Error const& error)
+    {
+        return error.remoteError.has_value() && error.remoteError->kind == RemoteIo::RemoteErrorKind::Busy;
     }
 
     void enterState(OperationState newState)

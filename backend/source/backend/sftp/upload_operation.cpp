@@ -131,6 +131,12 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
             if (!isSymlink_)
             {
                 const auto prepareResult = prepareInStrand(*fileSystem);
+                // Prepared again from the start once a connection is free, without the buffer meanwhile.
+                if (!prepareResult.has_value() && waitsForConnection(prepareResult.error()))
+                {
+                    buffer_ = {};
+                    return WorkStatus::Waiting;
+                }
                 if (!prepareResult.has_value())
                 {
                     Log::log(
@@ -510,62 +516,20 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     const auto perms = remoteFilePerms();
 
     // Adoption mechanic for temp file parts:
-    if (tempResult.has_value())
+    if (tempResult.has_value() && tempResult->size > static_cast<std::uint64_t>(leftToUpload_))
     {
-        if (tempResult->size > static_cast<std::uint64_t>(leftToUpload_))
-        {
-            Log::debug("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
-            // Do not adopt file
-        }
-        else if (options_.tryContinue && !tempBelongsToSourceInStrand(fileSystem, tempResult->size))
-        {
-            Log::info(
-                "UploadOperation: Remote temp file '{}' is not a part of this source, starting over.", tempPath_.value()
-            );
-        }
-        else if (options_.tryContinue)
-        {
-            Log::debug("UploadOperation: Continuing upload to existing temp file.");
-
-            const auto openResult = fileSystem.inStrand(
-                RemoteIo::OpenFile{.path = tempPath_, .mode = RemoteIo::OpenMode::Write, .permissions = perms}
-            );
-            if (!openResult.has_value())
-            {
-                Log::error(
-                    options_.failureToast,
-                    "Failed to open remote sftp file for continue: {}",
-                    openResult.error().message
-                );
-                return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = openResult.error()});
-            }
-            fileStream_ = openResult.value();
-            openedTemporaryFile_ = true;
-
-            auto stream = fileStream_.lock();
-            if (!stream)
-            {
-                Log::error(options_.failureToast, "UploadOperation: File stream expired.");
-                return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
-            }
-
-            const auto seekResult = stream->seekInStrand(tempResult->size);
-            if (!seekResult.has_value())
-            {
-                Log::error(
-                    options_.failureToast,
-                    "Failed to seek remote sftp file for continue: {}",
-                    seekResult.error().message
-                );
-                return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = seekResult.error()});
-            }
-
-            // Success! Continue upload from position.
-            continued_ = true;
-            leftToUpload_ -= static_cast<std::size_t>(tempResult->size);
-            localFile_.seekg(static_cast<std::streamoff>(tempResult->size));
-            return {};
-        }
+        Log::debug("UploadOperation: Remote temp file is larger than local file, do not adopt file.");
+    }
+    else if (tempResult.has_value() && options_.tryContinue)
+    {
+        const auto belongs = tempBelongsToSourceInStrand(fileSystem, tempResult->size);
+        if (!belongs)
+            return std::unexpected(belongs.error());
+        if (*belongs)
+            return continueTemporaryFileInStrand(fileSystem, tempResult->size, perms);
+        Log::info(
+            "UploadOperation: Remote temp file '{}' is not a part of this source, starting over.", tempPath_.value()
+        );
     }
 
     if (options_.createMissingDirectories)
@@ -576,17 +540,19 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
 
     // Open temp file part regularly, freshly:
     Log::debug("UploadOperation: Starting new upload to '{}'.", tempPath_.value());
-    const auto openResult = fileSystem.inStrand(
-        RemoteIo::OpenFile{
-            .path = tempPath_,
-            .mode = RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate,
-            .permissions = perms,
-        }
-    );
+    const auto openResult = fileSystem.inStrand(wakingOpen(
+        tempPath_, RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate, perms
+    ));
     if (!openResult.has_value())
     {
-        Log::error(options_.failureToast, "Failed to open remote sftp file for upload: {}", openResult.error().message);
-        return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = openResult.error()});
+        Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
+        Log::log(
+            failureLevelOf(error),
+            options_.failureToast,
+            "Failed to open remote file for upload: {}",
+            openResult.error().message
+        );
+        return std::unexpected(std::move(error));
     }
 
     fileStream_ = openResult.value();
@@ -607,14 +573,13 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     using enum RemoteIo::OpenMode;
     Log::debug("UploadOperation: Starting unsafe fast upload to '{}'.", remotePath_.value());
     const auto openResult = fileSystem.inStrand(
-        RemoteIo::OpenFile{
-            .path = remotePath_,
-            .mode = Write | Create | (options_.mayOverwrite ? Truncate : Exclusive),
-            .permissions = remoteFilePerms(),
-        }
+        wakingOpen(remotePath_, Write | Create | (options_.mayOverwrite ? Truncate : Exclusive), remoteFilePerms())
     );
     if (!openResult.has_value())
     {
+        Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
+        if (waitsForConnection(error))
+            return std::unexpected(std::move(error));
         // Servers of SFTP version 3 refuse an exclusive open of an existing file with a plain failure.
         if (!options_.mayOverwrite && fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_}).has_value())
         {
@@ -659,14 +624,67 @@ void UploadOperation::takeOverPartialFileInStrand(RemoteIo::IRemoteFileSystem& f
         Log::info("UploadOperation: continuing '{}' as '{}'.", partial->value(), tempPath_.value());
 }
 
-bool UploadOperation::tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize)
+std::expected<void, UploadOperation::Error> UploadOperation::continueTemporaryFileInStrand(
+    RemoteIo::IRemoteFileSystem& fileSystem,
+    std::uint64_t tempSize,
+    std::filesystem::perms permissions
+)
+{
+    Log::debug("UploadOperation: Continuing upload to existing temp file.");
+
+    const auto openResult = fileSystem.inStrand(wakingOpen(tempPath_, RemoteIo::OpenMode::Write, permissions));
+    if (!openResult.has_value())
+    {
+        Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
+        Log::log(
+            failureLevelOf(error),
+            options_.failureToast,
+            "Failed to open remote file for continue: {}",
+            openResult.error().message
+        );
+        return std::unexpected(std::move(error));
+    }
+    fileStream_ = openResult.value();
+    openedTemporaryFile_ = true;
+
+    auto stream = fileStream_.lock();
+    if (!stream)
+    {
+        Log::error(options_.failureToast, "UploadOperation: File stream expired.");
+        return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
+    }
+
+    const auto seekResult = stream->seekInStrand(tempSize);
+    if (!seekResult.has_value())
+    {
+        Log::error(
+            options_.failureToast, "Failed to seek remote sftp file for continue: {}", seekResult.error().message
+        );
+        return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = seekResult.error()});
+    }
+
+    // Success! Continue upload from position.
+    continued_ = true;
+    leftToUpload_ -= static_cast<std::size_t>(tempSize);
+    localFile_.seekg(static_cast<std::streamoff>(tempSize));
+    return {};
+}
+
+std::expected<bool, UploadOperation::Error>
+UploadOperation::tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize)
 {
     // Another program's partial file or a part of an older version of the source must not be continued.
     if (tempSize == 0)
         return false;
-    const auto opened = fileSystem.inStrand(RemoteIo::OpenFile{.path = tempPath_, .mode = RemoteIo::OpenMode::Read});
+    const auto opened = fileSystem.inStrand(wakingOpen(tempPath_, RemoteIo::OpenMode::Read));
     if (!opened)
+    {
+        // Busy says nothing about the file, starting over would throw the part away.
+        Error error{.type = ErrorType::SftpError, .remoteError = opened.error()};
+        if (waitsForConnection(error))
+            return std::unexpected(std::move(error));
         return false;
+    }
     auto stream = opened->lock();
     if (!stream)
         return false;

@@ -233,9 +233,20 @@ class UploadOperation : public Operation
     std::expected<void, Error> finalizeInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
-     * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
+     * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source. Fails
+     *        only when its open waits for a connection, see waitsForConnection.
      */
-    bool tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize);
+    std::expected<bool, Error>
+    tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize);
+
+    /**
+     * @brief Opens the remote temp file of @p tempSize bytes to write on at its end, the source from there.
+     */
+    std::expected<void, Error> continueTemporaryFileInStrand(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        std::uint64_t tempSize,
+        std::filesystem::perms permissions
+    );
 
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.

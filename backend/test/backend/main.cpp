@@ -52,6 +52,7 @@
 #include "test_compared_state_check.hpp"
 #include "test_operation_queue.hpp"
 #include "test_operation_queue_batches.hpp"
+#include "test_connection_waits.hpp"
 #include "test_existence_check.hpp"
 #include "test_opener_risk.hpp"
 #include "test_process.hpp"

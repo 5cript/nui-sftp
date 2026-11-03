@@ -213,6 +213,8 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
                 );
 
             const auto prepareResult = prepareInStrand(*fileSystem);
+            if (!prepareResult.has_value() && waitsForConnection(prepareResult.error()))
+                return WorkStatus::Waiting;
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;
@@ -285,7 +287,9 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
 
 std::expected<void, Operation::Error> ArchiveUploadOperation::flattenRoots()
 {
+    // Flattened again when the open after it waited for a connection.
     resolvedEntries_.clear();
+    totalPayloadBytes_ = 0u;
     resolvedEntries_.reserve(options_.localPaths.size());
 
     for (auto const& localRoot : options_.localPaths)
@@ -430,27 +434,25 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Re
         return std::unexpected(Error{.type = ErrorType::FileExists});
 
     // Written under the temp name, so a failed or cancelled upload never leaves a truncated destination.
-    const auto openResult = fileSystem.inStrand(
-        RemoteIo::OpenFile{
-            .path = tempPath_,
-            .mode = RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate,
-            .permissions = std::filesystem::perms{0644u},
-        }
-    );
+    const auto openResult = fileSystem.inStrand(wakingOpen(
+        tempPath_,
+        RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate,
+        std::filesystem::perms{0644u}
+    ));
     if (!openResult.has_value())
     {
-        Log::error(
+        Error error{
+            .type = ErrorType::SftpError,
+            .remoteError = openResult.error(),
+            .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
+        };
+        Log::log(
+            failureLevelOf(error),
             "ArchiveUploadOperation: cannot open remote '{}': {}",
             options_.remoteArchivePath.value(),
             openResult.error().message
         );
-        return std::unexpected(
-            Error{
-                .type = ErrorType::SftpError,
-                .remoteError = openResult.error(),
-                .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
-            }
-        );
+        return std::unexpected(std::move(error));
     }
     remoteStream_ = openResult.value();
     tempCreated_ = true;
