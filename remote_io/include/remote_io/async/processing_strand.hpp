@@ -3,10 +3,13 @@
 #include <remote_io/async/processing_thread.hpp>
 
 #include <atomic>
+#include <cassert>
 #include <future>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <set>
+#include <tuple>
 
 namespace RemoteIo
 {
@@ -41,6 +44,26 @@ namespace RemoteIo
             if (finalized_)
                 return false;
             return processingThread_->pushTask(std::move(task));
+        }
+
+        /**
+         * @brief Blocks until the processing thread ran every task pushed before, at once when it takes none. For a
+         *        caller that then waits for the thread with a timeout, which would count those tasks otherwise. Not on
+         *        the processing thread.
+         */
+        void waitForPushedTasks()
+        {
+            assert(!withinProcessingThread());
+            auto reached = std::make_shared<std::promise<void>>();
+            auto future = reached->get_future();
+            // The task holds the only promise: dropped unrun, it is broken, which ends the wait as well.
+            std::ignore = pushTask(
+                [reached = std::move(reached)]()
+                {
+                    reached->set_value();
+                }
+            );
+            future.wait();
         }
 
         /**
