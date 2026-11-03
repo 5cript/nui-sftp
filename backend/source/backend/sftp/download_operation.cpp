@@ -97,6 +97,8 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
         }
         case (Preparing):
         {
+            if (awaitsConnection())
+                return WorkStatus::Waiting;
             // Local-only preconditions replicated from prepare(); the remote work runs in
             // prepareInStrand() without an inner umbrella.
             if (options_.localPath.empty())
@@ -117,7 +119,7 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             {
                 // Prepared again from the start once a connection is free, nothing local exists yet.
                 if (waitsForConnection(prepareResult.error()))
-                    return WorkStatus::Waiting;
+                    return awaitConnection();
                 Log::error("DownloadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
                 return enterErrorState<WorkStatus>(prepareResult.error());
             }

@@ -11,6 +11,7 @@
 #include <log/log.hpp>
 #include <paths/remote_path.hpp>
 
+#include <atomic>
 #include <concepts>
 #include <expected>
 #include <filesystem>
@@ -263,10 +264,20 @@ class Operation
         Paths::RemotePath path,
         RemoteIo::OpenMode mode,
         std::filesystem::perms permissions = RemoteIo::OpenFile{}.permissions
-    ) const
+    )
     {
+        connectionFreed_ = std::make_shared<std::atomic_bool>(false);
+        awaitsConnection_ = false;
         return RemoteIo::OpenFile{
-            .path = std::move(path), .mode = mode, .permissions = permissions, .wakeWhenFree = wake_
+            .path = std::move(path),
+            .mode = mode,
+            .permissions = permissions,
+            .wakeWhenFree = [freed = connectionFreed_, wake = wake_]()
+            {
+                freed->store(true);
+                if (wake)
+                    wake();
+            },
         };
     }
 
@@ -277,6 +288,25 @@ class Operation
     static bool waitsForConnection(Error const& error)
     {
         return error.remoteError.has_value() && error.remoteError->kind == RemoteIo::RemoteErrorKind::Busy;
+    }
+
+    /**
+     * @brief Waits for the connection the latest wakingOpen found taken: awaitsConnection holds until its wake was
+     *        called.
+     */
+    WorkStatus awaitConnection()
+    {
+        awaitsConnection_ = true;
+        return WorkStatus::Waiting;
+    }
+
+    /**
+     * @brief Whether the operation still waits for a connection, see awaitConnection. A work step meanwhile answers
+     *        Waiting without opening again: the queue works every operation whenever another one progressed.
+     */
+    bool awaitsConnection() const
+    {
+        return awaitsConnection_ && connectionFreed_ && !connectionFreed_->load();
     }
 
     void enterState(OperationState newState)
@@ -365,4 +395,10 @@ class Operation
     std::optional<Error> error_{std::nullopt};
     /** @brief Set by the queue before the first work step, see setWake. */
     std::function<void()> wake_{};
+
+  private:
+    /** @brief Set by the wake of the latest wakingOpen, from any thread. */
+    std::shared_ptr<std::atomic_bool> connectionFreed_{};
+    /** @brief The latest wakingOpen failed with Busy, see awaitConnection. */
+    bool awaitsConnection_{false};
 };

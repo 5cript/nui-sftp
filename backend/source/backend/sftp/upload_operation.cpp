@@ -118,6 +118,8 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
         }
         case (Preparing):
         {
+            if (awaitsConnection())
+                return WorkStatus::Waiting;
             if (options_.sourceMayVanish && sourceIsGone())
             {
                 Log::info("UploadOperation: '{}' is gone, nothing to upload.", options_.localPath.toUtf8());
@@ -135,7 +137,7 @@ std::expected<UploadOperation::WorkStatus, UploadOperation::Error> UploadOperati
                 if (!prepareResult.has_value() && waitsForConnection(prepareResult.error()))
                 {
                     buffer_ = {};
-                    return WorkStatus::Waiting;
+                    return awaitConnection();
                 }
                 if (!prepareResult.has_value())
                 {

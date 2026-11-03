@@ -109,9 +109,36 @@ namespace Test
         EXPECT_GT(wakes_.load(), wakesBefore) << "freeing a connection did not wake the queue";
         workUntilCompletions(1);
 
-        expectCompleted();
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
         EXPECT_EQ(completions().front().operationId, operationId);
         EXPECT_TRUE(std::filesystem::exists(localDirectory_.path() / "file.txt"));
+    }
+
+    TEST_F(ConnectionWaitTests, AWaitingDownloadOpensAgainOnlyOnceItWasWoken)
+    {
+        auto queue = makeWakingQueue();
+        const auto waiting = addRemoteFile("waiting.txt");
+        fake_->takeConnectionsFor(
+            [waiting](RemoteIo::OpenFile const& open)
+            {
+                return open.path == waiting;
+            }
+        );
+        addDownload(*queue, "running.txt");
+        queueDownload(*queue, "waiting.txt");
+
+        // The running download takes several reads, the queue works the waiting one in each of those cycles too.
+        workUntilCompletions(1);
+        EXPECT_EQ(fake_->busyOpens(), 1u) << "the waiting download opened again before it was woken";
+
+        fake_->freeConnections();
+        workUntilCompletions(2);
+
+        ASSERT_EQ(completions().size(), 2u);
+        for (auto const& completed : completions())
+            EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed)
+                << (completed.error ? completed.error->toString() : std::string{});
+        EXPECT_TRUE(std::filesystem::exists(localDirectory_.path() / "waiting.txt"));
     }
 
     TEST_F(ConnectionWaitTests, AnUploadWaitsWithoutFailingUntilAConnectionIsFree)
@@ -131,7 +158,7 @@ namespace Test
         EXPECT_GT(wakes_.load(), wakesBefore) << "freeing a connection did not wake the queue";
         workUntilCompletions(1);
 
-        expectCompleted();
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
         EXPECT_EQ(fake_->contentOf(target), uploadedContent());
     }
 
@@ -162,7 +189,7 @@ namespace Test
         fake_->freeConnections();
         workUntilCompletions(1);
 
-        expectCompleted();
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
         EXPECT_EQ(fake_->contentOf(target), content);
     }
 
@@ -178,14 +205,16 @@ namespace Test
         EXPECT_TRUE(workUntilWaiting(*queue)) << "the queue kept working a bulk whose files wait";
         EXPECT_TRUE(completions().empty()) << "the bulk ended while every connection was taken";
         EXPECT_GE(fake_->busyOpens(), 1u);
-        EXPECT_LE(fake_->busyOpens(), names.size()) << "a waiting file opened again before it was woken";
+        for (auto const& name : names)
+            EXPECT_LE(fake_->busyOpensOf(remote(fmt::format("/home/test/{}", name))), 1u)
+                << name << " opened again before it was woken";
 
         const auto wakesBefore = wakes_.load();
         fake_->freeConnections();
         EXPECT_GT(wakes_.load(), wakesBefore) << "freeing a connection did not wake the queue";
         workUntilCompletions(1);
 
-        expectCompleted();
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
         EXPECT_TRUE(completions().front().failedEntries.empty());
         for (auto const& name : names)
             EXPECT_TRUE(std::filesystem::exists(localDirectory_.path() / name)) << name;
@@ -225,7 +254,7 @@ namespace Test
         EXPECT_GT(wakes_.load(), wakesBefore) << "freeing a connection did not wake the queue";
         workUntilCompletions(1);
 
-        expectCompleted();
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
         EXPECT_GT(std::filesystem::file_size(archive), 8u * 1024u);
     }
 
@@ -258,7 +287,7 @@ namespace Test
         EXPECT_GT(wakes_.load(), wakesBefore) << "freeing a connection did not wake the queue";
         workUntilCompletions(1);
 
-        expectCompleted();
+        ASSERT_NO_FATAL_FAILURE(expectCompleted());
         const auto packed = fake_->contentOf(target);
         ASSERT_TRUE(packed.has_value());
         EXPECT_GT(packed->size(), uploadedContent().size());

@@ -188,8 +188,22 @@ namespace RemoteIo::Test
          */
         void takeAllConnections()
         {
+            takeConnectionsFor(
+                [](OpenFile const&)
+                {
+                    return true;
+                }
+            );
+        }
+
+        /**
+         * @brief Fails the opens that @p opens matches with Busy from now on, as if every connection were taken for
+         *        them, and keeps their wakes for @ref freeConnections.
+         */
+        void takeConnectionsFor(std::function<bool(OpenFile const&)> opens)
+        {
             std::scoped_lock lock{mutex_};
-            connectionsTaken_ = true;
+            takenFor_ = std::move(opens);
         }
 
         /**
@@ -200,7 +214,7 @@ namespace RemoteIo::Test
             std::vector<std::function<void()>> wakes;
             {
                 std::scoped_lock lock{mutex_};
-                connectionsTaken_ = false;
+                takenFor_ = {};
                 wakes = std::exchange(wakesWhenFree_, {});
             }
             for (auto const& wake : wakes)
@@ -214,6 +228,16 @@ namespace RemoteIo::Test
         {
             std::scoped_lock lock{mutex_};
             return busyOpens_;
+        }
+
+        /**
+         * @brief How many opens of @p path failed with Busy.
+         */
+        std::size_t busyOpensOf(Paths::RemotePath const& path) const
+        {
+            std::scoped_lock lock{mutex_};
+            const auto count = busyOpensByPath_.find(path.value());
+            return count == busyOpensByPath_.end() ? 0u : count->second;
         }
 
         /**
@@ -446,9 +470,10 @@ namespace RemoteIo::Test
         }
         OperationResult<OpenFile> run(OpenFile const& operation)
         {
-            if (connectionsTaken_)
+            if (takenFor_ && takenFor_(operation))
             {
                 ++busyOpens_;
+                ++busyOpensByPath_[operation.path.value()];
                 if (operation.wakeWhenFree)
                     wakesWhenFree_.push_back(operation.wakeWhenFree);
                 return std::unexpected(errorOf(RemoteErrorKind::Busy, "Every connection is taken"));
@@ -497,8 +522,9 @@ namespace RemoteIo::Test
         std::vector<std::shared_ptr<FakeRemoteFileStream>> streams_{};
         std::array<std::size_t, RemoteFileSystemOperations::size> started_{};
         std::array<std::vector<FailureRule>, RemoteFileSystemOperations::size> failures_{};
-        bool connectionsTaken_{false};
+        std::function<bool(OpenFile const&)> takenFor_{};
         std::size_t busyOpens_{0};
+        std::map<std::string, std::size_t> busyOpensByPath_{};
         std::vector<std::function<void()>> wakesWhenFree_{};
         bool closed_{false};
     };

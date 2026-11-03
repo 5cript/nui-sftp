@@ -205,6 +205,8 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         }
         case Preparing:
         {
+            if (awaitsConnection())
+                return WorkStatus::Waiting;
             if (options_.remoteArchivePath.empty())
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             if (options_.localPaths.empty())
@@ -214,7 +216,7 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
 
             const auto prepareResult = prepareInStrand(*fileSystem);
             if (!prepareResult.has_value() && waitsForConnection(prepareResult.error()))
-                return WorkStatus::Waiting;
+                return awaitConnection();
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;

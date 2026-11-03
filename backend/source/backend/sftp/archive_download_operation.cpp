@@ -234,10 +234,12 @@ ArchiveDownloadOperation::workInStrand()
                 }
                 else
                 {
+                    if (awaitsConnection())
+                        return WorkStatus::Waiting;
                     const auto openResult = openNextEntryInStrand(*fileSystem);
                     // The entry is opened again once a connection is free, nothing of it is written yet.
                     if (!openResult.has_value() && waitsForConnection(openResult.error()))
-                        return WorkStatus::Waiting;
+                        return awaitConnection();
                     if (!openResult.has_value())
                         return enterErrorState<WorkStatus>(openResult.error());
                     return WorkStatus::MoreWork;
