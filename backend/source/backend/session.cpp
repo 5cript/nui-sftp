@@ -287,6 +287,8 @@ void Session::adoptBulkResumes(std::vector<Ids::OperationId> const& operationIds
                 );
                 return;
             }
+            // Queueing asks the server with a timeout, the queue's batch on the processing thread must not count.
+            self->operationQueue_->waitForBatch();
 
             for (auto const& opId : operationIds)
             {

@@ -175,6 +175,13 @@ class OperationQueue
     bool drainBatch();
 
     /**
+     * @brief Blocks the strand until the batch out left its processing thread, at once when none is out. For a request
+     *        that is about to wait for that thread with a timeout, which would count the batch's time otherwise. The
+     *        batch still returns to the queue as posted. On the strand.
+     */
+    void waitForBatch() const;
+
+    /**
      * @brief Sets what is called, from any thread, once the queue has work after work returned false: an operation
      *        was added, cancelled, moved, paused or resumed, or a transfer progressed or ended.
      */

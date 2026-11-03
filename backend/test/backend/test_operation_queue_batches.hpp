@@ -132,22 +132,30 @@ namespace Test
         }
 
         /**
-         * @brief Queues the download of the fake's file @p name into the local directory. The file takes several reads,
-         *        so the download runs for several cycles.
+         * @brief Puts the file @p name on the fake. It takes several reads, so its download runs for several cycles.
+         *        The fake stays locked while it holds an open, so files go in before.
          */
-        Ids::OperationId addDownload(OperationQueue& queue, std::string const& name)
+        Paths::RemotePath addRemoteFile(std::string const& name)
         {
             const auto remotePath = remote(fmt::format("/home/test/{}", name));
             fake_->addFile(remotePath, std::string(8u * 1024u, 'x'));
+            return remotePath;
+        }
+
+        /**
+         * @brief Queues the download of the fake's file @p name, see addRemoteFile(), into the local directory.
+         */
+        Ids::OperationId queueDownload(OperationQueue& queue, std::string const& name)
+        {
             auto operationId = Ids::generateOperationId();
-            const auto added = runOnStrand(
+            const auto added = runOnStrandWhileHeld(
                 [&]()
                 {
                     return queue.addDownloadOperation(
                         fake_,
                         operationId,
                         toLocal(localDirectory_.path() / name),
-                        remotePath,
+                        remote(fmt::format("/home/test/{}", name)),
                         false,
                         false,
                         false,
@@ -157,6 +165,15 @@ namespace Test
             );
             EXPECT_TRUE(added.has_value()) << added.error().toString();
             return operationId;
+        }
+
+        /**
+         * @brief Puts the file @p name on the fake and queues its download.
+         */
+        Ids::OperationId addDownload(OperationQueue& queue, std::string const& name)
+        {
+            addRemoteFile(name);
+            return queueDownload(queue, name);
         }
 
         std::vector<std::string> completedIds()
@@ -304,5 +321,49 @@ namespace Test
         ASSERT_EQ(completions().size(), 2u);
         for (auto const& completed : completions())
             EXPECT_EQ(completed.reason, SharedData::OperationCompletionReason::Completed);
+    }
+
+    TEST_F(OperationQueueBatchTests, ARequestThatWaitsForTheBatchFirstOutlastsABatchLongerThanItsTimeout)
+    {
+        constexpr auto operationTimeout = std::chrono::seconds{1};
+        const auto held = holdFirstOpen();
+        Persistence::SftpOptions options{};
+        options.operationTimeout = operationTimeout;
+        auto queue = makeQueue(std::move(options));
+        setPaused(false);
+        addDownload(*queue, "held.txt");
+        const auto remotePath = addRemoteFile("later.txt");
+
+        postToStrand(
+            [&queue]()
+            {
+                queue->work();
+            }
+        );
+        ASSERT_EQ(held->hasEntered.wait_for(waitLimit), std::future_status::ready);
+        auto added = postToStrand(
+            [&]()
+            {
+                // As the session does before a request that waits for the processing thread.
+                queue->waitForBatch();
+                return queue->addDownloadOperation(
+                    fake_,
+                    Ids::generateOperationId(),
+                    toLocal(localDirectory_.path() / "later.txt"),
+                    remotePath,
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            }
+        );
+        // Held past the add's timeout: an add that counted the batch's time gave up meanwhile.
+        EXPECT_EQ(added.wait_for(2 * operationTimeout), std::future_status::timeout) << "the add ended while held";
+        held->release();
+
+        ASSERT_EQ(added.wait_for(waitLimit), std::future_status::ready);
+        const auto result = added.get();
+        EXPECT_TRUE(result.has_value()) << result.error().toString();
     }
 }
