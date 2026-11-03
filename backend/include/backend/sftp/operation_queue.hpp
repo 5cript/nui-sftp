@@ -527,7 +527,8 @@ class OperationQueue
 
     /**
      * @brief Works the first @p count operations of @p operations in order, only those whose usesStrand equals
-     *        @p onlyUsesStrand when set, and stops after the first that completed or failed.
+     *        @p onlyUsesStrand when set, and stops after the first that completed or failed. One that does not use
+     *        the strand waits with a timeout for its processing thread, so that thread runs what is queued there first.
      */
     static std::vector<WorkResult>
     workHead(QueuedOperations& operations, std::size_t count, std::optional<bool> onlyUsesStrand);
