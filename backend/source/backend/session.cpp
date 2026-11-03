@@ -657,20 +657,23 @@ void Session::registerRpcSftpListDirectory()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->later(RemoteIo::ListDirectory{.path = *remotePath});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Timed out");
+                        channel->later(
+                            RemoteIo::ListDirectory{.path = *remotePath},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [path](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error(result.error().message);
 
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                        {
-                            return reply.error(result.error().message);
-                        }
-
-                        Log::info("Listed directory '{}', got {} entries", path, result->size());
-                        reply({{"entries", *result}});
+                                    Log::info("Listed directory '{}', got {} entries", path, result->size());
+                                    reply({{"entries", *result}});
+                                }
+                            )
+                        );
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -690,19 +693,26 @@ void Session::registerRpcSftpHomeDirectory()
                     Ids::makeChannelId(channelIdString),
                     [](RpcHelper::RpcOnce&& reply, auto&& channel)
                     {
-                        auto fut = channel->later(RemoteIo::HomeDirectory{});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to get home directory: timeout");
+                        channel->later(
+                            RemoteIo::HomeDirectory{},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error(
+                                            "Failed to get home directory: " + result.error().toString()
+                                        );
 
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                            return reply.error("Failed to get home directory: " + result.error().toString());
-
-                        const auto& home = result->value();
-                        Log::info("Remote home directory is '{}'", home);
-                        reply({{"path", home}});
+                                    const auto& home = result->value();
+                                    Log::info("Remote home directory is '{}'", home);
+                                    reply({{"path", home}});
+                                }
+                            )
+                        );
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -727,7 +737,7 @@ void Session::registerRpcSftpUserDirectories()
                         const auto homePath = RpcHelper::parseRemotePath(home);
                         if (!homePath)
                             return reply.error(homePath.error());
-                        auto fut = channel->performPromise(
+                        channel->perform(
                             [weakChannel = std::weak_ptr{channel}, home = *homePath]()
                                 -> std::expected<std::vector<Utility::UserDirectory>, RemoteIo::RemoteError>
                             {
@@ -737,26 +747,27 @@ void Session::registerRpcSftpUserDirectories()
                                         RemoteIo::RemoteError{.message = "The file system channel was closed"}
                                     );
                                 return RemoteIo::userDirectoriesInStrand(*fileSystem, home);
-                            }
+                            },
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [home](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error(
+                                            "Failed to read user directories: " + result.error().toString()
+                                        );
+
+                                    auto directories = nlohmann::json::array();
+                                    for (auto const& directory : *result)
+                                        directories.push_back({{"name", directory.name}, {"path", directory.path}});
+                                    Log::info("Read {} user directories in '{}'", directories.size(), home);
+                                    reply({{"directories", std::move(directories)}});
+                                }
+                            )
                         );
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to read user directories: timeout");
-
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                            return reply.error("Failed to read user directories: " + result.error().toString());
-
-                        auto directories = nlohmann::json::array();
-                        for (auto const& directory : *result)
-                        {
-                            directories.push_back(
-                                {{"name", directory.name}, {"path", directory.path}}
-                            );
-                        }
-                        Log::info("Read {} user directories in '{}'", directories.size(), home);
-                        reply({{"directories", std::move(directories)}});
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -846,20 +857,27 @@ void Session::registerRpcSftpCreateDirectory()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->later(RemoteIo::CreateNewDirectory{.path = *remotePath});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error(fmt::format("Failed to create directory '{}': timeout", path));
+                        channel->later(
+                            RemoteIo::CreateNewDirectory{.path = *remotePath},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [path](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error(
+                                            fmt::format(
+                                                "Failed to create directory '{}': {}", path, result.error().toString()
+                                            )
+                                        );
 
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                            return reply.error(
-                                fmt::format("Failed to create directory '{}': {}", path, result.error().toString())
-                            );
-
-                        Log::info("Created directory '{}'", path);
-                        reply({{"success", true}});
+                                    Log::info("Created directory '{}'", path);
+                                    reply({{"success", true}});
+                                }
+                            )
+                        );
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -884,18 +902,23 @@ void Session::registerRpcSftpCreateFile()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->later(RemoteIo::CreateEmptyFile{.path = *remotePath});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to create file: timeout");
+                        channel->later(
+                            RemoteIo::CreateEmptyFile{.path = *remotePath},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [path](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error("Failed to create file: " + result.error().message);
 
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                            return reply.error("Failed to create file: " + result.error().message);
-
-                        Log::info("Created file '{}'", path);
-                        reply({{"success", true}});
+                                    Log::info("Created file '{}'", path);
+                                    reply({{"success", true}});
+                                }
+                            )
+                        );
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -1620,17 +1643,23 @@ void Session::registerRpcSftpPreDeleteChecks()
                         auto remotePaths = RpcHelper::parseRemotePaths(directories);
                         if (!remotePaths)
                             return reply.error(remotePaths.error());
-                        auto fut =
-                            channel->later(RemoteIo::FilterOutEmptyDirectories{.directories = *std::move(remotePaths)});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to perform pre-delete checks: timeout");
-
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                            return reply.error("Failed to perform pre-delete checks: " + result.error().toString());
-                        reply({{"success", true}, {"nonEmptyDirectories", *result}});
+                        channel->later(
+                            RemoteIo::FilterOutEmptyDirectories{.directories = *std::move(remotePaths)},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error(
+                                            "Failed to perform pre-delete checks: " + result.error().toString()
+                                        );
+                                    reply({{"success", true}, {"nonEmptyDirectories", *result}});
+                                }
+                            )
+                        );
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -1663,15 +1692,19 @@ void Session::registerRpcSftpDeleteFiles()
                         auto guard = self.operationQueue_->remoteDeleteGuard(channel);
                         if (const auto refusal = refuseAnyProtected(guard, *remotePaths); refusal)
                             return replyRefusal(reply, *refusal);
-                        auto fut = channel->later(RemoteIo::RemoveAll{.paths = *std::move(remotePaths)});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to delete files: timeout");
+                        channel->later(
+                            RemoteIo::RemoveAll{.paths = *std::move(remotePaths)},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                        return reply.error("Failed to delete files: " + result.error().toString());
 
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                            return reply.error("Failed to delete files: " + result.error().toString());
-
-                        reply({{"success", true}});
+                                    reply({{"success", true}});
+                                }
+                            )
+                        );
                     },
                     std::move(reply)
                 );
@@ -1707,7 +1740,7 @@ void Session::registerRpcSftpRename()
                         if (!oldPath || !newPath || !oldPath->parent() || oldPath->parent() != newPath->parent())
                             return reply.error("backend.rename.invalidName");
 
-                        auto fut = channel->performPromise(
+                        channel->perform(
                             [session = std::weak_ptr{channel},
                                 oldPath = *oldPath,
                                 newPath = *newPath,
@@ -1723,21 +1756,24 @@ void Session::registerRpcSftpRename()
                                 return RemoteIo::moveIntoPlaceInStrand(
                                     *fileSystem, oldPath, newPath, overwrite, asideSuffix
                                 );
-                            }
+                            },
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                    {
+                                        if (result.error().kind == RemoteIo::RemoteErrorKind::AlreadyExists)
+                                            return reply.error("backend.rename.targetExists");
+                                        return reply.error("Failed to rename file: " + result.error().toString());
+                                    }
+                                    reply({{"success", true}});
+                                }
+                            )
                         );
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to rename file: timeout");
-
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                        {
-                            if (result.error().kind == RemoteIo::RemoteErrorKind::AlreadyExists)
-                                return reply.error("backend.rename.targetExists");
-                            return reply.error("Failed to rename file: " + result.error().toString());
-                        }
-                        reply({{"success", true}});
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );
@@ -1942,23 +1978,26 @@ void Session::registerRpcSftpStat()
                         const auto remotePath = RpcHelper::parseRemotePath(path);
                         if (!remotePath)
                             return reply.error(remotePath.error());
-                        auto fut = channel->later(RemoteIo::Stat{.path = *remotePath});
-                        if (fut.wait_for(futureTimeout) != std::future_status::ready)
-                            return reply.error("Failed to stat file: timeout");
-
-                        const auto result = fut.get();
-                        if (!result.has_value())
-                        {
-                            if (result.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
-                            {
-                                // File does not exist, return nullopt
-                                return reply({{"success", true}, {"stat", nullptr}});
-                            }
-                            return reply.error("Failed to stat file: " + result.error().toString());
-                        }
-                        reply({{"success", true}, {"stat", *result}});
+                        channel->later(
+                            RemoteIo::Stat{.path = *remotePath},
+                            RpcHelper::answerOnCompletion(
+                                std::move(reply),
+                                [](RpcHelper::RpcOnce const& reply, auto const& result)
+                                {
+                                    if (!result.has_value())
+                                    {
+                                        // A missing file answers with no stat.
+                                        if (result.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
+                                            return reply({{"success", true}, {"stat", nullptr}});
+                                        return reply.error("Failed to stat file: " + result.error().toString());
+                                    }
+                                    reply({{"success", true}, {"stat", *result}});
+                                }
+                            )
+                        );
                     },
-                    std::move(reply)
+                    std::move(reply),
+                    BatchWait::None
                 );
             }
         );

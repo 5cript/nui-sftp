@@ -301,9 +301,22 @@ class Session
     void removeSftpChannel(Ids::ChannelId channelId);
 
     /**
+     * @brief Whether a call on a file system channel waits for the operation queue's batch first, see
+     *        OperationQueue::waitForBatch().
+     */
+    enum class BatchWait
+    {
+        // The call waits for the processing thread with a timeout, which must not count the batch.
+        First,
+        // The call answers from a completion and waits for nothing on the strand.
+        None,
+    };
+
+    /**
      * @brief Runs @p func on the strand with the channel @p channelId of @p channels, as (reply, channel) or
      *        (reply, session, channel). @p reply is always answered: when the session is gone, when there is no such
-     *        channel, and with the message of an exception @p func throws.
+     *        channel, and with the message of an exception @p func throws. A file system channel waits for the
+     *        operation queue's batch first unless @p batchWait is None.
      */
     template <typename ChannelT, typename FunctionT>
     void withLockedChannelDo(
@@ -311,7 +324,8 @@ class Session
         void (Session::*remove)(Ids::ChannelId),
         Ids::ChannelId channelId,
         FunctionT&& func,
-        RpcHelper::RpcOnce&& reply
+        RpcHelper::RpcOnce&& reply,
+        BatchWait batchWait = BatchWait::First
     )
     {
         within_strand_do(
@@ -320,7 +334,8 @@ class Session
                 remove,
                 channelId = std::move(channelId),
                 func = std::forward<FunctionT>(func),
-                reply = std::move(reply)]() mutable
+                reply = std::move(reply),
+                batchWait]() mutable
             {
                 auto self = weak.lock();
                 if (!self)
@@ -339,13 +354,9 @@ class Session
                     ((*self).*remove)(channelId);
                     return reply.error("Failed to lock channel");
                 }
-                // Calls on a file system wait for its processing thread with a timeout, the queue's batch there must
-                // not count against it.
-                if constexpr (std::is_same_v<ChannelT, RemoteIo::IRemoteFileSystem>)
-                {
-                    if (self->operationQueue_)
-                        self->operationQueue_->waitForBatch();
-                }
+                if (std::is_same_v<ChannelT, RemoteIo::IRemoteFileSystem> && batchWait == BatchWait::First &&
+                    self->operationQueue_)
+                    self->operationQueue_->waitForBatch();
                 try
                 {
                     if constexpr (
@@ -384,14 +395,20 @@ class Session
     }
 
     template <typename FunctionT>
-    void withSftpChannelDo(Ids::ChannelId channelId, FunctionT&& func, RpcHelper::RpcOnce&& reply)
+    void withSftpChannelDo(
+        Ids::ChannelId channelId,
+        FunctionT&& func,
+        RpcHelper::RpcOnce&& reply,
+        BatchWait batchWait = BatchWait::First
+    )
     {
         withLockedChannelDo(
             &Session::sftpChannels_,
             &Session::removeSftpChannel,
             std::move(channelId),
             std::forward<FunctionT>(func),
-            std::move(reply)
+            std::move(reply),
+            batchWait
         );
     }
 
