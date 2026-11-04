@@ -427,6 +427,8 @@ namespace RemoteIo
         std::condition_variable_any wakeUp_{};
         /** @brief Set under taskMutex_ by everything that needs a cycle, cleared when a cycle starts. */
         bool wakeRequested_{false};
+        /** @brief Set by every wake after wakeRequested_, read without the lock while the thread spins to park. */
+        std::atomic_bool wakePending_{false};
         /** @brief Under taskMutex_: the thread sleeps in socketWait_, so a wake must go through it. */
         bool waitingOnSocket_{false};
         std::function<SocketWait::Watched()> watchedSocket_{};
