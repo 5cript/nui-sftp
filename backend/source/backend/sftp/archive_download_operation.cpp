@@ -234,7 +234,12 @@ ArchiveDownloadOperation::workInStrand()
                 }
                 else
                 {
+                    if (awaitsConnection())
+                        return WorkStatus::Waiting;
                     const auto openResult = openNextEntryInStrand(*fileSystem);
+                    // The entry is opened again once a connection is free, nothing of it is written yet.
+                    if (!openResult.has_value() && waitsForConnection(openResult.error()))
+                        return awaitConnection();
                     if (!openResult.has_value())
                         return enterErrorState<WorkStatus>(openResult.error());
                     return WorkStatus::MoreWork;
@@ -501,22 +506,17 @@ ArchiveDownloadOperation::openNextEntryInStrand(RemoteIo::IRemoteFileSystem& fil
         return {};
     }
 
-    const auto streamOpenResult =
-        fileSystem.inStrand(RemoteIo::OpenFile{.path = resolved.source, .mode = RemoteIo::OpenMode::Read});
+    const auto streamOpenResult = fileSystem.inStrand(wakingOpen(resolved.source, RemoteIo::OpenMode::Read));
     if (!streamOpenResult.has_value())
     {
-        Log::error(
-            "ArchiveDownloadOperation: cannot open remote '{}': {}",
-            resolved.source.value(),
-            streamOpenResult.error().message
-        );
-        return std::unexpected(
-            Error{
+        return std::unexpected(loggedOpenFailure(
+            {
                 .type = ErrorType::SftpError,
                 .remoteError = streamOpenResult.error(),
                 .extraInfo = fmt::format("Opening remote file: {}", resolved.source.value()),
-            }
-        );
+            },
+            fmt::format("ArchiveDownloadOperation: cannot open remote '{}'", resolved.source.value())
+        ));
     }
     currentStream_ = streamOpenResult.value();
 

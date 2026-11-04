@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -23,7 +24,7 @@ namespace RemoteIo::Test
     class FakeRemoteFileSystem;
 
     /**
-     * @brief A file of a FakeRemoteFileSystem opened for reading.
+     * @brief A file of a FakeRemoteFileSystem opened for reading or writing.
      */
     class FakeRemoteFileStream final : public IRemoteFileStream
     {
@@ -31,10 +32,12 @@ namespace RemoteIo::Test
         FakeRemoteFileStream(
             std::weak_ptr<FakeRemoteFileSystem> fileSystem,
             Paths::RemotePath path,
+            OpenMode mode,
             std::size_t readLengthLimit
         )
             : fileSystem_{std::move(fileSystem)}
             , path_{std::move(path)}
+            , mode_{mode}
             , readLengthLimit_{readLengthLimit}
         {}
 
@@ -51,10 +54,7 @@ namespace RemoteIo::Test
             unsupported.set_value(std::unexpected(RemoteError{.kind = RemoteErrorKind::Unsupported}));
             return unsupported.get_future();
         }
-        std::expected<void, RemoteError> writeInStrand(std::string_view) override
-        {
-            return std::unexpected(RemoteError{.kind = RemoteErrorKind::Unsupported});
-        }
+        std::expected<void, RemoteError> writeInStrand(std::string_view data) override;
         std::expected<std::shared_ptr<AsyncTransferContext>, RemoteError>
         readAsyncInStrand(SignedSizeType, char*, SignedSizeType, std::function<bool(SignedSizeType)>) override
         {
@@ -88,14 +88,16 @@ namespace RemoteIo::Test
       private:
         std::weak_ptr<FakeRemoteFileSystem> fileSystem_;
         Paths::RemotePath path_;
+        OpenMode mode_;
         std::size_t readLengthLimit_;
         std::size_t position_{0};
     };
 
     /**
      * @brief A remote file system in memory for tests. Completes every operation when it starts, counts the operations
-     *        it started and fails those a test tells it to with @ref failWhen. Runs the operations the helpers use,
-     *        any other is Unsupported until a test needs it.
+     *        it started and fails those a test tells it to with @ref failWhen, or opens while its connections are
+     *        taken, see @ref takeAllConnections. Runs the operations the helpers use, any other is Unsupported until a
+     *        test needs it.
      */
     class FakeRemoteFileSystem final : public RemoteFileSystemImplementation<FakeRemoteFileSystem>
     {
@@ -178,6 +180,73 @@ namespace RemoteIo::Test
                     return std::nullopt;
                 }
             );
+        }
+
+        /**
+         * @brief Fails every open with Busy from now on, as a protocol whose connections all transfer, and keeps the
+         *        wakes of those opens for @ref freeConnections.
+         */
+        void takeAllConnections()
+        {
+            takeConnectionsFor(
+                [](OpenFile const&)
+                {
+                    return true;
+                }
+            );
+        }
+
+        /**
+         * @brief Fails the opens that @p opens matches with Busy from now on, as if every connection were taken for
+         *        them, and keeps their wakes for @ref freeConnections.
+         */
+        void takeConnectionsFor(std::function<bool(OpenFile const&)> opens)
+        {
+            std::scoped_lock lock{mutex_};
+            takenFor_ = std::move(opens);
+        }
+
+        /**
+         * @brief Lets opens through again and calls the wakes the Busy opens left, outside the lock.
+         */
+        void freeConnections()
+        {
+            std::vector<std::function<void()>> wakes;
+            {
+                std::scoped_lock lock{mutex_};
+                takenFor_ = {};
+                wakes = std::exchange(wakesWhenFree_, {});
+            }
+            for (auto const& wake : wakes)
+                wake();
+        }
+
+        /**
+         * @brief How many opens failed with Busy.
+         */
+        std::size_t busyOpens() const
+        {
+            std::scoped_lock lock{mutex_};
+            return busyOpens_;
+        }
+
+        /**
+         * @brief How many reads the streams of the fake took, each a round trip on a real server.
+         */
+        std::size_t streamReads() const
+        {
+            std::scoped_lock lock{mutex_};
+            return streamReads_;
+        }
+
+        /**
+         * @brief How many opens of @p path failed with Busy.
+         */
+        std::size_t busyOpensOf(Paths::RemotePath const& path) const
+        {
+            std::scoped_lock lock{mutex_};
+            const auto count = busyOpensByPath_.find(path.value());
+            return count == busyOpensByPath_.end() ? 0u : count->second;
         }
 
         /**
@@ -395,19 +464,63 @@ namespace RemoteIo::Test
             move(operation.source, operation.destination);
             return {};
         }
+        OperationResult<CreateDirectoryIfItDoesntExist> run(CreateDirectoryIfItDoesntExist const& operation)
+        {
+            if (auto const* node = find(operation.path); node != nullptr)
+            {
+                if (node->type == SharedData::FileType::Directory)
+                    return {};
+                return std::unexpected(errorOf(RemoteErrorKind::AlreadyExists, "Not a directory"));
+            }
+            if (!parentIsDirectory(operation.path))
+                return std::unexpected(noSuchFile(operation.path));
+            nodes_.emplace(operation.path.value(), Node{.type = SharedData::FileType::Directory});
+            return {};
+        }
         OperationResult<OpenFile> run(OpenFile const& operation)
         {
-            if (operation.mode != OpenMode::Read)
-                return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "The fake only reads"));
+            if (takenFor_ && takenFor_(operation))
+            {
+                ++busyOpens_;
+                ++busyOpensByPath_[operation.path.value()];
+                if (operation.wakeWhenFree)
+                    wakesWhenFree_.push_back(operation.wakeWhenFree);
+                return std::unexpected(errorOf(RemoteErrorKind::Busy, "Every connection is taken"));
+            }
+            auto* node = find(operation.path);
+            if (contains(operation.mode, OpenMode::Write))
+            {
+                if (node != nullptr && contains(operation.mode, OpenMode::Exclusive))
+                    return std::unexpected(errorOf(RemoteErrorKind::AlreadyExists, "The file exists"));
+                if (node == nullptr && !contains(operation.mode, OpenMode::Create))
+                    return std::unexpected(noSuchFile(operation.path));
+                if (node == nullptr)
+                {
+                    if (!parentIsDirectory(operation.path))
+                        return std::unexpected(noSuchFile(operation.path));
+                    node = &nodes_.emplace(operation.path.value(), Node{}).first->second;
+                }
+                if (contains(operation.mode, OpenMode::Truncate))
+                    node->content.clear();
+            }
+            if (node == nullptr)
+                return std::unexpected(noSuchFile(operation.path));
+            if (node->type != SharedData::FileType::Regular)
+                return std::unexpected(errorOf(RemoteErrorKind::Failure, "Not a regular file"));
+            auto stream = std::make_shared<FakeRemoteFileStream>(
+                weak_from_this(), operation.path, operation.mode, options_.readLengthLimit
+            );
+            streams_.push_back(stream);
+            return stream;
+        }
+        OperationResult<ReadFile> run(ReadFile const& operation)
+        {
             auto const* node = find(operation.path);
             if (node == nullptr)
                 return std::unexpected(noSuchFile(operation.path));
             if (node->type != SharedData::FileType::Regular)
                 return std::unexpected(errorOf(RemoteErrorKind::Failure, "Not a regular file"));
-            auto stream =
-                std::make_shared<FakeRemoteFileStream>(weak_from_this(), operation.path, options_.readLengthLimit);
-            streams_.push_back(stream);
-            return stream;
+            return node->content.substr(0, operation.maximumSize);
         }
 
         ProcessingStrand* strand_;
@@ -418,6 +531,11 @@ namespace RemoteIo::Test
         std::vector<std::shared_ptr<FakeRemoteFileStream>> streams_{};
         std::array<std::size_t, RemoteFileSystemOperations::size> started_{};
         std::array<std::vector<FailureRule>, RemoteFileSystemOperations::size> failures_{};
+        std::function<bool(OpenFile const&)> takenFor_{};
+        std::size_t streamReads_{0};
+        std::size_t busyOpens_{0};
+        std::map<std::string, std::size_t> busyOpensByPath_{};
+        std::vector<std::function<void()>> wakesWhenFree_{};
         bool closed_{false};
     };
 
@@ -437,6 +555,7 @@ namespace RemoteIo::Test
         if (!fileSystem)
             return std::unexpected(RemoteError{.wrapperError = WrapperErrors::SharedPtrDestroyed});
         std::scoped_lock lock{fileSystem->mutex_};
+        ++fileSystem->streamReads_;
         auto const* node = fileSystem->find(path_);
         if (node == nullptr)
             return std::unexpected(FakeRemoteFileSystem::noSuchFile(path_));
@@ -446,6 +565,24 @@ namespace RemoteIo::Test
         std::copy_n(node->content.begin() + static_cast<std::ptrdiff_t>(position_), count, buffer);
         position_ += count;
         return count;
+    }
+
+    inline std::expected<void, RemoteError> FakeRemoteFileStream::writeInStrand(std::string_view data)
+    {
+        if (!contains(mode_, OpenMode::Write))
+            return std::unexpected(RemoteError{.kind = RemoteErrorKind::PermissionDenied, .message = "Opened to read"});
+        const auto fileSystem = fileSystem_.lock();
+        if (!fileSystem)
+            return std::unexpected(RemoteError{.wrapperError = WrapperErrors::SharedPtrDestroyed});
+        std::scoped_lock lock{fileSystem->mutex_};
+        auto* node = fileSystem->find(path_);
+        if (node == nullptr)
+            return std::unexpected(FakeRemoteFileSystem::noSuchFile(path_));
+        if (node->content.size() < position_ + data.size())
+            node->content.resize(position_ + data.size());
+        std::ranges::copy(data, node->content.begin() + static_cast<std::ptrdiff_t>(position_));
+        position_ += data.size();
+        return {};
     }
 
     inline void FakeRemoteFileStream::close()

@@ -14,11 +14,17 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <cstddef>
 #include <cstdint>
 
 class ScanOperation : public Operation
 {
   public:
+    /**
+     * @brief Ignore files are applied up to their last whole line within this size, no real one comes near it.
+     */
+    static constexpr std::size_t maximumIgnoreFileSize = 1024u * 1024u;
+
     struct ScanOperationOptions
     {
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>

@@ -11,13 +11,17 @@
 #include <log/log.hpp>
 #include <paths/remote_path.hpp>
 
+#include <atomic>
 #include <concepts>
 #include <expected>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 template <>
@@ -252,6 +256,69 @@ class Operation
         context.observe(wake_);
     }
 
+    /**
+     * @brief An open of @p path in @p mode that wakes the queue after it failed with Busy, see waitsForConnection.
+     */
+    RemoteIo::OpenFile wakingOpen(
+        Paths::RemotePath path,
+        RemoteIo::OpenMode mode,
+        std::filesystem::perms permissions = RemoteIo::OpenFile{}.permissions
+    )
+    {
+        connectionFreed_ = std::make_shared<std::atomic_bool>(false);
+        awaitsConnection_ = false;
+        return RemoteIo::OpenFile{
+            .path = std::move(path),
+            .mode = mode,
+            .permissions = permissions,
+            .wakeWhenFree = [freed = connectionFreed_, wake = wake_]()
+            {
+                freed->store(true);
+                if (wake)
+                    wake();
+            },
+        };
+    }
+
+    /**
+     * @brief Whether @p error is an open that found every connection taken: the operation answers Waiting and opens
+     *        again once the file system woke it, an open from wakingOpen passed the wake.
+     */
+    static bool waitsForConnection(Error const& error)
+    {
+        return error.remoteError.has_value() && error.remoteError->kind == RemoteIo::RemoteErrorKind::Busy;
+    }
+
+    /**
+     * @brief @p error of an open from wakingOpen, logged after @p what: at Debug when it waits for a connection,
+     *        which the caller waits out, else at failureLevelOf.
+     */
+    static Error loggedOpenFailure(Error error, std::string_view what, Log::Toast toast = Log::Toast::Show)
+    {
+        const auto level = waitsForConnection(error) ? Log::Level::Debug : failureLevelOf(error);
+        Log::log(level, toast, "{}: {}", what, error.remoteError ? error.remoteError->message : std::string{});
+        return error;
+    }
+
+    /**
+     * @brief Waits for the connection the latest wakingOpen found taken: awaitsConnection holds until its wake was
+     *        called.
+     */
+    WorkStatus awaitConnection()
+    {
+        awaitsConnection_ = true;
+        return WorkStatus::Waiting;
+    }
+
+    /**
+     * @brief Whether the operation still waits for a connection, see awaitConnection. A work step meanwhile answers
+     *        Waiting without opening again: the queue works every operation whenever another one progressed.
+     */
+    bool awaitsConnection() const
+    {
+        return awaitsConnection_ && connectionFreed_ && !connectionFreed_->load();
+    }
+
     void enterState(OperationState newState)
     {
         state_ = newState;
@@ -338,4 +405,10 @@ class Operation
     std::optional<Error> error_{std::nullopt};
     /** @brief Set by the queue before the first work step, see setWake. */
     std::function<void()> wake_{};
+
+  private:
+    /** @brief Set by the wake of the latest wakingOpen, from any thread. */
+    std::shared_ptr<std::atomic_bool> connectionFreed_{};
+    /** @brief The latest wakingOpen failed with Busy, see awaitConnection. */
+    bool awaitsConnection_{false};
 };

@@ -5,7 +5,6 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <memory>
 #include <utility>
@@ -199,9 +198,9 @@ namespace RemoteIo
         };
         const std::unique_ptr<IRemoteFileStream, decltype(closeStream)> closer{stream.get(), closeStream};
 
+        // Read straight into the content in pieces as large as the stream allows, every piece is a round trip.
         std::string content;
-        std::array<char, 4096> buffer{};
-        const auto pieceSize = std::min(buffer.size(), stream->readLengthLimit());
+        const auto pieceSize = stream->readLengthLimit();
         if (pieceSize == 0)
         {
             return std::unexpected(
@@ -213,10 +212,12 @@ namespace RemoteIo
         }
         while (content.size() < maximumSize)
         {
-            const auto bytesRead =
-                stream->readSomeInStrand(buffer.data(), std::min(pieceSize, maximumSize - content.size()));
+            const auto filled = content.size();
+            content.resize(filled + std::min(pieceSize, maximumSize - filled));
+            const auto bytesRead = stream->readSomeInStrand(content.data() + filled, content.size() - filled);
             if (!bytesRead.has_value())
                 return std::unexpected(bytesRead.error());
+            content.resize(filled + *bytesRead);
             if (*bytesRead == 0)
                 return stream->finishInStrand().transform(
                     [&content]()
@@ -224,7 +225,6 @@ namespace RemoteIo
                         return std::move(content);
                     }
                 );
-            content.append(buffer.data(), *bytesRead);
         }
         return content;
     }
@@ -247,7 +247,7 @@ namespace RemoteIo
             );
         }
         const auto file = home / *Paths::RelativePath::make(".config/user-dirs.dirs");
-        return readSmallFileInStrand(fileSystem, file, maximumFileSize)
+        return fileSystem.inStrand(ReadFile{.path = file, .maximumSize = maximumFileSize})
             .transform(
                 [&home](std::string const& content)
                 {

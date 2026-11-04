@@ -2,8 +2,11 @@
 #include <log/log.hpp>
 #include <remote_io/remote_file_system.hpp>
 
-#include <string>
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <utility>
 
 ScanOperation::ScanOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, ScanOperationOptions options)
     : fileSystem_{std::move(fileSystem)}
@@ -22,33 +25,28 @@ ScanOperation::~ScanOperation() = default;
 namespace
 {
     std::optional<std::string>
-    readRemoteFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
+    readIgnoreFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
-        auto openFut = fileSystem.later(RemoteIo::OpenFile{.path = path, .mode = RemoteIo::OpenMode::Read});
-        if (openFut.wait_for(timeout) != std::future_status::ready)
+        constexpr auto maximumSize = ScanOperation::maximumIgnoreFileSize;
+        // A read of its own, it does not wait for a connection the queue's transfers hold. One byte more tells a cut.
+        auto read = fileSystem.later(RemoteIo::ReadFile{.path = path, .maximumSize = maximumSize + 1u});
+        if (read.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
-        auto openResult = openFut.get();
-        if (!openResult.has_value())
+        auto content = read.get();
+        if (!content.has_value())
             return std::nullopt;
-        auto stream = openResult.value().lock();
-        if (!stream)
-            return std::nullopt;
-
-        std::string contents;
-        auto readFut = stream->readAll([&contents](std::string_view chunk) {
-            contents.append(chunk);
-            return true;
-        });
-        if (readFut.wait_for(timeout) != std::future_status::ready)
+        if (content->size() > maximumSize)
         {
-            stream->close();
-            return std::nullopt;
+            // A rule cut in two would match what it never meant to.
+            content->resize(maximumSize);
+            content->erase(content->find_last_of('\n') + 1u);
+            Log::warn(
+                "ScanOperation: '{}' is over {} bytes, the rules after its last whole line there are dropped.",
+                path.value(),
+                maximumSize
+            );
         }
-        auto readResult = readFut.get();
-        stream->close();
-        if (!readResult.has_value())
-            return std::nullopt;
-        return contents;
+        return std::move(content).value();
     }
 }
 
@@ -109,7 +107,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*fileSystem, path / *entry.nameSegment(), futureTimeout_))
+        if (auto content = readIgnoreFile(*fileSystem, path / *entry.nameSegment(), futureTimeout_))
             ignoreMatcher_.addFile(relative, *content);
     }
 

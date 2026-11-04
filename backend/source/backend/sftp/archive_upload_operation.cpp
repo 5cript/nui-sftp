@@ -205,6 +205,8 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         }
         case Preparing:
         {
+            if (awaitsConnection())
+                return WorkStatus::Waiting;
             if (options_.remoteArchivePath.empty())
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             if (options_.localPaths.empty())
@@ -213,6 +215,8 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
                 );
 
             const auto prepareResult = prepareInStrand(*fileSystem);
+            if (!prepareResult.has_value() && waitsForConnection(prepareResult.error()))
+                return awaitConnection();
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;
@@ -415,42 +419,42 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Re
         );
     }
 
-    const auto flattenResult = flattenRoots();
-    if (!flattenResult.has_value())
-        return std::unexpected(flattenResult.error());
-
+    // Flattened once, preparing again after a wait for a connection only opens again. Flattening to nothing fails.
     if (resolvedEntries_.empty())
-        return std::unexpected(Error{
-            .type = ErrorType::FileNotFound,
-            .extraInfo = "no local files could be stat'd",
-        });
+    {
+        const auto flattenResult = flattenRoots();
+        if (!flattenResult.has_value())
+            return std::unexpected(flattenResult.error());
+
+        if (resolvedEntries_.empty())
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::FileNotFound,
+                    .extraInfo = "no local files could be stat'd",
+                }
+            );
+    }
 
     // Fail early instead of packing everything first, the final rename refuses to replace it anyway.
     if (!options_.mayOverwrite && fileSystem.inStrand(RemoteIo::Lstat{.path = remoteArchivePath_}).has_value())
         return std::unexpected(Error{.type = ErrorType::FileExists});
 
     // Written under the temp name, so a failed or cancelled upload never leaves a truncated destination.
-    const auto openResult = fileSystem.inStrand(
-        RemoteIo::OpenFile{
-            .path = tempPath_,
-            .mode = RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate,
-            .permissions = std::filesystem::perms{0644u},
-        }
-    );
+    const auto openResult = fileSystem.inStrand(wakingOpen(
+        tempPath_,
+        RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate,
+        std::filesystem::perms{0644u}
+    ));
     if (!openResult.has_value())
     {
-        Log::error(
-            "ArchiveUploadOperation: cannot open remote '{}': {}",
-            options_.remoteArchivePath.value(),
-            openResult.error().message
-        );
-        return std::unexpected(
-            Error{
+        return std::unexpected(loggedOpenFailure(
+            {
                 .type = ErrorType::SftpError,
                 .remoteError = openResult.error(),
                 .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
-            }
-        );
+            },
+            fmt::format("ArchiveUploadOperation: cannot open remote '{}'", options_.remoteArchivePath.value())
+        ));
     }
     remoteStream_ = openResult.value();
     tempCreated_ = true;

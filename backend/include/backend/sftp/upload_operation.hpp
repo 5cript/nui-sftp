@@ -17,6 +17,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
 class UploadOperation : public Operation
 {
@@ -233,9 +234,28 @@ class UploadOperation : public Operation
     std::expected<void, Error> finalizeInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
-     * @brief Whether the existing remote temp file of @p tempSize bytes ends like the same range of the source.
+     * @brief Whether the existing remote temp file @p temp ends like the same range of the source. Fails when the
+     *        connection let it not tell, a part thrown away for that would be lost; an open that waits for a
+     *        connection, see waitsForConnection, is one of those. The verdict on the same part and source is kept, so
+     *        preparing again after a wait opens no extra stream.
      */
-    bool tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize);
+    std::expected<bool, Error>
+    tempBelongsToSourceInStrand(RemoteIo::IRemoteFileSystem& fileSystem, RemoteIo::FileInformation const& temp);
+
+    /**
+     * @brief Compares the tail of the remote temp file of @p tempSize bytes with the same range of the source, see
+     *        tempBelongsToSourceInStrand.
+     */
+    std::expected<bool, Error> tailMatchesInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::uint64_t tempSize);
+
+    /**
+     * @brief Opens the remote temp file of @p tempSize bytes to write on at its end, the source from there.
+     */
+    std::expected<void, Error> continueTemporaryFileInStrand(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        std::uint64_t tempSize,
+        std::filesystem::perms permissions
+    );
 
     /** @brief Ensures every ancestor directory of @p dir exists on the remote, creating
      *         any missing ones.  Idempotent: existing directories are left alone.
@@ -286,6 +306,19 @@ class UploadOperation : public Operation
     void removeRemoteFile(Paths::RemotePath const& path);
 
   private:
+    /**
+     * @brief A remote temp file and the source its tail was compared with.
+     */
+    struct CheckedPart
+    {
+        std::uint64_t size{0};
+        std::uint64_t modified{0};
+        std::uint32_t modifiedNanoseconds{0};
+        std::optional<SentSource> source{};
+
+        friend bool operator==(CheckedPart const&, CheckedPart const&) = default;
+    };
+
     std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     std::weak_ptr<RemoteIo::IRemoteFileStream> fileStream_;
     UploadOperationOptions options_;
@@ -302,6 +335,8 @@ class UploadOperation : public Operation
     std::optional<Error> readFailure_{};
     /** @brief The state of the source right before it was opened, nothing when it could not be read. */
     std::optional<SentSource> sourceBeforeOpening_{};
+    /** @brief The latest tail check and whether the part belonged to the source, see tempBelongsToSourceInStrand. */
+    std::optional<std::pair<CheckedPart, bool>> tailCheck_{};
     /** @brief The upload continued a temp file an earlier one left, whose content is not known to be the source's. */
     bool continued_{false};
     /** @brief The upload opened tempPath_ to write to it, created anew or continued. */

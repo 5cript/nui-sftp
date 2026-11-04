@@ -97,6 +97,8 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
         }
         case (Preparing):
         {
+            if (awaitsConnection())
+                return WorkStatus::Waiting;
             // Local-only preconditions replicated from prepare(); the remote work runs in
             // prepareInStrand() without an inner umbrella.
             if (options_.localPath.empty())
@@ -115,6 +117,9 @@ std::expected<DownloadOperation::WorkStatus, DownloadOperation::Error> DownloadO
             const auto prepareResult = prepareInStrand(*fileSystem);
             if (!prepareResult.has_value())
             {
+                // Prepared again from the start once a connection is free, nothing local exists yet.
+                if (waitsForConnection(prepareResult.error()))
+                    return awaitConnection();
                 Log::error("DownloadOperation: Failed to prepare operation: {}", prepareResult.error().toString());
                 return enterErrorState<WorkStatus>(prepareResult.error());
             }
@@ -767,18 +772,17 @@ DownloadOperation::prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
     if (options_.entry->isSymlink() && options_.symlinkHandling != Persistence::SymlinkHandling::FollowSymlink)
         return {};
 
-    const auto streamOpenResult =
-        fileSystem.inStrand(RemoteIo::OpenFile{.path = remotePath_, .mode = RemoteIo::OpenMode::Read});
+    const auto streamOpenResult = fileSystem.inStrand(wakingOpen(remotePath_, RemoteIo::OpenMode::Read));
     if (!streamOpenResult.has_value())
     {
-        Log::error("DownloadOperation: Failed to open remote sftp file: {}.", streamOpenResult.error().message);
-        return std::unexpected(
-            Error{
+        return std::unexpected(loggedOpenFailure(
+            {
                 .type = ErrorType::SftpError,
                 .remoteError = streamOpenResult.error(),
-                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value())
-            }
-        );
+                .extraInfo = fmt::format("Opening remote file: {}", options_.remotePath.value()),
+            },
+            "DownloadOperation: Failed to open remote file"
+        ));
     }
 
     fileStream_ = streamOpenResult.value();

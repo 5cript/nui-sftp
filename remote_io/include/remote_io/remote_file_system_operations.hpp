@@ -198,6 +198,10 @@ namespace RemoteIo
     };
     BOOST_DESCRIBE_STRUCT(LinkIntoPlace, (), (source, destination))
 
+    /**
+     * @brief Opens a file for a transfer. Fails with Busy while every connection the protocol transfers on is taken,
+     *        the caller waits for wakeWhenFree and opens again.
+     */
     struct OpenFile
     {
         using Result = std::weak_ptr<IRemoteFileStream>;
@@ -205,8 +209,26 @@ namespace RemoteIo
         OpenMode mode{OpenMode::Read};
         /** @brief The permissions of a file the open creates. */
         std::filesystem::perms permissions{std::filesystem::perms::owner_read | std::filesystem::perms::owner_write};
+        /**
+         * @brief Called once, from any thread, after the open failed with Busy, when a connection became free. An
+         *        open that did not fail with Busy drops it.
+         */
+        std::function<void()> wakeWhenFree{};
     };
     BOOST_DESCRIBE_STRUCT(OpenFile, (), (path, mode, permissions))
+
+    /**
+     * @brief Reads at most maximumSize bytes of a file, for a read outside the operation queue such as an ignore file.
+     *        Never fails with Busy: the protocol reads it alongside the transfers that hold its connections.
+     */
+    struct ReadFile
+    {
+        using Result = std::string;
+        Paths::RemotePath path;
+        /** @brief The read stops there, 1 MiB unless set. */
+        std::size_t maximumSize{1024u * 1024u};
+    };
+    BOOST_DESCRIBE_STRUCT(ReadFile, (), (path, maximumSize))
 
     /**
      * @brief Sets when a path was last modified. Needs Capabilities::setModificationTime. Fails with Unsupported for a
@@ -319,6 +341,7 @@ namespace RemoteIo
         Rename,
         LinkIntoPlace,
         OpenFile,
+        ReadFile,
         SetModificationTime,
         HomeDirectory,
         CanonicalHomeDirectory,
