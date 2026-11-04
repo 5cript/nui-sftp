@@ -2,8 +2,10 @@
 #include <remote_io/async/processing_strand.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <future>
+#include <thread>
 
 namespace RemoteIo
 {
@@ -32,6 +34,26 @@ namespace RemoteIo
             std::atomic<std::thread::id>& processingThreadId_;
             std::thread::id previous_;
         };
+
+        /**
+         * @brief How long the thread spins for a task before it parks. Longer spins gained nothing in the transfer
+         *        benchmark.
+         */
+        constexpr std::chrono::microseconds spinBeforeParking{50};
+
+        /**
+         * @brief Tells the processor that the thread spins, so a sibling hardware thread runs meanwhile.
+         */
+        void relaxProcessor() noexcept
+        {
+#if defined(__x86_64__) || defined(__i386__)
+            __builtin_ia32_pause();
+#elif defined(__aarch64__)
+            asm volatile("yield");
+#else
+            std::this_thread::yield();
+#endif
+        }
     }
 
     ProcessingThread::ProcessingThread()
@@ -194,6 +216,7 @@ namespace RemoteIo
     }
     void ProcessingThread::notifyWake(bool interruptSocketWait)
     {
+        wakePending_.store(true, std::memory_order_release);
         wakeUp_.notify_all();
         // Set before waitingOnSocket_ under the same lock, and destroyed only after the thread ended.
         if (interruptSocketWait)
@@ -332,6 +355,7 @@ namespace RemoteIo
                 {
                     std::lock_guard lock{taskMutex_};
                     wakeRequested_ = false;
+                    wakePending_.store(false, std::memory_order_relaxed);
                 }
                 cycleStart_ = std::chrono::steady_clock::now();
                 CycleNeeds needs{};
@@ -503,6 +527,15 @@ namespace RemoteIo
         {
             return !running_ || wakeRequested_ || !tasks_.empty();
         };
+        if (workArrived())
+            return;
+
+        // A task pushed right after the last one ran is taken without parking, which a wake through the socket costs.
+        const auto spinUntil = std::chrono::steady_clock::now() + spinBeforeParking;
+        lock.unlock();
+        while (!wakePending_.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < spinUntil)
+            relaxProcessor();
+        lock.lock();
         if (workArrived())
             return;
 
