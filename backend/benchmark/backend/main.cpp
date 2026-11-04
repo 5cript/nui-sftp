@@ -3,11 +3,14 @@
 #include "libssh_client.hpp"
 #include "openssh_client.hpp"
 #include "openssh_server.hpp"
+#include "queue_client.hpp"
 #include "report.hpp"
 #include "workload.hpp"
 
 #include <docker/docker.hpp>
 #include <log/log.hpp>
+#include <nui/rpc.hpp>
+#include <nui/window.hpp>
 #include <paths/native.hpp>
 #include <utility/process_temporary_directory.hpp>
 
@@ -18,6 +21,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -325,6 +329,19 @@ namespace
             .baselineClient = "OpenSSH sftp",
         };
 
+        // The queue reports to a window as in the app, nothing is shown in it.
+        std::unique_ptr<Nui::Window> window{};
+        std::unique_ptr<Nui::RpcHub> hub{};
+        try
+        {
+            window = std::make_unique<Nui::Window>();
+            hub = std::make_unique<Nui::RpcHub>(*window);
+        }
+        catch (std::exception const& exception)
+        {
+            context.notes.push_back(fmt::format("The queue clients did not run, no window: {}", exception.what()));
+        }
+
         std::vector<Connection> connections;
         std::vector<std::unique_ptr<Client>> clients;
         auto openSsh = OpenSshClient::make({
@@ -339,8 +356,9 @@ namespace
             context.notes.push_back(fmt::format("The OpenSSH sftp baseline did not run: {}", openSsh.error()));
 
         // Each client gets a connection of its own, so what one learned of the link does not carry over.
-        connections.reserve(3);
-        for (int index = 0; index < 3; ++index)
+        constexpr int connectionCount = 5;
+        connections.reserve(connectionCount);
+        for (int index = 0; index < connectionCount; ++index)
         {
             auto connection = connect(server->host(), OpenSshServer::port);
             if (!connection)
@@ -353,6 +371,11 @@ namespace
         clients.push_back(std::make_unique<LibsshClient>(connections[0]));
         clients.push_back(std::make_unique<ApplicationClient>(connections[1], false));
         clients.push_back(std::make_unique<ApplicationClient>(connections[2], true));
+        if (window)
+        {
+            clients.push_back(std::make_unique<QueueClient>(connections[3], *window, *hub, Queueing::AsTheApp));
+            clients.push_back(std::make_unique<QueueClient>(connections[4], *window, *hub, Queueing::OnePerFile));
+        }
         if (!arguments.clients.empty())
         {
             std::erase_if(
