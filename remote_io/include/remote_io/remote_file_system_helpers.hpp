@@ -64,7 +64,8 @@ namespace RemoteIo
 
     /**
      * @brief Reads a file into a string through OpenFile, stopping after @p maximumSize bytes: ReadFile for a protocol
-     *        whose opens never fail with Busy. Must be called on the processing thread of the file system's strand.
+     *        whose opens never fail with Busy. Reads through a buffer of the file system's pool, or one of its own
+     *        when the pool has none free. Must be called on the processing thread of the file system's strand.
      */
     std::expected<std::string, RemoteError>
     readSmallFileInStrand(IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::size_t maximumSize);
