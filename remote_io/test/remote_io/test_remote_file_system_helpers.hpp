@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <future>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -444,6 +445,94 @@ namespace RemoteIo::Test
         ASSERT_FALSE(read.has_value());
         EXPECT_EQ(read.error().kind, RemoteErrorKind::Failure);
         EXPECT_EQ(fileSystem_->openStreams(), 0u);
+    }
+
+    TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileReadsThroughABufferOfThePool)
+    {
+        fileSystem_->addFile(remotePath("/home/user/notes.txt"), "notes");
+        const auto releasesBefore = fileSystem_->bufferProvider().releaseCount();
+
+        const auto read = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return readSmallFileInStrand(*fileSystem_, remotePath("/home/user/notes.txt"), 1024u * 1024u);
+            }
+        );
+
+        ASSERT_TRUE(read.has_value()) << read.error().toString();
+        EXPECT_EQ(*read, "notes");
+        EXPECT_EQ(fileSystem_->bufferProvider().releaseCount(), releasesBefore + 1u) << "the read leased no buffer";
+    }
+
+    TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileReadsThroughABufferOfItsOwnWhenThePoolIsFull)
+    {
+        std::string content;
+        for (int line = 0; content.size() < 3000u; ++line)
+            content += fmt::format("line {}\n", line);
+        fileSystem_->addFile(remotePath("/home/user/notes.txt"), content);
+        // One hint per buffer size, the last past the threshold of the largest buffers.
+        auto& pool = fileSystem_->bufferProvider();
+        std::vector<BufferLease> taken;
+        for (const std::size_t hint : {1u * 1024u, 4u * 1024u, 16u * 1024u, 64u * 1024u, 1024u * 1024u})
+            for (auto lease = pool.lease(hint); lease; lease = pool.lease(hint))
+                taken.push_back(std::move(lease));
+
+        const auto read = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return readSmallFileInStrand(*fileSystem_, remotePath("/home/user/notes.txt"), 1024u * 1024u);
+            }
+        );
+
+        ASSERT_TRUE(read.has_value()) << read.error().toString();
+        EXPECT_EQ(*read, content);
+        EXPECT_EQ(fileSystem_->openStreams(), 0u);
+    }
+
+    TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileLeavesThePoolsLargestBuffersToTransfers)
+    {
+        fileSystem_ = makeFileSystem({.readLengthLimit = std::numeric_limits<std::size_t>::max()});
+        fileSystem_->addFile(remotePath("/home/user/notes.txt"), "notes");
+        // Only the largest buffers stay free, a read that takes none of them leases nothing.
+        auto& pool = fileSystem_->bufferProvider();
+        std::vector<BufferLease> taken;
+        for (const std::size_t hint : {1u * 1024u, 4u * 1024u, 16u * 1024u, 64u * 1024u})
+            for (auto lease = pool.lease(hint); lease; lease = pool.lease(hint))
+                taken.push_back(std::move(lease));
+        const auto releasesBefore = pool.releaseCount();
+
+        const auto read = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return readSmallFileInStrand(*fileSystem_, remotePath("/home/user/notes.txt"), 2u * 1024u * 1024u);
+            }
+        );
+
+        ASSERT_TRUE(read.has_value()) << read.error().toString();
+        EXPECT_EQ(*read, "notes");
+        EXPECT_EQ(pool.releaseCount(), releasesBefore) << "the read took one of the largest buffers";
+    }
+
+    TEST_F(RemoteFileSystemReadHelperTests, ReadSmallFileWithoutAnyLimitHoldsOnlyTheFile)
+    {
+        constexpr auto noLimit = std::numeric_limits<std::size_t>::max();
+        fileSystem_ = makeFileSystem({.readLengthLimit = noLimit});
+        fileSystem_->addFile(remotePath("/home/user/notes.txt"), "notes");
+
+        const auto read = runInStrand(
+            *fileSystem_,
+            [this]()
+            {
+                return readSmallFileInStrand(*fileSystem_, remotePath("/home/user/notes.txt"), noLimit);
+            }
+        );
+
+        ASSERT_TRUE(read.has_value()) << read.error().toString();
+        EXPECT_EQ(*read, "notes");
+        EXPECT_LT(read->capacity(), 1024u) << "the content was sized by the limits, not by the file";
     }
 
     TEST_F(RemoteFileSystemReadHelperTests, UserDirectoriesAreReadFromTheHomeDirectory)

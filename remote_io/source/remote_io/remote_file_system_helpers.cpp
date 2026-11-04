@@ -7,12 +7,20 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace RemoteIo
 {
     namespace
     {
+        /**
+         * @brief The most a whole-file read asks for at once, so it never takes one of the pool's largest buffers,
+         *        which big transfers lease.
+         */
+        constexpr std::size_t wholeFilePieceSize = 64u * 1024u;
+
         /**
          * @brief @p knownType, or the type an Lstat of @p path finds.
          */
@@ -198,10 +206,8 @@ namespace RemoteIo
         };
         const std::unique_ptr<IRemoteFileStream, decltype(closeStream)> closer{stream.get(), closeStream};
 
-        // Read straight into the content in pieces as large as the stream allows, every piece is a round trip.
-        std::string content;
-        const auto pieceSize = stream->readLengthLimit();
-        if (pieceSize == 0)
+        const auto lengthLimit = stream->readLengthLimit();
+        if (lengthLimit == 0)
         {
             return std::unexpected(
                 RemoteError{
@@ -210,14 +216,22 @@ namespace RemoteIo
                 }
             );
         }
+
+        // A full pool neither fails the read nor makes it wait, it reads through a buffer of its own then.
+        const auto pieceSize = std::min({maximumSize, wholeFilePieceSize, lengthLimit});
+        auto lease = fileSystem.bufferProvider().leaseForTransfer(pieceSize, lengthLimit);
+        std::vector<char> ownBuffer{};
+        if (!lease)
+            ownBuffer.resize(pieceSize);
+        const auto buffer = lease ? std::span<char>{lease.data(), lease.size()} : std::span<char>{ownBuffer};
+
+        std::string content;
         while (content.size() < maximumSize)
         {
-            const auto filled = content.size();
-            content.resize(filled + std::min(pieceSize, maximumSize - filled));
-            const auto bytesRead = stream->readSomeInStrand(content.data() + filled, content.size() - filled);
+            const auto bytesRead =
+                stream->readSomeInStrand(buffer.data(), std::min(buffer.size(), maximumSize - content.size()));
             if (!bytesRead.has_value())
                 return std::unexpected(bytesRead.error());
-            content.resize(filled + *bytesRead);
             if (*bytesRead == 0)
                 return stream->finishInStrand().transform(
                     [&content]()
@@ -225,6 +239,7 @@ namespace RemoteIo
                         return std::move(content);
                     }
                 );
+            content.append(buffer.data(), *bytesRead);
         }
         return content;
     }
