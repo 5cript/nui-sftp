@@ -7,6 +7,16 @@ if (NOT TARGET GTest::gtest)
     find_package(GTest CONFIG REQUIRED)
 endif()
 
+# A server is a directory below servers/ with a profile.json. Adding one takes no change here, only its name in this list.
+set(NUI_SFTP_FTP_TEST_SERVERS "vsftpd;proftpd" CACHE STRING "The servers the FTP conformance suites run against")
+file(GLOB FTP_SERVER_PROFILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/servers/*/profile.json")
+foreach(server IN LISTS NUI_SFTP_FTP_TEST_SERVERS)
+    if (NOT "${CMAKE_CURRENT_SOURCE_DIR}/servers/${server}/profile.json" IN_LIST FTP_SERVER_PROFILES)
+        message(FATAL_ERROR "NUI_SFTP_FTP_TEST_SERVERS: ${server} has no servers/${server}/profile.json")
+    endif()
+endforeach()
+list(JOIN NUI_SFTP_FTP_TEST_SERVERS "," FTP_TEST_SERVER_NAMES)
+
 # The test support shares objects with the test across threads, so every variant builds its own.
 function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
     add_library(
@@ -14,6 +24,8 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
         STATIC
             support/ftp_script.cpp
             support/scripted_ftp_server.cpp
+            support/server_fleet.cpp
+            support/server_profile.cpp
             support/test_ftp_client.cpp
             support/test_pki.cpp
     )
@@ -26,9 +38,18 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
             OpenSSL::SSL
             OpenSSL::Crypto
             fmt::fmt
+            nlohmann_json::nlohmann_json
+    )
+    target_compile_definitions(
+        ${name}-support
+        PRIVATE
+            NUI_SFTP_FTP_SERVERS_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/servers"
+            NUI_SFTP_FTP_TEST_SERVERS="${FTP_TEST_SERVER_NAMES}"
     )
     if (WIN32)
         target_link_libraries(${name}-support PUBLIC ws2_32 mswsock)
+    else()
+        target_link_libraries(${name}-support PUBLIC docker-control)
     endif()
 
     add_executable(${name} main.cpp)
@@ -47,8 +68,41 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
     set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${outputDirectory}")
 endfunction()
 
+# The suites against real servers share one fleet of containers, a ctest fixture starts and stops it. Run directly, the
+# test binary starts its own.
+set(FTP_FLEET_ENDPOINTS "${CMAKE_BINARY_DIR}/test/ftp-fleet/endpoints.json")
+function(discover_ftp_tests name testPrefix environment)
+    gtest_discover_tests(
+        ${name}
+        TEST_PREFIX "${testPrefix}"
+        TEST_FILTER "-Conformance/*"
+        PROPERTIES ENVIRONMENT "${environment}"
+        DISCOVERY_TIMEOUT 60
+    )
+    if (NOT WIN32)
+        list(APPEND environment "NUI_SFTP_FTP_FLEET_ENDPOINTS=${FTP_FLEET_ENDPOINTS}")
+        gtest_discover_tests(
+            ${name}
+            TEST_PREFIX "${testPrefix}"
+            TEST_FILTER "Conformance/*"
+            PROPERTIES ENVIRONMENT "${environment}" FIXTURES_REQUIRED FtpServerFleet
+            DISCOVERY_TIMEOUT 60
+        )
+    endif()
+endfunction()
+
 add_ftp_test(nui-sftp-ftp-test file-transfer-protocol remote-io "${CMAKE_BINARY_DIR}/test")
-gtest_discover_tests(nui-sftp-ftp-test)
+discover_ftp_tests(nui-sftp-ftp-test "" "")
+
+if (NOT WIN32)
+    add_executable(nui-sftp-ftp-fleet support/fleet_tool.cpp)
+    target_link_libraries(nui-sftp-ftp-fleet PRIVATE nui-sftp-ftp-test-support)
+    set_target_properties(nui-sftp-ftp-fleet PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME FtpServerFleetStart COMMAND nui-sftp-ftp-fleet start "${FTP_FLEET_ENDPOINTS}")
+    add_test(NAME FtpServerFleetStop COMMAND nui-sftp-ftp-fleet stop "${FTP_FLEET_ENDPOINTS}")
+    set_tests_properties(FtpServerFleetStart PROPERTIES FIXTURES_SETUP FtpServerFleet TIMEOUT 900)
+    set_tests_properties(FtpServerFleetStop PROPERTIES FIXTURES_CLEANUP FtpServerFleet)
+endif()
 
 # A configure of its own with -DCODE_COVERAGE=ON, a report to look at that no test fails on. The instrumented libraries
 # need the instrumented link of the tests named here, so build only the ccov targets there.
@@ -74,12 +128,7 @@ function(add_sanitized_ftp_test variant testPrefix environment)
     target_compile_options(nui-sftp-ftp-${variant}-test-support PRIVATE ${sanitizerOptions})
     target_compile_options(nui-sftp-ftp-${variant}-test PRIVATE ${sanitizerOptions})
     target_link_options(nui-sftp-ftp-${variant}-test PRIVATE ${sanitizerOptions})
-    gtest_discover_tests(
-        nui-sftp-ftp-${variant}-test
-        TEST_PREFIX "${testPrefix}."
-        PROPERTIES ENVIRONMENT "${environment}"
-        DISCOVERY_TIMEOUT 60
-    )
+    discover_ftp_tests(nui-sftp-ftp-${variant}-test "${testPrefix}." "${environment}")
 endfunction()
 
 if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")

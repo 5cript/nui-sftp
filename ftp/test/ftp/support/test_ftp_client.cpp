@@ -66,6 +66,8 @@ namespace FileTransferProtocol::Test
         {
             if (!control_)
                 return std::unexpected("Not connected");
+            if (!received_.empty())
+                return std::unexpected("Plaintext follows the reply that started TLS");
             try
             {
                 context_.emplace(ssl::context::tls_client);

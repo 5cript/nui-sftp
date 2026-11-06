@@ -53,4 +53,15 @@ namespace Docker
      * @brief Removes the container @p name whether it runs or not, e.g. one whose owner was killed.
      */
     void removeContainer(std::string_view name);
+
+    /**
+     * @brief The address of the container @p name on its docker network, reachable from the host without a published
+     *        port.
+     */
+    std::expected<std::string, std::string> containerAddress(std::string_view name);
+
+    /**
+     * @brief Runs @p command through sh inside the container @p name, as @p user unless it is empty.
+     */
+    CommandResult executeIn(std::string_view name, std::string_view command, std::string_view user = {});
 }
