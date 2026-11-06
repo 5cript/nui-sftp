@@ -50,6 +50,15 @@ endfunction()
 add_ftp_test(nui-sftp-ftp-test file-transfer-protocol remote-io "${CMAKE_BINARY_DIR}/test")
 gtest_discover_tests(nui-sftp-ftp-test)
 
+# A configure of its own with -DCODE_COVERAGE=ON, a report to look at that no test fails on. The instrumented libraries
+# need the instrumented link of the tests named here, so build only the ccov targets there.
+if (CODE_COVERAGE)
+    target_code_coverage(remote-io)
+    target_code_coverage(file-transfer-protocol)
+    target_code_coverage(nui-sftp-ftp-test AUTO ALL LLVM_EXCLUDE ${NUI_SFTP_COVERAGE_EXCLUDES})
+    target_code_coverage(nui-sftp-remote-io-test AUTO ALL LLVM_EXCLUDE ${NUI_SFTP_COVERAGE_EXCLUDES})
+endif()
+
 # Builds instrumented copies of file-transfer-protocol and its tests in test/<variant>, on the instrumented remote_io
 # of its tests. ctest names the tests <testPrefix>.*. OpenSSL and the other prebuilt libraries stay uninstrumented.
 function(add_sanitized_ftp_test variant testPrefix environment)
