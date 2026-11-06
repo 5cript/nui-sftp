@@ -1,16 +1,43 @@
 include(GoogleTest)
 
+find_package(Boost CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
+find_package(fmt CONFIG REQUIRED)
 if (NOT TARGET GTest::gtest)
     find_package(GTest CONFIG REQUIRED)
 endif()
 
+# The test support shares objects with the test across threads, so every variant builds its own.
 function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
+    add_library(
+        ${name}-support
+        STATIC
+            support/ftp_script.cpp
+            support/scripted_ftp_server.cpp
+            support/test_ftp_client.cpp
+            support/test_pki.cpp
+    )
+    target_include_directories(${name}-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+    target_link_libraries(
+        ${name}-support
+        PUBLIC
+            ${ftpLibrary}
+            Boost::headers
+            OpenSSL::SSL
+            OpenSSL::Crypto
+            fmt::fmt
+    )
+    if (WIN32)
+        target_link_libraries(${name}-support PUBLIC ws2_32 mswsock)
+    endif()
+
     add_executable(${name} main.cpp)
 
     target_link_libraries(
         ${name}
         PUBLIC
             utility
+            ${name}-support
             ${ftpLibrary}
             ${remoteIoLibrary}
             GTest::gtest
@@ -35,6 +62,7 @@ function(add_sanitized_ftp_test variant testPrefix environment)
         remote-io-${variant}
         "${CMAKE_BINARY_DIR}/test/${variant}"
     )
+    target_compile_options(nui-sftp-ftp-${variant}-test-support PRIVATE ${sanitizerOptions})
     target_compile_options(nui-sftp-ftp-${variant}-test PRIVATE ${sanitizerOptions})
     target_link_options(nui-sftp-ftp-${variant}-test PRIVATE ${sanitizerOptions})
     gtest_discover_tests(
