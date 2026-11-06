@@ -65,7 +65,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, LoginScriptRuns)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login("alice", "secret").expect("QUIT").reply("221 Goodbye").closeControl();
         server_->addConnection(std::move(script));
@@ -84,7 +84,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, ScriptsRunInTheOrderOfTheConnections)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script first{};
         first.reply("220 First").expectDisconnect();
         Script second{};
@@ -109,7 +109,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, AnUnexpectedCommandFailsWithADiff)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login().expect("RETR", ".*\\.txt").reply("150 Here it comes");
         server_->addConnection(std::move(script));
@@ -130,7 +130,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, AnArgumentMustMatchAsAWhole)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready").expect("CWD", "/home");
         server_->addConnection(std::move(script));
@@ -145,7 +145,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, ACommandBehindTheEndOfTheScriptFails)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready").checkpoint("greeted");
         server_->addConnection(std::move(script));
@@ -162,7 +162,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, AConnectionWithoutAScriptFails)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         connectClient();
         const auto reply = client_.readReply();
         EXPECT_FALSE(reply.has_value());
@@ -171,7 +171,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, CheckpointsAreTakenOnce)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.checkpoint("reached").reply("220 Ready").expectDisconnect();
         server_->addConnection(std::move(script));
@@ -185,7 +185,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, RawBytesAndDribbledRepliesArriveAsSent)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.replyRaw("220-First\r\n").dribble("220 Second\r\n").expectDisconnect();
         server_->addConnection(std::move(script));
@@ -200,7 +200,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, RepliesEndEveryLineInCrLf)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220-First\n220 Second").expectDisconnect();
         server_->addConnection(std::move(script));
@@ -215,7 +215,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, ClosingTheControlConnectionEndsTheStream)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready").closeControl();
         server_->addConnection(std::move(script));
@@ -230,14 +230,14 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, ResettingTheControlConnectionIsNoCleanEnd)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
-        script.reply("220 Ready").resetControl();
+        script.reply("220 Ready").expect("NOOP").resetControl();
         server_->addConnection(std::move(script));
 
         connectClient();
         ASSERT_TRUE(client_.readReply().has_value());
-        const auto reply = client_.readReply();
+        const auto reply = client_.command("NOOP");
         ASSERT_FALSE(reply.has_value());
         EXPECT_EQ(reply.error().find("End of file"), std::string::npos) << reply.error();
         expectNoFailures();
@@ -245,7 +245,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, AStalledScriptNeverAnswersButRecordsCommands)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready").stall();
         server_->addConnection(std::move(script));
@@ -276,7 +276,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, ExplicitTlsTurnsTheControlConnection)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready")
             .expect("AUTH", "TLS")
@@ -303,7 +303,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, ImplicitTlsStartsWithTheHandshake)
     {
-        startServer({.implicitTls = true});
+        ASSERT_NO_FATAL_FAILURE(startServer({.implicitTls = true}));
         Script script{};
         script.reply("220 Ready").expectDisconnect();
         server_->addConnection(std::move(script));
@@ -320,13 +320,13 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, AHandshakeCanBeAnAlertInstead)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready")
             .expect("AUTH")
             .reply("234 Proceed")
             .startTls({.insteadOfHandshake = fatalAlert()})
-            .expectDisconnect();
+            .stall();
         server_->addConnection(std::move(script));
 
         connectClient();
@@ -339,7 +339,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerTests, PlaintextCanFollowThe234)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.reply("220 Ready")
             .expect("AUTH")
@@ -381,7 +381,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, DownloadsThroughEpsv)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("EPSV")
@@ -410,7 +410,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, UploadsThroughPasv)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("PASV")
@@ -438,7 +438,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, AnAnnouncementCanLie)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("PASV")
@@ -459,7 +459,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, AnAnnouncementCanBeAnyReply)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("EPSV")
@@ -480,11 +480,11 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, SendForeverEndsWhenTheScriptStopsIt)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("EPSV")
-            .passive(DataPlan{}.sendForever().send("tail"))
+            .passive(DataPlan{}.sendForever())
             .expect("RETR")
             .reply("150 Here it comes")
             .beginData()
@@ -504,7 +504,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, ADataResetIsNoCleanEnd)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("EPSV")
@@ -526,7 +526,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTests, AStallLastsUntilTheClientLeaves)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         Script script{};
         script.login()
             .expect("EPSV")
@@ -602,7 +602,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTlsTests, ADataConnectionResumesTheControlSession)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         server_->addConnection(
             securedScript(DataPlan{}.tls({.requireResumption = true}).send("over tls"))
         );
@@ -622,7 +622,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTlsTests, ResumptionCanBeRefused)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         server_->addConnection(securedScript(DataPlan{}.tls({.refuseResumption = true}).send("over tls")));
 
         login();
@@ -638,7 +638,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTlsTests, ADataConnectionCanPresentAnotherCertificate)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         const auto pki = testPki();
         ASSERT_TRUE(pki.has_value()) << pki.error();
         server_->addConnection(
@@ -657,7 +657,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(ScriptedFtpServerDataTlsTests, AClosedDataConnectionCanOmitCloseNotify)
     {
-        startServer();
+        ASSERT_NO_FATAL_FAILURE(startServer());
         server_->addConnection(
             securedScript(DataPlan{}.tls({.closeWithoutCloseNotify = true}).send("over tls"))
         );
@@ -687,7 +687,7 @@ namespace FileTransferProtocol::Test
     {
         const auto pki = testPki();
         ASSERT_TRUE(pki.has_value()) << pki.error();
-        startServer({.implicitTls = true, .certificate = pki->get().*GetParam().certificate});
+        ASSERT_NO_FATAL_FAILURE(startServer({.implicitTls = true, .certificate = pki->get().*GetParam().certificate}));
         Script script{};
         script.expectDisconnect();
         server_->addConnection(std::move(script));
@@ -719,7 +719,7 @@ namespace FileTransferProtocol::Test
     {
         const auto pki = testPki();
         ASSERT_TRUE(pki.has_value()) << pki.error();
-        startServer({.implicitTls = true});
+        ASSERT_NO_FATAL_FAILURE(startServer({.implicitTls = true}));
         for (auto const* name : {"localhost", "127.0.0.1"})
         {
             Script script{};

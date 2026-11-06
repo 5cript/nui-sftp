@@ -171,6 +171,20 @@ namespace FileTransferProtocol::Test
             return error.message();
         }
 
+        /**
+         * @brief Opens @p acceptor on @p endpoint. No SO_REUSEADDR, with it two processes can get the same free port.
+         */
+        error_code openAcceptor(tcp::acceptor& acceptor, tcp::endpoint const& endpoint)
+        {
+            error_code error;
+            acceptor.open(endpoint.protocol(), error);
+            if (!error)
+                acceptor.bind(endpoint, error);
+            if (!error)
+                acceptor.listen(asio::socket_base::max_listen_connections, error);
+            return error;
+        }
+
         std::shared_ptr<ssl::context> makeContext(CertifiedKey const& certified)
         {
             auto context = std::make_shared<ssl::context>(ssl::context::tls_server);
@@ -442,14 +456,8 @@ namespace FileTransferProtocol::Test
             std::expected<std::uint16_t, std::string> listen(asio::ip::address const& address)
             {
                 const tcp::endpoint endpoint{address, 0u};
-                error_code error;
-                acceptor_.open(endpoint.protocol(), error);
-                if (!error)
-                    acceptor_.bind(endpoint, error);
-                if (!error)
-                    acceptor_.listen(asio::socket_base::max_listen_connections, error);
-                if (error)
-                    return std::unexpected(error.message());
+                if (const auto opened = openAcceptor(acceptor_, endpoint); opened)
+                    return std::unexpected(opened.message());
                 return acceptor_.local_endpoint().port();
             }
 
@@ -486,7 +494,7 @@ namespace FileTransferProtocol::Test
             }
 
             /**
-             * @brief Ends what the plan waits for, the plan goes on with its next action.
+             * @brief Ends the plan. A shutdown because a cancel misses a composed write between two of its steps.
              */
             void stop()
             {
@@ -494,7 +502,7 @@ namespace FileTransferProtocol::Test
                 error_code ignored;
                 acceptor_.close(ignored);
                 if (transport_)
-                    transport_->socket().cancel(ignored);
+                    transport_->socket().shutdown(tcp::socket::shutdown_both, ignored);
                 begun_.set();
             }
 
@@ -574,17 +582,15 @@ namespace FileTransferProtocol::Test
             asio::awaitable<bool> perform(DataPlan::SendForever const&)
             {
                 const std::string block(foreverBlockSize, 'x');
-                while (!stopped_)
+                for (;;)
                 {
                     if (const auto error = co_await transport_->writeAll(asio::buffer(block)); error)
                     {
-                        if (stopped_)
-                            break;
-                        server_.record(connection_, Kind::DataEnded, endReason(error));
+                        if (!stopped_)
+                            server_.record(connection_, Kind::DataEnded, endReason(error));
                         co_return false;
                     }
                 }
-                co_return true;
             }
 
             asio::awaitable<bool> perform(DataPlan::ExpectUpload const& step)
@@ -638,7 +644,7 @@ namespace FileTransferProtocol::Test
                     {
                         if (!stopped_)
                             server_.record(connection_, Kind::DataEnded, endReason(error));
-                        co_return stopped_;
+                        co_return false;
                     }
                 }
             }
@@ -962,13 +968,7 @@ namespace FileTransferProtocol::Test
         }
 
         const tcp::endpoint endpoint{asio::ip::make_address(address()), 0u};
-        error_code error;
-        acceptor_.open(endpoint.protocol(), error);
-        if (!error)
-            acceptor_.bind(endpoint, error);
-        if (!error)
-            acceptor_.listen(asio::socket_base::max_listen_connections, error);
-        if (error)
+        if (const auto error = openAcceptor(acceptor_, endpoint); error)
             return std::unexpected(fmt::format("Binding {}: {}", address(), error.message()));
         port_ = acceptor_.local_endpoint().port();
 

@@ -69,13 +69,13 @@ namespace FileTransferProtocol::Test
         using Action = std::variant<Send, SendForever, ExpectUpload, Close, Reset, StallAfter>;
 
         DataPlan& send(std::string bytes, std::size_t chunkSize = 0, std::chrono::milliseconds interval = {});
-        /** @brief Sends until the client goes away or the control script calls stopData(). */
+        /** @brief Sends until the client goes away or the control script calls stopData(), nothing can follow. */
         DataPlan& sendForever();
         /** @brief Reads until the client closes, more than @p limit bytes fail the script. */
         DataPlan& expectUpload(std::size_t limit);
         DataPlan& close();
         DataPlan& reset();
-        /** @brief Sends @p bytes, then neither sends nor closes until the client goes away. */
+        /** @brief Sends @p bytes, then neither sends nor closes until the client goes away or stopData(). */
         DataPlan& stallAfter(std::string bytes);
         DataPlan& tls(TlsBehaviour behaviour = {});
         /** @brief Announces this address and port instead of the real ones. */
@@ -237,7 +237,7 @@ namespace FileTransferProtocol::Test
         Script& beginData();
         /** @brief Waits until that plan ended. */
         Script& awaitData();
-        /** @brief Ends a sendForever() or a stallAfter() of that plan. */
+        /** @brief Ends that plan and its connection, the way out of a sendForever() or a stallAfter(). */
         Script& stopData();
 
         /** @brief Greets, then accepts a USER and PASS login. */
