@@ -6,6 +6,8 @@ set(roots
     backend
     command-store/include
     command-store/source
+    ftp/include
+    ftp/source
     log
     nui-file-explorer/source/nui-file-explorer/support
     paths/include
