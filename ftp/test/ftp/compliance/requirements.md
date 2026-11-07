@@ -279,7 +279,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_7_6_2_UnknownLocalFacts | RFC 3659 7.6, 7.6.2 | SHOULD NOT | Make no use of X. or OS-specific facts without knowing their meaning |  |  |
 | R3659_7_7_8_CaseDependentSelection | RFC 3659 7.7.8 | MUST | Keep names that differ only in case apart when choosing files |  |  |
 | R3659_7_8_FeatMlst | RFC 3659 7.8 | MUST | Learn MLST and MLSD support from the MLST FEAT line, there is no MLSD line |  |  |
-| R3659_7_8_FeatFactList | RFC 3659 7.8 | MUST | Read the facts of the MLST feature line, a "*" marking those sent by default | Features::parametersOf("MLST") | `FeaturesTests.ProftpdFeatures` |
+| R3659_7_8_FeatFactList | RFC 3659 7.8 | MUST | Read the facts of the MLST feature line, a "*" marking those sent by default | Features::machineListFact | `FeaturesTests.ProftpdFeatures`, `FeaturesTests.FactsOfMachineListingAreOfferedOrEnabled`, `FeaturesTests.NoMachineListingHasNoFacts` |
 | R3659_7_9_OptsMlstSyntax | RFC 3659 7.9 | MUST | Send OPTS MLST (there is no OPTS MLSD) with fact names each followed by ";" and no spaces |  |  |
 | R3659_7_9_RequestedFactsOnly | RFC 3659 7.9 | MUST NOT | Expect only requested facts after OPTS MLST, and accept requested ones that are missing |  |  |
 | R3659_7_9_DefaultFactsPreferred | RFC 3659 7.9 | SHOULD NOT | Request facts outside the server's default set only for a real operational need |  |  |

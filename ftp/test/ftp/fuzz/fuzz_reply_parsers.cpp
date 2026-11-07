@@ -82,6 +82,7 @@ namespace
                     check(character < 'a' || character > 'z');
             }
             static_cast<void>(features->has("AUTH", "TLS"));
+            static_cast<void>(features->machineListFact("size"));
         }
         for (const auto verb : {std::optional<Verb>{}, std::optional{Verb::Retrieve}, std::optional{Verb::Password}})
         {

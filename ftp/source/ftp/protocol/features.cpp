@@ -8,6 +8,26 @@
 
 namespace FileTransferProtocol
 {
+    namespace
+    {
+        /**
+         * @brief The parameters of a feature line, split at ';' and spaces, without empty ones.
+         */
+        std::vector<std::string_view> parameterList(std::string_view parameters)
+        {
+            std::vector<std::string_view> list{};
+            std::size_t start = 0u;
+            while (start < parameters.size())
+            {
+                const auto end = std::min(parameters.find_first_of("; ", start), parameters.size());
+                if (end > start)
+                    list.push_back(parameters.substr(start, end - start));
+                start = end + 1u;
+            }
+            return list;
+        }
+    }
+
     std::expected<Features, RemoteIo::RemoteError> Features::fromReply(Reply const& reply)
     {
         if (reply.code == 500 || reply.code == 502)
@@ -46,20 +66,30 @@ namespace FileTransferProtocol
             features_,
             [&](Feature const& feature)
             {
-                if (!Detail::equalIgnoringCase(feature.name, name))
-                    return false;
-                const std::string_view parameters{feature.parameters};
-                std::size_t start = 0u;
-                while (start <= parameters.size())
-                {
-                    const auto end = std::min(parameters.find_first_of("; ", start), parameters.size());
-                    if (Detail::equalIgnoringCase(parameters.substr(start, end - start), parameter))
-                        return true;
-                    start = end + 1u;
-                }
-                return false;
+                return Detail::equalIgnoringCase(feature.name, name) &&
+                    std::ranges::any_of(
+                        parameterList(feature.parameters),
+                        [parameter](std::string_view listed)
+                        {
+                            return Detail::equalIgnoringCase(listed, parameter);
+                        }
+                    );
             }
         );
+    }
+
+    std::optional<FactState> Features::machineListFact(std::string_view fact) const
+    {
+        const auto parameters = parametersOf("MLST");
+        if (!parameters)
+            return std::nullopt;
+        for (const auto listed : parameterList(*parameters))
+        {
+            const auto enabled = listed.ends_with('*');
+            if (Detail::equalIgnoringCase(enabled ? listed.substr(0u, listed.size() - 1u) : listed, fact))
+                return enabled ? FactState::Enabled : FactState::Offered;
+        }
+        return std::nullopt;
     }
 
     std::optional<std::string_view> Features::parametersOf(std::string_view name) const

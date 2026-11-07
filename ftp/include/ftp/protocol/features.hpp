@@ -23,6 +23,17 @@ namespace FileTransferProtocol
     };
 
     /**
+     * @brief How the MLST feature lists a fact (RFC 3659 7.8).
+     */
+    enum class FactState
+    {
+        /** @brief The server knows the fact, OPTS MLST has to ask for it. */
+        Offered,
+        /** @brief Marked with '*', MLST and MLSD send it now. */
+        Enabled,
+    };
+
+    /**
      * @brief What a server says it supports in its reply to FEAT (RFC 2389). Servers do not list everything they
      *        support, vsftpd leaves out AUTH TLS and UTF8, so a missing feature is no proof.
      */
@@ -46,9 +57,17 @@ namespace FileTransferProtocol
 
         /**
          * @brief The server lists @p name with @p parameter among its parameters, which are separated by ';' or
-         *        spaces. "AUTH TLS;SSL" has TLS, "REST STREAM" has STREAM. Both compare in any case.
+         *        spaces. "AUTH TLS;SSL" has TLS, "REST STREAM" has STREAM. Both compare in any case. The facts of
+         *        MLST carry a '*' when enabled, ask machineListFact() for them.
          */
         bool has(std::string_view name, std::string_view parameter) const;
+
+        /**
+         * @brief How MLST lists @p fact, compared in any case and without the '*' that marks an enabled fact.
+         *
+         * @return Nothing when FEAT lists no MLST or MLST lists no such fact.
+         */
+        std::optional<FactState> machineListFact(std::string_view fact) const;
 
         /**
          * @brief The parameters of the first line for @p name.

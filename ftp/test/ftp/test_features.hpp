@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -87,8 +88,31 @@ namespace FileTransferProtocol::Test
             features->parametersOf("MLST"),
             "modify*;perm*;size*;type*;unique*;UNIX.group*;UNIX.groupname*;UNIX.mode*;UNIX.owner*;UNIX.ownername*;"
         );
-        EXPECT_TRUE(features->has("MLST", "size*"));
+        EXPECT_EQ(features->machineListFact("size"), FactState::Enabled);
+        EXPECT_EQ(features->machineListFact("UNIX.mode"), FactState::Enabled);
+        EXPECT_EQ(features->machineListFact("media-type"), std::nullopt);
         EXPECT_FALSE(features->has("MLSD"));
+    }
+
+    TEST(FeaturesTests, FactsOfMachineListingAreOfferedOrEnabled)
+    {
+        const auto features = Features::fromReply(
+            Reply{.code = 211, .lines = {"211-Features:", " MLST Type*;Size;modify*;perm;", "211 End"}}
+        );
+        ASSERT_TRUE(features);
+        EXPECT_EQ(features->machineListFact("type"), FactState::Enabled);
+        EXPECT_EQ(features->machineListFact("SIZE"), FactState::Offered);
+        EXPECT_EQ(features->machineListFact("Modify"), FactState::Enabled);
+        EXPECT_EQ(features->machineListFact("perm"), FactState::Offered);
+        EXPECT_EQ(features->machineListFact("unique"), std::nullopt);
+        EXPECT_EQ(features->machineListFact(""), std::nullopt);
+    }
+
+    TEST(FeaturesTests, NoMachineListingHasNoFacts)
+    {
+        const auto features = Features::fromReply(vsftpdFeatures);
+        ASSERT_TRUE(features);
+        EXPECT_EQ(features->machineListFact("size"), std::nullopt);
     }
 
     TEST(FeaturesTests, PureFtpdFeatures)
