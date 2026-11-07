@@ -19,7 +19,7 @@ namespace FileTransferProtocol
     {
         /** @brief The code of the line that ended the reply, three digits from 100 to 599. */
         int code{0};
-        /** @brief The lines as received without their line ends and Telnet commands, codes included. */
+        /** @brief The lines as received without their line ends and Telnet negotiation, codes included. */
         std::vector<std::string> lines{};
         /** @brief Lines of a multi-line reply past the limits, skipped up to its last line. */
         std::size_t droppedLines{0};
@@ -48,7 +48,8 @@ namespace FileTransferProtocol
     /**
      * @brief Cuts the bytes of a control connection into replies, in whatever pieces they arrive (RFC 1123 4.1.2.10).
      *
-     * A line ends at LF, a CR before it is dropped. Telnet commands are removed and IAC IAC becomes 0xFF. Blank lines
+     * A line ends at LF, a CR before it is dropped. Telnet option negotiation is removed and IAC IAC becomes 0xFF, IAC
+     * before any other byte is a 0xFF the server did not escape and stays with that byte. Blank lines
      * between replies are skipped. A multi-line reply ends on a line with its own code and a space. A line inside it
      * with another code and a space is held as a possible end, for servers that end on another code: the next line
      * makes it text, unless settle() accepts it first because nothing followed. Lines past the limits of a multi-line
@@ -101,8 +102,6 @@ namespace FileTransferProtocol
             Data,
             Command,
             Option,
-            Subnegotiation,
-            SubnegotiationCommand,
         };
 
         std::expected<void, RemoteIo::RemoteError> takeByte(unsigned char byte);

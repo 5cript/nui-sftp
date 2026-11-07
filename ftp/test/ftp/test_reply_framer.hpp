@@ -177,7 +177,7 @@ namespace FileTransferProtocol::Test
     {
         expectFramingIgnoresReadBoundaries(
             "220 Ready\n" + withTelnet({255, 251, 1}) + "331 Pass" + withTelnet({255, 255}) + "word\r\n230-a\n" +
-            withTelnet({255, 250, 24, 255, 255, 1, 255, 240}) + "230 b\r\n"
+            withTelnet({255, 254, 24, 255, 241}) + "x\r\n230 b\r\n"
         );
     }
 
@@ -221,12 +221,20 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(framed.replies[0].lines, std::vector<std::string>{"220 Ready"});
     }
 
-    TEST(ReplyFramerTests, TelnetCommandsAndSubnegotiationAreRemoved)
+    TEST(ReplyFramerTests, InterpretAsCommandBeforeAnotherCommandIsAnUnescapedByte)
     {
-        const auto framed =
-            frameWhole("220 Re" + withTelnet({255, 241, 255, 250, 24, 1, 255, 255, 13, 10, 255, 240}) + "ady\r\n");
-        ASSERT_EQ(framed.replies.size(), 1u);
-        EXPECT_EQ(framed.replies[0].lines, std::vector<std::string>{"220 Ready"});
+        // CP1251 and Latin-1 names of a server that does not escape 0xFF, a subnegotiation start among them.
+        const auto framed = frameWhole(
+            "257 \"/home/\xFF\xFA"
+            "dir\xFF\xF1\xF2\xFF\xF0\" created\r\n226 Done\r\n"
+        );
+        ASSERT_EQ(framed.replies.size(), 2u);
+        EXPECT_EQ(
+            framed.replies[0].lines.front(),
+            "257 \"/home/\xFF\xFA"
+            "dir\xFF\xF1\xF2\xFF\xF0\" created"
+        );
+        EXPECT_EQ(framed.replies[1].code, 226);
     }
 
     TEST(ReplyFramerTests, EscapedInterpretAsCommandIsOneByte)

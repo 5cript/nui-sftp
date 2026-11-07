@@ -12,8 +12,6 @@ namespace FileTransferProtocol
     {
         // RFC 854.
         constexpr unsigned char interpretAsCommand = 255u;
-        constexpr unsigned char subnegotiationBegin = 250u;
-        constexpr unsigned char subnegotiationEnd = 240u;
         constexpr unsigned char will = 251u;
         constexpr unsigned char dont = 254u;
 
@@ -164,31 +162,23 @@ namespace FileTransferProtocol
                 break;
             case TelnetState::Command:
                 telnetState_ = TelnetState::Data;
-                // IAC IAC is one 0xFF of data.
-                if (byte == interpretAsCommand)
-                    break;
                 if (byte >= will && byte <= dont)
-                    telnetState_ = TelnetState::Option;
-                else if (byte == subnegotiationBegin)
-                    telnetState_ = TelnetState::Subnegotiation;
-                else if (byte < subnegotiationEnd)
                 {
-                    // Not a Telnet command, a server that does not escape 0xFF sent it as data.
+                    telnetState_ = TelnetState::Option;
+                    return {};
+                }
+                // IAC IAC is one 0xFF of data. Before any other byte a server that does not escape 0xFF sent it as
+                // data: the client agrees to no option, so no subnegotiation can start, and the other commands mean
+                // nothing on a control connection.
+                if (byte != interpretAsCommand)
+                {
                     const auto kept = keepInLine(interpretAsCommand);
                     if (!kept)
                         return kept;
-                    break;
                 }
-                return {};
+                break;
             case TelnetState::Option:
                 telnetState_ = TelnetState::Data;
-                return {};
-            case TelnetState::Subnegotiation:
-                if (byte == interpretAsCommand)
-                    telnetState_ = TelnetState::SubnegotiationCommand;
-                return {};
-            case TelnetState::SubnegotiationCommand:
-                telnetState_ = byte == subnegotiationEnd ? TelnetState::Data : TelnetState::Subnegotiation;
                 return {};
         }
 
