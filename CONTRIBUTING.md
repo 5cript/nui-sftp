@@ -301,17 +301,24 @@ the tests that cover each requirement. Update it when a test covers a requiremen
 or changes its name.
 
 With clang on Linux the build has two libFuzzer targets, one for the reply framer and
-one for the reply parsers. ctest runs each for `NUI_SFTP_FTP_FUZZ_SECONDS` (30) under
-the label `fuzz`, `ctest -LE fuzz` leaves them out. To fuzz longer, run a target with
-its corpus in the build tree and the seeds of `ftp/test/ftp/fuzz/seeds`:
+one for the reply parsers. ctest runs every input of `ftp/test/ftp/fuzz/seeds` once
+through each (`FtpFuzzSeeds.*`), with the same result every time. Fuzzing finds inputs
+by chance, so a retry of a failed run can pass, and CI retries failed tests: it stays
+off unless configured with `-DNUI_SFTP_FTP_FUZZ=ON`, which lets ctest fuzz each target
+for `NUI_SFTP_FTP_FUZZ_SECONDS` (30) under the label `fuzz`. To fuzz longer, run a
+target with its corpus in the build tree and the seeds:
 
 ```bash
 ./build/clang_debug/test/fuzz/nui-sftp-ftp-fuzz-reply-framer -max_total_time=600 \
   build/clang_debug/test/fuzz/nui-sftp-ftp-fuzz-reply-framer-corpus ftp/test/ftp/fuzz/seeds
 ```
 
+The corpus grows with every run. `-merge=1 <new directory> <corpus>` keeps only the
+inputs that add coverage, the new directory then replaces the corpus.
+
 A crashing input is written to the working directory, under ctest to
-`build/<dir>/test/fuzz/<target>-crash-*`. Add it as a unit test before fixing the bug.
+`build/<dir>/test/fuzz/<target>-crash-*`. Add it as a unit test and as a seed before
+fixing the bug.
 
 Coverage has a configure of its own. Its numbers are there to look at and to show
 where tests are missing, no test fails on them. Build only the coverage targets
