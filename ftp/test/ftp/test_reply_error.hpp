@@ -98,6 +98,14 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(kindOf(553, "Could not create file."), RemoteErrorKind::PermissionDenied);
     }
 
+    TEST(ReplyErrorTests, TextsAreReadInAnyCase)
+    {
+        EXPECT_EQ(kindOf(550, "FILE NOT FOUND"), RemoteErrorKind::NoSuchFile);
+        EXPECT_EQ(kindOf(550, "x: PERMISSION DENIED"), RemoteErrorKind::PermissionDenied);
+        EXPECT_EQ(kindOf(421, "TOO MANY CONNECTIONS", std::nullopt), RemoteErrorKind::ConnectionLimit);
+        EXPECT_EQ(kindOf(500, "oops: lower case", Verb::Noop), RemoteErrorKind::Failure);
+    }
+
     TEST(ReplyErrorTests, FixedTextsLeaveAmbiguousCodesAsFailures)
     {
         // vsftpd sends one text per command, missing and denied look the same.

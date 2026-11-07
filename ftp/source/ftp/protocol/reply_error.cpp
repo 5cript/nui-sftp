@@ -17,15 +17,29 @@ namespace FileTransferProtocol
     {
         using RemoteIo::RemoteErrorKind;
 
+        bool sameIgnoringCase(char left, char right)
+        {
+            return Utility::Algorithm::asciiToLower(left) == Utility::Algorithm::asciiToLower(right);
+        }
+
+        /**
+         * @brief @p text holds one of @p phrases, in any case.
+         */
         bool mentionsAny(std::string_view text, std::initializer_list<std::string_view> phrases)
         {
             return std::ranges::any_of(
                 phrases,
                 [text](std::string_view phrase)
                 {
-                    return text.find(phrase) != std::string_view::npos;
+                    return !std::ranges::search(text, phrase, sameIgnoringCase).empty();
                 }
             );
+        }
+
+        bool startsWithIgnoringCase(std::string_view text, std::string_view start)
+        {
+            return text.size() >= start.size() &&
+                std::ranges::equal(text.substr(0u, start.size()), start, sameIgnoringCase);
         }
 
         bool mentionsConnectionLimit(std::string_view text)
@@ -82,7 +96,7 @@ namespace FileTransferProtocol
                     return RemoteErrorKind::NoSpace;
                 case 500:
                     // vsftpd reports its fatal errors as "500 OOPS: ...".
-                    if (text.starts_with("oops"))
+                    if (startsWithIgnoringCase(text, "oops"))
                         return RemoteErrorKind::Failure;
                     return verb ? RemoteErrorKind::Unsupported : RemoteErrorKind::NoConnection;
                 case 503:
@@ -116,7 +130,7 @@ namespace FileTransferProtocol
             );
 
         return RemoteIo::RemoteError{
-            .kind = kindOf(reply.code, Utility::Algorithm::toLowerCase(text), verb),
+            .kind = kindOf(reply.code, text, verb),
             .protocol = RemoteIo::Protocol::Ftp,
             .protocolCode = reply.code,
             .message = text,
