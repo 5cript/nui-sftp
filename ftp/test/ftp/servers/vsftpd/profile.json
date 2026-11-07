@@ -1,0 +1,23 @@
+{
+    "image": "nui-sftp-ftp-test-vsftpd",
+    "runArguments": ["--init"],
+    "ports": {"plain": 21, "explicit": 21, "implicit": 990},
+    "users": [{"name": "ftptest", "password": "ftptest"}],
+    "variants": {
+        "default": {"command": ["default"]},
+        "throttled": {"command": ["throttled"], "runArguments": ["--cap-add", "NET_ADMIN"]},
+        "limits": {"command": ["limits"]}
+    },
+    "expectations": {
+        "features": {"mlsd": false, "mlst": false, "mfmt": false, "utf8": true, "epsv": true},
+        "advertised": ["EPRT", "EPSV", "MDTM", "PASV", "PBSZ", "PROT", "REST STREAM", "SIZE", "TVFS"],
+        "modificationTime": "mdtm",
+        "abortReplies": {"plain": [426, 225], "tls": [426, 225]},
+        "finalReplyWaitsForDataClose": {"plain": false, "tls": true},
+        "sessionReuseRequired": true,
+        "missingReuse": "endsSession",
+        "connectionLimit": "atGreeting",
+        "repliesTell550Causes": false,
+        "listOfMissingDirectory": "emptyListing"
+    }
+}

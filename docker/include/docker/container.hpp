@@ -42,6 +42,13 @@ namespace Docker
         }
 
         /**
+         * @brief Hands the container over: it keeps running, removeContainer() ends it.
+         *
+         * @return Its name.
+         */
+        std::string release() && noexcept;
+
+        /**
          * @brief The address of the container on its docker network, reachable from the host without a published
          *        port.
          */

@@ -251,6 +251,7 @@ Test sources live next to the code they cover, under `*/test/`:
 ```
 remote_io/test/remote_io
 ssh/test/ssh
+ftp/test/ftp
 backend/test/backend
 utility/test/utility
 shared_data/test/shared_data
@@ -266,6 +267,7 @@ explicitly, or use ctest:
 cmake --build build/clang_debug --target \
   nui-tests nui-sftp-backend-test nui-sftp-utility-test \
   nui-sftp-shared-data-test nui-sftp-remote-io-test nui-sftp-ssh-test \
+  nui-sftp-ftp-test nui-sftp-ftp-fleet \
   nui-sftp-tar-archive-test nui-sftp-command-store-test
 
 # Run the whole suite. Tests run in parallel; the timeout makes a hang fail
@@ -279,6 +281,42 @@ ctest --test-dir build/clang_debug --output-on-failure --timeout 120 -j$(nproc)
 Tests must place transient files under the build tree (typically `programDirectory / "temp"`),
 not `/tmp` or `std::filesystem::temp_directory_path()`. This keeps runs isolated
 and reproducible across machines.
+
+### FTP tests
+
+`nui-sftp-ftp-test` covers the FTP client, `nui-sftp-ftp-asan-test` and
+`nui-sftp-ftp-tsan-test` run the same tests instrumented. `ftp/test/ftp/support`
+holds what the tests are built on: `ScriptedFtpServer`, a mock that runs one script
+per control connection, the certificates of `testPki`, and `TestFtpClient`.
+
+The `Conformance/*` suites talk to real servers in docker. Under ctest a fixture
+starts every variant of every server once, a test binary run directly starts its
+own. Without docker they skip. A server is a directory below
+`ftp/test/ftp/servers/` with a `Dockerfile`, its configs and a `profile.json`, which
+holds what it does where servers disagree. Add its name to the CMake cache list
+`NUI_SFTP_FTP_TEST_SERVERS` to run the suites against it.
+
+`ftp/test/ftp/compliance/requirements.md` lists what the RFCs ask of the client and
+the tests that cover each requirement. Update it when a test covers a requirement
+or changes its name.
+
+Coverage has a configure of its own. Its numbers are there to look at and to show
+where tests are missing, no test fails on them. Build only the coverage targets
+there, the rest of the tree does not link against the instrumented libraries:
+
+```bash
+cmake -B build/clang_coverage -S . -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_STANDARD=23 \
+  -DNUI_SFTP_ENABLE_TESTING=ON -DCODE_COVERAGE=ON
+
+# Runs the ftp and remote_io tests, then prints the coverage of every file. Run
+# ccov-all-run first, ccov-all-report alone fails once after a rebuilt test.
+cmake --build build/clang_coverage --target ccov-all-run
+cmake --build build/clang_coverage --target ccov-all-report
+
+# The same as HTML, in build/clang_coverage/ccov/all-merged.
+cmake --build build/clang_coverage --target ccov-all
+```
 
 ### Transfer benchmark
 
