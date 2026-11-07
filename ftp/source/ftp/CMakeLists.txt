@@ -6,6 +6,7 @@ function(add_file_transfer_protocol_library name remoteIo)
     add_library(
         ${name}
         STATIC
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/protocol_error.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply_code.cpp
