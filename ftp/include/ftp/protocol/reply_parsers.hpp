@@ -22,6 +22,8 @@ namespace FileTransferProtocol
 
     /**
      * @brief Reads a time-val, YYYYMMDDHHMMSS with optional fractions after a dot. Second 60 is a leap second.
+     *
+     * @return An unreadableReply() for text that is no time-val.
      */
     std::expected<TimeVal, RemoteIo::RemoteError> parseTimeVal(std::string_view text);
 
@@ -34,11 +36,15 @@ namespace FileTransferProtocol
 
     /**
      * @brief The size from the 213 reply to SIZE (RFC 3659 4), up to 2^64 - 1.
+     *
+     * @return The replyError() of another code, an unreadableReply() for a 213 without a size.
      */
     std::expected<std::uint64_t, RemoteIo::RemoteError> parseSizeReply(Reply const& reply);
 
     /**
      * @brief The time from the 213 reply to MDTM (RFC 3659 3).
+     *
+     * @return The replyError() of another code, an unreadableReply() for a 213 without a time-val.
      */
     std::expected<TimeVal, RemoteIo::RemoteError> parseModificationTimeReply(Reply const& reply);
 
@@ -55,12 +61,16 @@ namespace FileTransferProtocol
     /**
      * @brief Reads the 227 reply to PASV by scanning it for the six numbers h1,h2,h3,h4,p1,p2, with or without the
      *        parentheses (RFC 1123 4.1.2.6).
+     *
+     * @return The replyError() of another code, an unreadableReply() for a 227 that names no host and port.
      */
     std::expected<PassiveEndpoint, RemoteIo::RemoteError> parsePassiveReply(Reply const& reply);
 
     /**
      * @brief The port of the 229 reply to EPSV, "(|||port|)" with any delimiter from ASCII 33 to 126 other than a
      *        digit, the same one each time (RFC 2428 3).
+     *
+     * @return The replyError() of another code, an unreadableReply() for a 229 that names no port.
      */
     std::expected<std::uint16_t, RemoteIo::RemoteError> parseExtendedPassiveReply(Reply const& reply);
 
@@ -69,6 +79,7 @@ namespace FileTransferProtocol
      *        read as CR (RFC 2640 3.1).
      *
      * @param verb The command the reply answers, for the error of any other reply.
+     * @return The replyError() of another code, an unreadableReply() for a 257 without a quoted path.
      */
     std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply, Verb verb);
 }

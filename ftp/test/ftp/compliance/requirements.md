@@ -68,7 +68,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R959_5_4_WaitForGreeting | RFC 959 5.4 | SHOULD | Wait for the 220 greeting before the first command |  |  |
 | R959_5_4_DelayedGreeting | RFC 959 5.4 | SHOULD | After a 120 greeting keep waiting for the 220 instead of hanging up |  |  |
 | R959_5_4_LoginWithoutPassword | RFC 959 5.4 | MUST | Accept 230 to USER, and 202 to PASS or ACCT, as a finished login |  |  |
-| R959_AppendixII_257Quoting | RFC 959 Appendix II | SHOULD | Read a quoted path with doubled quotes from a 257 reply | parsePathReply | `ReplyParserTests.PathReply`, `ReplyParserTests.PathReplyUndoublesQuotes`, `ReplyParserTests.PathReplyWithoutAQuotedPathBreaksTheProtocol` |
+| R959_AppendixII_257Quoting | RFC 959 Appendix II | SHOULD | Read a quoted path with doubled quotes from a 257 reply | parsePathReply | `ReplyParserTests.PathReply`, `ReplyParserTests.PathReplyUndoublesQuotes`, `ReplyParserTests.PathReplyWithoutAQuotedPathIsUnreadable` |
 | R959_AppendixII_UseMkdReplyName | RFC 959 Appendix II | MUST | Refer to a new directory by the absolute name from the 257 reply to MKD |  |  |
 | R959_AppendixII_MkdExistingDirectory | RFC 959 Appendix II | MUST | Treat the error reply to MKD of an existing directory as failure, whatever its code (521 is seen) | replyError reads 521 like 550, an "already exists" at the end of a line is AlreadyExists | `ReplyErrorTests.ExistingDirectoryOfRfc959AppendixII` |
 | R1123_4_1_2_1_TypeLocal8 | RFC 1123 4.1.2.1, 4.1.5 | MUST | Support TYPE L 8 next to TYPE I | Deviation: TYPE I does the same on 8-bit hosts and every server has it |  |
@@ -77,7 +77,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R1123_4_1_2_3_NoPageStructure | RFC 1123 4.1.2.3, 4.1.5 | SHOULD NOT | Do not implement page structure |  |  |
 | R1123_4_1_2_4_InvertibleTransform | RFC 1123 4.1.2.4, 4.1.5 | SHOULD | Keep record to file structure transformations invertible | Not applicable: file structure only |  |
 | R1123_4_1_2_5_PortBeforeEachTransfer | RFC 1123 4.1.2.5, 4.1.5 | SHOULD | In stream mode send PORT with a non-default port before each transfer command | Not applicable: passive mode only, active mode comes later |  |
-| R1123_4_1_2_6_PasvReplyFormat | RFC 1123 4.1.2.6 | MUST | Scan the 227 text for the six numbers, parentheses may be missing | parsePassiveReply | `ReplyParserTests.PassiveReplyWithParentheses`, `ReplyParserTests.PassiveReplyWithoutParentheses`, `ReplyParserTests.PassiveReplyScansPastOtherNumbers`, `ReplyParserTests.PassiveReplyThatNamesNoEndpointBreaksTheProtocol` |
+| R1123_4_1_2_6_PasvReplyFormat | RFC 1123 4.1.2.6 | MUST | Scan the 227 text for the six numbers, parentheses may be missing | parsePassiveReply | `ReplyParserTests.PassiveReplyWithParentheses`, `ReplyParserTests.PassiveReplyWithoutParentheses`, `ReplyParserTests.PassiveReplyScansPastOtherNumbers`, `ReplyParserTests.PassiveReplyThatNamesNoEndpointIsUnreadable` |
 | R1123_4_1_2_6_PasvPerTransfer | RFC 1123 4.1.2.6 | MUST | Send PASV for every transfer | DataConnection setup |  |
 | R1123_4_1_2_7_NlstNamesUsable | RFC 1123 4.1.2.7, 4.1.5 | MUST | Use NLST names as they are in later transfer commands |  |  |
 | R1123_4_1_2_7_ListImpliedAscii | RFC 1123 4.1.2.7, 4.1.5 | SHOULD | Read LIST and NLST data as ASCII lines ending in CRLF, whatever TYPE is set |  |  |
@@ -167,7 +167,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2428_4_NewSessionAfterEpsvAll | RFC 2428 4 | MUST | Start a new session for a three-way transfer after EPSV ALL | Not applicable: the client never sends EPSV ALL |  |
 | R2428_4_EpsvAll | RFC 2428 4 | SHOULD | Send EPSV ALL as soon as possible when only two-way transfers follow | Deviation: never sent, it would rule out the PASV fallback for the rest of the session | `CommandTests.ExtendedPassiveTakesNoArgument` |
 | R2428_4_UseEpsv | RFC 2428 4 | MUST | Use EPSV for transfers between the two hosts, over IPv4 and IPv6 | DataConnection setup tries EPSV first, PASV only as a fallback on IPv4 |  |
-| R2428_EpsvFormat | RFC 2428 2, 3 | MUST | Read the 229 format with any delimiter | parseExtendedPassiveReply | `ReplyParserTests.ExtendedPassiveReply`, `ReplyParserTests.ExtendedPassiveReplyScansPastOtherParentheses`, `ReplyParserTests.ExtendedPassiveReplyThatNamesNoPortBreaksTheProtocol` |
+| R2428_EpsvFormat | RFC 2428 2, 3 | MUST | Read the 229 format with any delimiter | parseExtendedPassiveReply | `ReplyParserTests.ExtendedPassiveReply`, `ReplyParserTests.ExtendedPassiveReplyScansPastOtherParentheses`, `ReplyParserTests.ExtendedPassiveReplyThatNamesNoPortIsUnreadable` |
 | R2428_522Handling | RFC 2428 2, 3 | MUST | Fall back to the protocols a 522 names, for EPRT | Not applicable: neither EPRT nor EPSV with an argument is sent |  |
 | R2577_4_VerifyDataPeer | RFC 2577 4 | SHOULD | Check that a data connection accepted on a listening port comes from the expected server | Not applicable: active mode comes later |  |
 | R2577_5_FailedPassDelay | RFC 2577 5 | SHOULD | Allow several seconds for the reply to a wrong PASS |  |  |
@@ -222,7 +222,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_3_1_UnretrievableObjectTime | RFC 3659 3.1 | MAY | Do not trust an MDTM time for an object that cannot be retrieved, it may be unspecified |  |  |
 | R3659_3_2_MdtmErrors | RFC 3659 3.2 | SHOULD | Map 550 to MDTM as no time available, 500 and 501 as syntax errors, 4xy as temporary | parseModificationTimeReply, replyError | `ReplyParserTests.ModificationTimeReply` |
 | R3659_3_3_FeatMdtm | RFC 3659 3.3 | MUST | Learn MDTM support from a FEAT line "MDTM" in any case | Features::has | `FeaturesTests.NamesAndParametersCompareInAnyCase` |
-| R3659_4_SizeIsExact | RFC 3659 4 | MUST | Rely on SIZE as the exact octet count for the current TYPE, servers send no estimates | parseSizeReply reads the 213 reply to SIZE | `ReplyParserTests.SizeReply`, `ReplyParserTests.SizeReplyThatIsNoSizeBreaksTheProtocol` |
+| R3659_4_SizeIsExact | RFC 3659 4 | MUST | Rely on SIZE as the exact octet count for the current TYPE, servers send no estimates | parseSizeReply reads the 213 reply to SIZE | `ReplyParserTests.SizeReply`, `ReplyParserTests.SizeReplyThatIsNoSizeIsUnreadable` |
 | R3659_4_2_Size550NotFinal | RFC 3659 4.2 | MUST NOT | Do not take 550 to SIZE as proof that the file cannot be transferred |  |  |
 | R3659_4_2_SizeErrors | RFC 3659 4.2 | SHOULD | Map 550, 500, 501 and 4xy replies to SIZE | parseSizeReply, replyError | `ReplyParserTests.SizeReplyOfAFailureIsItsError` |
 | R3659_4_3_FeatSize | RFC 3659 4.3 | MUST | Learn SIZE support from a FEAT line "SIZE" in any case |  |  |
@@ -289,7 +289,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_8_SameSpaceCrNulHandling | RFC 3659 8 | SHOULD | Treat spaces, CR and NUL in those arguments as for MLST |  |  |
 | R3659_11_FeatOptsBeforeLogin | RFC 3659 11 | MAY | Send FEAT and OPTS before login |  |  |
 | R3659_11_NoMlsxBeforeLogin | RFC 3659 11 | MUST NOT | Send no MLST or MLSD before login |  |  |
-| R3659_MdtmTimeVal | RFC 3659 2.3, 3.1 | MUST | Read time-val as UTC with optional fractions | parseTimeVal, parseModificationTimeReply | `ReplyParserTests.TimeVal`, `ReplyParserTests.TimeValWithFractions`, `ReplyParserTests.TimeValOutOfRangeBreaksTheProtocol`, `ReplyParserTests.ModificationTimeReply` |
+| R3659_MdtmTimeVal | RFC 3659 2.3, 3.1 | MUST | Read time-val as UTC with optional fractions | parseTimeVal, parseModificationTimeReply | `ReplyParserTests.TimeVal`, `ReplyParserTests.TimeValWithFractions`, `ReplyParserTests.TimeValOutOfRangeIsUnreadable`, `ReplyParserTests.ModificationTimeReply` |
 | R3659_RestStream | RFC 3659 5.1, 5.3 | MUST | Use REST STREAM semantics and placement | Transfer flow |  |
 | R3659_MlstGrammar | RFC 3659 7.2, 7.4 | MUST | Read MLST and MLSD entries by the grammar and their facts | Listing parsers |  |
 | R3659_CdirPdir | RFC 3659 7.5.1.2, 7.5.1.4 | SHOULD | Do not list cdir and pdir entries as children | Listing parsers |  |

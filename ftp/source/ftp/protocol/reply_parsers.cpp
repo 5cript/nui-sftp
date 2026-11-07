@@ -65,16 +65,16 @@ namespace FileTransferProtocol
             if (count < numbers.size())
                 return std::nullopt;
             if (numberFollows)
-                return std::unexpected(protocolViolation("The passive reply has more than six numbers", code));
+                return std::unexpected(unreadableReply("The passive reply has more than six numbers", code));
 
             for (const auto number : numbers)
             {
                 if (number > 255u)
-                    return std::unexpected(protocolViolation("A number of the passive reply is above 255", code));
+                    return std::unexpected(unreadableReply("A number of the passive reply is above 255", code));
             }
             const auto port = numbers[4] * 256u + numbers[5];
             if (port == 0u)
-                return std::unexpected(protocolViolation("The passive reply names port 0", code));
+                return std::unexpected(unreadableReply("The passive reply names port 0", code));
             return PassiveEndpoint{
                 .address =
                     {static_cast<std::uint8_t>(numbers[0]),
@@ -102,12 +102,12 @@ namespace FileTransferProtocol
             std::size_t position = 3u;
             const auto port = numberAt<std::uint32_t>(fields, position);
             if (!port)
-                return std::unexpected(protocolViolation("The extended passive reply has no port", code));
+                return std::unexpected(unreadableReply("The extended passive reply has no port", code));
             if (position >= fields.size() || fields[position] != delimiter)
-                return std::unexpected(protocolViolation("The extended passive reply does not end its port", code));
+                return std::unexpected(unreadableReply("The extended passive reply does not end its port", code));
             if (*port == 0u || *port > 65535u)
                 return std::unexpected(
-                    protocolViolation(fmt::format("The extended passive port {} is invalid", *port), code)
+                    unreadableReply(fmt::format("The extended passive port {} is invalid", *port), code)
                 );
             return static_cast<std::uint16_t>(*port);
         }
@@ -134,7 +134,7 @@ namespace FileTransferProtocol
     {
         const auto invalid = [text]()
         {
-            return std::unexpected(protocolViolation(fmt::format("Not a time-val: '{}'", printable(text))));
+            return std::unexpected(unreadableReply(fmt::format("Not a time-val: '{}'", printable(text))));
         };
         constexpr std::size_t wholeDigits = 14u;
         if (text.size() < wholeDigits)
@@ -202,7 +202,7 @@ namespace FileTransferProtocol
         std::size_t position = 0u;
         const auto size = numberAt<std::uint64_t>(text, position);
         if (!size || position != text.size())
-            return std::unexpected(protocolViolation(fmt::format("Not a size: '{}'", printable(text)), reply.code));
+            return std::unexpected(unreadableReply(fmt::format("Not a size: '{}'", printable(text)), reply.code));
         return *size;
     }
 
@@ -238,7 +238,7 @@ namespace FileTransferProtocol
                 position = end;
             }
         }
-        return std::unexpected(protocolViolation("The passive reply names no host and port", reply.code));
+        return std::unexpected(unreadableReply("The passive reply names no host and port", reply.code));
     }
 
     std::expected<std::uint16_t, RemoteIo::RemoteError> parseExtendedPassiveReply(Reply const& reply)
@@ -250,7 +250,7 @@ namespace FileTransferProtocol
             if (auto port = extendedPassivePortIn(textOfLine(line), reply.code))
                 return std::move(*port);
         }
-        return std::unexpected(protocolViolation("The extended passive reply names no port", reply.code));
+        return std::unexpected(unreadableReply("The extended passive reply names no port", reply.code));
     }
 
     std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply, Verb verb)
@@ -260,7 +260,7 @@ namespace FileTransferProtocol
         const auto text = textOfLine(reply.lines.front());
         const auto open = text.find('"');
         if (open == std::string_view::npos)
-            return std::unexpected(protocolViolation("The path reply has no quoted path", reply.code));
+            return std::unexpected(unreadableReply("The path reply has no quoted path", reply.code));
 
         std::string path{};
         for (auto position = open + 1u; position < text.size(); ++position)
@@ -270,13 +270,13 @@ namespace FileTransferProtocol
             if (character == '"' && following != '"')
             {
                 if (path.empty())
-                    return std::unexpected(protocolViolation("The path reply quotes an empty path", reply.code));
+                    return std::unexpected(unreadableReply("The path reply quotes an empty path", reply.code));
                 return path;
             }
             path += character;
             if ((character == '"' && following == '"') || (character == '\r' && following == '\0'))
                 ++position;
         }
-        return std::unexpected(protocolViolation("The quoted path of the path reply does not end", reply.code));
+        return std::unexpected(unreadableReply("The quoted path of the path reply does not end", reply.code));
     }
 }

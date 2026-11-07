@@ -31,6 +31,18 @@ namespace FileTransferProtocol::Test
             return parsePathReply(reply, Verb::PrintWorkingDirectory);
         }
 
+        /**
+         * @brief A Failure with the reply code that leaves the connection usable, see unreadableReply().
+         */
+        template <typename ValueT>
+        void expectUnreadable(std::expected<ValueT, RemoteIo::RemoteError> const& parsed, int code)
+        {
+            ASSERT_FALSE(parsed);
+            EXPECT_EQ(parsed.error().kind, RemoteIo::RemoteErrorKind::Failure);
+            EXPECT_EQ(parsed.error().protocol, RemoteIo::Protocol::Ftp);
+            EXPECT_EQ(parsed.error().protocolCode, code);
+        }
+
         template <typename ValueT>
         void expectViolation(std::expected<ValueT, RemoteIo::RemoteError> const& parsed)
         {
@@ -48,13 +60,13 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(parseSizeReply(replyOf(213, "18446744073709551615")), std::numeric_limits<std::uint64_t>::max());
     }
 
-    TEST(ReplyParserTests, SizeReplyThatIsNoSizeBreaksTheProtocol)
+    TEST(ReplyParserTests, SizeReplyThatIsNoSizeIsUnreadable)
     {
-        expectViolation(parseSizeReply(replyOf(213, "18446744073709551616")));
-        expectViolation(parseSizeReply(replyOf(213, "-1")));
-        expectViolation(parseSizeReply(replyOf(213, "12 bytes")));
-        expectViolation(parseSizeReply(replyOf(213, "")));
-        expectViolation(parseSizeReply(replyOf(213, "0x10")));
+        expectUnreadable(parseSizeReply(replyOf(213, "18446744073709551616")), 213);
+        expectUnreadable(parseSizeReply(replyOf(213, "-1")), 213);
+        expectUnreadable(parseSizeReply(replyOf(213, "12 bytes")), 213);
+        expectUnreadable(parseSizeReply(replyOf(213, "")), 213);
+        expectUnreadable(parseSizeReply(replyOf(213, "0x10")), 213);
     }
 
     TEST(ReplyParserTests, SizeReplyOfAFailureIsItsError)
@@ -95,7 +107,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(parseTimeVal("20161231235960"), timeOf(2017, 1, 1, 0, 0, 0));
     }
 
-    TEST(ReplyParserTests, TimeValOutOfRangeBreaksTheProtocol)
+    TEST(ReplyParserTests, TimeValOutOfRangeIsUnreadable)
     {
         for (
             std::string_view text :
@@ -117,7 +129,7 @@ namespace FileTransferProtocol::Test
         )
         {
             SCOPED_TRACE(text);
-            expectViolation(parseTimeVal(text));
+            expectUnreadable(parseTimeVal(text), 0);
         }
     }
 
@@ -158,8 +170,7 @@ namespace FileTransferProtocol::Test
             timeOf(2020, 1, 2, 3, 4, 5) + std::chrono::milliseconds{250}
         );
         const auto broken = parseModificationTimeReply(replyOf(213, "2020"));
-        expectViolation(broken);
-        EXPECT_EQ(broken.error().protocolCode, 213);
+        expectUnreadable(broken, 213);
         const auto failed = parseModificationTimeReply(replyOf(550, "Could not get file modification time."));
         ASSERT_FALSE(failed);
         EXPECT_EQ(failed.error().kind, RemoteIo::RemoteErrorKind::Failure);
@@ -221,7 +232,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(endpoint->port, 1026);
     }
 
-    TEST(ReplyParserTests, PassiveReplyThatNamesNoEndpointBreaksTheProtocol)
+    TEST(ReplyParserTests, PassiveReplyThatNamesNoEndpointIsUnreadable)
     {
         for (
             std::string_view text :
@@ -237,7 +248,7 @@ namespace FileTransferProtocol::Test
         )
         {
             SCOPED_TRACE(text);
-            expectViolation(parsePassiveReply(replyOf(227, text)));
+            expectUnreadable(parsePassiveReply(replyOf(227, text)), 227);
         }
     }
 
@@ -256,7 +267,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(parseExtendedPassiveReply(replyOf(229, "Mode (|1|) ( (|||6447|)")), 6447);
     }
 
-    TEST(ReplyParserTests, ExtendedPassiveReplyThatNamesNoPortBreaksTheProtocol)
+    TEST(ReplyParserTests, ExtendedPassiveReplyThatNamesNoPortIsUnreadable)
     {
         for (
             std::string_view text :
@@ -274,7 +285,7 @@ namespace FileTransferProtocol::Test
         )
         {
             SCOPED_TRACE(text);
-            expectViolation(parseExtendedPassiveReply(replyOf(229, text)));
+            expectUnreadable(parseExtendedPassiveReply(replyOf(229, text)), 229);
         }
     }
 
@@ -310,7 +321,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(existing.error().kind, RemoteIo::RemoteErrorKind::AlreadyExists);
     }
 
-    TEST(ReplyParserTests, PathReplyWithoutAQuotedPathBreaksTheProtocol)
+    TEST(ReplyParserTests, PathReplyWithoutAQuotedPathIsUnreadable)
     {
         for (
             std::string_view text :
@@ -318,7 +329,7 @@ namespace FileTransferProtocol::Test
         )
         {
             SCOPED_TRACE(text);
-            expectViolation(workingDirectoryOf(replyOf(257, text)));
+            expectUnreadable(workingDirectoryOf(replyOf(257, text)), 257);
         }
     }
 }

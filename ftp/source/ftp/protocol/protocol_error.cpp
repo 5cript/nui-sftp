@@ -32,6 +32,16 @@ namespace FileTransferProtocol
         };
     }
 
+    RemoteIo::RemoteError unreadableReply(std::string message, int replyCode)
+    {
+        return RemoteIo::RemoteError{
+            .kind = RemoteIo::RemoteErrorKind::Failure,
+            .protocol = RemoteIo::Protocol::Ftp,
+            .protocolCode = replyCode,
+            .message = std::move(message),
+        };
+    }
+
     std::string printable(std::string_view bytes)
     {
         std::string text{};
