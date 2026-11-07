@@ -157,6 +157,11 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     )
 endif()
 
+# Apple's clang has no libFuzzer, and the coverage configure measures the tests above alone.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT WIN32 AND NOT APPLE AND NOT CODE_COVERAGE)
+    add_subdirectory(fuzz)
+endif()
+
 # If msys2, copy dynamic libraries to executable directory, visual studio does this automatically.
 # And there is no need on linux.
 if (DEFINED ENV{MSYSTEM})
