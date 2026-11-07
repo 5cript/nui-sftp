@@ -68,24 +68,22 @@ namespace FileTransferProtocol
         {
             std::array<unsigned, 6> numbers{};
             std::size_t count = 0u;
-            for (;;)
+            // The caller starts at a digit.
+            bool numberFollows = true;
+            while (numberFollows && count < numbers.size())
             {
                 const auto number = numberAt<unsigned>(text, position);
                 if (!number)
                     return std::unexpected(protocolViolation("A number of the passive reply is too large", code));
                 numbers[count++] = *number;
-                const bool another =
-                    position + 1u < text.size() && text[position] == ',' && isDigit(text[position + 1u]);
-                if (count == numbers.size())
-                {
-                    if (another)
-                        return std::unexpected(protocolViolation("The passive reply has more than six numbers", code));
-                    break;
-                }
-                if (!another)
-                    return std::nullopt;
-                ++position;
+                numberFollows = position + 1u < text.size() && text[position] == ',' && isDigit(text[position + 1u]);
+                if (numberFollows)
+                    ++position;
             }
+            if (count < numbers.size())
+                return std::nullopt;
+            if (numberFollows)
+                return std::unexpected(protocolViolation("The passive reply has more than six numbers", code));
 
             for (const auto number : numbers)
             {
