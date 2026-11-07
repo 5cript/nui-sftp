@@ -375,6 +375,10 @@ namespace FileTransferProtocol::Test
 
       private:
         asio::awaitable<void> acceptConnections();
+        /**
+         * @brief Runs the next script on a control connection that was just accepted.
+         */
+        void startSession(tcp::socket socket);
 
       private:
         const Options options_;
@@ -525,23 +529,28 @@ namespace FileTransferProtocol::Test
           private:
             asio::awaitable<void> acceptClient()
             {
-                for (;;)
+                error_code error{};
+                while (!transport_ && !error)
                 {
-                    auto [error, socket] = co_await acceptor_.async_accept(noThrow);
-                    if (error)
-                        co_return;
-                    error_code peerError;
-                    const auto peer = socket.remote_endpoint(peerError).address();
-                    if (plan_.onlyControlPeer && peer != controlPeer_)
+                    auto [acceptError, socket] = co_await acceptor_.async_accept(noThrow);
+                    error = acceptError;
+                    if (!error)
                     {
-                        server_.record(connection_, Kind::DataRefused, peer.to_string());
-                        continue;
+                        error_code peerError;
+                        const auto peer = socket.remote_endpoint(peerError).address();
+                        if (plan_.onlyControlPeer && peer != controlPeer_)
+                            server_.record(connection_, Kind::DataRefused, peer.to_string());
+                        else
+                        {
+                            server_.record(connection_, Kind::DataConnected, peer.to_string());
+                            transport_.emplace(std::move(socket));
+                        }
                     }
-                    server_.record(connection_, Kind::DataConnected, peer.to_string());
-                    transport_.emplace(std::move(socket));
+                }
+                if (transport_)
+                {
                     error_code ignored;
                     acceptor_.close(ignored);
-                    co_return;
                 }
             }
 
@@ -593,38 +602,32 @@ namespace FileTransferProtocol::Test
             asio::awaitable<bool> perform(DataPlan::SendForever const&)
             {
                 const std::string block(foreverBlockSize, 'x');
-                for (;;)
-                {
-                    if (const auto error = co_await transport_->writeAll(asio::buffer(block)); error)
-                    {
-                        if (!stopped_)
-                            server_.record(connection_, Kind::DataEnded, endReason(error));
-                        co_return false;
-                    }
-                }
+                error_code error{};
+                while (!error)
+                    error = co_await transport_->writeAll(asio::buffer(block));
+                if (!stopped_)
+                    server_.record(connection_, Kind::DataEnded, endReason(error));
+                co_return false;
             }
 
             asio::awaitable<bool> perform(DataPlan::ExpectUpload const& step)
             {
                 std::string uploaded{};
                 std::array<char, 16u * 1024u> chunk{};
-                for (;;)
+                error_code error{};
+                while (!error)
                 {
-                    const auto [error, size] = co_await transport_->readSome(asio::buffer(chunk));
+                    const auto [readError, size] = co_await transport_->readSome(asio::buffer(chunk));
                     uploaded.append(chunk.data(), size);
-                    if (error)
-                    {
-                        if (uploaded.size() > step.limit)
-                        {
-                            server_.fail(
-                                fmt::format("Upload of {} bytes exceeds the limit of {}", uploaded.size(), step.limit)
-                            );
-                        }
-                        server_.record(connection_, Kind::DataUploaded, std::move(uploaded));
-                        server_.record(connection_, Kind::DataEnded, endReason(error));
-                        co_return true;
-                    }
+                    error = readError;
                 }
+                if (uploaded.size() > step.limit)
+                    server_.fail(
+                        fmt::format("Upload of {} bytes exceeds the limit of {}", uploaded.size(), step.limit)
+                    );
+                server_.record(connection_, Kind::DataUploaded, std::move(uploaded));
+                server_.record(connection_, Kind::DataEnded, endReason(error));
+                co_return true;
             }
 
             asio::awaitable<bool> perform(DataPlan::Close const&)
@@ -648,16 +651,15 @@ namespace FileTransferProtocol::Test
                     co_return false;
                 }
                 std::array<char, 4096u> discarded{};
-                for (;;)
+                error_code error{};
+                while (!error)
                 {
-                    const auto [error, size] = co_await transport_->readSome(asio::buffer(discarded));
-                    if (error)
-                    {
-                        if (!stopped_)
-                            server_.record(connection_, Kind::DataEnded, endReason(error));
-                        co_return false;
-                    }
+                    const auto [readError, size] = co_await transport_->readSome(asio::buffer(discarded));
+                    error = readError;
                 }
+                if (!stopped_)
+                    server_.record(connection_, Kind::DataEnded, endReason(error));
+                co_return false;
             }
 
           private:
@@ -739,16 +741,9 @@ namespace FileTransferProtocol::Test
              */
             asio::awaitable<std::optional<std::string>> readLine()
             {
-                for (;;)
+                auto end = received_.find("\r\n");
+                while (end == std::string::npos)
                 {
-                    if (const auto end = received_.find("\r\n"); end != std::string::npos)
-                    {
-                        auto line = received_.substr(0u, end);
-                        received_.erase(0u, end + 2u);
-                        server_.record(connection_, Kind::Command, line);
-                        commands_.push_back(line);
-                        co_return line;
-                    }
                     std::array<char, 4096u> chunk{};
                     const auto [error, size] = co_await transport_.readSome(asio::buffer(chunk));
                     received_.append(chunk.data(), size);
@@ -759,7 +754,13 @@ namespace FileTransferProtocol::Test
                         closed_ = true;
                         co_return std::nullopt;
                     }
+                    end = received_.find("\r\n");
                 }
+                auto line = received_.substr(0u, end);
+                received_.erase(0u, end + 2u);
+                server_.record(connection_, Kind::Command, line);
+                commands_.push_back(line);
+                co_return line;
             }
 
             /**
@@ -999,53 +1000,58 @@ namespace FileTransferProtocol::Test
             }
         );
         thread_ = std::thread{[this]()
-                              {
-                                  ioContext_.run();
-                              }};
+            {
+                ioContext_.run();
+            }};
         return {};
     }
 
     asio::awaitable<void> ScriptedFtpServer::Implementation::acceptConnections()
     {
-        for (;;)
+        error_code error{};
+        while (!error)
         {
-            auto [error, socket] = co_await acceptor_.async_accept(noThrow);
-            if (error)
-                co_return;
-
-            std::optional<Script> script{};
-            std::size_t connection = 0u;
-            {
-                std::lock_guard lock{mutex_};
-                connection = nextConnection_++;
-                if (!scripts_.empty())
-                {
-                    script = std::move(scripts_.front());
-                    scripts_.pop_front();
-                }
-            }
-            if (!script)
-            {
-                fail(fmt::format("Control connection {} has no script", connection));
-                connectionEnded();
-                continue;
-            }
-
-            auto session = std::make_shared<ControlSession>(*this, connection, std::move(*script), std::move(socket));
-            asio::co_spawn(
-                ioContext_,
-                session->run(),
-                [this, connection](std::exception_ptr exception)
-                {
-                    if (exception)
-                    {
-                        fail(fmt::format("Control connection {} ended with an exception", connection));
-                        scriptEnded();
-                        connectionEnded();
-                    }
-                }
-            );
+            auto [acceptError, socket] = co_await acceptor_.async_accept(noThrow);
+            error = acceptError;
+            if (!error)
+                startSession(std::move(socket));
         }
+    }
+
+    void ScriptedFtpServer::Implementation::startSession(tcp::socket socket)
+    {
+        std::optional<Script> script{};
+        std::size_t connection = 0u;
+        {
+            std::lock_guard lock{mutex_};
+            connection = nextConnection_++;
+            if (!scripts_.empty())
+            {
+                script = std::move(scripts_.front());
+                scripts_.pop_front();
+            }
+        }
+        if (!script)
+        {
+            fail(fmt::format("Control connection {} has no script", connection));
+            connectionEnded();
+            return;
+        }
+
+        auto session = std::make_shared<ControlSession>(*this, connection, std::move(*script), std::move(socket));
+        asio::co_spawn(
+            ioContext_,
+            session->run(),
+            [this, connection](std::exception_ptr exception)
+            {
+                if (exception)
+                {
+                    fail(fmt::format("Control connection {} ended with an exception", connection));
+                    scriptEnded();
+                    connectionEnded();
+                }
+            }
+        );
     }
 
     ScriptedFtpServer::ScriptedFtpServer(std::unique_ptr<Implementation> implementation)
@@ -1056,8 +1062,9 @@ namespace FileTransferProtocol::Test
     std::expected<std::unique_ptr<ScriptedFtpServer>, std::string> ScriptedFtpServer::start(Options options)
     {
         return testPki().and_then(
-            [&options](std::reference_wrapper<TestPki const> pki)
-                -> std::expected<std::unique_ptr<ScriptedFtpServer>, std::string>
+            [&options](
+                std::reference_wrapper<TestPki const> pki
+            ) -> std::expected<std::unique_ptr<ScriptedFtpServer>, std::string>
             {
                 const auto certificate = options.certificate.value_or(pki.get().server);
                 auto implementation = std::make_unique<Implementation>(std::move(options), certificate);
