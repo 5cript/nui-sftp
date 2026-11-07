@@ -16,8 +16,9 @@ namespace FileTransferProtocol
     RemoteIo::RemoteError protocolViolation(std::string message, int replyCode = 0);
 
     /**
-     * @brief @p bytes as text a log or a person can read: valid UTF-8 stays, every other byte and every control
-     *        character becomes \\xNN.
+     * @brief @p bytes as text a log or a person can read: valid UTF-8 stays, every other byte and the bytes of every
+     *        control character become \\xNN. Control characters are C0, DEL and C1, the bidirectional formatting
+     *        characters and the line and paragraph separators.
      */
     std::string printable(std::string_view bytes);
 }
