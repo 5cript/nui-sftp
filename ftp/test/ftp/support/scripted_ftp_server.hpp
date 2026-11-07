@@ -104,8 +104,8 @@ namespace FileTransferProtocol::Test
         bool waitUntilFinished(std::chrono::milliseconds timeout = std::chrono::seconds{10});
 
         /**
-         * @brief Waits until every accepted control connection ended, which is when commands behind the end of a
-         *        script have been seen.
+         * @brief Waits until every accepted control connection and its data plans ended, which is when commands
+         *        behind the end of a script have been seen.
          *
          * @return False when one is still open.
          */

@@ -692,8 +692,10 @@ namespace FileTransferProtocol::Test
                     co_await readUntilDisconnect();
                 if (!closed_)
                     co_await transport_.close(false);
-                if (data_)
-                    data_->stop();
+                for (auto const& data : dataPlans_)
+                    data->stop();
+                for (auto const& data : dataPlans_)
+                    co_await data->awaitEnd();
                 server_.connectionEnded();
             }
 
@@ -872,8 +874,8 @@ namespace FileTransferProtocol::Test
                     server_.fail(diff("command PASV or EPSV before passive()", fmt::format("command {}", lastVerb_)));
                     co_return false;
                 }
-                data_ = std::make_shared<DataSession>(server_, connection_, step.plan, peer_);
-                const auto port = data_->listen(local_);
+                auto data = std::make_shared<DataSession>(server_, connection_, step.plan, peer_);
+                const auto port = data->listen(local_);
                 if (!port)
                 {
                     server_.fail(diff("a data port", port.error()));
@@ -881,9 +883,10 @@ namespace FileTransferProtocol::Test
                 }
                 const auto reply = passiveReply(step.plan, *port);
                 co_await transport_.writeAll(asio::buffer(reply));
+                dataPlans_.push_back(data);
                 asio::co_spawn(
                     server_.executor(),
-                    data_->run(),
+                    data->run(),
                     [server = &server_](std::exception_ptr exception)
                     {
                         if (exception)
@@ -895,34 +898,34 @@ namespace FileTransferProtocol::Test
 
             asio::awaitable<bool> perform(Script::BeginData const&)
             {
-                if (!data_)
+                if (dataPlans_.empty())
                 {
                     server_.fail(diff("a passive() before beginData()", "none"));
                     co_return false;
                 }
-                data_->begin();
+                dataPlans_.back()->begin();
                 co_return true;
             }
 
             asio::awaitable<bool> perform(Script::AwaitData const&)
             {
-                if (!data_)
+                if (dataPlans_.empty())
                 {
                     server_.fail(diff("a passive() before awaitData()", "none"));
                     co_return false;
                 }
-                co_await data_->awaitEnd();
+                co_await dataPlans_.back()->awaitEnd();
                 co_return true;
             }
 
             asio::awaitable<bool> perform(Script::StopData const&)
             {
-                if (!data_)
+                if (dataPlans_.empty())
                 {
                     server_.fail(diff("a passive() before stopData()", "none"));
                     co_return false;
                 }
-                data_->stop();
+                dataPlans_.back()->stop();
                 co_return true;
             }
 
@@ -938,7 +941,8 @@ namespace FileTransferProtocol::Test
             std::vector<std::string> commands_{};
             std::string lastVerb_{};
             std::string endedBy_{};
-            std::shared_ptr<DataSession> data_{};
+            /** @brief Every passive() so far, the last one is what beginData() and its kin act on. */
+            std::vector<std::shared_ptr<DataSession>> dataPlans_{};
             bool closeNotify_{true};
             bool closed_{false};
             bool silent_{false};

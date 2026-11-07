@@ -524,6 +524,34 @@ namespace FileTransferProtocol::Test
         expectNoFailures();
     }
 
+    TEST_F(ScriptedFtpServerDataTests, EveryDataPlanEndsWithItsControlConnection)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.login()
+            .expect("EPSV")
+            .passive(DataPlan{}.send("first"))
+            .expect("EPSV")
+            .passive(DataPlan{}.send("second"))
+            .expectDisconnect();
+        server_->addConnection(std::move(script));
+
+        connectClient();
+        ASSERT_TRUE(client_.readReply().has_value());
+        expectReply("USER user", 331);
+        expectReply("PASS password", 230);
+        const auto first = client_.command("EPSV");
+        ASSERT_TRUE(first.has_value()) << first.error();
+        const auto firstPort = TestFtpClient::passivePort(*first);
+        ASSERT_TRUE(firstPort.has_value()) << first->text;
+        expectReply("EPSV", 229);
+        client_.close();
+        expectNoFailures();
+
+        TestFtpClient probe{};
+        EXPECT_FALSE(probe.connect(server_->address(), *firstPort).has_value());
+    }
+
     TEST_F(ScriptedFtpServerDataTests, AStallLastsUntilTheClientLeaves)
     {
         ASSERT_NO_FATAL_FAILURE(startServer());
