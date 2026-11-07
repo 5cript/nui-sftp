@@ -20,10 +20,9 @@ namespace FileTransferProtocol
          */
         std::string_view withoutCode(std::string_view line, int code)
         {
-            const auto lineCode = replyCodeOf(line);
-            if (!lineCode || *lineCode != code)
+            if (replyCodeOf(line) != code)
                 return line;
-            return line.substr(std::min<std::size_t>(line.size(), 4u));
+            return textOfLine(line);
         }
 
         bool endsWithSpaceOrLine(std::string_view line)
@@ -68,6 +67,13 @@ namespace FileTransferProtocol
         if (line.size() > 3u && line[3] != ' ' && line[3] != '-')
             return std::nullopt;
         return (line[0] - '0') * 100 + (line[1] - '0') * 10 + (line[2] - '0');
+    }
+
+    std::string_view textOfLine(std::string_view line)
+    {
+        if (!replyCodeOf(line))
+            return line;
+        return line.substr(std::min<std::size_t>(line.size(), 4u));
     }
 
     ReplyFramer::ReplyFramer(ReplyLimits limits)

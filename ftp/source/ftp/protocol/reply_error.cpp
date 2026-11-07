@@ -1,7 +1,7 @@
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/protocol_error.hpp>
 #include <ftp/protocol/reply_code.hpp>
-#include <utility/algorithm/case_convert.hpp>
+#include "text.hpp"
 
 #include <fmt/format.h>
 
@@ -17,11 +17,6 @@ namespace FileTransferProtocol
     {
         using RemoteIo::RemoteErrorKind;
 
-        bool sameIgnoringCase(char left, char right)
-        {
-            return Utility::Algorithm::asciiToLower(left) == Utility::Algorithm::asciiToLower(right);
-        }
-
         /**
          * @brief @p text holds one of @p phrases, in any case.
          */
@@ -31,15 +26,9 @@ namespace FileTransferProtocol
                 phrases,
                 [text](std::string_view phrase)
                 {
-                    return !std::ranges::search(text, phrase, sameIgnoringCase).empty();
+                    return Detail::containsIgnoringCase(text, phrase);
                 }
             );
-        }
-
-        bool startsWithIgnoringCase(std::string_view text, std::string_view start)
-        {
-            return text.size() >= start.size() &&
-                std::ranges::equal(text.substr(0u, start.size()), start, sameIgnoringCase);
         }
 
         bool mentionsConnectionLimit(std::string_view text)
@@ -96,7 +85,7 @@ namespace FileTransferProtocol
                     return RemoteErrorKind::NoSpace;
                 case 500:
                     // vsftpd reports its fatal errors as "500 OOPS: ...".
-                    if (startsWithIgnoringCase(text, "oops"))
+                    if (Detail::equalIgnoringCase(text.substr(0u, 4u), "oops"))
                         return RemoteErrorKind::Failure;
                     return verb ? RemoteErrorKind::Unsupported : RemoteErrorKind::NoConnection;
                 case 503:

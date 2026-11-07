@@ -1,6 +1,7 @@
 #include <ftp/protocol/reply_parsers.hpp>
 #include <ftp/protocol/protocol_error.hpp>
 #include <ftp/protocol/reply_error.hpp>
+#include "text.hpp"
 
 #include <fmt/format.h>
 
@@ -16,25 +17,6 @@ namespace FileTransferProtocol
         bool isDigit(char character)
         {
             return character >= '0' && character <= '9';
-        }
-
-        /**
-         * @brief @p line without the code and separator it starts with.
-         */
-        std::string_view textOf(std::string_view line)
-        {
-            if (!replyCodeOf(line))
-                return line;
-            return line.substr(std::min<std::size_t>(line.size(), 4u));
-        }
-
-        std::string_view trimmed(std::string_view text)
-        {
-            while (!text.empty() && text.front() == ' ')
-                text.remove_prefix(1u);
-            while (!text.empty() && text.back() == ' ')
-                text.remove_suffix(1u);
-            return text;
         }
 
         /**
@@ -205,7 +187,7 @@ namespace FileTransferProtocol
     {
         if (reply.code != 213)
             return std::unexpected(replyError(reply, Verb::Size));
-        const auto text = trimmed(textOf(reply.lines.front()));
+        const auto text = Detail::trimmedSpaces(textOfLine(reply.lines.front()));
         std::size_t position = 0u;
         const auto size = numberAt<std::uint64_t>(text, position);
         if (!size || position != text.size())
@@ -217,7 +199,7 @@ namespace FileTransferProtocol
     {
         if (reply.code != 213)
             return std::unexpected(replyError(reply, Verb::ModificationTime));
-        return parseTimeVal(trimmed(textOf(reply.lines.front())))
+        return parseTimeVal(Detail::trimmedSpaces(textOfLine(reply.lines.front())))
             .transform_error(
                 [&reply](RemoteIo::RemoteError error)
                 {
@@ -233,7 +215,7 @@ namespace FileTransferProtocol
             return std::unexpected(replyError(reply, Verb::Passive));
         for (auto const& line : reply.lines)
         {
-            const auto text = textOf(line);
+            const auto text = textOfLine(line);
             for (std::size_t position = 0u; position < text.size(); ++position)
             {
                 const auto previous = position == 0u ? ' ' : text[position - 1u];
@@ -254,7 +236,7 @@ namespace FileTransferProtocol
             return std::unexpected(replyError(reply, Verb::ExtendedPassive));
         for (auto const& line : reply.lines)
         {
-            if (auto port = extendedPassivePortIn(textOf(line), reply.code))
+            if (auto port = extendedPassivePortIn(textOfLine(line), reply.code))
                 return std::move(*port);
         }
         return std::unexpected(protocolViolation("The extended passive reply names no port", reply.code));
@@ -264,7 +246,7 @@ namespace FileTransferProtocol
     {
         if (reply.code != 257)
             return std::unexpected(replyError(reply, Verb::PrintWorkingDirectory));
-        const auto text = textOf(reply.lines.front());
+        const auto text = textOfLine(reply.lines.front());
         const auto open = text.find('"');
         if (open == std::string_view::npos)
             return std::unexpected(protocolViolation("The path reply has no quoted path", reply.code));

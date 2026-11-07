@@ -127,4 +127,9 @@ namespace FileTransferProtocol
      *        or the end of the line.
      */
     std::optional<int> replyCodeOf(std::string_view line);
+
+    /**
+     * @brief @p line without the reply code and the separator after it, the whole line when it starts with no code.
+     */
+    std::string_view textOfLine(std::string_view line);
 }

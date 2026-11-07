@@ -515,4 +515,13 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(replyCodeOf("099 Low"), std::nullopt);
         EXPECT_EQ(replyCodeOf("22"), std::nullopt);
     }
+
+    TEST(ReplyFramerTests, TextOfALine)
+    {
+        EXPECT_EQ(textOfLine("257 \"/home\" created"), "\"/home\" created");
+        EXPECT_EQ(textOfLine("211-Features:"), "Features:");
+        EXPECT_EQ(textOfLine("220"), "");
+        EXPECT_EQ(textOfLine(" MDTM"), " MDTM");
+        EXPECT_EQ(textOfLine("2000 bytes"), "2000 bytes");
+    }
 }
