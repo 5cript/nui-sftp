@@ -3,10 +3,32 @@
 #include <utility/algorithm/case_convert.hpp>
 
 #include <algorithm>
+#include <charconv>
+#include <optional>
 #include <string_view>
 
 namespace FileTransferProtocol::Detail
 {
+    inline bool isDigit(char character)
+    {
+        return character >= '0' && character <= '9';
+    }
+
+    /**
+     * @brief The number @p text holds when it is nothing but decimal digits and fits.
+     */
+    template <typename NumberT>
+    std::optional<NumberT> decimalOf(std::string_view text)
+    {
+        NumberT number{};
+        if (text.empty() || !std::ranges::all_of(text, isDigit))
+            return std::nullopt;
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), number);
+        if (parsed.ec != std::errc{})
+            return std::nullopt;
+        return number;
+    }
+
     /**
      * @brief @p text without the spaces around it.
      */
@@ -49,5 +71,13 @@ namespace FileTransferProtocol::Detail
     inline bool endsWithIgnoringCase(std::string_view text, std::string_view phrase)
     {
         return text.size() >= phrase.size() && equalIgnoringCase(text.substr(text.size() - phrase.size()), phrase);
+    }
+
+    /**
+     * @brief @p text starts with @p phrase, ASCII letters compared in any case.
+     */
+    inline bool startsWithIgnoringCase(std::string_view text, std::string_view phrase)
+    {
+        return text.size() >= phrase.size() && equalIgnoringCase(text.substr(0u, phrase.size()), phrase);
     }
 }

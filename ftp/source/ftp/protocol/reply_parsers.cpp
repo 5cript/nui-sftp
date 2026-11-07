@@ -14,10 +14,7 @@ namespace FileTransferProtocol
 {
     namespace
     {
-        bool isDigit(char character)
-        {
-            return character >= '0' && character <= '9';
-        }
+        using Detail::isDigit;
 
         /**
          * @brief The unsigned number of the digits at @p position, which moves behind them.
