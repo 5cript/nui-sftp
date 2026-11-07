@@ -65,6 +65,8 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
             GTest::gtest_main
     )
 
+    target_compile_definitions(${name} PRIVATE NUI_SFTP_FTP_LISTING_SAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/samples/listings")
+
     set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${outputDirectory}")
 endfunction()
 

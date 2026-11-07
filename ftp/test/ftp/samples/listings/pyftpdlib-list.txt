@@ -1,0 +1,11 @@
+-rw-r--r--   1 spike    spike           8 Oct 01 12:34  leading space.txt
+-rw-r--r--   1 spike    spike           7 Oct 01 12:34 .hidden
+-rw-r--r--   1 spike    spike           6 Oct 01 12:34 a -> b.txt
+lrwxrwxrwx   1 spike    spike          14 Oct 01 12:34 dangling-link -> does-not-exist
+lrwxrwxrwx   1 spike    spike           9 Oct 01 12:34 link-to-plain.txt -> plain.txt
+lrwxrwxrwx   1 spike    spike           6 Oct 01 12:34 link-to-subdir -> subdir
+-rw-r--r--   1 spike    spike           7 Oct 01 12:34 name with spaces.txt
+-rw-r--r--   1 spike    spike           4 Jan 02  2020 old.txt
+-rw-r--r--   1 spike    spike          11 Oct 01 12:34 plain.txt
+drwxr-xr-x   2 spike    spike        4096 Oct 01 12:34 subdir
+-rw-r--r--   1 spike    spike           5 Oct 01 12:34 ünïcödé-名前.txt

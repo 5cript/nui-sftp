@@ -8,6 +8,9 @@ function(add_file_transfer_protocol_library name remoteIo)
         STATIC
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/features.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/list_line.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/listing.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/machine_listing_line.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/protocol_error.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply_code.cpp
