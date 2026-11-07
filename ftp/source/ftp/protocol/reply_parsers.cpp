@@ -242,10 +242,10 @@ namespace FileTransferProtocol
         return std::unexpected(protocolViolation("The extended passive reply names no port", reply.code));
     }
 
-    std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply)
+    std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply, Verb verb)
     {
         if (reply.code != 257)
-            return std::unexpected(replyError(reply, Verb::PrintWorkingDirectory));
+            return std::unexpected(replyError(reply, verb));
         const auto text = textOfLine(reply.lines.front());
         const auto open = text.find('"');
         if (open == std::string_view::npos)

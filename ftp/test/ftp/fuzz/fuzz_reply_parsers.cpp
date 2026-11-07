@@ -71,7 +71,7 @@ namespace
             check(endpoint->port != 0u);
         if (const auto port = parseExtendedPassiveReply(reply))
             check(*port != 0u);
-        if (const auto path = parsePathReply(reply))
+        if (const auto path = parsePathReply(reply, Verb::MakeDirectory))
             check(!path->empty());
         if (const auto features = Features::fromReply(reply))
         {

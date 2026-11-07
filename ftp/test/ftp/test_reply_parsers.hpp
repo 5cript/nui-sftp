@@ -26,6 +26,11 @@ namespace FileTransferProtocol::Test
                 std::chrono::minutes{minute} + std::chrono::seconds{second};
         }
 
+        std::expected<std::string, RemoteIo::RemoteError> workingDirectoryOf(Reply const& reply)
+        {
+            return parsePathReply(reply, Verb::PrintWorkingDirectory);
+        }
+
         template <typename ValueT>
         void expectViolation(std::expected<ValueT, RemoteIo::RemoteError> const& parsed)
         {
@@ -65,7 +70,7 @@ namespace FileTransferProtocol::Test
         expectViolation(parseSizeReply(replyOf(200, "11")));
         expectViolation(parsePassiveReply(replyOf(229, "(|||30003|)")));
         expectViolation(parseExtendedPassiveReply(replyOf(227, "(1,2,3,4,5,6)")));
-        expectViolation(parsePathReply(replyOf(250, "\"/home\"")));
+        expectViolation(workingDirectoryOf(replyOf(250, "\"/home\"")));
     }
 
     TEST(ReplyParserTests, TimeVal)
@@ -263,22 +268,34 @@ namespace FileTransferProtocol::Test
 
     TEST(ReplyParserTests, PathReply)
     {
-        EXPECT_EQ(parsePathReply(replyOf(257, "\"/home/spike\" is the current directory")), "/home/spike");
-        EXPECT_EQ(parsePathReply(replyOf(257, "\"/\"")), "/");
-        EXPECT_EQ(parsePathReply(replyOf(257, "Current directory is \"/srv\"")), "/srv");
-        EXPECT_EQ(parsePathReply(replyOf(257, "\"/name with spaces\" created")), "/name with spaces");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "\"/home/spike\" is the current directory")), "/home/spike");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "\"/\"")), "/");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "Current directory is \"/srv\"")), "/srv");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "\"/name with spaces\" created")), "/name with spaces");
     }
 
     TEST(ReplyParserTests, PathReplyUndoublesQuotes)
     {
-        EXPECT_EQ(parsePathReply(replyOf(257, "\"/usr/dir\"\"name\" created")), "/usr/dir\"name");
-        EXPECT_EQ(parsePathReply(replyOf(257, "\"\"\"\"")), "\"");
-        EXPECT_EQ(parsePathReply(replyOf(257, "\"a\"\"\"\"b\"")), "a\"\"b");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "\"/usr/dir\"\"name\" created")), "/usr/dir\"name");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "\"\"\"\"")), "\"");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, "\"a\"\"\"\"b\"")), "a\"\"b");
     }
 
     TEST(ReplyParserTests, PathReplyReadsCarriageReturnNulAsCarriageReturn)
     {
-        EXPECT_EQ(parsePathReply(replyOf(257, std::string{"\"/a\r\0b\" created", 15u})), "/a\rb");
+        EXPECT_EQ(workingDirectoryOf(replyOf(257, std::string{"\"/a\r\0b\" created", 15u})), "/a\rb");
+    }
+
+    TEST(ReplyParserTests, PathReplyErrorNamesTheCommandItAnswers)
+    {
+        const auto unexpected = parsePathReply(replyOf(250, "Directory created"), Verb::MakeDirectory);
+        ASSERT_FALSE(unexpected);
+        EXPECT_EQ(unexpected.error().kind, RemoteIo::RemoteErrorKind::ProtocolViolation);
+        EXPECT_NE(unexpected.error().message.find("to MKD"), std::string::npos);
+
+        const auto existing = parsePathReply(replyOf(550, "subdir: File exists"), Verb::MakeDirectory);
+        ASSERT_FALSE(existing);
+        EXPECT_EQ(existing.error().kind, RemoteIo::RemoteErrorKind::AlreadyExists);
     }
 
     TEST(ReplyParserTests, PathReplyWithoutAQuotedPathBreaksTheProtocol)
@@ -289,7 +306,7 @@ namespace FileTransferProtocol::Test
         )
         {
             SCOPED_TRACE(text);
-            expectViolation(parsePathReply(replyOf(257, text)));
+            expectViolation(workingDirectoryOf(replyOf(257, text)));
         }
     }
 }

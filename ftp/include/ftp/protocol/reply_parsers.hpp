@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ftp/protocol/command.hpp>
 #include <ftp/protocol/reply.hpp>
 #include <remote_io/remote_error.hpp>
 
@@ -66,6 +67,8 @@ namespace FileTransferProtocol
     /**
      * @brief The quoted path of a 257 reply to PWD or MKD, doubled quotes undoubled (RFC 959 Appendix II) and CR NUL
      *        read as CR (RFC 2640 3.1).
+     *
+     * @param verb The command the reply answers, for the error of any other reply.
      */
-    std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply);
+    std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply, Verb verb);
 }
