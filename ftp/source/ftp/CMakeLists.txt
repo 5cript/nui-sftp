@@ -10,6 +10,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/protocol_error.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply_code.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply_error.cpp
     )
 
     target_include_directories(

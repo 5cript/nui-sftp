@@ -1,6 +1,7 @@
 #include <utility/process_temporary_directory.hpp>
 #include "test_command.hpp"
 #include "test_reply_code.hpp"
+#include "test_reply_error.hpp"
 #include "test_reply_framer.hpp"
 #include "test_scripted_ftp_server.hpp"
 #include "test_server_profiles.hpp"
