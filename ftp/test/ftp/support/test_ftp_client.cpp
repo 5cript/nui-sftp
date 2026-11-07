@@ -7,7 +7,10 @@
 #include <boost/asio/write.hpp>
 #include <fmt/format.h>
 
+#include <openssl/bio.h>
+#include <openssl/pem.h>
 #include <openssl/ssl.h>
+#include <openssl/x509.h>
 
 #include <array>
 #include <charconv>
@@ -34,6 +37,8 @@ namespace FileTransferProtocol::Test
             }
         };
         using Session = std::unique_ptr<SSL_SESSION, Release<SSL_SESSION_free>>;
+        using Certificate = std::unique_ptr<X509, Release<X509_free>>;
+        using MemoryBio = std::unique_ptr<BIO, Release<BIO_free_all>>;
 
         /**
          * @brief A socket that may have turned to TLS.
@@ -198,6 +203,19 @@ namespace FileTransferProtocol::Test
                 );
             }
             data_.reset();
+        }
+
+        std::optional<std::string> dataCertificate()
+        {
+            if (!data_ || !data_->tls)
+                return std::nullopt;
+            const Certificate certificate{SSL_get1_peer_certificate(data_->tls->native_handle())};
+            const MemoryBio memory{BIO_new(BIO_s_mem())};
+            if (!certificate || !memory || PEM_write_bio_X509(memory.get(), certificate.get()) != 1)
+                return std::nullopt;
+            char* text = nullptr;
+            const auto size = BIO_get_mem_data(memory.get(), &text);
+            return std::string(text, static_cast<std::size_t>(size));
         }
 
         void close()
@@ -374,6 +392,10 @@ namespace FileTransferProtocol::Test
     void TestFtpClient::closeData()
     {
         impl_->closeData();
+    }
+    std::optional<std::string> TestFtpClient::dataCertificate()
+    {
+        return impl_->dataCertificate();
     }
     void TestFtpClient::close()
     {

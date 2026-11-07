@@ -77,6 +77,13 @@ namespace FileTransferProtocol::Test
         void closeData();
 
         /**
+         * @brief The certificate the server presented on the data connection, in PEM.
+         *
+         * @return Nothing without a TLS data connection.
+         */
+        std::optional<std::string> dataCertificate();
+
+        /**
          * @brief Ends the control connection without a QUIT.
          */
         void close();

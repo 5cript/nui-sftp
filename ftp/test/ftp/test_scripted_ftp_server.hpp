@@ -256,6 +256,7 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(impatient.command("NOOP").has_value());
         impatient.close();
         expectNoFailures();
+        EXPECT_EQ(server_->commands(), (std::vector<std::string>{"NOOP"}));
     }
 
     TEST_F(ScriptedFtpServerTests, AStepBehindAStallFailsTheScript)
@@ -710,6 +711,7 @@ namespace FileTransferProtocol::Test
         login();
         openSecuredData();
         ASSERT_TRUE(dataOpened_.has_value()) << dataOpened_.error();
+        EXPECT_EQ(client_.dataCertificate(), pki->get().otherServer.certificate);
         EXPECT_TRUE(client_.readData().has_value());
         client_.closeData();
         EXPECT_TRUE(client_.readReply().has_value());
