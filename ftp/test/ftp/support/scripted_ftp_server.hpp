@@ -97,6 +97,17 @@ namespace FileTransferProtocol::Test
         bool waitForCheckpoint(std::string const& name, std::chrono::milliseconds timeout = std::chrono::seconds{10});
 
         /**
+         * @brief Waits until the transcript holds an entry of @p kind, for what no script step can wait on, like the
+         *        accept of a data connection.
+         *
+         * @return False when none was recorded in time.
+         */
+        bool waitForTranscriptEntry(
+            TranscriptEntry::Kind kind,
+            std::chrono::milliseconds timeout = std::chrono::seconds{10}
+        );
+
+        /**
          * @brief Waits until every added script ended, by its last step or by a failure.
          *
          * @return False when one did not end in time.

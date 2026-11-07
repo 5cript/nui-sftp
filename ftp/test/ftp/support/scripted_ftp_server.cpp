@@ -233,8 +233,11 @@ namespace FileTransferProtocol::Test
 
         void record(std::size_t connection, Kind kind, std::string detail)
         {
-            std::lock_guard lock{mutex_};
-            transcript_.push_back({.connection = connection, .kind = kind, .detail = std::move(detail)});
+            {
+                std::lock_guard lock{mutex_};
+                transcript_.push_back({.connection = connection, .kind = kind, .detail = std::move(detail)});
+            }
+            changed_.notify_all();
         }
 
         void fail(std::string description)
@@ -281,6 +284,25 @@ namespace FileTransferProtocol::Test
                 return false;
             checkpoints_.erase(std::ranges::find(checkpoints_, name));
             return true;
+        }
+
+        bool waitForTranscriptEntry(Kind kind, std::chrono::milliseconds timeout)
+        {
+            std::unique_lock lock{mutex_};
+            return changed_.wait_for(
+                lock,
+                timeout,
+                [&]()
+                {
+                    return std::ranges::any_of(
+                        transcript_,
+                        [kind](TranscriptEntry const& entry)
+                        {
+                            return entry.kind == kind;
+                        }
+                    );
+                }
+            );
         }
 
         bool waitUntilFinished(std::chrono::milliseconds timeout)
@@ -457,7 +479,7 @@ namespace FileTransferProtocol::Test
                 if (transport_)
                 {
                     co_await begun_.wait();
-                    if (co_await startTls())
+                    if (!stopped_ && co_await startTls())
                     {
                         bool goesOn = !stopped_;
                         for (std::size_t action = 0u; goesOn && action < plan_.actions.size(); ++action)
@@ -1059,6 +1081,10 @@ namespace FileTransferProtocol::Test
     bool ScriptedFtpServer::waitForCheckpoint(std::string const& name, std::chrono::milliseconds timeout)
     {
         return impl_->waitForCheckpoint(name, timeout);
+    }
+    bool ScriptedFtpServer::waitForTranscriptEntry(TranscriptEntry::Kind kind, std::chrono::milliseconds timeout)
+    {
+        return impl_->waitForTranscriptEntry(kind, timeout);
     }
     bool ScriptedFtpServer::waitUntilFinished(std::chrono::milliseconds timeout)
     {

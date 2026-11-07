@@ -552,6 +552,20 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(probe.connect(server_->address(), *firstPort).has_value());
     }
 
+    TEST_F(ScriptedFtpServerDataTests, ADataPlanStoppedBeforeItBeganStartsNoTls)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.login().expect("EPSV").passive(DataPlan{}.tls().send("never sent")).expectDisconnect();
+        server_->addConnection(std::move(script));
+
+        openPassive("EPSV");
+        ASSERT_TRUE(server_->waitForTranscriptEntry(TranscriptEntry::Kind::DataConnected));
+        client_.close();
+        expectNoFailures();
+        EXPECT_FALSE(transcriptHas(TranscriptEntry::Kind::TlsFailed));
+    }
+
     TEST_F(ScriptedFtpServerDataTests, AStallLastsUntilTheClientLeaves)
     {
         ASSERT_NO_FATAL_FAILURE(startServer());
