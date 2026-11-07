@@ -698,7 +698,7 @@ namespace FileTransferProtocol::Test
                     co_await secure(server_, connection_, transport_, TlsBehaviour{}, "control");
 
                 bool goesOn = true;
-                for (; goesOn && step_ < script_.steps.size(); ++step_)
+                for (; goesOn && !silent_ && step_ < script_.steps.size(); ++step_)
                 {
                     goesOn = co_await std::visit(
                         [this](auto const& step)
@@ -843,6 +843,8 @@ namespace FileTransferProtocol::Test
             asio::awaitable<bool> perform(Script::Stall const&)
             {
                 silent_ = true;
+                if (const auto behind = script_.steps.size() - step_ - 1u; behind > 0u)
+                    server_.fail(diff("stall() as the last step", fmt::format("{} steps behind it", behind)));
                 co_return true;
             }
 

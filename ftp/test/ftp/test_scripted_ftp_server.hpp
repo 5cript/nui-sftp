@@ -258,6 +258,26 @@ namespace FileTransferProtocol::Test
         expectNoFailures();
     }
 
+    TEST_F(ScriptedFtpServerTests, AStepBehindAStallFailsTheScript)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.reply("220 Ready").stall().reply("200 Never sent");
+        server_->addConnection(std::move(script));
+
+        TestFtpClient impatient{std::chrono::milliseconds{50}};
+        ASSERT_TRUE(impatient.connect(server_->address(), server_->port()).has_value());
+        ASSERT_TRUE(impatient.readReply().has_value());
+        EXPECT_TRUE(server_->waitUntilFinished());
+        EXPECT_FALSE(impatient.readReply().has_value());
+        impatient.close();
+        EXPECT_TRUE(server_->waitUntilDisconnected());
+        const auto failures = server_->failures();
+        ASSERT_EQ(failures.size(), 1u);
+        EXPECT_NE(failures.front().find("  - stall() as the last step\n  + 1 steps behind it"), std::string::npos)
+            << failures.front();
+    }
+
     TEST_F(ScriptedFtpServerTests, Ipv6ControlConnection)
     {
         auto started = ScriptedFtpServer::start({.ipv6 = true});

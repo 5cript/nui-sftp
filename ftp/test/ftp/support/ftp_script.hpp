@@ -224,7 +224,7 @@ namespace FileTransferProtocol::Test
         Script& closeControl();
         /** @brief Ends the connection with a TCP reset. */
         Script& resetControl();
-        /** @brief Never answers again, the script counts as finished. */
+        /** @brief Never answers again, the script ends here. Steps behind it fail the script. */
         Script& stall();
         /** @brief Waits for the client to end the connection, a command fails the script. */
         Script& expectDisconnect();
