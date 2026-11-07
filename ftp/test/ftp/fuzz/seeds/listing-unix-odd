@@ -1,0 +1,7 @@
+total 3
+crw-rw-rw-   1 root     root       1,   3 Oct  1 12:34 null
+brw-rw----   1 root disk 8,0 Oct  1 12:34 sda
+-rwsr-sr-t+  1 a b 0 Feb 29 12:00 special
+lrwxrwxrwx 1 u g 5 Oct 29 23:59 a -> b -> c
+drwxr-xr-x               folder        0 Aug 15 05:49  spaced name 
+-rw-r--r-- 1234 Dec 31  1999 only-size
