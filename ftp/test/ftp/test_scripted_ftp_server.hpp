@@ -674,6 +674,24 @@ namespace FileTransferProtocol::Test
         expectNoFailures();
     }
 
+    TEST_F(ScriptedFtpServerDataTlsTests, AnUnansweredCloseNotifyEndsThePlanInTime)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        server_->addConnection(securedScript(DataPlan{}.tls().send("over tls")));
+
+        login();
+        openSecuredData();
+        ASSERT_TRUE(dataOpened_.has_value()) << dataOpened_.error();
+        EXPECT_TRUE(client_.readData().has_value());
+        // The data connection stays open without the close_notify of the client.
+        const auto done = client_.readReply();
+        ASSERT_TRUE(done.has_value()) << done.error();
+        EXPECT_EQ(done->code, 226);
+        client_.closeData();
+        client_.close();
+        expectNoFailures();
+    }
+
     struct BadCertificate
     {
         std::string name{};

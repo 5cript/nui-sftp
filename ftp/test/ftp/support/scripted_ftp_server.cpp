@@ -2,6 +2,7 @@
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -128,21 +129,9 @@ namespace FileTransferProtocol::Test
             asio::awaitable<void> close(bool notify)
             {
                 error_code ignored;
+                // async_shutdown waits for the close_notify of the peer without a limit.
                 if (tls_ && notify)
-                {
-                    // async_shutdown waits for the close_notify of the peer without a limit.
-                    asio::steady_timer limit{socket_.get_executor(), closeNotifyWait};
-                    limit.async_wait(
-                        [this](error_code error)
-                        {
-                            error_code closeError;
-                            if (!error)
-                                socket_.close(closeError);
-                        }
-                    );
-                    co_await tls_->async_shutdown(noThrow);
-                    limit.cancel();
-                }
+                    co_await tls_->async_shutdown(asio::cancel_after(closeNotifyWait, noThrow));
                 socket_.shutdown(tcp::socket::shutdown_send, ignored);
                 socket_.close(ignored);
             }
