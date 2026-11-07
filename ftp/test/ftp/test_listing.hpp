@@ -316,6 +316,12 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(onlyEntry(machineListingOf("type=file; a=b;c d\n")).name, "a=b;c d");
     }
 
+    TEST(MachineListingTests, NamesAreBytes)
+    {
+        // Latin-1 and a lone continuation byte, no UTF-8.
+        EXPECT_EQ(onlyEntry(machineListingOf("type=file; Fran\xE7ois\x80.txt\r\n")).name, "Fran\xE7ois\x80.txt");
+    }
+
     TEST(MachineListingTests, EntryWithoutFacts)
     {
         const auto entry = onlyEntry(machineListingOf(" name\n"));

@@ -46,7 +46,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R959_4_1_3_DeleteConfirmation | RFC 959 4.1.3 | SHOULD | Ask any extra delete confirmation in the client, the server asks none |  |  |
 | R959_4_1_3_StatPathOnControl | RFC 959 4.1.3 | MUST | Read the output of STAT with a path from the control reply, no data connection is used |  |  |
 | R959_4_1_3_TelnetSignalsBeforeAbor | RFC 959 4.1.3 | SHOULD | Precede ABOR, and STAT during a transfer, with Telnet IP and Synch | Deviation: ABOR goes in band without IP and Synch, TLS has no urgent data (RFC 4217 14) |  |
-| R959_4_1_3_ListFormats | RFC 959 4.1.3 | SHOULD | Do not assume one format of LIST output | Listing parsers |  |
+| R959_4_1_3_ListFormats | RFC 959 4.1.3 | SHOULD | Do not assume one format of LIST output | ListingParser::list() reads the Unix and the DOS format line by line, a line in neither is counted as unreadable | `ListParserTests.UnixLines`, `ListParserTests.DosLines`, `ListParserTests.LinesInNoFormatAreUnreadable`, `ListingSampleTests.VsftpdList` |
 | R959_4_2_ReplyFormat | RFC 959 4.2 | MUST | A reply is three digits, a space or hyphen, text and CRLF | ReplyFramer, replyCodeOf | `ReplyFramerTests.SingleLineReply`, `ReplyFramerTests.CodeWithoutTextIsAReply`, `ReplyFramerTests.LinesThatStartNoReplyBreakTheProtocol`, `ReplyFramerTests.ReplyCodeOfALine` |
 | R959_4_2_MultiLineContinuation | RFC 959 4.2 | MUST | A multi-line reply ends with a line of the same code and a space | ReplyFramer ends a multi-line reply on its own code and a space | `ReplyFramerTests.MultiLineReplyOfRfc959`, `ReplyFramerTests.MultiLineReplyWithTheCodeOnEveryLine`, `ReplyFramerTests.LineWithTheOpeningCodeAndAHyphenDoesNotEndTheReply`, `ReplyFramerTests.LineWithAnotherCodeFollowedByTextIsText`, `ReplyFramerTests.LineWithAnotherCodeFollowedByTheEndIsText` |
 | R959_4_2_FirstDigitSemantics | RFC 959 4.2 | MUST | The first digit says whether the command succeeded, goes on or failed | classifyReply | `ReplyCodeTests.FirstDigitGivesTheClass`, `ReplyErrorTests.PositiveRepliesAreUnexpected` |
@@ -79,8 +79,8 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R1123_4_1_2_5_PortBeforeEachTransfer | RFC 1123 4.1.2.5, 4.1.5 | SHOULD | In stream mode send PORT with a non-default port before each transfer command | Not applicable: passive mode only, active mode comes later |  |
 | R1123_4_1_2_6_PasvReplyFormat | RFC 1123 4.1.2.6 | MUST | Scan the 227 text for the six numbers, parentheses may be missing | parsePassiveReply | `ReplyParserTests.PassiveReplyWithParentheses`, `ReplyParserTests.PassiveReplyWithoutParentheses`, `ReplyParserTests.PassiveReplyScansPastOtherNumbers`, `ReplyParserTests.PassiveReplyThatNamesNoEndpointIsUnreadable` |
 | R1123_4_1_2_6_PasvPerTransfer | RFC 1123 4.1.2.6 | MUST | Send PASV for every transfer | DataConnection setup |  |
-| R1123_4_1_2_7_NlstNamesUsable | RFC 1123 4.1.2.7, 4.1.5 | MUST | Use NLST names as they are in later transfer commands |  |  |
-| R1123_4_1_2_7_ListImpliedAscii | RFC 1123 4.1.2.7, 4.1.5 | SHOULD | Read LIST and NLST data as ASCII lines ending in CRLF, whatever TYPE is set |  |  |
+| R1123_4_1_2_7_NlstNamesUsable | RFC 1123 4.1.2.7, 4.1.5 | MUST | Use NLST names as they are in later transfer commands | ListingParser::nameList() keeps the bytes of each name, without the listed path some servers put before it | `ListingSampleTests.ProftpdNameListLosesTheListedPath`, `ListingSampleTests.PyftpdlibNameList`, `NameListTests.NamesAsSent` |
+| R1123_4_1_2_7_ListImpliedAscii | RFC 1123 4.1.2.7, 4.1.5 | SHOULD | Read LIST and NLST data as ASCII lines ending in CRLF, whatever TYPE is set | ListingParser ends a line at LF with or without the CR before it | `ListingParserTests.LineEndsOfAnyKind` |
 | R1123_4_1_2_9_StouFileName | RFC 1123 4.1.2.9, 4.1.5 | MUST | Read the unique name of STOU from a "125 FILE:" or "150 FILE:" reply | Not applicable: the client never sends STOU |  |
 | R1123_4_1_2_10_NoReadBoundaries | RFC 1123 4.1.2.10 | MUST NOT | Do not rely on TCP read boundaries on the control connection | ReplyFramer takes bytes in any pieces | `ReplyFramerTests.ReadBoundariesDoNotMatter`, `ReplyFramerTests.ReadBoundariesDoNotMatterForTelnetCommandsAndBareLineFeeds`, `ReplyFramerTests.ReadBoundariesDoNotMatterForAPossibleEnd`, `ReplyFramerTests.SeveralRepliesInOnePiece` |
 | R1123_4_1_2_11_MultiLineReplies | RFC 1123 4.1.2.11 | MUST | Handle multi-line replies for every command | ReplyFramer | `ReplyFramerTests.MultiLineReplyOfRfc959`, `ReplyFramerTests.PureFtpdGreeting` |
@@ -182,7 +182,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2640_3_1_StripNulOnReceipt | RFC 2640 3.1 | MUST | Remove the NUL from a CR NUL pair in received path names | parsePathReply | `ReplyParserTests.PathReplyReadsCarriageReturnNulAsCarriageReturn` |
 | R2640_3_1_OtherEncodingChoice | RFC 2640 3.1 | MAY | Let users choose another path name encoding as well |  |  |
 | R2640_3_1_KeepUtf8WhenUnconvertible | RFC 2640 3.1 | SHOULD | Keep UTF-8 path names that cannot be converted to a usable local code set |  |  |
-| R2640_3_1_RawBytesWhenUnknown | RFC 2640 3.1; RFC 3659 7.3 | SHOULD | Use the raw bytes of a path name whose encoding cannot be determined |  |  |
+| R2640_3_1_RawBytesWhenUnknown | RFC 2640 3.1; RFC 3659 7.3 | SHOULD | Use the raw bytes of a path name whose encoding cannot be determined | ListingEntry::name holds the bytes the server sent | `MachineListingTests.NamesAreBytes` |
 | R2640_3_3_DisplayUtf8 | RFC 2640 3.3 | SHOULD | Parse UTF-8 path names correctly and try to display them |  |  |
 | R2640_3_3_FeatUtf8 | RFC 2640 3.2, 3.3 | MUST | Learn UTF-8 support from FEAT and its UTF8 feature, matched in any case | Features::has | `FeaturesTests.PureFtpdFeatures` |
 | R2640_3_3_NonUtf8ServerDisplay | RFC 2640 3.3 | SHOULD | Adapt the display when the server is not UTF-8 |  |  |
@@ -250,24 +250,24 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_7_1_OmitArgumentForCurrentDirectory | RFC 3659 7.1 | MUST | List the current directory by omitting the argument, no shorthand like "." is defined |  |  |
 | R3659_7_1_MlstOnControlOnly | RFC 3659 7.1 | MUST | Read MLST from the control reply and open no data connection for it |  |  |
 | R3659_7_1_MlsdOnNonDirectory | RFC 3659 7.1, 7.2.1 | MUST | Expect 501 and no data connection when MLSD names something that is not a directory |  |  |
-| R3659_7_2_MlstEntryLeadingSpace | RFC 3659 7.2 | MUST | Read each MLST entry line after its one leading space |  |  |
-| R3659_7_2_FactsPathnameSeparator | RFC 3659 7.2 | MUST | Split an entry at its first space, facts before it and the path name after it |  |  |
-| R3659_7_2_EmptyFactSet | RFC 3659 7.2, 7.9 | MUST | Accept entries without facts that start with the separating space |  |  |
-| R3659_7_2_SameNameSeveralTypes | RFC 3659 7.2, 7.5.1.6 | MUST | Accept several entries for one path name, each with its own type fact |  |  |
+| R3659_7_2_MlstEntryLeadingSpace | RFC 3659 7.2 | MUST | Read each MLST entry line after its one leading space | parseMachineListReply reads the line that starts with a space | `MachineListReplyTests.EntryOfTheReply`, `MachineListReplyTests.ReplyWithoutAReadableEntry` |
+| R3659_7_2_FactsPathnameSeparator | RFC 3659 7.2 | MUST | Split an entry at its first space, facts before it and the path name after it | Listing parsers | `MachineListingTests.NameIsEverythingAfterTheFirstSpace` |
+| R3659_7_2_EmptyFactSet | RFC 3659 7.2, 7.9 | MUST | Accept entries without facts that start with the separating space | Listing parsers | `MachineListingTests.EntryWithoutFacts` |
+| R3659_7_2_SameNameSeveralTypes | RFC 3659 7.2, 7.5.1.6 | MUST | Accept several entries for one path name, each with its own type fact | The first entry of a name is kept and the others counted, an entry of the file explorer has one type | `ListingParserTests.RepeatedNamesKeepTheFirst` |
 | R3659_7_2_NoFormatVariation | RFC 3659 7.1, 7.2 | MUST NOT | Expect no headers, titles, blank lines, tabs or padding spaces in MLSx output |  |  |
 | R3659_7_2_MlsdKeepsType | RFC 3659 7.2 | MUST | Keep the current TYPE across MLSD, its data connection always acts as TYPE L 8, MODE S, STRU F |  |  |
-| R3659_7_2_LongLines | RFC 3659 7.2 | SHOULD | Accept MLSD lines of any length |  |  |
-| R3659_7_2_FactsVaryPerEntry | RFC 3659 7.2 | MAY | Accept a different set and order of facts on each entry |  |  |
+| R3659_7_2_LongLines | RFC 3659 7.2 | SHOULD | Accept MLSD lines of any length | Deviation: lines past 64 KiB are skipped and counted and names past 1024 bytes refused, so a server cannot exhaust memory | `ListingParserTests.LongLinesAreSkipped`, `ListingParserTests.LongestLineIsRead` |
+| R3659_7_2_FactsVaryPerEntry | RFC 3659 7.2 | MAY | Accept a different set and order of facts on each entry | Listing parsers | `ListingSampleTests.ProftpdMachineListing`, `ListingSampleTests.PureFtpdMachineListing` |
 | R3659_7_3_EightBitClean | RFC 3659 7, 7.3 | MUST | Send and receive all 256 octet values on the control connection | Replies keep every byte, arguments refuse CR, LF and NUL (R959_5_3_NoLineEndsInArguments) | `ReplyFramerTests.NulAndInvalidUtf8AreKeptAndShownEscaped` |
-| R3659_7_3_1_MlstReturnedName | RFC 3659 7.3.1 | MAY | Accept an MLST entry named differently from the request, a full TVFS path or an empty name |  |  |
-| R3659_7_3_1_MlsdUnqualifiedNames | RFC 3659 7.3.1 | SHOULD | Read MLSD names as names inside the listed directory |  |  |
-| R3659_7_4_FactSyntax | RFC 3659 7.4 | MUST | Split facts at each ";" and every fact at its first "=" |  |  |
-| R3659_7_5_FactNamesAnyCase | RFC 3659 7.5, 7.7.8 | MUST | Compare fact names without regard to case |  |  |
-| R3659_7_5_1_TypeValuesAnyCase | RFC 3659 7.5.1, 7.5.1.5 | MUST | Compare type values, OS.name=kind included, without regard to case |  |  |
-| R3659_7_5_1_4_PdirOptional | RFC 3659 7.5.1.4 | SHOULD | Do not rely on pdir entries, a listing may hold none or several |  |  |
-| R3659_7_5_1_5_UnknownOsTypes | RFC 3659 7.5.1.5 | MAY | Accept OS.name=kind types the client does not know |  |  |
+| R3659_7_3_1_MlstReturnedName | RFC 3659 7.3.1 | MAY | Accept an MLST entry named differently from the request, a full TVFS path or an empty name | parseMachineListReply keeps the name as sent | `MachineListReplyTests.EntryOfTheReply`, `MachineListReplyTests.CurrentDirectoryIsADirectory`, `MachineListReplyTests.NameMayBeEmpty` |
+| R3659_7_3_1_MlsdUnqualifiedNames | RFC 3659 7.3.1 | SHOULD | Read MLSD names as names inside the listed directory | A name with "/" is refused as no child of the listed directory | `ListingParserTests.NamesThatNameNoChildAreRefused` |
+| R3659_7_4_FactSyntax | RFC 3659 7.4 | MUST | Split facts at each ";" and every fact at its first "=" | Listing parsers | `MachineListingTests.LinesAgainstTheGrammarAreUnreadable`, `MachineListingTests.SymlinksAndDevices` |
+| R3659_7_5_FactNamesAnyCase | RFC 3659 7.5, 7.7.8 | MUST | Compare fact names without regard to case | Listing parsers | `MachineListingTests.FactNamesAndTypesInAnyCase`, `MachineListingTests.LinesAgainstTheGrammarAreUnreadable` |
+| R3659_7_5_1_TypeValuesAnyCase | RFC 3659 7.5.1, 7.5.1.5 | MUST | Compare type values, OS.name=kind included, without regard to case | Listing parsers | `MachineListingTests.FactNamesAndTypesInAnyCase` |
+| R3659_7_5_1_4_PdirOptional | RFC 3659 7.5.1.4 | SHOULD | Do not rely on pdir entries, a listing may hold none or several | pdir entries are skipped, none is needed | `MachineListingTests.CurrentAndParentDirectoriesAreNoChildren`, `ListingSampleTests.PyftpdlibMachineListing` |
+| R3659_7_5_1_5_UnknownOsTypes | RFC 3659 7.5.1.5 | MAY | Accept OS.name=kind types the client does not know | They stay of unknown type | `MachineListingTests.UnknownTypesAndFactsAreIgnored` |
 | R3659_7_5_1_5_SharedUniqueTransfer | RFC 3659 7.5.1.5 | MAY | Transfer a file listed under several names with one unique value only once |  |  |
-| R3659_7_5_2_UniqueOpaque | RFC 3659 7.5.2 | SHOULD | Compare unique values as opaque, case-sensitive strings |  |  |
+| R3659_7_5_2_UniqueOpaque | RFC 3659 7.5.2 | SHOULD | Compare unique values as opaque, case-sensitive strings | ListingEntry::unique keeps the value as sent | `MachineListingTests.UniqueKeepsItsCase` |
 | R3659_7_5_2_UniqueEqualityOnly | RFC 3659 7.5.2 | SHOULD | Conclude from equal unique values only that names share one object |  |  |
 | R3659_7_5_2_UniqueWithinConnection | RFC 3659 7.5.2 | SHOULD | Compare unique values only within one control connection |  |  |
 | R3659_7_5_3_ModifyChangeNotProof | RFC 3659 7.5.3 | SHOULD NOT | Do not take a changed modify value as proof that the content changed |  |  |
@@ -275,8 +275,8 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_7_5_5_PermIsAHint | RFC 3659 7.5.5 | MUST NOT | Never take a perm letter as a guarantee that the command will succeed |  |  |
 | R3659_7_5_7_SizeFactApproximate | RFC 3659 7.5.7 | MUST | Treat the size fact as approximate, it may change before the RETR |  |  |
 | R3659_7_5_7_SizeForAccuracy | RFC 3659 7.5.7 | SHOULD | Use SIZE for an exact size and the size fact for display |  |  |
-| R3659_7_5_10_AnyFactMayBeMissing | RFC 3659 7.5.10, 7.8 | MAY | Cope with MLSx output that lacks any fact, the type fact included |  |  |
-| R3659_7_6_2_UnknownLocalFacts | RFC 3659 7.6, 7.6.2 | SHOULD NOT | Make no use of X. or OS-specific facts without knowing their meaning |  |  |
+| R3659_7_5_10_AnyFactMayBeMissing | RFC 3659 7.5.10, 7.8 | MAY | Cope with MLSx output that lacks any fact, the type fact included | A missing fact leaves its field unknown | `MachineListingTests.MissingFactsStayUnknown`, `MachineListingTests.EntryWithoutFacts` |
+| R3659_7_6_2_UnknownLocalFacts | RFC 3659 7.6, 7.6.2 | SHOULD NOT | Make no use of X. or OS-specific facts without knowing their meaning | Only type, size, sizd, modify, unique and the UNIX mode, owner and group facts are read | `MachineListingTests.UnknownTypesAndFactsAreIgnored` |
 | R3659_7_7_8_CaseDependentSelection | RFC 3659 7.7.8 | MUST | Keep names that differ only in case apart when choosing files |  |  |
 | R3659_7_8_FeatMlst | RFC 3659 7.8 | MUST | Learn MLST and MLSD support from the MLST FEAT line, there is no MLSD line |  |  |
 | R3659_7_8_FeatFactList | RFC 3659 7.8 | MUST | Read the facts of the MLST feature line, a "*" marking those sent by default | Features::machineListFact | `FeaturesTests.ProftpdFeatures`, `FeaturesTests.FactsOfMachineListingAreOfferedOrEnabled`, `FeaturesTests.NoMachineListingHasNoFacts` |
@@ -291,8 +291,8 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_11_NoMlsxBeforeLogin | RFC 3659 11 | MUST NOT | Send no MLST or MLSD before login |  |  |
 | R3659_MdtmTimeVal | RFC 3659 2.3, 3.1 | MUST | Read time-val as UTC with optional fractions | parseTimeVal, parseModificationTimeReply | `ReplyParserTests.TimeVal`, `ReplyParserTests.TimeValWithFractions`, `ReplyParserTests.TimeValOutOfRangeIsUnreadable`, `ReplyParserTests.ModificationTimeReply` |
 | R3659_RestStream | RFC 3659 5.1, 5.3 | MUST | Use REST STREAM semantics and placement | Transfer flow |  |
-| R3659_MlstGrammar | RFC 3659 7.2, 7.4 | MUST | Read MLST and MLSD entries by the grammar and their facts | Listing parsers |  |
-| R3659_CdirPdir | RFC 3659 7.5.1.2, 7.5.1.4 | SHOULD | Do not list cdir and pdir entries as children | Listing parsers |  |
+| R3659_MlstGrammar | RFC 3659 7.2, 7.4 | MUST | Read MLST and MLSD entries by the grammar and their facts | Listing parsers | `MachineListingTests.FactsAndName`, `MachineListingTests.LinesAgainstTheGrammarAreUnreadable`, `MachineListReplyTests.EntryOfTheReply` |
+| R3659_CdirPdir | RFC 3659 7.5.1.2, 7.5.1.4 | SHOULD | Do not list cdir and pdir entries as children | Listing parsers | `MachineListingTests.CurrentAndParentDirectoriesAreNoChildren` |
 | R3659_TvfsPaths | RFC 3659 | SHOULD | Use slash separated paths when TVFS is offered | Metadata operations |  |
 | R3659_MlstErrors | RFC 3659 7.2.1 | SHOULD | Map the error replies of MLST and MLSD | Reply mapping |  |
 | R4217_1_SslAllowed | RFC 4217 1 | MAY | Negotiate SSL instead of TLS when so configured | Not applicable: TLS 1.2 is the minimum, SSL is never negotiated |  |
