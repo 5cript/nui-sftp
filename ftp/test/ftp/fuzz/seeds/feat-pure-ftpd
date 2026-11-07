@@ -1,0 +1,8 @@
+211-Extensions supported:
+ UTF8
+ MLST type*;size*;sizd*;modify*;UNIX.mode*;UNIX.uid*;UNIX.gid*;unique*;
+ MLSD
+ AUTH TLS
+ PBSZ
+ EPSV
+211 End.

@@ -1,5 +1,11 @@
 #include <utility/process_temporary_directory.hpp>
+#include "test_command.hpp"
+#include "test_features.hpp"
+#include "test_printable.hpp"
 #include "test_reply_code.hpp"
+#include "test_reply_error.hpp"
+#include "test_reply_framer.hpp"
+#include "test_reply_parsers.hpp"
 #include "test_scripted_ftp_server.hpp"
 #include "test_server_profiles.hpp"
 #include "test_server_smoke.hpp"
@@ -19,5 +25,6 @@ int main(int argc, char** argv)
     temporaryRoot = processTemporary.path();
 
     ::testing::InitGoogleTest(&argc, argv);
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     return RUN_ALL_TESTS();
 }

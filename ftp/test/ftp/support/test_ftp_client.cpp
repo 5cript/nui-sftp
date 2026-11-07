@@ -108,7 +108,8 @@ namespace FileTransferProtocol::Test
                 return std::unexpected("Not connected");
 
             Reply reply{};
-            for (;;)
+            bool complete = false;
+            while (!complete)
             {
                 const auto line = readLine();
                 if (!line)
@@ -118,17 +119,17 @@ namespace FileTransferProtocol::Test
                 reply.text += *line;
                 if (reply.code == 0)
                 {
-                    const auto parsed =
-                        std::from_chars(line->data(), line->data() + std::min<std::size_t>(line->size(), 3u), reply.code);
+                    const auto parsed = std::from_chars(
+                        line->data(), line->data() + std::min<std::size_t>(line->size(), 3u), reply.code
+                    );
                     if (parsed.ec != std::errc{} || line->size() < 3u)
                         return std::unexpected(fmt::format("Not a reply: '{}'", *line));
-                    if (line->size() == 3u || (*line)[3] != '-')
-                        return reply;
-                    continue;
+                    complete = line->size() == 3u || (*line)[3] != '-';
                 }
-                if (line->size() >= 4u && line->starts_with(fmt::format("{} ", reply.code)))
-                    return reply;
+                else
+                    complete = line->size() >= 4u && line->starts_with(fmt::format("{} ", reply.code));
             }
+            return reply;
         }
 
         std::expected<void, std::string> openData(std::string const& host, std::uint16_t port, bool secured)
@@ -158,9 +159,10 @@ namespace FileTransferProtocol::Test
                 return std::unexpected("No data connection");
             std::string received{};
             std::array<char, 16u * 1024u> chunk{};
-            for (;;)
+            error_code error{};
+            while (!error)
             {
-                const auto [error, size] = complete(
+                const auto [readError, size] = complete(
                     [&](auto handler)
                     {
                         if (data_->tls)
@@ -170,11 +172,11 @@ namespace FileTransferProtocol::Test
                     }
                 );
                 received.append(chunk.data(), size);
-                if (error == asio::error::eof)
-                    return received;
-                if (error)
-                    return std::unexpected(fmt::format("Reading data: {}", error.message()));
+                error = readError;
             }
+            if (error != asio::error::eof)
+                return std::unexpected(fmt::format("Reading data: {}", error.message()));
+            return received;
         }
 
         std::expected<void, std::string> writeData(std::string_view bytes)
@@ -313,14 +315,9 @@ namespace FileTransferProtocol::Test
 
         std::expected<std::string, std::string> readLine()
         {
-            for (;;)
+            auto end = received_.find("\r\n");
+            while (end == std::string::npos)
             {
-                if (const auto end = received_.find("\r\n"); end != std::string::npos)
-                {
-                    auto line = received_.substr(0u, end);
-                    received_.erase(0u, end + 2u);
-                    return line;
-                }
                 std::array<char, 4096u> chunk{};
                 const auto [error, size] = complete(
                     [&](auto handler)
@@ -334,7 +331,11 @@ namespace FileTransferProtocol::Test
                 received_.append(chunk.data(), size);
                 if (error)
                     return std::unexpected(fmt::format("Reading a reply: {}", error.message()));
+                end = received_.find("\r\n");
             }
+            auto line = received_.substr(0u, end);
+            received_.erase(0u, end + 2u);
+            return line;
         }
 
       private:
@@ -376,8 +377,7 @@ namespace FileTransferProtocol::Test
             }
         );
     }
-    std::expected<void, std::string>
-    TestFtpClient::openData(std::string const& host, std::uint16_t port, bool secured)
+    std::expected<void, std::string> TestFtpClient::openData(std::string const& host, std::uint16_t port, bool secured)
     {
         return impl_->openData(host, port, secured);
     }
