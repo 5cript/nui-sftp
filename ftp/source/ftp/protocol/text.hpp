@@ -42,4 +42,12 @@ namespace FileTransferProtocol::Detail
         const auto found = std::ranges::search(text, phrase, sameCharacterIgnoringCase);
         return !found.empty();
     }
+
+    /**
+     * @brief @p text ends with @p phrase, ASCII letters compared in any case.
+     */
+    inline bool endsWithIgnoringCase(std::string_view text, std::string_view phrase)
+    {
+        return text.size() >= phrase.size() && equalIgnoringCase(text.substr(text.size() - phrase.size()), phrase);
+    }
 }

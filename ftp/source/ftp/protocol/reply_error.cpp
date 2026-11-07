@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <initializer_list>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -31,27 +32,73 @@ namespace FileTransferProtocol
             );
         }
 
-        bool mentionsConnectionLimit(std::string_view text)
+        bool mentionsTooMany(std::string_view text)
         {
             return mentionsAny(text, {"too many", "no more connections", "maximum number of"});
         }
 
         /**
-         * @brief The kind an errno text names, as proftpd and pure-ftpd send them.
+         * @brief A ban after failed logins, such as "Too many failed login attempts".
+         */
+        bool mentionsLoginBan(std::string_view text)
+        {
+            return mentionsTooMany(text) && mentionsAny(text, {"fail", "attempt", "incorrect", "invalid"});
+        }
+
+        bool mentionsConnectionLimit(std::string_view text)
+        {
+            return mentionsTooMany(text) && !mentionsLoginBan(text);
+        }
+
+        /**
+         * @brief A line of @p text ends with one of @p phrases in any case, before closing punctuation. Servers put an
+         *        errno text after the path they echo, so the words of a path decide nothing.
+         */
+        bool aLineEndsWithAny(std::string_view text, std::initializer_list<std::string_view> phrases)
+        {
+            return std::ranges::any_of(
+                std::views::split(text, '\n'),
+                [phrases](auto const& range)
+                {
+                    const std::string_view line{range.begin(), range.end()};
+                    const auto end = line.find_last_not_of(" .!;");
+                    const auto body = end == std::string_view::npos ? std::string_view{} : line.substr(0u, end + 1u);
+                    return std::ranges::any_of(
+                        phrases,
+                        [body](std::string_view phrase)
+                        {
+                            return Detail::endsWithIgnoringCase(body, phrase);
+                        }
+                    );
+                }
+            );
+        }
+
+        /**
+         * @brief The kind an errno text or a fixed text names, as proftpd, pure-ftpd, IIS and FileZilla Server send
+         *        them.
          */
         std::optional<RemoteErrorKind> kindNamedBy(std::string_view text)
         {
-            if (mentionsAny(
-                    text, {"no such file", "no such directory", "not found", "does not exist", "doesn't exist"}
+            if (aLineEndsWithAny(
+                    text,
+                    {"no such file or directory",
+                        "no such file",
+                        "no such directory",
+                        "not found",
+                        "does not exist",
+                        "doesn't exist",
+                        "cannot find the file specified",
+                        "cannot find the path specified"}
                 ))
                 return RemoteErrorKind::NoSuchFile;
-            if (mentionsAny(text, {"permission denied", "access denied", "access is denied", "not permitted"}))
+            if (aLineEndsWithAny(text, {"permission denied", "access denied", "access is denied", "not permitted"}))
                 return RemoteErrorKind::PermissionDenied;
-            if (mentionsAny(text, {"file exists", "already exists"}))
+            if (aLineEndsWithAny(text, {"file exists", "already exists"}))
                 return RemoteErrorKind::AlreadyExists;
-            if (mentionsAny(text, {"no space left"}))
+            if (aLineEndsWithAny(text, {"no space left on device"}))
                 return RemoteErrorKind::NoSpace;
-            if (mentionsAny(text, {"quota"}))
+            if (aLineEndsWithAny(text, {"quota exceeded"}))
                 return RemoteErrorKind::QuotaExceeded;
             return std::nullopt;
         }
@@ -61,6 +108,8 @@ namespace FileTransferProtocol
             switch (code)
             {
                 case 421:
+                    if (mentionsLoginBan(text))
+                        return RemoteErrorKind::AuthenticationFailed;
                     if (mentionsConnectionLimit(text))
                         return RemoteErrorKind::ConnectionLimit;
                     return verb ? RemoteErrorKind::ConnectionLost : RemoteErrorKind::NoConnection;
@@ -79,6 +128,8 @@ namespace FileTransferProtocol
                     return RemoteErrorKind::Unsupported;
                 case 450:
                 case 451:
+                // RFC 959 Appendix II for MKD of an existing directory, RFC 4217 for a data connection PROT refuses.
+                case 521:
                 case 550:
                     return kindNamedBy(text).value_or(RemoteErrorKind::Failure);
                 case 452:

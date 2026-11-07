@@ -98,6 +98,40 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(kindOf(553, "Could not create file."), RemoteErrorKind::PermissionDenied);
     }
 
+    TEST(ReplyErrorTests, WordsOfAnEchoedPathDecideNothing)
+    {
+        EXPECT_EQ(kindOf(550, "no such file.txt: Permission denied", Verb::Delete), RemoteErrorKind::PermissionDenied);
+        EXPECT_EQ(kindOf(550, "Not Found Archive: Permission denied", Verb::Delete), RemoteErrorKind::PermissionDenied);
+        EXPECT_EQ(kindOf(550, "quota: Is a directory", Verb::Delete), RemoteErrorKind::Failure);
+        EXPECT_EQ(
+            kindOf(550, "already exists: No such file or directory", Verb::Retrieve), RemoteErrorKind::NoSuchFile
+        );
+    }
+
+    TEST(ReplyErrorTests, TextsOfWindowsServers)
+    {
+        EXPECT_EQ(kindOf(550, "The system cannot find the file specified. "), RemoteErrorKind::NoSuchFile);
+        EXPECT_EQ(kindOf(550, "The system cannot find the path specified.", Verb::List), RemoteErrorKind::NoSuchFile);
+        EXPECT_EQ(
+            kindOf(550, "Cannot create a file when that file already exists.", Verb::MakeDirectory),
+            RemoteErrorKind::AlreadyExists
+        );
+        EXPECT_EQ(kindOf(550, "Directory not found.", Verb::ChangeWorkingDirectory), RemoteErrorKind::NoSuchFile);
+    }
+
+    TEST(ReplyErrorTests, ExistingDirectoryOfRfc959AppendixII)
+    {
+        const Reply reply{
+            .code = 521,
+            .lines = {"521-\"/usr/dm/pathname\" directory already exists;", "521 taking no action."},
+        };
+        EXPECT_EQ(replyError(reply, Verb::MakeDirectory).kind, RemoteErrorKind::AlreadyExists);
+        EXPECT_EQ(
+            kindOf(521, "Data connection cannot be opened with this PROT setting.", Verb::Retrieve),
+            RemoteErrorKind::Failure
+        );
+    }
+
     TEST(ReplyErrorTests, TextsAreReadInAnyCase)
     {
         EXPECT_EQ(kindOf(550, "FILE NOT FOUND"), RemoteErrorKind::NoSuchFile);
@@ -134,6 +168,19 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(kindOf(530, "Login incorrect.", Verb::Password), RemoteErrorKind::AuthenticationFailed);
     }
 
+    TEST(ReplyErrorTests, BansAfterFailedLoginsAreFailedAuthentication)
+    {
+        EXPECT_EQ(
+            kindOf(421, "Temporarily banned for too many failed login attempts", Verb::Password),
+            RemoteErrorKind::AuthenticationFailed
+        );
+        EXPECT_EQ(kindOf(421, "Too many authentication failures", std::nullopt), RemoteErrorKind::AuthenticationFailed);
+        EXPECT_EQ(
+            kindOf(530, "Maximum number of login attempts exceeded", Verb::Password),
+            RemoteErrorKind::AuthenticationFailed
+        );
+    }
+
     TEST(ReplyErrorTests, RefusedGreetingIsNoConnection)
     {
         EXPECT_EQ(kindOf(421, "Service not available", std::nullopt), RemoteErrorKind::NoConnection);
@@ -143,6 +190,10 @@ namespace FileTransferProtocol::Test
     TEST(ReplyErrorTests, IdleTimeoutIsALostConnection)
     {
         EXPECT_EQ(kindOf(421, "Timeout.", Verb::Noop), RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(
+            kindOf(421, "Login timeout (300 seconds): closing control connection", Verb::User),
+            RemoteErrorKind::ConnectionLost
+        );
     }
 
     TEST(ReplyErrorTests, FatalErrorsOfVsftpdAreFailures)
