@@ -167,7 +167,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2428_4_NewSessionAfterEpsvAll | RFC 2428 4 | MUST | Start a new session for a three-way transfer after EPSV ALL | Not applicable: the client never sends EPSV ALL |  |
 | R2428_4_EpsvAll | RFC 2428 4 | SHOULD | Send EPSV ALL as soon as possible when only two-way transfers follow | Deviation: never sent, it would rule out the PASV fallback for the rest of the session | `CommandTests.ExtendedPassiveTakesNoArgument` |
 | R2428_4_UseEpsv | RFC 2428 4 | MUST | Use EPSV for transfers between the two hosts, over IPv4 and IPv6 | DataConnection setup tries EPSV first, PASV only as a fallback on IPv4 |  |
-| R2428_EpsvFormat | RFC 2428 2, 3 | MUST | Read the 229 format with any delimiter | parseExtendedPassiveReply | `ReplyParserTests.ExtendedPassiveReply`, `ReplyParserTests.ExtendedPassiveReplyThatNamesNoPortBreaksTheProtocol` |
+| R2428_EpsvFormat | RFC 2428 2, 3 | MUST | Read the 229 format with any delimiter | parseExtendedPassiveReply | `ReplyParserTests.ExtendedPassiveReply`, `ReplyParserTests.ExtendedPassiveReplyScansPastOtherParentheses`, `ReplyParserTests.ExtendedPassiveReplyThatNamesNoPortBreaksTheProtocol` |
 | R2428_522Handling | RFC 2428 2, 3 | MUST | Fall back to the protocols a 522 names, for EPRT | Not applicable: neither EPRT nor EPSV with an argument is sent |  |
 | R2577_4_VerifyDataPeer | RFC 2577 4 | SHOULD | Check that a data connection accepted on a listening port comes from the expected server | Not applicable: active mode comes later |  |
 | R2577_5_FailedPassDelay | RFC 2577 5 | SHOULD | Allow several seconds for the reply to a wrong PASS |  |  |

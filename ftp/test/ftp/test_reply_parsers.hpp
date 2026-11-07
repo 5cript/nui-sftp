@@ -197,6 +197,12 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(endpoint);
         EXPECT_EQ(endpoint->address, (std::array<std::uint8_t, 4>{192, 168, 1, 2}));
         EXPECT_EQ(endpoint->port, 195 * 256 + 80);
+
+        const auto pastLongNumber =
+            parsePassiveReply(replyOf(227, "Session 12345678901234 Entering Passive Mode (10,0,0,1,4,5)"));
+        ASSERT_TRUE(pastLongNumber);
+        EXPECT_EQ(pastLongNumber->address, (std::array<std::uint8_t, 4>{10, 0, 0, 1}));
+        EXPECT_EQ(pastLongNumber->port, 4 * 256 + 5);
     }
 
     TEST(ReplyParserTests, PassiveReplyOnAnyLineOfAMultiLineReply)
@@ -242,6 +248,12 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(parseExtendedPassiveReply(replyOf(229, "(!!!1!)")), 1);
         EXPECT_EQ(parseExtendedPassiveReply(replyOf(229, "(~~~65535~)")), 65535);
         EXPECT_EQ(parseExtendedPassiveReply(replyOf(229, "Mode (|||6446|")), 6446);
+    }
+
+    TEST(ReplyParserTests, ExtendedPassiveReplyScansPastOtherParentheses)
+    {
+        EXPECT_EQ(parseExtendedPassiveReply(replyOf(229, "Entering Extended Passive Mode (EPSV) (|||6446|)")), 6446);
+        EXPECT_EQ(parseExtendedPassiveReply(replyOf(229, "Mode (|1|) ( (|||6447|)")), 6447);
     }
 
     TEST(ReplyParserTests, ExtendedPassiveReplyThatNamesNoPortBreaksTheProtocol)

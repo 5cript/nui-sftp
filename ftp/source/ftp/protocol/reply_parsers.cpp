@@ -42,8 +42,8 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The six numbers of a 227 reply that start at @p position: nothing when fewer follow there, an error
-         *        when they are no host and port.
+         * @brief The six numbers of a 227 reply that start at @p position: nothing when fewer follow there or one is
+         *        too long for a number, an error when they are no host and port.
          */
         std::optional<std::expected<PassiveEndpoint, RemoteIo::RemoteError>>
         passiveEndpointAt(std::string_view text, std::size_t& position, int code)
@@ -56,7 +56,7 @@ namespace FileTransferProtocol
             {
                 const auto number = numberAt<unsigned>(text, position);
                 if (!number)
-                    return std::unexpected(protocolViolation("A number of the passive reply is too large", code));
+                    return std::nullopt;
                 numbers[count++] = *number;
                 numberFollows = position + 1u < text.size() && text[position] == ',' && isDigit(text[position + 1u]);
                 if (numberFollows)
@@ -85,25 +85,19 @@ namespace FileTransferProtocol
             };
         }
 
+        /**
+         * @brief The port of the "|||port|" that starts @p fields: nothing when they do not start with three equal
+         *        delimiters, an error when the port that follows is missing or invalid.
+         */
         std::optional<std::expected<std::uint16_t, RemoteIo::RemoteError>>
-        extendedPassivePortIn(std::string_view text, int code)
+        extendedPassivePortAt(std::string_view fields, int code)
         {
-            const auto open = text.find('(');
-            if (open == std::string_view::npos)
+            if (fields.size() < 3u)
                 return std::nullopt;
-            const auto fields = text.substr(open + 1u);
-            if (fields.empty())
-                return std::unexpected(
-                    protocolViolation("The extended passive reply ends after its parenthesis", code)
-                );
-
             const auto delimiter = fields.front();
-            if (delimiter < 33 || delimiter > 126 || isDigit(delimiter))
-                return std::unexpected(protocolViolation("The extended passive reply has no valid delimiter", code));
-            if (fields.size() < 3u || fields[1] != delimiter || fields[2] != delimiter)
-                return std::unexpected(
-                    protocolViolation("The extended passive reply does not start with three delimiters", code)
-                );
+            if (delimiter < 33 || delimiter > 126 || isDigit(delimiter) || fields[1] != delimiter ||
+                fields[2] != delimiter)
+                return std::nullopt;
 
             std::size_t position = 3u;
             const auto port = numberAt<std::uint32_t>(fields, position);
@@ -116,6 +110,23 @@ namespace FileTransferProtocol
                     protocolViolation(fmt::format("The extended passive port {} is invalid", *port), code)
                 );
             return static_cast<std::uint16_t>(*port);
+        }
+
+        /**
+         * @brief The port of the first parenthesis in @p text that opens three equal delimiters, see
+         *        extendedPassivePortAt.
+         */
+        std::optional<std::expected<std::uint16_t, RemoteIo::RemoteError>>
+        extendedPassivePortIn(std::string_view text, int code)
+        {
+            std::optional<std::expected<std::uint16_t, RemoteIo::RemoteError>> port{};
+            auto open = text.find('(');
+            while (!port && open != std::string_view::npos)
+            {
+                port = extendedPassivePortAt(text.substr(open + 1u), code);
+                open = text.find('(', open + 1u);
+            }
+            return port;
         }
     }
 
