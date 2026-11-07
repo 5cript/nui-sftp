@@ -5,6 +5,7 @@
 #include <boost/mp11/algorithm.hpp>
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -21,7 +22,10 @@ namespace FileTransferProtocol::Test
             boost::mp11::mp_for_each<boost::describe::describe_enumerators<Verb>>(
                 [&names](auto enumerator)
                 {
-                    names.insert(wireName(enumerator.value));
+                    const auto name = wireName(enumerator.value);
+                    EXPECT_TRUE(name) << enumerator.name;
+                    if (name)
+                        names.insert(*name);
                 }
             );
             return names;
@@ -99,12 +103,39 @@ namespace FileTransferProtocol::Test
             EXPECT_FALSE(names.contains(forbidden)) << forbidden;
     }
 
-    TEST(CommandTests, LogStringHidesPasswordAndAccount)
+    TEST(CommandTests, WireNamesBelongToTheirVerbs)
     {
-        EXPECT_EQ((Command{.verb = Verb::Password, .argument = "secret"}.toLogString()), "PASS ****");
-        EXPECT_EQ((Command{.verb = Verb::Account, .argument = "billing"}.toLogString()), "ACCT ****");
-        EXPECT_EQ((Command{.verb = Verb::User, .argument = "alice"}.toLogString()), "USER alice");
+        EXPECT_EQ(wireName(Verb::User), "USER");
+        EXPECT_EQ(wireName(Verb::Retrieve), "RETR");
+        EXPECT_EQ(wireName(Verb::MachineListDirectory), "MLSD");
+        EXPECT_EQ(wireName(Verb::Quit), "QUIT");
+    }
+
+    TEST(CommandTests, ValueThatIsNoVerbHasNoWireName)
+    {
+        EXPECT_EQ(wireName(static_cast<Verb>(999)), std::nullopt);
+        EXPECT_EQ(wireName(static_cast<Verb>(-1)), std::nullopt);
+    }
+
+    TEST(CommandTests, LogStringIsTheVerbAlone)
+    {
+        EXPECT_EQ((Command{.verb = Verb::Password, .argument = "secret"}.toLogString()), "PASS");
+        EXPECT_EQ((Command{.verb = Verb::Account, .argument = "billing"}.toLogString()), "ACCT");
+        EXPECT_EQ((Command{.verb = Verb::User, .argument = "alice"}.toLogString()), "USER");
+        EXPECT_EQ((Command{.verb = Verb::Retrieve, .argument = "/home/alice/private.txt"}.toLogString()), "RETR");
         EXPECT_EQ((Command{.verb = Verb::Noop}.toLogString()), "NOOP");
-        EXPECT_EQ((Command{.verb = Verb::Delete, .argument = "a\rb"}.toLogString()), "DELE a\\x0Db");
+        EXPECT_EQ((Command{.verb = static_cast<Verb>(999)}.toLogString()), "unknown verb 999");
+    }
+
+    TEST(CommandDeathTests, EncodingAValueThatIsNoVerbIsACodingError)
+    {
+        // A release build has no assert and refuses to send.
+        EXPECT_DEBUG_DEATH(
+            {
+                const auto refused = encoded(static_cast<Verb>(999), "x");
+                EXPECT_FALSE(refused);
+            },
+            "no Verb"
+        );
     }
 }

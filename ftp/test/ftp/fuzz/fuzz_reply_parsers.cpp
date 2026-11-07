@@ -46,7 +46,9 @@ namespace
         check(encoded->find_first_of(std::string_view{"\r\n\0", 3u}) == encoded->size() - 2u);
         if (bytes.empty())
             return;
-        const auto prefix = wireName(verb).size() + 1u;
+        const auto name = wireName(verb);
+        check(name.has_value());
+        const auto prefix = name->size() + 1u;
         const auto sent = std::string_view{*encoded}.substr(prefix, encoded->size() - prefix - 2u);
         std::string argument{};
         for (std::size_t position = 0u; position < sent.size(); ++position)

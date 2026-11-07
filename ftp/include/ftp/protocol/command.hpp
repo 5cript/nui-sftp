@@ -4,6 +4,7 @@
 #include <utility/describe.hpp>
 
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -92,8 +93,10 @@ namespace FileTransferProtocol
 
     /**
      * @brief The three or four letters of @p verb on the wire, "RETR" for Verb::Retrieve.
+     *
+     * @return Nothing for a value that is no Verb.
      */
-    std::string_view wireName(Verb verb);
+    std::optional<std::string_view> wireName(Verb verb);
 
     struct Command
     {
@@ -106,12 +109,13 @@ namespace FileTransferProtocol
          *        the argument is doubled, Telnet's IAC IAC.
          *
          * @return InvalidPath when the argument holds a CR, an LF or a NUL, or when EPSV has an argument (EPSV ALL
-         *         would forbid PASV for the rest of the session). Nothing may be sent then.
+         *         would forbid PASV for the rest of the session). Nothing may be sent then. A verb that is no Verb is a
+         *         coding error: it asserts, and fails without an assert in a release build.
          */
         std::expected<std::string, RemoteIo::RemoteError> encode() const;
 
         /**
-         * @brief The command for logs and transcripts, with the argument of PASS and ACCT hidden.
+         * @brief The command for logs and transcripts: the verb alone, arguments can hold passwords and private paths.
          */
         std::string toLogString() const;
     };

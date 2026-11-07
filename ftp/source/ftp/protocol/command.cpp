@@ -1,9 +1,13 @@
 #include <ftp/protocol/command.hpp>
-#include <ftp/protocol/protocol_error.hpp>
 
+#include <boost/mp11/algorithm.hpp>
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <array>
+#include <cassert>
+#include <cstddef>
+#include <ranges>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -47,41 +51,64 @@ namespace FileTransferProtocol
             std::pair{Verb::Noop, std::string_view{"NOOP"}},
             std::pair{Verb::Quit, std::string_view{"QUIT"}},
         };
+        static_assert(wireNames.size() == boost::mp11::mp_size<boost::describe::describe_enumerators<Verb>>::value);
+        // Looked up by the value of a Verb, so every entry sits at the index of its verb.
+        static_assert(std::ranges::all_of(
+            std::views::iota(std::size_t{0u}, wireNames.size()),
+            [](std::size_t index)
+            {
+                return wireNames[index].first == static_cast<Verb>(index);
+            }
+        ));
 
         constexpr char interpretAsCommand = '\xFF';
 
-        RemoteIo::RemoteError refused(Verb verb, std::string_view reason)
+        RemoteIo::RemoteError refused(std::string_view name, std::string_view reason)
         {
             return RemoteIo::RemoteError{
                 .kind = RemoteIo::RemoteErrorKind::Failure,
                 .protocol = RemoteIo::Protocol::Ftp,
-                .message = fmt::format("{} was not sent, {}", wireName(verb), reason),
+                .message = fmt::format("{} was not sent, {}", name, reason),
                 .wrapperError = RemoteIo::WrapperErrors::InvalidPath,
             };
         }
+
+        std::string unknownVerb(Verb verb)
+        {
+            return fmt::format("unknown verb {}", static_cast<int>(verb));
+        }
     }
 
-    std::string_view wireName(Verb verb)
+    std::optional<std::string_view> wireName(Verb verb)
     {
-        for (auto const& [candidate, name] : wireNames)
-        {
-            if (candidate == verb)
-                return name;
-        }
-        return "NOOP";
+        const auto index = static_cast<std::size_t>(verb);
+        if (index >= wireNames.size())
+            return std::nullopt;
+        return wireNames[index].second;
     }
 
     std::expected<std::string, RemoteIo::RemoteError> Command::encode() const
     {
-        if (argument.find_first_of(std::string_view{"\r\n\0", 3u}) != std::string::npos)
-            return std::unexpected(refused(verb, "its argument holds a line break or a NUL byte"));
-        if (verb == Verb::ExtendedPassive && !argument.empty())
-            return std::unexpected(refused(verb, "the client sends it without an argument"));
-
         const auto name = wireName(verb);
+        if (!name)
+        {
+            assert(false && "Command::encode() with a verb that is no Verb");
+            return std::unexpected(
+                RemoteIo::RemoteError{
+                    .kind = RemoteIo::RemoteErrorKind::Failure,
+                    .protocol = RemoteIo::Protocol::Ftp,
+                    .message = fmt::format("Nothing was sent, {}", unknownVerb(verb)),
+                }
+            );
+        }
+        if (argument.find_first_of(std::string_view{"\r\n\0", 3u}) != std::string::npos)
+            return std::unexpected(refused(*name, "its argument holds a line break or a NUL byte"));
+        if (verb == Verb::ExtendedPassive && !argument.empty())
+            return std::unexpected(refused(*name, "the client sends it without an argument"));
+
         std::string encoded{};
-        encoded.reserve(name.size() + argument.size() + 3u);
-        encoded += name;
+        encoded.reserve(name->size() + argument.size() + 3u);
+        encoded += *name;
         if (!argument.empty())
         {
             encoded += ' ';
@@ -99,10 +126,8 @@ namespace FileTransferProtocol
     std::string Command::toLogString() const
     {
         const auto name = wireName(verb);
-        if (argument.empty())
-            return std::string{name};
-        if (verb == Verb::Password || verb == Verb::Account)
-            return fmt::format("{} ****", name);
-        return fmt::format("{} {}", name, printable(argument));
+        if (!name)
+            return unknownVerb(verb);
+        return std::string{*name};
     }
 }

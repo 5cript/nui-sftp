@@ -108,7 +108,7 @@ namespace FileTransferProtocol
     RemoteIo::RemoteError replyError(Reply const& reply, std::optional<Verb> verb)
     {
         const auto replyClass = classifyReply(reply.code);
-        const auto answered = verb ? std::string{wireName(*verb)} : std::string{"the greeting"};
+        const auto answered = verb ? Command{.verb = *verb}.toLogString() : std::string{"the greeting"};
         const auto text = reply.text();
         if (replyClass != ReplyClass::TransientNegative && replyClass != ReplyClass::PermanentNegative)
             return protocolViolation(

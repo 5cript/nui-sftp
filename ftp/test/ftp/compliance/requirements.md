@@ -25,7 +25,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R959_4_1_1_UserPass | RFC 959 4.1.1 | MUST | Send USER, then PASS after 331, ACCT after 332 | Login flow |  |
 | R959_4_1_1_CwdCdup | RFC 959 4.1.1 | MUST | Change directories with CWD and CDUP and honour their replies | Metadata operations |  |
 | R959_4_1_1_Quit | RFC 959 2.3, 4.1.1 | SHOULD | End a session with QUIT and wait for 221 within a bound | ControlConnection close |  |
-| R959_4_1_1_HidePassword | RFC 959 4.1.1 | MUST | Mask the password in display and logs, the server cannot hide it | Command::toLogString() hides PASS and ACCT | `CommandTests.LogStringHidesPasswordAndAccount` |
+| R959_4_1_1_HidePassword | RFC 959 4.1.1 | MUST | Mask the password in display and logs, the server cannot hide it | Command::toLogString() logs the verb alone, never an argument | `CommandTests.LogStringIsTheVerbAlone` |
 | R959_4_1_1_AccountLater | RFC 959 4.1.1 | SHOULD | Answer a 332 to a command after login with ACCT, treat 532 as an account needed for that command |  |  |
 | R959_4_1_1_CwdCdupReplies | RFC 959 4.1.1, Appendix II | MUST | Accept the same replies for CDUP as for CWD, 200 and 250 alike as success |  |  |
 | R959_4_1_2_Pasv | RFC 959 4.1.2; RFC 2428 4 | MAY | Use PASV for a data connection when EPSV fails | DataConnection setup |  |
