@@ -106,7 +106,8 @@ namespace FileTransferProtocol
 
     void ReplyFramer::settle()
     {
-        if (!possibleEnd_)
+        // Bytes of a following line show that the possible end was text.
+        if (!possibleEnd_ || !line_.empty() || telnetState_ != TelnetState::Data)
             return;
         auto lastLine = std::move(*possibleEnd_);
         possibleEnd_.reset();

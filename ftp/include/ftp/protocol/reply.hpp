@@ -80,7 +80,8 @@ namespace FileTransferProtocol
         bool holdsPossibleEnd() const;
 
         /**
-         * @brief Ends the open reply on the line held as its possible end, when there is one.
+         * @brief Ends the open reply on the line held as its possible end, when there is one and no byte of a
+         *        following line arrived.
          */
         void settle();
 

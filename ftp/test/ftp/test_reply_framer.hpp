@@ -2,6 +2,7 @@
 
 #include <ftp/protocol/reply.hpp>
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -422,6 +423,25 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(reply);
         EXPECT_EQ(reply->code, 250);
         EXPECT_EQ(reply->lines, (std::vector<std::string>{"230-Welcome", "200 first", "250 second"}));
+    }
+
+    TEST(ReplyFramerTests, SettleWaitsForAFollowingLineThatStarted)
+    {
+        for (std::string_view started : {"more te", "\xFF", "\xFF\xFB"})
+        {
+            SCOPED_TRACE(started);
+            ReplyFramer framer{};
+            ASSERT_TRUE(framer.feed(fmt::format("230-Welcome\r\n200 users at most\r\n{}", started)));
+            framer.settle();
+            EXPECT_FALSE(framer.next());
+
+            ASSERT_TRUE(framer.feed("xt\r\n230 Logged in\r\n"));
+            const auto reply = framer.next();
+            ASSERT_TRUE(reply);
+            EXPECT_EQ(reply->code, 230);
+            EXPECT_FALSE(reply->endedOnOtherCode);
+            EXPECT_EQ(reply->lines.size(), 4u);
+        }
     }
 
     TEST(ReplyFramerTests, SettleWithoutAPossibleEndChangesNothing)
