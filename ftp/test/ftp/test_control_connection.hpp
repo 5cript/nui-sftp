@@ -998,4 +998,27 @@ namespace FileTransferProtocol::Test
                 });
         expectError(reply, RemoteErrorKind::TimedOut);
     }
+
+    TEST_F(ControlConnectionTests, LimitOnTheFinalReplyOutlastsALatePreliminaryReply)
+    {
+        // The data connection of a small transfer can end before the 150 on the control connection is read.
+        server_->addConnection(
+            Script{}.reply("220 Ready").expect("RETR", "file").awaitRelease("open").reply("150 Opening").stall()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto replies =
+            run(connection,
+                [connection, server = server_.get()]() -> asio::awaitable<std::pair<ReplyResult, ReplyResult>>
+                {
+                    const auto pending = connection->send(command(Verb::Retrieve, "file")).value();
+                    connection->limitFinalReply(*pending, 1s);
+                    server->release("open");
+                    auto opened = co_await pending->nextReply();
+                    auto finalReply = co_await pending->finalReply();
+                    co_return std::pair{std::move(opened), std::move(finalReply)};
+                });
+        expectReply(replies.first, 150);
+        expectError(replies.second, RemoteErrorKind::TimedOut);
+    }
 }

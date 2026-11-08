@@ -29,8 +29,8 @@ namespace FileTransferProtocol
         /** @brief The TCP connect and the greeting together, a 120 before the 220 included. */
         std::chrono::milliseconds connectTimeout{15'000};
         /**
-         * @brief From writing a command to its first reply, and from a preliminary reply to the next. A transfer has
-         *        no limit after its preliminary reply, see ControlConnection::limitFinalReply().
+         * @brief From writing a command to its first reply. A transfer has no limit after its preliminary reply, see
+         *        ControlConnection::limitFinalReply().
          */
         std::chrono::milliseconds commandTimeout{15'000};
         /** @brief Quiet time after which a line with another code ends a multi-line reply, see ReplyFramer::settle().
@@ -129,7 +129,7 @@ namespace FileTransferProtocol
 
         /**
          * @brief The final reply of @p pending has to come within @p timeout from now, or the connection is Dead. For
-         *        the end of a transfer, once its data is through.
+         *        the end of a transfer, once its data is through. A preliminary reply that comes later keeps the limit.
          */
         void limitFinalReply(PendingCommand& pending, std::chrono::milliseconds timeout);
 
@@ -175,7 +175,8 @@ namespace FileTransferProtocol
         void die(RemoteIo::RemoteError error);
         void end(ControlState state, RemoteIo::RemoteError error);
         bool isLive() const;
-        std::optional<std::chrono::steady_clock::time_point> deadlineAfterPreliminary(PendingCommand const& pending);
+        static std::optional<std::chrono::steady_clock::time_point>
+        deadlineAfterPreliminary(PendingCommand const& pending);
 
         ControlConnectionOptions options_;
         boost::asio::strand<boost::asio::any_io_executor> strand_;

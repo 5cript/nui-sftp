@@ -100,5 +100,7 @@ namespace FileTransferProtocol
         bool finalTaken_{false};
         /** @brief When the connection gives up waiting for the next reply, nothing for no limit. */
         std::optional<std::chrono::steady_clock::time_point> deadline_{};
+        /** @brief Set by ControlConnection::limitFinalReply(), a preliminary reply after it does not lift it. */
+        std::optional<std::chrono::steady_clock::time_point> finalDeadline_{};
     };
 }

@@ -252,7 +252,8 @@ namespace FileTransferProtocol
         );
         if (!awaited)
             return;
-        pending.deadline_ = Clock::now() + timeout;
+        pending.finalDeadline_ = Clock::now() + timeout;
+        pending.deadline_ = pending.finalDeadline_;
         armDeadline();
     }
 
@@ -554,13 +555,11 @@ namespace FileTransferProtocol
 
     std::optional<Clock::time_point> ControlConnection::deadlineAfterPreliminary(PendingCommand const& pending)
     {
-        const auto verb = pending.verb();
-        // The greeting keeps the connect deadline.
-        if (!verb)
+        // Only the greeting and transfers get here. The greeting keeps the connect deadline, a transfer has none until
+        // limitFinalReply(), whose limit a late 1yz keeps.
+        if (!pending.verb())
             return pending.deadline_;
-        if (isTransfer(*verb))
-            return std::nullopt;
-        return Clock::now() + options_.commandTimeout;
+        return pending.finalDeadline_;
     }
 
     void ControlConnection::die(RemoteIo::RemoteError error)
