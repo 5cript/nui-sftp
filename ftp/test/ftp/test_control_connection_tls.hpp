@@ -615,6 +615,29 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"));
     }
 
+    TEST_F(ControlConnectionTlsTests, CloseDuringAWriteSendsCloseNotifyBehindIt)
+    {
+        // More than the socket buffers of both sides hold while the server does not read, the write is under way.
+        constexpr std::size_t argumentSize = 32u * 1024u * 1024u;
+        server_->addConnection(explicitTls().awaitRelease("read").expect("SITE").expectDisconnect());
+        auto options = relaxedOptions();
+        options.closeNotifyTimeout = 20s;
+        const auto connection = makeConnection(options);
+        connect(connection);
+        ASSERT_TRUE(startTls(connection, settings()));
+        const auto sent =
+            run(connection,
+                [connection]() -> asio::awaitable<bool>
+                {
+                    co_return connection->send(command(Verb::Site, std::string(argumentSize, 'x'))).has_value();
+                });
+        ASSERT_TRUE(sent);
+        connection->close();
+        server_->release("read");
+        ASSERT_TRUE(server_->waitUntilDisconnected());
+        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"));
+    }
+
     TEST_F(ControlConnectionTlsTests, ServerClosingTlsEndsTheConnection)
     {
         server_->addConnection(explicitTls().closeControl());

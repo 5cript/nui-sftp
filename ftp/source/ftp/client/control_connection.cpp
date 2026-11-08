@@ -135,11 +135,12 @@ namespace FileTransferProtocol
      * @brief The socket and, once there is one, the TLS stream over it. Every operation in flight holds it next to the
      *        connection, so it outlives them. Used on the strand of the connection only.
      */
-    class ControlConnection::Transport
+    class ControlConnection::Transport : public std::enable_shared_from_this<Transport>
     {
       public:
         explicit Transport(asio::strand<asio::any_io_executor> const& strand)
             : socket_{strand}
+            , closeTimer_{strand}
         {}
 
         asio::ip::tcp::socket& socket()
@@ -180,40 +181,73 @@ namespace FileTransferProtocol
         template <typename BuffersT, typename HandlerT>
         void write(BuffersT const& buffers, HandlerT&& handler)
         {
+            writing_ = true;
+            auto written = [transport = shared_from_this(), handler = std::forward<HandlerT>(handler)](
+                               boost::system::error_code error, std::size_t size
+                           ) mutable
+            {
+                transport->writing_ = false;
+                if (transport->notifyAfterWrite_)
+                    transport->sendCloseNotify();
+                handler(error, size);
+            };
             if (tls_)
-                asio::async_write(*tls_, buffers, std::forward<HandlerT>(handler));
+                asio::async_write(*tls_, buffers, std::move(written));
             else
-                asio::async_write(socket_, buffers, std::forward<HandlerT>(handler));
+                asio::async_write(socket_, buffers, std::move(written));
         }
 
         void close()
         {
             boost::system::error_code ignored{};
             socket_.close(ignored);
+            closeTimer_.cancel();
         }
 
         /**
-         * @brief Sends close_notify without waiting for the server's, then closes, within @p timeout.
+         * @brief Sends close_notify without waiting for the server's, then closes, all within @p timeout. A write in
+         *        flight goes first: Asio's ssl::stream drops the output of a shutdown that had to wait for one.
          */
-        static void closeAfterNotify(std::shared_ptr<Transport> transport, std::chrono::milliseconds timeout)
+        void closeAfterNotify(std::chrono::milliseconds timeout)
         {
             // The server's close_notify counts as received, the shutdown ends once ours is out.
-            SSL_set_shutdown(transport->tlsHandle(), SSL_RECEIVED_SHUTDOWN);
-            auto& stream = *transport->tls_;
-            stream.async_shutdown(
-                asio::cancel_after(
-                    timeout,
-                    [transport = std::move(transport)](boost::system::error_code)
-                    {
+            SSL_set_shutdown(tls_->native_handle(), SSL_RECEIVED_SHUTDOWN);
+            closeTimer_.expires_after(timeout);
+            closeTimer_.async_wait(
+                [transport = shared_from_this()](boost::system::error_code error)
+                {
+                    if (!error)
                         transport->close();
-                    }
-                )
+                }
+            );
+            if (writing_)
+                notifyAfterWrite_ = true;
+            else
+                sendCloseNotify();
+        }
+
+      private:
+        void sendCloseNotify()
+        {
+            notifyAfterWrite_ = false;
+            if (!socket_.is_open())
+                return;
+            tls_->async_shutdown(
+                [transport = shared_from_this()](boost::system::error_code)
+                {
+                    transport->close();
+                }
             );
         }
 
       private:
         asio::ip::tcp::socket socket_;
         std::optional<asio::ssl::stream<asio::ip::tcp::socket&>> tls_{};
+        /** @brief Bounds a close over TLS. */
+        asio::steady_timer closeTimer_;
+        bool writing_{false};
+        /** @brief close_notify waits for the write in flight. */
+        bool notifyAfterWrite_{false};
     };
 
     std::shared_ptr<ControlConnection>
@@ -983,7 +1017,7 @@ namespace FileTransferProtocol
         }
         // A failed handshake leaves no TLS to close.
         if (state == ControlState::Closed && trustedCertificate_)
-            Transport::closeAfterNotify(transport_, options_.closeNotifyTimeout);
+            transport_->closeAfterNotify(options_.closeNotifyTimeout);
         else
             transport_->close();
         deadlineTimer_.cancel();

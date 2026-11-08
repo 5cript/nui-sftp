@@ -827,6 +827,8 @@ namespace FileTransferProtocol::Test
                 {
                     std::array<char, 4096u> chunk{};
                     const auto [error, size] = co_await transport_.readSome(asio::buffer(chunk));
+                    // Only the new bytes and a CR before them can hold the line end, long lines stay linear.
+                    const auto searchFrom = received_.empty() ? std::size_t{0u} : received_.size() - 1u;
                     received_.append(chunk.data(), size);
                     if (error)
                     {
@@ -835,7 +837,7 @@ namespace FileTransferProtocol::Test
                         closed_ = true;
                         co_return std::nullopt;
                     }
-                    end = received_.find("\r\n");
+                    end = received_.find("\r\n", searchFrom);
                 }
                 auto line = received_.substr(0u, end);
                 received_.erase(0u, end + 2u);
