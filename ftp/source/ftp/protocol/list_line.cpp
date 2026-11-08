@@ -250,7 +250,8 @@ namespace FileTransferProtocol::Detail
         }
 
         /**
-         * @brief Where the size or the device numbers of a Unix line start, and the size when it is no device.
+         * @brief Where the size of a Unix line starts, or the device numbers of a device, and the size of an entry
+         *        that is no device.
          */
         struct SizeColumn
         {
@@ -258,14 +259,16 @@ namespace FileTransferProtocol::Detail
             std::optional<std::uint64_t> size{};
         };
 
-        std::optional<SizeColumn> sizeColumnOf(std::span<Token const> tokens, std::size_t dateIndex)
+        std::optional<SizeColumn> sizeColumnOf(std::span<Token const> tokens, std::size_t dateIndex, FileType type)
         {
             const auto index = dateIndex - 1u;
             const auto sizeText = tokens[index].text;
-            if (sizeText.find(',') != std::string_view::npos)
-                return SizeColumn{.index = index};
-            if (endsDeviceMajor(tokens[index - 1u].text))
-                return SizeColumn{.index = index - 1u};
+            if (type == FileType::CharDevice || type == FileType::BlockDevice)
+            {
+                const auto majorApart =
+                    sizeText.find(',') == std::string_view::npos && endsDeviceMajor(tokens[index - 1u].text);
+                return SizeColumn{.index = majorApart ? index - 1u : index};
+            }
             return decimalOf<std::uint64_t>(sizeText).transform(
                 [index](std::uint64_t size)
                 {
@@ -349,7 +352,7 @@ namespace FileTransferProtocol::Detail
             const auto dateIndex = mode ? dateIndexOf(tokens) : std::nullopt;
             if (!dateIndex)
                 return std::nullopt;
-            const auto sizeColumn = sizeColumnOf(tokens, *dateIndex);
+            const auto sizeColumn = sizeColumnOf(tokens, *dateIndex, mode->type);
             if (!sizeColumn)
                 return std::nullopt;
             const auto ownerAndGroup = ownerAndGroupOf(tokens.subspan(1u, sizeColumn->index - 1u));

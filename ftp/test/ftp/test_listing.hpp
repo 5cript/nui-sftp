@@ -548,6 +548,7 @@ namespace FileTransferProtocol::Test
         const auto listing = listOf(
             "crw-rw-rw-   1 root     root       1,   3 Oct  1 12:34 null\n"
             "brw-rw----   1 root     disk       8,0 Oct  1 12:34 sda\n"
+            "crw-rw-rw-   1 root     root         0 Oct  1 12:34 plain-number\n"
         );
         expectNothingLeftOut(listing);
         const auto null = entryNamed(listing, "null");
@@ -558,6 +559,9 @@ namespace FileTransferProtocol::Test
         const auto disk = entryNamed(listing, "sda");
         EXPECT_EQ(disk.type, FileType::BlockDevice);
         EXPECT_EQ(disk.group, "disk");
+        const auto plainNumber = entryNamed(listing, "plain-number");
+        EXPECT_EQ(plainNumber.size, std::nullopt);
+        EXPECT_EQ(plainNumber.group, "root");
     }
 
     TEST(ListParserTests, TypesAndSpecialBits)
@@ -660,11 +664,12 @@ namespace FileTransferProtocol::Test
             "-rw-r--r-- 1 u g 5 Oct  1 12:34 \n"
             "-rw-r--r-- 1 a b c 5 Oct  1 12:34 owner-with-spaces\n"
             "-rw-r--r-- 1 u g 18446744073709551616 Oct  1 12:34 size-overflow\n"
+            "-rw-r--r-- 1 u g 1,234 Oct  1 12:34 size-with-comma\n"
             "   \n"
             "-rw-r--r-- 1 u g 5 Oct  1 12:34 readable\n"
         );
         EXPECT_EQ(namesOf(listing), std::set<std::string>{"readable"});
-        EXPECT_EQ(listing.unreadableLines, 15u);
+        EXPECT_EQ(listing.unreadableLines, 16u);
     }
 
     TEST(ListParserTests, LeapDayWithoutAYearThatHasOne)
