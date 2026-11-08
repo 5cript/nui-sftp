@@ -568,20 +568,15 @@ namespace FileTransferProtocol
             return queued_.begin();
         if (!runningTransfer())
             return queued_.end();
-        // ABOR goes into the transfer ahead of commands queued before it, QUIT in its turn (RFC 959 4.2). STAT waits:
-        // the server answers it at once, before the final reply of the transfer, so the replies would swap.
-        const auto abort = std::ranges::find_if(
+        // Only ABOR goes into the transfer, ahead of commands queued before it (RFC 959 4.2). STAT and QUIT wait: proftpd
+        // and pyftpdlib answer them at once, before the final reply of the transfer, so the replies would swap.
+        return std::ranges::find_if(
             queued_,
             [](std::shared_ptr<PendingCommand> const& queued)
             {
                 return queued->verb() == Verb::Abort;
             }
         );
-        if (abort != queued_.end())
-            return abort;
-        if (!queued_.empty() && queued_.front()->verb() == Verb::Quit)
-            return queued_.begin();
-        return queued_.end();
     }
 
     std::shared_ptr<PendingCommand> ControlConnection::runningTransfer() const

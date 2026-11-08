@@ -55,11 +55,11 @@ namespace FileTransferProtocol
      *        is open, also while it is idle, so a 421, an EOF or a reset is seen at once. Replies go to the commands
      *        in the order the commands were written.
      *
-     * A command is written once every earlier one has its first reply (RFC 959 5.4) and has completed. Only ABOR and
-     * QUIT go into a transfer that got its preliminary reply (RFC 959 4.2), ABOR ahead of commands queued before it.
-     * STAT waits like any other command: a server answers it before the final reply of the transfer. A connection
-     * whose replies cannot be matched to its commands any more ends as Dead: a reply nothing waits for, a 421, a reply
-     * past its deadline, a framing error.
+     * A command is written once every earlier one has its first reply (RFC 959 5.4) and has completed. Only ABOR goes
+     * into a transfer that got its preliminary reply (RFC 959 4.2), ahead of commands queued before it. STAT and QUIT
+     * wait like any other command: servers answer them before the final reply of the transfer, so a session that ends
+     * during a transfer aborts it first or closes. A connection whose replies cannot be matched to its commands any
+     * more ends as Dead: a reply nothing waits for, a 421, a reply past its deadline, a framing error.
      *
      * ABOR into a transfer is followed by PWD as a marker. Servers answer the two with two replies in either order,
      * with one, or with none; the final replies before the 257 of PWD go to the transfer and ABOR: the first to the

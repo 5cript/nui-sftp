@@ -629,6 +629,44 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stages, (std::vector<int>{150, 1, 226, 211}));
     }
 
+    TEST_F(ControlConnectionTests, QuitWaitsForTheEndOfATransfer)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .awaitRelease("finish")
+                .reply("226 Done")
+                .expect("QUIT")
+                .reply("221 Goodbye")
+                .closeControl()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto stages =
+            run(connection,
+                [connection, server = server_.get()]() -> asio::awaitable<std::vector<int>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    // proftpd and pyftpdlib answer QUIT at once, the 221 would take the place of the 226.
+                    const auto quit = connection->send(command(Verb::Quit)).value();
+                    const auto queued = quit->stage() == PendingCommand::Stage::Queued;
+                    server->release("finish");
+                    const auto transferEnd = co_await retrieve->finalReply();
+                    const auto quitReply = co_await quit->finalReply();
+                    co_return std::vector<int>{
+                        opened ? opened->code : 0,
+                        queued ? 1 : 0,
+                        transferEnd ? transferEnd->code : 0,
+                        quitReply ? quitReply->code : 0,
+                    };
+                });
+        EXPECT_EQ(stages, (std::vector<int>{150, 1, 226, 221}));
+        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+    }
+
     TEST_F(ControlConnectionTests, AbortGoesAheadOfCommandsQueuedBeforeIt)
     {
         server_->addConnection(
