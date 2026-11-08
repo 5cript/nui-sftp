@@ -460,6 +460,16 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(listing.unreadableLines, 7u);
     }
 
+    TEST(MachineListingTests, FactRepeatedAmongManyIsFound)
+    {
+        std::string facts{};
+        for (std::size_t index = 0u; index < 4'000u; ++index)
+            facts += fmt::format("x.fact{}=;", index);
+        const auto listing = machineListingOf(fmt::format("{} distinct\n{}X.FACT3999=1; repeated\n", facts, facts));
+        EXPECT_EQ(namesOf(listing), std::set<std::string>{"distinct"});
+        EXPECT_EQ(listing.unreadableLines, 1u);
+    }
+
     TEST(ListParserTests, UnixLines)
     {
         constexpr std::chrono::sys_days today{std::chrono::year{2017} / 3 / 10};

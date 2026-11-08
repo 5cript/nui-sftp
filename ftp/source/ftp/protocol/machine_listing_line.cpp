@@ -7,8 +7,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
-#include <vector>
 
 namespace FileTransferProtocol::Detail
 {
@@ -160,7 +160,7 @@ namespace FileTransferProtocol::Detail
             return std::nullopt;
 
         Facts facts{.entry = ListingEntry{.name = std::string{line.substr(separator + 1u)}}};
-        std::vector<std::string_view> seenNames{};
+        std::unordered_set<std::string> seenNames{};
         std::size_t position = 0u;
         while (position < factText.size())
         {
@@ -172,13 +172,8 @@ namespace FileTransferProtocol::Detail
             if (equals == 0u || equals == std::string_view::npos)
                 return std::nullopt;
             const auto name = fact.substr(0u, equals);
-            const auto named = [name](std::string_view seen)
-            {
-                return equalIgnoringCase(seen, name);
-            };
-            if (std::ranges::any_of(seenNames, named))
+            if (!seenNames.insert(Utility::Algorithm::toLowerCase(std::string{name})).second)
                 return std::nullopt;
-            seenNames.push_back(name);
             readFact(name, fact.substr(equals + 1u), facts);
         }
 
