@@ -21,7 +21,8 @@ namespace FileTransferProtocol
 
     /**
      * @brief A command on a control connection and the replies it is owed: preliminary 1yz replies, then one final
-     *        reply (RFC 959 4.2). Used on the strand of its connection only.
+     *        reply (RFC 959 4.2). Used on the strand of its connection only. Waits may overlap, each reply goes to the
+     *        wait that takes it first.
      */
     class PendingCommand
     {
@@ -75,6 +76,17 @@ namespace FileTransferProtocol
         /** @brief More undelivered replies than this break the protocol. */
         static constexpr std::size_t maximumHeldReplies = 16u;
 
+        enum class Wanted : std::uint8_t
+        {
+            Next,
+            Final,
+        };
+
+        /**
+         * @brief The wait of nextReply() and finalReply() in one coroutine: after a cancelled wait it awaits nothing
+         *        more, Asio would throw operation_aborted.
+         */
+        boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> takeReply(Wanted wanted);
         void take(Reply reply);
         void fail(RemoteIo::RemoteError error);
         void wake();

@@ -21,13 +21,37 @@ namespace FileTransferProtocol
 
     boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> PendingCommand::nextReply()
     {
+        co_return co_await takeReply(Wanted::Next);
+    }
+
+    boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> PendingCommand::finalReply()
+    {
+        co_return co_await takeReply(Wanted::Final);
+    }
+
+    boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> PendingCommand::takeReply(Wanted wanted)
+    {
+        const auto dropUnwanted = [this, wanted]()
+        {
+            if (wanted == Wanted::Final)
+                std::erase_if(
+                    replies_,
+                    [](Reply const& reply)
+                    {
+                        return isPreliminary(reply.code);
+                    }
+                );
+        };
+
+        // The timer never expires, wake() cancels every wait on it. Setting its expiry would cancel overlapping waits.
         bool cancelled = false;
+        dropUnwanted();
         while (replies_.empty() && !failure_ && !finalTaken_ && !cancelled)
         {
-            signal_.expires_at(boost::asio::steady_timer::time_point::max());
             co_await signal_.async_wait(boost::asio::as_tuple(boost::asio::use_awaitable));
             const auto state = co_await boost::asio::this_coro::cancellation_state;
             cancelled = state.cancelled() != boost::asio::cancellation_type::none;
+            dropUnwanted();
         }
 
         if (!replies_.empty())
@@ -56,14 +80,6 @@ namespace FileTransferProtocol
                 .message = "The final reply was taken already",
             }
         );
-    }
-
-    boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> PendingCommand::finalReply()
-    {
-        auto reply = co_await nextReply();
-        while (reply && isPreliminary(reply->code))
-            reply = co_await nextReply();
-        co_return reply;
     }
 
     std::optional<Verb> PendingCommand::verb() const

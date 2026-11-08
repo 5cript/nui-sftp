@@ -6,6 +6,8 @@
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/deferred.hpp>
+#include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -82,7 +84,21 @@ namespace FileTransferProtocol::Test
 
         std::shared_ptr<ControlConnection> makeConnection(ControlConnectionOptions options = relaxedOptions())
         {
-            auto connection = ControlConnection::create(pool_.get_executor(), options);
+            return makeConnectionOn(pool_.get_executor(), options);
+        }
+
+        /**
+         * @brief A connection on one thread, its handlers that are ready together run in the order they got ready.
+         */
+        std::shared_ptr<ControlConnection> makeSequentialConnection()
+        {
+            return makeConnectionOn(sequentialPool_.get_executor(), relaxedOptions());
+        }
+
+        std::shared_ptr<ControlConnection>
+        makeConnectionOn(asio::any_io_executor executor, ControlConnectionOptions const& options)
+        {
+            auto connection = ControlConnection::create(std::move(executor), options);
             connection->onEnd(
                 [ended = ended_](RemoteIo::RemoteError const& error)
                 {
@@ -158,6 +174,7 @@ namespace FileTransferProtocol::Test
         }
 
         asio::thread_pool pool_{2};
+        asio::thread_pool sequentialPool_{1};
         std::unique_ptr<ScriptedFtpServer> server_{};
         std::vector<std::shared_ptr<ControlConnection>> connections_{};
         std::shared_ptr<std::promise<RemoteIo::RemoteError>> ended_ =
@@ -641,6 +658,77 @@ namespace FileTransferProtocol::Test
         expectError(cancelled, RemoteErrorKind::Cancelled);
         // The late 213 goes to the cancelled command, the NOOP gets its own reply.
         expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(ControlConnectionTests, OverlappingWaitsTakeTheRepliesInTurn)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .awaitRelease("answer")
+                .reply("150 Opening")
+                .reply("226 Done")
+                .expectDisconnect()
+        );
+        const auto connection = makeSequentialConnection();
+        connect(connection);
+        const auto codes =
+            run(connection,
+                [connection, server = server_.get()]() -> asio::awaitable<std::vector<int>>
+                {
+                    const auto pending = connection->send(command(Verb::Retrieve, "file")).value();
+                    // The strand is busy until both waits are in place, no reply can come before.
+                    server->release("answer");
+                    const auto [order, firstException, first, secondException, second] =
+                        co_await asio::experimental::make_parallel_group(
+                            asio::co_spawn(connection->strand(), pending->nextReply(), asio::deferred),
+                            asio::co_spawn(connection->strand(), pending->nextReply(), asio::deferred)
+                        )
+                            .async_wait(asio::experimental::wait_for_all(), asio::use_awaitable);
+                    if (firstException)
+                        std::rethrow_exception(firstException);
+                    if (secondException)
+                        std::rethrow_exception(secondException);
+                    co_return std::vector<int>{first ? first->code : 0, second ? second->code : 0};
+                });
+        EXPECT_EQ(codes, (std::vector<int>{150, 226}));
+    }
+
+    TEST_F(ControlConnectionTests, WaitCancelledWhileAPreliminaryReplyIsHeldEndsCancelled)
+    {
+        // The 125 wakes both waits. The nextReply() takes it and the group cancels the finalReply() before that
+        // resumes, with the 150 held.
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .awaitRelease("answer")
+                .replyRaw("125 Data connection already open\r\n150 Opening\r\n")
+                .expectDisconnect()
+        );
+        const auto connection = makeSequentialConnection();
+        connect(connection);
+        const auto replies =
+            run(connection,
+                [connection, server = server_.get()]() -> asio::awaitable<std::pair<ReplyResult, ReplyResult>>
+                {
+                    const auto pending = connection->send(command(Verb::Retrieve, "file")).value();
+                    server->release("answer");
+                    auto [order, nextException, nextResult, finalException, finalResult] =
+                        co_await asio::experimental::make_parallel_group(
+                            asio::co_spawn(connection->strand(), pending->nextReply(), asio::deferred),
+                            asio::co_spawn(connection->strand(), pending->finalReply(), asio::deferred)
+                        )
+                            .async_wait(asio::experimental::wait_for_one(), asio::use_awaitable);
+                    if (nextException)
+                        std::rethrow_exception(nextException);
+                    if (finalException)
+                        std::rethrow_exception(finalException);
+                    co_return std::pair{std::move(nextResult), std::move(finalResult)};
+                });
+        expectReply(replies.first, 125);
+        expectError(replies.second, RemoteErrorKind::Cancelled);
     }
 
     TEST_F(ControlConnectionTests, ArgumentThatCannotBeSentLeavesTheConnectionUsable)
