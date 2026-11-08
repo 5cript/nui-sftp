@@ -857,6 +857,21 @@ namespace FileTransferProtocol::Test
         expectError(waiting.get(), RemoteErrorKind::Cancelled);
     }
 
+    TEST_F(ControlConnectionTests, DroppingTheLastOwnerDuringExecuteFailsItAsCancelled)
+    {
+        server_->addConnection(Script{}.reply("220 Ready").expect("NOOP").checkpoint("received").stall());
+        // Not through makeConnection(), which keeps a copy for the end of the test. On one thread the handlers that
+        // hold the connection weakly end before execute() resumes, so its memory is freed by then.
+        auto connection = ControlConnection::create(sequentialPool_.get_executor(), relaxedOptions());
+        connect(connection);
+        auto waiting = asio::co_spawn(connection->strand(), connection->execute(command(Verb::Noop)), asio::use_future);
+        ASSERT_TRUE(server_->waitForCheckpoint("received"));
+
+        connection.reset();
+        ASSERT_EQ(waiting.wait_for(20s), std::future_status::ready);
+        expectError(waiting.get(), RemoteErrorKind::Cancelled);
+    }
+
     TEST_F(ControlConnectionTests, WithdrawnCommandIsNeverWritten)
     {
         server_->addConnection(
@@ -1167,6 +1182,25 @@ namespace FileTransferProtocol::Test
                     const auto opened = co_await pending->nextReply();
                     if (!opened)
                         co_return opened;
+                    connection->limitFinalReply(*pending, 100ms);
+                    co_return co_await pending->finalReply();
+                });
+        expectError(reply, RemoteErrorKind::TimedOut);
+    }
+
+    TEST_F(ControlConnectionTests, ShorterLimitMovesTheDeadlineEarlier)
+    {
+        server_->addConnection(Script{}.reply("220 Ready").expect("RETR", "file").stall());
+        auto options = relaxedOptions();
+        // Longer than run() waits, only the limit can end the wait in time.
+        options.commandTimeout = 60s;
+        const auto connection = makeConnection(options);
+        connect(connection);
+        const auto reply =
+            run(connection,
+                [connection]() -> asio::awaitable<ReplyResult>
+                {
+                    const auto pending = connection->send(command(Verb::Retrieve, "file")).value();
                     connection->limitFinalReply(*pending, 100ms);
                     co_return co_await pending->finalReply();
                 });

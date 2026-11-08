@@ -67,8 +67,8 @@ namespace FileTransferProtocol
      *
      * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
      * operations hold the connection weakly and own only their buffers and commands: the owner decides how long it
-     * lives, dropping the last shared_ptr closes it, and waiting commands fail as Cancelled. A caller of connect() or
-     * execute() keeps the connection while it waits.
+     * lives, dropping the last shared_ptr closes it, and waiting commands fail as Cancelled. A caller of connect()
+     * keeps the connection while it waits.
      */
     class ControlConnection : public std::enable_shared_from_this<ControlConnection>
     {
@@ -209,6 +209,8 @@ namespace FileTransferProtocol
         boost::asio::ip::tcp::endpoint remote_{};
         ReplyFramer framer_;
         boost::asio::steady_timer deadlineTimer_;
+        /** @brief What deadlineTimer_ waits for, an unchanged earliest deadline is not armed again. */
+        std::optional<std::chrono::steady_clock::time_point> armedDeadline_{};
         boost::asio::steady_timer settleTimer_;
         /** @brief Shared with the read in flight, which may still fill it after the connection is gone. */
         std::shared_ptr<std::array<char, 4096>> readBuffer_;

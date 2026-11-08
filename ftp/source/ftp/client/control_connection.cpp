@@ -238,12 +238,17 @@ namespace FileTransferProtocol
 
     asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> ControlConnection::execute(Command command)
     {
+        // The owner may drop the connection during the wait, the command then fails as Cancelled.
+        const auto weak = weak_from_this();
         const auto pending = send(std::move(command));
         if (!pending)
             co_return std::unexpected(pending.error());
         auto reply = co_await (*pending)->finalReply();
         if (!reply && reply.error().kind == RemoteErrorKind::Cancelled)
-            withdraw(**pending);
+        {
+            if (const auto self = weak.lock())
+                self->withdraw(**pending);
+        }
         co_return reply;
     }
 
@@ -604,6 +609,9 @@ namespace FileTransferProtocol
             if (pending->deadline_ && (!earliest || *pending->deadline_ < *earliest))
                 earliest = pending->deadline_;
         }
+        if (earliest == armedDeadline_)
+            return;
+        armedDeadline_ = earliest;
         if (!earliest)
         {
             deadlineTimer_.cancel();
@@ -623,6 +631,7 @@ namespace FileTransferProtocol
 
     void ControlConnection::takeDeadline()
     {
+        armedDeadline_.reset();
         if (!isLive())
             return;
         const auto now = Clock::now();
@@ -683,6 +692,7 @@ namespace FileTransferProtocol
         boost::system::error_code ignored{};
         socket_.close(ignored);
         deadlineTimer_.cancel();
+        armedDeadline_.reset();
         settleTimer_.cancel();
         drain_.reset();
         const auto awaiting = std::exchange(awaiting_, {});
