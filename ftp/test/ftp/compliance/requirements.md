@@ -22,14 +22,14 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R959_3_3_DataConnectionManagement | RFC 959 3.3 | MUST | Treat the end of the data connection as the end of a stream mode transfer | Transfer ends on data EOF plus the final reply |  |
 | R959_3_3_UploadEofByClose | RFC 959 3.3, 3.4.1 | MUST | Mark the end of a stream mode upload by closing the data connection |  |  |
 | R959_3_3_DataConnectionPerTransfer | RFC 959 3.3, 3.4.1 | MUST | Establish a data connection for each transfer and close it after | DataConnection is created per transfer |  |
-| R959_4_1_1_UserPass | RFC 959 4.1.1 | MUST | Send USER, then PASS after 331, ACCT after 332 | Login flow |  |
+| R959_4_1_1_UserPass | RFC 959 4.1.1 | MUST | Send USER, then PASS after 331, ACCT after 332 | logIn() sends USER, PASS after a 331 and ACCT after a 332 | `LoginTests.PlainLoginRunsTheWholeSequence`, `LoginTests.AccountIsSentWhenAskedFor`, `LoginTests.AccountAskedForButNoneSetFails`, `Conformance/LoginConformance.LogsInAndLearnsTheServer` |
 | R959_4_1_1_CwdCdup | RFC 959 4.1.1 | MUST | Change directories with CWD and CDUP and honour their replies | Metadata operations |  |
 | R959_4_1_1_Quit | RFC 959 2.3, 4.1.1 | SHOULD | End a session with QUIT and wait for 221 within a bound | ControlConnection close |  |
 | R959_4_1_1_HidePassword | RFC 959 4.1.1 | MUST | Mask the password in display and logs, the server cannot hide it | Command::toLogString() logs the verb alone, never an argument | `CommandTests.LogStringIsTheVerbAlone` |
 | R959_4_1_1_AccountLater | RFC 959 4.1.1 | SHOULD | Answer a 332 to a command after login with ACCT, treat 532 as an account needed for that command |  |  |
 | R959_4_1_1_CwdCdupReplies | RFC 959 4.1.1, Appendix II | MUST | Accept the same replies for CDUP as for CWD, 200 and 250 alike as success |  |  |
 | R959_4_1_2_Pasv | RFC 959 4.1.2; RFC 2428 4 | MAY | Use PASV for a data connection when EPSV fails | DataConnection setup |  |
-| R959_4_1_2_TypeImage | RFC 959 4.1.2 | MUST | Send TYPE I before binary transfers, the default is ASCII | Login flow sets TYPE I |  |
+| R959_4_1_2_TypeImage | RFC 959 4.1.2 | MUST | Send TYPE I before binary transfers, the default is ASCII | logIn() sends TYPE I, a refusal fails the login | `LoginTests.PlainLoginRunsTheWholeSequence`, `Replies/LoginRefusedTests.ServerRefusalIsMapped` |
 | R959_4_1_2_StruFile | RFC 959 4.1.2; client scope | MUST NOT | Never send another STRU than the default file structure | Verb has no STRU, the client keeps the default file structure | `CommandTests.CommandsTheClientMustNeverSendCannotBeEncoded` |
 | R959_4_1_2_ModeStream | RFC 959 4.1.2; client scope | MUST NOT | Never send another MODE than the default stream mode | Verb has no MODE, the client keeps the default stream mode | `CommandTests.CommandsTheClientMustNeverSendCannotBeEncoded` |
 | R959_4_1_2_ParametersBeforeService | RFC 959 4.1.2 | MUST | Send TYPE and the passive mode command before the service command they apply to |  |  |
@@ -67,7 +67,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R959_5_4_WaitForPrimaryReply | RFC 959 5.4 | SHOULD | Wait for the primary reply to a command before sending the next one | A command is written once the earlier ones have their first reply | `ControlConnectionTests.RepliesGoToTheCommandsInOrder`, `ControlConnectionTests.WithdrawnCommandIsNeverWritten` |
 | R959_5_4_WaitForGreeting | RFC 959 5.4 | SHOULD | Wait for the 220 greeting before the first command | connect() returns with the 220, commands wait behind the greeting | `ControlConnectionTests.GreetingThenCommand`, `ControlConnectionTests.MultiLineGreeting` |
 | R959_5_4_DelayedGreeting | RFC 959 5.4 | SHOULD | After a 120 greeting keep waiting for the 220 instead of hanging up | A 120 is a preliminary reply to the greeting, the wait stays within the connect timeout | `ControlConnectionTests.DelayedGreetingWaitsForThe220`, `ControlConnectionTests.DelayedGreetingStaysWithinTheConnectTimeout` |
-| R959_5_4_LoginWithoutPassword | RFC 959 5.4 | MUST | Accept 230 to USER, and 202 to PASS or ACCT, as a finished login |  |  |
+| R959_5_4_LoginWithoutPassword | RFC 959 5.4 | MUST | Accept 230 to USER, and 202 to PASS or ACCT, as a finished login | logIn() takes any 2xx to USER, PASS or ACCT as a finished login | `LoginTests.UserAloneMayLogIn`, `LoginTests.PasswordAnsweredWith202IsALogin` |
 | R959_AppendixII_257Quoting | RFC 959 Appendix II | SHOULD | Read a quoted path with doubled quotes from a 257 reply | parsePathReply | `ReplyParserTests.PathReply`, `ReplyParserTests.PathReplyUndoublesQuotes`, `ReplyParserTests.PathReplyWithoutAQuotedPathIsUnreadable` |
 | R959_AppendixII_UseMkdReplyName | RFC 959 Appendix II | MUST | Refer to a new directory by the absolute name from the 257 reply to MKD |  |  |
 | R959_AppendixII_MkdExistingDirectory | RFC 959 Appendix II | MUST | Treat the error reply to MKD of an existing directory as failure, whatever its code (521 is seen) | replyError reads 521 like 550, an "already exists" at the end of a line is AlreadyExists | `ReplyErrorTests.ExistingDirectoryOfRfc959AppendixII` |
@@ -116,13 +116,13 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2228_3_AdatAfterAuth | RFC 2228 3 | MUST | Send ADAT only after a successful AUTH and before the exchange completes | Not applicable: AUTH TLS has no ADAT exchange |  |
 | R2228_3_ResetStateOnAdatError | RFC 2228 3 | MUST | Reset the internal security state when ADAT fails | Not applicable: AUTH TLS has no ADAT exchange |  |
 | R2228_3_ResetServerStateOutOfStep | RFC 2228 3 | MUST | Reset the server security state when the security exchange gets out of step | Not applicable: AUTH TLS has no ADAT exchange |  |
-| R2228_3_PbszAfterSecurityExchange | RFC 2228 3; RFC 4217 9 | MUST | Send PBSZ only after a successful security exchange, the TLS handshake |  |  |
+| R2228_3_PbszAfterSecurityExchange | RFC 2228 3; RFC 4217 9 | MUST | Send PBSZ only after a successful security exchange, the TLS handshake | logIn() sends PBSZ after the handshake and the login | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData` |
 | R2228_3_PbszFits32Bits | RFC 2228 3, 8.1 | MUST | Send a PBSZ value that fits an unsigned 32-bit integer |  |  |
 | R2228_3_PbszSmallerSize | RFC 2228 3 | MUST | Read a "PBSZ=" value in the 200 reply and use the smaller of both sizes |  |  |
 | R2228_4_UserReply232 | RFC 2228 4; RFC 4217 12.2 | SHOULD | Accept 232 to USER as logged in through the security exchange, send no PASS |  |  |
 | R2228_4_Show336Challenge | RFC 2228 4 | MUST | On 336 to USER show the challenge before asking for the password |  |  |
 | R2228_4_NoPasswordPromptBeforeUser | RFC 2228 4 | SHOULD | Prompt for the password only after USER has been sent |  |  |
-| R2228_5_1_Reply234StartsTls | RFC 2228 3, 5.1; RFC 4217 4.2 | MUST | Start the TLS handshake only on 234 to AUTH TLS, 334 is wrong for TLS |  |  |
+| R2228_5_1_Reply234StartsTls | RFC 2228 3, 5.1; RFC 4217 4.2 | MUST | Start the TLS handshake only on 234 to AUTH TLS, 334 is wrong for TLS | Deviation: a 334 starts the handshake too, as curl takes it | `ControlConnectionTlsTests.AuthAnsweredWith334StartsTls` |
 | R2228_5_1_AdatReplies | RFC 2228 3, 5.1 | MUST | Handle 235 and 335 to ADAT | Not applicable: AUTH TLS has no ADAT exchange |  |
 | R2228_5_1_Reply431 | RFC 2228 3, 5.1 | SHOULD | Treat 431 to AUTH or PROT as a resource the server lacks for now | replyError | `ReplyErrorTests.CodesOfTheSecurityExtensions` |
 | R2228_5_1_Reply533 | RFC 2228 3, 5.1, 8.2 | SHOULD | Treat 533 as a command protection level denied by policy | replyError | `ReplyErrorTests.CodesOfTheSecurityExtensions` |
@@ -139,9 +139,9 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2228_10_Base64CaseSensitive | RFC 2228 10 | MUST NOT | Never ignore case in base64 data of ADAT, MIC, CONF, ENC and 63z replies | Not applicable: AUTH TLS uses no base64 exchange |  |
 | R2228_AppendixI_Gssapi | RFC 2228 Appendix I | MUST | Follow the GSSAPI client exchange | Not applicable: TLS is the only mechanism used |  |
 | R2228_AppendixII_KerberosV4 | RFC 2228 Appendix II | MUST | Follow the KERBEROS_V4 client exchange | Not applicable: TLS is the only mechanism used |  |
-| R2228_AuthReplies | RFC 2228 3, 8.2 | MUST | Handle 234, 334, 431, 500, 501, 502, 504, 534 and 421 to AUTH | Login flow |  |
-| R2228_PbszBeforeProt | RFC 2228 3; RFC 4217 9 | MUST | Send PBSZ before PROT | Login flow |  |
-| R2228_ProtReplies | RFC 2228 3, 8.2 | MUST | Handle 200, 504, 536, 503, 534, 431, 500, 501, 421 and 530 to PROT | Login flow |  |
+| R2228_AuthReplies | RFC 2228 3, 8.2 | MUST | Handle 234, 334, 431, 500, 501, 502, 504, 534 and 421 to AUTH | startTls() makes the handshake on 234 or 334, any other reply is its replyError() and the login fails without sending more | `ControlConnectionTlsTests.CommandsAfterAuthTlsGoOverTls`, `ControlConnectionTlsTests.AuthAnsweredWith334StartsTls`, `ControlConnectionTlsTests.RefusedAuthLeavesThePlainConnectionUsable`, `LoginTests.RefusedAuthTlsNeverSendsTheCredentials` |
+| R2228_PbszBeforeProt | RFC 2228 3; RFC 4217 9 | MUST | Send PBSZ before PROT | logIn() sends PBSZ 0, then PROT P | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData`, `LoginTests.ImplicitTlsLogsInOverTlsFromTheStart` |
+| R2228_ProtReplies | RFC 2228 3, 8.2 | MUST | Handle 200, 504, 536, 503, 534, 431, 500, 501, 421 and 530 to PROT | logIn() takes a 2xx to PROT, any other reply is its replyError() and fails the login | `LoginTests.RefusedDataProtectionFailsTheLogin` |
 | R2228_CccNotSent | RFC 2228 7 | SHOULD NOT | Never send CCC | Verb has no CCC | `CommandTests.CommandsTheClientMustNeverSendCannotBeEncoded` |
 | R2389_2_2_AnyReplyMultiLine | RFC 2389 2.2; RFC 3659 2.4; RFC 7151 2.2 | SHOULD | Accept a multi-line reply to every command, QUIT and extension commands included | ReplyFramer frames every reply the same way | `ReplyFramerTests.MultiLineReplyWithTheCodeOnEveryLine` |
 | R2389_3_UnknownFeatures | RFC 2389 3 | MUST | Accept unknown features in a FEAT reply without error | Features keeps every line | `FeaturesTests.ProftpdFeatures` |
@@ -151,11 +151,11 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2389_3_2_FeatureOrder | RFC 2389 3.2 | MAY | Do not depend on the order of feature lines, it may change between replies |  |  |
 | R2389_3_2_OnlyListedExtensions | RFC 2389 3.2 | MAY | Assume the server supports only the extensions FEAT lists | Deviation: FEAT alone decides nothing, vsftpd leaves out AUTH TLS and UTF8, MLSD is probed once |  |
 | R2389_3_2_ProbeAfterFeatError | RFC 2389 3.2 | SHOULD | After an error reply to FEAT test extensions one by one |  |  |
-| R2389_4_OptsReplies | RFC 2389 4 | MUST | Read 200 to OPTS as accepted, 451 as temporary, 501 as permanent, 500 or 502 as no OPTS |  |  |
+| R2389_4_OptsReplies | RFC 2389 4 | MUST | Read 200 to OPTS as accepted, 451 as temporary, 501 as permanent, 500 or 502 as no OPTS | logIn() reads a 2xx to OPTS UTF8 ON as accepted and any other reply as refused, a refusal is no failure | `LoginTests.PlainLoginRunsTheWholeSequence`, `LoginTests.ServerWithoutFeatLogsInWithoutFeatures` |
 | R2389_4_OptsWithFeat | RFC 2389 4 | MUST | Assume OPTS exists when the server supports FEAT |  |  |
 | R2389_FeatFormat | RFC 2389 | MUST | Read 211 multi-line replies with one leading space per feature | Features::fromReply | `FeaturesTests.VsftpdFeatures`, `FeaturesTests.ProftpdFeatures`, `FeaturesTests.PureFtpdFeatures` |
 | R2389_NoFeat | RFC 2389 3.2 | MUST | Treat 500 or 502 to FEAT as no FEAT, older extensions may still exist | Features::fromReply | `FeaturesTests.NoFeatCommandMeansNoFeatures` |
-| R2389_OptsSyntax | RFC 2389 | MUST | Send OPTS with the command name and its options | Command encoding |  |
+| R2389_OptsSyntax | RFC 2389 | MUST | Send OPTS with the command name and its options | logIn() sends OPTS UTF8 ON | `LoginTests.PlainLoginRunsTheWholeSequence` |
 | R2428_2_EprtSyntax | RFC 2428 2 | MUST | Send EPRT with one space, a delimiter from ASCII 33 to 126, AF number, address and port | Not applicable: active mode comes later |  |
 | R2428_2_EprtPipeDelimiter | RFC 2428 2 | SHOULD | Use the pipe character (ASCII 124) as EPRT delimiter unless the address contains it | Not applicable: active mode comes later |  |
 | R2428_2_EprtAddressFormat | RFC 2428 2 | MUST | Give the EPRT address in dotted decimal for AF 1 and IPv6 text form for AF 2 | Not applicable: active mode comes later |  |
@@ -174,7 +174,7 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R2577_5_421AfterFailedLogins | RFC 2577 5 | MUST | Expect 421 and a closed connection after a few failed PASS attempts |  |  |
 | R2577_7_UniformUserReply | RFC 2577 7 | SHOULD | Expect 331 to any user name, an unknown user then fails only at PASS |  |  |
 | R2577_PortTheft | RFC 2577 8 | SHOULD | Use random local ports for data connections | The operating system picks the local port of every data connection |  |
-| R2577_NoPlaintextPasswords | RFC 2577 5, 6; RFC 2228 7 | SHOULD | Encrypt the password whenever possible, never send it in plaintext when the session asks for TLS | Login flow |  |
+| R2577_NoPlaintextPasswords | RFC 2577 5, 6; RFC 2228 7 | SHOULD | Encrypt the password whenever possible, never send it in plaintext when the session asks for TLS | The credentials go out only after the trust decision, never when AUTH TLS was refused | `LoginTests.RefusedAuthTlsNeverSendsTheCredentials`, `LoginTests.UntrustedCertificateStopsBeforeTheCredentials`, `Certificates/ControlConnectionUntrustedTests.CertificateNeedsTrustAndNothingIsSent` |
 | R2640_3_1_Utf8Support | RFC 2640 3.1 | MUST | Support UTF-8 path names in commands and replies |  |  |
 | R2640_3_1_SingleSpaceBeforePathname | RFC 2640 3.1 | MUST | Put exactly one space between the command and the path name | Command::encode() | `CommandTests.VerbAndArgumentAreSeparatedByOneSpaceAndEndInCrLf`, `CommandTests.ArgumentIsSentAsItIs` |
 | R2640_3_1_SpacesBelongToPathname | RFC 2640 3.1 | MUST | Treat spaces after the first separator as part of the path name, never trim them | Command::encode() sends the argument as it is | `CommandTests.ArgumentIsSentAsItIs` |
@@ -296,41 +296,41 @@ carries the server's level ("a server MAY send X" is a MAY row "Accept X").
 | R3659_TvfsPaths | RFC 3659 | SHOULD | Use slash separated paths when TVFS is offered | Metadata operations |  |
 | R3659_MlstErrors | RFC 3659 7.2.1 | SHOULD | Map the error replies of MLST and MLSD | Reply mapping |  |
 | R4217_1_SslAllowed | RFC 4217 1 | MAY | Negotiate SSL instead of TLS when so configured | Not applicable: TLS 1.2 is the minimum, SSL is never negotiated |  |
-| R4217_4_1_SendAuthTls | RFC 4217 4.1 | SHOULD | Send AUTH TLS to secure a session |  |  |
+| R4217_4_1_SendAuthTls | RFC 4217 4.1 | SHOULD | Send AUTH TLS to secure a session | startTls() sends AUTH TLS | `ControlConnectionTlsTests.CommandsAfterAuthTlsGoOverTls` |
 | R4217_4_1_ContinueAfterAuthRejection | RFC 4217 4.1 | MAY | Go on unprotected after AUTH is rejected, if policy allows | Not applicable: a session that asks for TLS never goes on without it |  |
-| R4217_4_2_UserStillRequired | RFC 4217 4.2; RFC 2228 2 | MUST | Send USER even when TLS already identified the client |  |  |
-| R4217_4_2_ResetAfterAuth | RFC 4217 4.2 | MUST | Treat TYPE, data port, working directory and other transfer parameters as reset after AUTH |  |  |
+| R4217_4_2_UserStillRequired | RFC 4217 4.2; RFC 2228 2 | MUST | Send USER even when TLS already identified the client | logIn() sends USER after the handshake | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData` |
+| R4217_4_2_ResetAfterAuth | RFC 4217 4.2 | MUST | Treat TYPE, data port, working directory and other transfer parameters as reset after AUTH | logIn() sets TYPE I and reads the directory after AUTH TLS | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData` |
 | R4217_6_FeatAuthTls | RFC 4217 6 | MUST | Read AUTH TLS, PBSZ and PROT from FEAT, a TLS-C synonym need not appear | Features::has("AUTH", "TLS") | `FeaturesTests.ProftpdFeatures` |
 | R4217_7_ClientIsTlsClient | RFC 4217 7 | MUST | Be the TLS client on data connections too | DataConnection TLS |  |
 | R4217_8_ProtAnyTime | RFC 4217 8 | MAY | Change the data protection level with PROT at any point of the session | Not applicable: PROT P is set once per control connection |  |
 | R4217_9_ProtLevelPersists | RFC 4217 9 | MUST | Protect every later data connection at the accepted PROT level until PROT, REIN or AUTH changes it |  |  |
-| R4217_9_ProtClearOrPrivate | RFC 4217 9 | MUST | Send only PROT C or PROT P with TLS |  |  |
+| R4217_9_ProtClearOrPrivate | RFC 4217 9 | MUST | Send only PROT C or PROT P with TLS | logIn() sends PROT P only | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData` |
 | R4217_9_DataHandshakeFirst | RFC 4217 9 | MUST | With PROT P finish the data connection TLS handshake before any data |  |  |
 | R4217_9_NoEncapsulation | RFC 4217 9 | SHOULD NOT | Do not wrap TLS data in RFC 2228 protection blocks |  |  |
 | R4217_9_InitialClear | RFC 4217 9; RFC 2228 3 | MUST | Treat data connections as Clear until a PROT P is accepted |  |  |
-| R4217_10_1_FailedTlsReplies | RFC 4217 10.1 | SHOULD | After a failed control handshake accept a clear 421, a protected 421 or a dropped connection |  |  |
+| R4217_10_1_FailedTlsReplies | RFC 4217 10.1 | SHOULD | After a failed control handshake accept a clear 421, a protected 421 or a dropped connection | A failed handshake ends the connection as Dead, whatever the server sends | `ServerBytes/ControlConnectionHandshakeReplacedTests.ConnectionEndsAndNothingIsSent`, `ControlConnectionTlsTests.PlaintextBeforeTheHandshakeEndsTheConnection` |
 | R4217_10_2_Reply521 | RFC 4217 10.2 | SHOULD | Read 521 to a transfer command as a PROT setting the server refuses |  |  |
 | R4217_10_2_Reply522 | RFC 4217 10.2, 11.4 | MUST | Read 522 to a transfer command, first or after 150, as data protection too weak or a failed data handshake |  |  |
 | R4217_10_3_FlexibleSecuring | RFC 4217 10.3 | SHOULD | Secure the session at the point the server or user policy demands |  |  |
 | R4217_10_3_ServerDictatesTiming | RFC 4217 10.3 | SHOULD | Let the server dictate when AUTH, PBSZ and PROT are sent | Deviation: AUTH TLS follows the greeting and PBSZ 0, PROT P follow the handshake, no setting changes that order |  |
 | R4217_10_3_UserOverridesTiming | RFC 4217 10.3 | MUST | Let the user override when AUTH, PBSZ and PROT are sent | Deviation: AUTH TLS follows the greeting and PBSZ 0, PROT P follow the handshake, no setting changes that order |  |
 | R4217_10_3_AuthNotForcedFirst | RFC 4217 10.3 | SHOULD NOT | Do not insist on AUTH as the first command, nor on PBSZ and PROT right after it | Deviation: AUTH TLS follows the greeting and PBSZ 0, PROT P follow the handshake, no setting changes that order |  |
-| R4217_10_3_ClearQuitAfterFailedTls | RFC 4217 10.3 | SHOULD | Send an unprotected QUIT when the TLS negotiation fails completely |  |  |
-| R4217_10_3_ProtectedQuitOnRejectedPeer | RFC 4217 10.3 | SHOULD | Send a protected QUIT when TLS succeeds but the server's parameters are unacceptable |  |  |
-| R4217_10_3_DropOnBrokenHandshake | RFC 4217 10.3 | SHOULD | Drop the control connection when the handshake fails midway |  |  |
+| R4217_10_3_ClearQuitAfterFailedTls | RFC 4217 10.3 | SHOULD | Send an unprotected QUIT when the TLS negotiation fails completely | Deviation: the connection closes without QUIT, after a failed handshake the server cannot read either form for sure |  |
+| R4217_10_3_ProtectedQuitOnRejectedPeer | RFC 4217 10.3 | SHOULD | Send a protected QUIT when TLS succeeds but the server's parameters are unacceptable | Deviation: an untrusted certificate fails the handshake itself, no session exists for a QUIT |  |
+| R4217_10_3_DropOnBrokenHandshake | RFC 4217 10.3 | SHOULD | Drop the control connection when the handshake fails midway | A failed or timed out handshake closes the connection | `ServerBytes/ControlConnectionHandshakeReplacedTests.ConnectionEndsAndNothingIsSent`, `ControlConnectionTlsTests.HandshakeWithoutAnAnswerTimesOut`, `ControlConnectionTlsTests.TlsBeforeVersion12IsRefused` |
 | R4217_10_4_DataNegotiation | RFC 4217 10.4 | SHOULD NOT | Do not read a refused transfer as a refusal of that PROT level for the session | DataConnection TLS |  |
 | R4217_10_4_ClearListingsFirst | RFC 4217 10.4 | MAY | Try LIST and NLST on a Clear data connection first, with a user option that forbids it | Not applicable: listings use PROT P like transfers |  |
 | R4217_10_4_ClientCertificateForUser | RFC 4217 10.4 | SHOULD | Use a client certificate that identifies a user, not the client host | Not applicable: client certificates come later |  |
-| R4217_12_1_PbszProtLoginOrder | RFC 4217 12.1 | MAY | Accept a server that takes PBSZ and PROT only after login, or before it |  |  |
+| R4217_12_1_PbszProtLoginOrder | RFC 4217 12.1 | MAY | Accept a server that takes PBSZ and PROT only after login, or before it | PBSZ and PROT follow the login, as curl and FileZilla send them | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData`, `Conformance/LoginConformance.LogsInAndLearnsTheServer` |
 | R4217_12_5_ConnectBeforeTransferReply | RFC 4217 12.5 | SHOULD | Open the passive data connection without waiting for the 150 reply |  |  |
 | R4217_13_ReinClearsTls | RFC 4217 13 | MUST | Treat TLS as cleared on control and data connections after REIN | Not applicable: the client never sends REIN |  |
-| R4217_14_EverythingInsideTls | RFC 4217 14 | MUST | Send all data, Telnet commands included, inside the TLS session | ABOR goes in band on the TLS stream, without urgent data |  |
-| R4217_15_1_1_CertificateVerification | RFC 4217 15.1.1; RFC 7151 4 | SHOULD | Verify the certificate of the server | Tls trust |  |
+| R4217_14_EverythingInsideTls | RFC 4217 14 | MUST | Send all data, Telnet commands included, inside the TLS session | ABOR goes in band on the TLS stream, without urgent data | `ControlConnectionTlsTests.CommandsAfterAuthTlsGoOverTls` |
+| R4217_15_1_1_CertificateVerification | RFC 4217 15.1.1; RFC 7151 4 | SHOULD | Verify the certificate of the server | TlsContext checks the chain against trusted authorities and the name, a pin of the public key accepts a refused one | `Certificates/ControlConnectionUntrustedTests.CertificateNeedsTrustAndNothingIsSent`, `Certificates/ControlConnectionUntrustedTests.PinnedPublicKeyIsTrusted`, `ControlConnectionTlsTests.CertificateHasToNameTheServer`, `ControlConnectionTlsTests.DnsNameOfTheCertificateIsTrusted`, `Conformance/LoginConformance.LogsInAndLearnsTheServer` |
 | R4217_15_1_1_SameDataCertificate | RFC 4217 15.1.1 | SHOULD | Check that data connections show the same server certificate as the control connection |  |  |
 | R4217_15_1_2_SameClientCertificate | RFC 4217 15.1.2 | SHOULD | Present the same client certificate on data and control connections | Not applicable: client certificates come later |  |
 | R4217_15_3_CccIssues | RFC 4217 15.3 | SHOULD NOT | Do not assume the server accepts CCC | Not applicable: the client never sends CCC |  |
-| R4217_17_AuthParameterTls | RFC 4217 17 | MUST | Send the AUTH parameter as "TLS" |  |  |
-| R4217_AuthTlsPbszProt | RFC 4217 4.1, 8, 9, 17 | SHOULD | Send AUTH TLS, then PBSZ 0 and PROT P | Login flow |  |
+| R4217_17_AuthParameterTls | RFC 4217 17 | MUST | Send the AUTH parameter as "TLS" | startTls() sends AUTH TLS | `ControlConnectionTlsTests.CommandsAfterAuthTlsGoOverTls` |
+| R4217_AuthTlsPbszProt | RFC 4217 4.1, 8, 9, 17 | SHOULD | Send AUTH TLS, then PBSZ 0 and PROT P | logIn() sends AUTH TLS, then PBSZ 0 and PROT P after the login | `LoginTests.ExplicitTlsProtectsTheCredentialsAndTheData` |
 | MFXX_3_MfmtNotMdtm | draft-somers-ftp-mfxx-04 3 | SHOULD | Set modification times with MFMT, not with an MDTM that takes a time |  |  |
 | MFXX_3_MffForBothTimes | draft-somers-ftp-mfxx-04 3, 4 | SHOULD | Use MFF to change modification and creation time together | Not applicable: the client sets only modification times |  |
 | MFXX_3_1_ReadActualTime | draft-somers-ftp-mfxx-04 3.1 | SHOULD | Take the time in the 213 "Modify=" reply as the one actually set, it may differ from the request |  |  |
