@@ -345,6 +345,7 @@ namespace FileTransferProtocol::Test
             "type=cdir;modify=20150813224845; /home/user\r\n"
             "type=pdir;modify=20150813224845; ..\r\n"
             "type=pdir; /home\r\n"
+            "type=pdir;modify=2015; /\r\n"
             "type=dir; child\r\n"
         );
         EXPECT_EQ(namesOf(listing), std::set<std::string>{"child"});

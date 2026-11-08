@@ -177,9 +177,9 @@ namespace FileTransferProtocol::Detail
             readFact(name, fact.substr(equals + 1u), facts);
         }
 
-        const auto unreadableFacts = facts.unreadable;
         if (facts.currentOrParent && currentAndParent == CurrentAndParent::Skip)
-            return ListingLine{.unreadableFacts = unreadableFacts};
+            return ListingLine{};
+        const auto unreadableFacts = facts.unreadable;
         return ListingLine{.entry = entryOf(std::move(facts)), .unreadableFacts = unreadableFacts};
     }
 }

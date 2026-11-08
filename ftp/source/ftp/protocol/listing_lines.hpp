@@ -16,7 +16,7 @@ namespace FileTransferProtocol::Detail
     {
         /** @brief The entry, nothing for a line that lists no child, like "total 12" or a cdir entry of MLSD. */
         std::optional<ListingEntry> entry{};
-        /** @brief Facts whose value could not be read. */
+        /** @brief Facts of the entry whose value could not be read. */
         std::size_t unreadableFacts{0u};
     };
 
