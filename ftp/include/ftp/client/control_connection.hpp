@@ -61,9 +61,9 @@ namespace FileTransferProtocol
      * whose replies cannot be matched to its commands any more ends as Dead: a reply nothing waits for, a 421, a reply
      * past its deadline, a framing error.
      *
-     * ABOR into a transfer is followed by PWD as a marker. Servers answer the two with two replies in either order, with
-     * one, or with none; the final replies before the 257 of PWD go to the transfer and ABOR: the first to the transfer,
-     * the last to ABOR, a single one to both.
+     * ABOR into a transfer is followed by PWD as a marker. Servers answer the two with two replies in either order,
+     * with one, or with none; the final replies before the 257 of PWD go to the transfer and ABOR: the first to the
+     * transfer, the last to ABOR, a single one to both.
      *
      * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
      * operations hold the connection weakly and own only their buffers and commands: the owner decides how long it
@@ -98,10 +98,12 @@ namespace FileTransferProtocol
 
         /**
          * @brief Connects to the first of @p endpoints that accepts within the connect timeout, starts the reader and
-         *        waits for the greeting.
+         *        waits for the greeting. Each endpoint gets its share of the time left, one that never answers leaves
+         *        time for the rest.
          *
-         * @return The 220 greeting. NoConnection when no endpoint accepted, TimedOut past the connect timeout, the
-         *         replyError() of any other greeting. The connection is Dead after an error.
+         * @return The 220 greeting. NoConnection when no endpoint accepted, TimedOut past the connect timeout,
+         *         Cancelled by close() or a cancelled wait, the replyError() of any other greeting. The connection is
+         *         Dead after an error, Closed after close().
          */
         boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
         connect(std::vector<boost::asio::ip::tcp::endpoint> endpoints);
@@ -173,6 +175,10 @@ namespace FileTransferProtocol
             std::vector<Reply> replies{};
         };
 
+        boost::asio::awaitable<std::expected<boost::asio::ip::tcp::endpoint, RemoteIo::RemoteError>> connectToFirst(
+            std::vector<boost::asio::ip::tcp::endpoint> const& endpoints,
+            std::chrono::steady_clock::time_point deadline
+        );
         void readNext();
         void takeRead(boost::system::error_code error, std::string_view bytes);
         void takeBytes(std::string_view bytes);

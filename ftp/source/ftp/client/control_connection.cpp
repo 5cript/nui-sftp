@@ -7,9 +7,9 @@
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/cancel_after.hpp>
-#include <boost/asio/connect.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/write.hpp>
 #include <fmt/format.h>
@@ -52,16 +52,14 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Why a connect failed: TimedOut at @p deadline, Cancelled before it, NoConnection for any other error.
+         * @brief Why no endpoint accepted: TimedOut once @p deadline passed, before it NoConnection with @p lastError.
          */
         RemoteIo::RemoteError
-        connectError(boost::system::error_code error, Clock::time_point deadline, std::chrono::milliseconds timeout)
+        connectError(boost::system::error_code lastError, Clock::time_point deadline, std::chrono::milliseconds timeout)
         {
-            if (error != asio::error::operation_aborted)
-                return errorOf(RemoteErrorKind::NoConnection, fmt::format("Could not connect: {}", error.message()));
             if (Clock::now() >= deadline)
                 return errorOf(RemoteErrorKind::TimedOut, fmt::format("No connection within {} ms", timeout.count()));
-            return errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled");
+            return errorOf(RemoteErrorKind::NoConnection, fmt::format("Could not connect: {}", lastError.message()));
         }
 
         /**
@@ -160,15 +158,13 @@ namespace FileTransferProtocol
         }
 
         const auto deadline = Clock::now() + options_.connectTimeout;
-        const auto [error, endpoint] =
-            co_await asio::async_connect(socket_, endpoints, asio::cancel_after(options_.connectTimeout, useTuple));
-        if (error)
+        const auto endpoint = co_await connectToFirst(endpoints, deadline);
+        if (!endpoint)
         {
-            auto failure = connectError(error, deadline, options_.connectTimeout);
-            die(failure);
-            co_return std::unexpected(std::move(failure));
+            die(endpoint.error());
+            co_return std::unexpected(endpoint.error());
         }
-        remote_ = endpoint;
+        remote_ = *endpoint;
         state_ = ControlState::Open;
         if (const auto configured = applyControlSocketOptions(socket_, options_.socket); !configured)
         {
@@ -197,6 +193,30 @@ namespace FileTransferProtocol
             co_return std::unexpected(std::move(failure));
         }
         co_return reply;
+    }
+
+    asio::awaitable<std::expected<asio::ip::tcp::endpoint, RemoteIo::RemoteError>>
+    ControlConnection::connectToFirst(std::vector<asio::ip::tcp::endpoint> const& endpoints, Clock::time_point deadline)
+    {
+        boost::system::error_code lastError{};
+        for (std::size_t index = 0u; index < endpoints.size() && Clock::now() < deadline; ++index)
+        {
+            // Each endpoint gets its share of the time left, so one that never answers leaves time for the rest.
+            const auto share = (deadline - Clock::now()) / static_cast<Clock::rep>(endpoints.size() - index);
+            boost::system::error_code ignored{};
+            socket_.close(ignored);
+            const auto [error] = co_await socket_.async_connect(endpoints[index], asio::cancel_after(share, useTuple));
+            // close() ran while the connect was under way.
+            if (!isLive())
+                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled"));
+            // A cancelled coroutine would throw at its next co_await.
+            if ((co_await asio::this_coro::cancellation_state).cancelled() != asio::cancellation_type::none)
+                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled"));
+            if (!error)
+                co_return endpoints[index];
+            lastError = error;
+        }
+        co_return std::unexpected(connectError(lastError, deadline, options_.connectTimeout));
     }
 
     std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> ControlConnection::send(Command command)

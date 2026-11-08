@@ -8,13 +8,16 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
 #include <future>
 #include <memory>
@@ -59,6 +62,59 @@ namespace FileTransferProtocol::Test
             ASSERT_FALSE(reply) << "got a " << reply->code << " reply";
             EXPECT_EQ(reply.error().kind, kind) << reply.error().toString();
         }
+
+        /**
+         * @brief A listener with a full queue: Linux drops further SYNs, so a connect to it neither completes nor
+         *        fails. Other systems may refuse or queue more.
+         */
+        class SilentEndpoint
+        {
+          public:
+            SilentEndpoint()
+            {
+                acceptor_.open(asio::ip::tcp::v4());
+                acceptor_.bind(asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0u});
+                acceptor_.listen(1);
+                // A backlog of 1 holds two connections, with SYN cookies on or off.
+                for (auto& filler : fillers_)
+                    filler.connect(acceptor_.local_endpoint());
+            }
+
+            asio::ip::tcp::endpoint endpoint() const
+            {
+                return acceptor_.local_endpoint();
+            }
+
+            /**
+             * @brief A connect is still under way after a while.
+             */
+            bool neverAnswers()
+            {
+                asio::ip::tcp::socket probe{context_};
+                boost::system::error_code result{};
+                probe.async_connect(
+                    endpoint(),
+                    asio::cancel_after(
+                        100ms,
+                        [&result](boost::system::error_code error)
+                        {
+                            result = error;
+                        }
+                    )
+                );
+                context_.restart();
+                context_.run();
+                return result == asio::error::operation_aborted;
+            }
+
+          private:
+            asio::io_context context_{};
+            asio::ip::tcp::acceptor acceptor_{context_};
+            std::array<asio::ip::tcp::socket, 2> fillers_{
+                asio::ip::tcp::socket{context_},
+                asio::ip::tcp::socket{context_}
+            };
+        };
     }
 
     class ControlConnectionTests : public ::testing::Test
@@ -265,6 +321,115 @@ namespace FileTransferProtocol::Test
                 });
         expectError(greeting, RemoteErrorKind::NoConnection);
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
+    }
+
+    TEST_F(ControlConnectionTests, RefusedEndpointIsSkipped)
+    {
+        asio::io_context context{};
+        asio::ip::tcp::acceptor unused{context, asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}};
+        const auto closedPort = unused.local_endpoint();
+        unused.close();
+
+        server_->addConnection(Script{}.reply("220 Ready").expectDisconnect());
+        const auto connection = makeConnection();
+        const auto greeting =
+            run(connection,
+                [connection, tried = std::vector{closedPort, endpoints().front()}]() -> asio::awaitable<ReplyResult>
+                {
+                    co_return co_await connection->connect(tried);
+                });
+        expectReply(greeting, 220);
+        EXPECT_EQ(connection->remoteEndpoint(), endpoints().front());
+    }
+
+    TEST_F(ControlConnectionTests, EndpointThatNeverAnswersLeavesTimeForTheNext)
+    {
+#if !defined(__linux__)
+        GTEST_SKIP() << "Only Linux drops the SYNs to a full listen queue";
+#else
+        SilentEndpoint silent{};
+        ASSERT_TRUE(silent.neverAnswers());
+        server_->addConnection(Script{}.reply("220 Ready").expectDisconnect());
+        auto options = relaxedOptions();
+        options.connectTimeout = 1s;
+        const auto connection = makeConnection(options);
+        const auto greeting = run(
+            connection,
+            [connection, tried = std::vector{silent.endpoint(), endpoints().front()}]() -> asio::awaitable<ReplyResult>
+            {
+                co_return co_await connection->connect(tried);
+            }
+        );
+        expectReply(greeting, 220);
+        EXPECT_EQ(connection->remoteEndpoint(), endpoints().front());
+#endif
+    }
+
+    TEST_F(ControlConnectionTests, NoEndpointAnswersWithinTheConnectTimeout)
+    {
+#if !defined(__linux__)
+        GTEST_SKIP() << "Only Linux drops the SYNs to a full listen queue";
+#else
+        SilentEndpoint silent{};
+        ASSERT_TRUE(silent.neverAnswers());
+        auto options = relaxedOptions();
+        options.connectTimeout = 200ms;
+        const auto connection = makeConnection(options);
+        const auto greeting =
+            run(connection,
+                [connection, tried = std::vector{silent.endpoint()}]() -> asio::awaitable<ReplyResult>
+                {
+                    co_return co_await connection->connect(tried);
+                });
+        expectError(greeting, RemoteErrorKind::TimedOut);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+#endif
+    }
+
+    TEST_F(ControlConnectionTests, CloseWhileAnEndpointIsTriedStopsTheConnect)
+    {
+#if !defined(__linux__)
+        GTEST_SKIP() << "Only Linux drops the SYNs to a full listen queue";
+#else
+        SilentEndpoint silent{};
+        ASSERT_TRUE(silent.neverAnswers());
+        const auto connection = makeConnection();
+        auto connecting = asio::co_spawn(
+            connection->strand(), connection->connect({silent.endpoint(), endpoints().front()}), asio::use_future
+        );
+        // Runs behind the start of connect(), while the first endpoint is tried.
+        asio::post(
+            connection->strand(),
+            [connection]()
+            {
+                connection->close();
+            }
+        );
+        ASSERT_EQ(connecting.wait_for(20s), std::future_status::ready);
+        expectError(connecting.get(), RemoteErrorKind::Cancelled);
+        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+        // The next endpoint was never tried.
+        EXPECT_TRUE(server_->transcript().empty());
+#endif
+    }
+
+    TEST_F(ControlConnectionTests, CloseBeforeTheConnectResumesKeepsItClosed)
+    {
+        // On one thread the close runs before connect() resumes, also when the connect itself already succeeded.
+        server_->addConnection(Script{}.expectDisconnect());
+        const auto connection = makeSequentialConnection();
+        auto connecting = asio::co_spawn(connection->strand(), connection->connect(endpoints()), asio::use_future);
+        asio::post(
+            connection->strand(),
+            [connection]()
+            {
+                connection->close();
+            }
+        );
+        ASSERT_EQ(connecting.wait_for(20s), std::future_status::ready);
+        expectError(connecting.get(), RemoteErrorKind::Cancelled);
+        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+        EXPECT_FALSE(connection->failure());
     }
 
     TEST_F(ControlConnectionTests, RepliesGoToTheCommandsInOrder)
