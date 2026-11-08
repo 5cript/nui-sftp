@@ -517,6 +517,32 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Open);
     }
 
+    TEST_F(ControlConnectionTests, PreliminaryReplyToACommandWithoutOneIsDropped)
+    {
+        // The late 150 of the failed RETR comes once PWD is written, PWD gets no 1yz (RFC 959 5.4).
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "missing")
+                .reply("550 No such file")
+                .expect("PWD")
+                .replyRaw("150 Opening anyway\r\n257 \"/\" is the current directory\r\n")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        expectReply(execute(connection, command(Verb::Retrieve, "missing")), 550);
+        const auto directory =
+            run(connection,
+                [connection]() -> asio::awaitable<ReplyResult>
+                {
+                    const auto pending = connection->send(command(Verb::PrintWorkingDirectory)).value();
+                    co_return co_await pending->nextReply();
+                });
+        expectReply(directory, 257);
+        EXPECT_EQ(stateOf(connection), ControlState::Open);
+    }
+
     TEST_F(ControlConnectionTests, ReplyNothingWaitsForEndsTheConnection)
     {
         server_->addConnection(Script{}.reply("220 Ready").delay(50ms).unsolicited("200 Surprise"));

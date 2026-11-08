@@ -86,6 +86,15 @@ namespace FileTransferProtocol
             return verb && isTransfer(*verb);
         }
 
+        /**
+         * @brief The greeting, which may come after a 120, or a transfer.
+         */
+        bool takesPreliminaryReplies(PendingCommand const& pending)
+        {
+            const auto verb = pending.verb();
+            return !verb || isTransfer(*verb);
+        }
+
         std::string nameOf(PendingCommand const& pending)
         {
             const auto verb = pending.verb();
@@ -339,14 +348,15 @@ namespace FileTransferProtocol
     {
         const auto code = reply.code;
         const auto preliminary = isPreliminary(code);
+        // Only the greeting and transfers get 1yz replies (RFC 959 5.4). Some servers send a 150 after a transfer
+        // failed, by then the next command may be written, and the end of the transfer is not in doubt.
+        if (preliminary && (awaiting_.empty() || !takesPreliminaryReplies(*awaiting_.front())))
+        {
+            Log::debug("FTP: Dropped a {} reply that no command waited for", code);
+            return;
+        }
         if (awaiting_.empty())
         {
-            // Some servers send a 150 after a transfer failed, the end of the transfer is not in doubt.
-            if (preliminary)
-            {
-                Log::debug("FTP: Dropped a {} reply that no command waited for", code);
-                return;
-            }
             Log::warn("FTP: A {} reply came while no command waited for one", code);
             if (code != 421)
             {
