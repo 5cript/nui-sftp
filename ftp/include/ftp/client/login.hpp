@@ -58,8 +58,8 @@ namespace FileTransferProtocol
      *        login as with curl and FileZilla. Runs on the strand of @p connection, which the caller keeps.
      *
      * @return The result, or the error of the step that failed: a replyError() of the server's reply,
-     *         TrustRequired with ControlConnection::untrustedCertificate() to ask about. The connection is closed
-     *         after an error.
+     *         TrustRequired with ControlConnection::untrustedCertificate() to ask about, NoSecureConnection when TLS
+     *         or the protection of the data connections failed. The connection is closed after an error.
      */
     boost::asio::awaitable<std::expected<LoginResult, RemoteIo::RemoteError>> logIn(
         std::shared_ptr<ControlConnection> connection,

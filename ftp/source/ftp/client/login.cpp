@@ -79,6 +79,23 @@ namespace FileTransferProtocol
             co_return std::unexpected(replyError(*password, Verb::Password));
         }
 
+        /**
+         * @brief PBSZ 0 and PROT P, the data connections of a TLS session use TLS too. A refusal leaves no secure
+         *        session.
+         */
+        asio::awaitable<Result> protectData(ControlConnection& connection)
+        {
+            const auto bufferSize =
+                co_await require(connection, Command{.verb = Verb::ProtectionBufferSize, .argument = "0"});
+            if (!bufferSize)
+                co_return std::unexpected(asNoSecureConnection(bufferSize.error()));
+            const auto protection =
+                co_await require(connection, Command{.verb = Verb::DataProtection, .argument = "P"});
+            if (!protection)
+                co_return std::unexpected(asNoSecureConnection(protection.error()));
+            co_return Result{};
+        }
+
         asio::awaitable<std::expected<Features, RemoteIo::RemoteError>> askFeatures(ControlConnection& connection)
         {
             const auto reply = co_await connection.execute(Command{.verb = Verb::Features});
@@ -135,14 +152,8 @@ namespace FileTransferProtocol
 
             if (secured)
             {
-                const auto bufferSize =
-                    co_await require(*connection, Command{.verb = Verb::ProtectionBufferSize, .argument = "0"});
-                if (!bufferSize)
-                    co_return std::unexpected(bufferSize.error());
-                const auto protection =
-                    co_await require(*connection, Command{.verb = Verb::DataProtection, .argument = "P"});
-                if (!protection)
-                    co_return std::unexpected(protection.error());
+                if (const auto protectedData = co_await protectData(*connection); !protectedData)
+                    co_return std::unexpected(protectedData.error());
                 result.dataProtected = true;
             }
 

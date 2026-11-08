@@ -362,8 +362,8 @@ namespace FileTransferProtocol::Test
         server_->addConnection(script.expectDisconnect());
         const auto connection = makeConnection();
         const auto result = login(connection, explicitOptions());
-        ASSERT_FALSE(result);
-        EXPECT_NE(result.error().kind, RemoteIo::RemoteErrorKind::None) << result.error().toString();
+        expectLoginError(result, RemoteIo::RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(result.error().protocolCode, 536);
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
     }
 
