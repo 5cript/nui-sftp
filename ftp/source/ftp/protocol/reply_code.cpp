@@ -20,4 +20,9 @@ namespace FileTransferProtocol
                 return std::nullopt;
         }
     }
+
+    bool isPreliminary(int code)
+    {
+        return classifyReply(code) == ReplyClass::PositivePreliminary;
+    }
 }

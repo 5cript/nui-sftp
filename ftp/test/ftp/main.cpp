@@ -1,5 +1,6 @@
 #include <utility/process_temporary_directory.hpp>
 #include "test_command.hpp"
+#include "test_control_connection.hpp"
 #include "test_features.hpp"
 #include "test_listing.hpp"
 #include "test_printable.hpp"
@@ -10,6 +11,7 @@
 #include "test_scripted_ftp_server.hpp"
 #include "test_server_profiles.hpp"
 #include "test_server_smoke.hpp"
+#include "test_socket_options.hpp"
 
 #include <gtest/gtest.h>
 

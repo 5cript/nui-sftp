@@ -5,6 +5,7 @@
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -19,6 +20,7 @@
 #include <condition_variable>
 #include <deque>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <thread>
@@ -199,6 +201,8 @@ namespace FileTransferProtocol::Test
             ioContext_.stop();
             if (thread_.joinable())
                 thread_.join();
+            // Timers of scripts still waiting for a release, they must go before ioContext_.
+            releaseWaiters_.clear();
         }
         Implementation(Implementation const&) = delete;
         Implementation& operator=(Implementation const&) = delete;
@@ -271,6 +275,54 @@ namespace FileTransferProtocol::Test
                 ++disconnected_;
             }
             changed_.notify_all();
+        }
+
+        void release(std::string name)
+        {
+            std::vector<std::shared_ptr<asio::steady_timer>> waiting{};
+            {
+                std::lock_guard lock{mutex_};
+                releases_.push_back(std::move(name));
+                waiting = releaseWaiters_;
+            }
+            for (auto const& waiter : waiting)
+            {
+                asio::post(
+                    executor(),
+                    [waiter]()
+                    {
+                        waiter->cancel();
+                    }
+                );
+            }
+        }
+
+        /**
+         * @brief Takes a release of @p name, false when there is none yet.
+         */
+        bool takeRelease(std::string const& name)
+        {
+            std::lock_guard lock{mutex_};
+            const auto found = std::ranges::find(releases_, name);
+            if (found == releases_.end())
+                return false;
+            releases_.erase(found);
+            return true;
+        }
+
+        /**
+         * @brief Cancels @p waiter on the executor of the server whenever release() is called.
+         */
+        void wakeOnRelease(std::shared_ptr<asio::steady_timer> waiter)
+        {
+            std::lock_guard lock{mutex_};
+            releaseWaiters_.push_back(std::move(waiter));
+        }
+
+        void stopWakingOnRelease(std::shared_ptr<asio::steady_timer> const& waiter)
+        {
+            std::lock_guard lock{mutex_};
+            std::erase(releaseWaiters_, waiter);
         }
 
         bool waitForCheckpoint(std::string const& name, std::chrono::milliseconds timeout)
@@ -395,6 +447,8 @@ namespace FileTransferProtocol::Test
         std::size_t disconnected_{0u};
         std::vector<TranscriptEntry> transcript_{};
         std::vector<std::string> checkpoints_{};
+        std::vector<std::string> releases_{};
+        std::vector<std::shared_ptr<asio::steady_timer>> releaseWaiters_{};
         std::vector<std::string> failures_{};
 
         // Destroyed first of what suspended coroutines may use, the coroutines go with it.
@@ -815,10 +869,13 @@ namespace FileTransferProtocol::Test
 
             asio::awaitable<bool> perform(Script::Dribble const& step)
             {
+                // Stops at the first byte the client did not take, the next read sees how the connection ended.
                 asio::steady_timer timer{server_.executor()};
-                for (auto const& byte : step.bytes)
+                error_code error{};
+                std::size_t position = 0u;
+                while (!error && position < step.bytes.size())
                 {
-                    co_await transport_.writeAll(asio::buffer(&byte, 1u));
+                    error = co_await transport_.writeAll(asio::buffer(&step.bytes[position++], 1u));
                     timer.expires_after(step.interval);
                     co_await timer.async_wait(noThrow);
                 }
@@ -865,6 +922,21 @@ namespace FileTransferProtocol::Test
             asio::awaitable<bool> perform(Script::Checkpoint const& step)
             {
                 server_.reachCheckpoint(step.name);
+                co_return true;
+            }
+
+            asio::awaitable<bool> perform(Script::AwaitRelease const& step)
+            {
+                // release() posts the cancel, so it cannot come between the check and the wait.
+                const auto waiter =
+                    std::make_shared<asio::steady_timer>(server_.executor(), asio::steady_timer::time_point::max());
+                server_.wakeOnRelease(waiter);
+                while (!server_.takeRelease(step.name))
+                {
+                    waiter->expires_at(asio::steady_timer::time_point::max());
+                    co_await waiter->async_wait(noThrow);
+                }
+                server_.stopWakingOnRelease(waiter);
                 co_return true;
             }
 
@@ -1091,6 +1163,11 @@ namespace FileTransferProtocol::Test
     {
         return impl_->waitForCheckpoint(name, timeout);
     }
+    void ScriptedFtpServer::release(std::string name)
+    {
+        impl_->release(std::move(name));
+    }
+
     bool ScriptedFtpServer::waitForTranscriptEntry(TranscriptEntry::Kind kind, std::chrono::milliseconds timeout)
     {
         return impl_->waitForTranscriptEntry(kind, timeout);

@@ -73,9 +73,9 @@ namespace FileTransferProtocol::Test
             return names;
         }
 
-        ListingEntry entryNamed(Listing const& listing, std::string_view name)
+        FileTransferProtocol::ListingEntry entryNamed(Listing const& listing, std::string_view name)
         {
-            const auto found = std::ranges::find(listing.entries, name, &ListingEntry::name);
+            const auto found = std::ranges::find(listing.entries, name, &FileTransferProtocol::ListingEntry::name);
             if (found == listing.entries.end())
             {
                 ADD_FAILURE() << "No entry named '" << name << "'";
@@ -87,12 +87,12 @@ namespace FileTransferProtocol::Test
         /**
          * @brief The one entry of @p listing, which must have nothing left out.
          */
-        ListingEntry onlyEntry(Listing const& listing)
+        FileTransferProtocol::ListingEntry onlyEntry(Listing const& listing)
         {
             EXPECT_EQ(listing.entries.size(), 1u);
             EXPECT_EQ(listing.unreadableLines, 0u);
             EXPECT_EQ(listing.refusedNames, 0u);
-            return listing.entries.empty() ? ListingEntry{} : listing.entries.front();
+            return listing.entries.empty() ? FileTransferProtocol::ListingEntry{} : listing.entries.front();
         }
 
         void expectNothingLeftOut(Listing const& listing)

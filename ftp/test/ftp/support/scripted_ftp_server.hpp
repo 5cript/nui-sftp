@@ -97,6 +97,11 @@ namespace FileTransferProtocol::Test
         bool waitForCheckpoint(std::string const& name, std::chrono::milliseconds timeout = std::chrono::seconds{10});
 
         /**
+         * @brief Lets a script go on that waits in Script::awaitRelease(@p name), now or once it gets there.
+         */
+        void release(std::string name);
+
+        /**
          * @brief Waits until the transcript holds an entry of @p kind, for what no script step can wait on, like the
          *        accept of a data connection.
          *

@@ -23,4 +23,9 @@ namespace FileTransferProtocol
      * @return The class, nothing when @p code is not between 100 and 599.
      */
     std::optional<ReplyClass> classifyReply(int code);
+
+    /**
+     * @brief A 1yz reply, which is never the final reply to a command.
+     */
+    bool isPreliminary(int code);
 }

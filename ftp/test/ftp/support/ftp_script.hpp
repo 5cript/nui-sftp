@@ -182,6 +182,10 @@ namespace FileTransferProtocol::Test
         {
             std::string name{};
         };
+        struct AwaitRelease
+        {
+            std::string name{};
+        };
         struct Passive
         {
             DataPlan plan{};
@@ -203,6 +207,7 @@ namespace FileTransferProtocol::Test
             ExpectDisconnect,
             StartTls,
             Checkpoint,
+            AwaitRelease,
             Passive,
             BeginData,
             AwaitData,
@@ -231,6 +236,9 @@ namespace FileTransferProtocol::Test
         Script& startTls(TlsBehaviour behaviour = {});
         /** @brief A sync point, see ScriptedFtpServer::waitForCheckpoint(). */
         Script& checkpoint(std::string name);
+        /** @brief Waits until the test calls ScriptedFtpServer::release(@p name), the other way round of a checkpoint.
+         */
+        Script& awaitRelease(std::string name);
         /** @brief Listens for a data connection and answers the PASV or EPSV expected before this step. */
         Script& passive(DataPlan plan);
         /** @brief Starts the plan of the last passive() once the client connected. */
