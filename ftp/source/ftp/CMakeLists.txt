@@ -8,6 +8,8 @@ function(add_file_transfer_protocol_library name remoteIo)
     add_library(
         ${name}
         STATIC
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/control_connection.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/pending_command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/socket_options.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/features.cpp
@@ -27,7 +29,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/../../include
     )
 
-    target_link_libraries(${name} PUBLIC ${remoteIo} fmt::fmt Boost::headers Threads::Threads)
+    target_link_libraries(${name} PUBLIC ${remoteIo} fmt::fmt Boost::headers Threads::Threads PRIVATE log)
     if (WIN32)
         target_link_libraries(${name} PUBLIC ws2_32 mswsock)
     endif()

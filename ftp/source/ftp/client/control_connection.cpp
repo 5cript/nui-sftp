@@ -1,0 +1,537 @@
+#include <ftp/client/control_connection.hpp>
+#include <ftp/protocol/protocol_error.hpp>
+#include <ftp/protocol/reply_code.hpp>
+#include <ftp/protocol/reply_error.hpp>
+#include <log/log.hpp>
+
+#include <boost/asio/as_tuple.hpp>
+#include <boost/asio/buffer.hpp>
+#include <boost/asio/cancel_after.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/connect.hpp>
+#include <boost/asio/dispatch.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/write.hpp>
+#include <fmt/format.h>
+
+#include <algorithm>
+#include <cassert>
+#include <exception>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+
+namespace FileTransferProtocol
+{
+    namespace
+    {
+        namespace asio = boost::asio;
+        using Clock = std::chrono::steady_clock;
+        using RemoteIo::RemoteErrorKind;
+
+        constexpr auto useTuple = asio::as_tuple(asio::use_awaitable);
+
+        RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
+        {
+            return RemoteIo::RemoteError{
+                .kind = kind,
+                .protocol = RemoteIo::Protocol::Ftp,
+                .message = std::move(message),
+            };
+        }
+
+        RemoteIo::RemoteError transportError(std::string_view operation, boost::system::error_code error)
+        {
+            return errorOf(
+                RemoteErrorKind::ConnectionLost,
+                fmt::format("{} the control connection failed: {}", operation, error.message())
+            );
+        }
+
+        /**
+         * @brief A command whose final reply follows its whole data transfer.
+         */
+        bool isTransfer(Verb verb)
+        {
+            switch (verb)
+            {
+                case Verb::Retrieve:
+                case Verb::Store:
+                case Verb::Append:
+                case Verb::List:
+                case Verb::NameList:
+                case Verb::MachineListDirectory:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /**
+         * @brief A command that RFC 959 4.2 lets go between the preliminary and the final reply of a transfer.
+         */
+        bool mayInterrupt(std::optional<Verb> verb)
+        {
+            return verb == Verb::Abort || verb == Verb::Status || verb == Verb::Quit;
+        }
+
+        std::string nameOf(PendingCommand const& pending)
+        {
+            const auto verb = pending.verb();
+            if (!verb)
+                return "the greeting";
+            return std::string{wireName(*verb).value_or("an unknown verb")};
+        }
+    }
+
+    std::shared_ptr<ControlConnection>
+    ControlConnection::create(asio::any_io_executor executor, ControlConnectionOptions options)
+    {
+        return std::make_shared<ControlConnection>(Private{}, std::move(executor), std::move(options));
+    }
+
+    ControlConnection::ControlConnection(Private, asio::any_io_executor executor, ControlConnectionOptions options)
+        : options_{std::move(options)}
+        , strand_{asio::make_strand(std::move(executor))}
+        , socket_{strand_}
+        , framer_{options_.replyLimits}
+        , deadlineTimer_{strand_}
+        , settleTimer_{strand_}
+    {}
+
+    ControlConnection::~ControlConnection() = default;
+
+    asio::strand<asio::any_io_executor> const& ControlConnection::strand() const
+    {
+        return strand_;
+    }
+
+    asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
+    ControlConnection::connect(std::vector<asio::ip::tcp::endpoint> endpoints)
+    {
+        assert(strand_.running_in_this_thread() && "ControlConnection::connect() runs on the strand of the connection");
+        if (state_ != ControlState::Unconnected)
+            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The control connection was connected before"));
+        if (endpoints.empty())
+        {
+            auto failure = errorOf(RemoteErrorKind::NoConnection, "There is no address to connect to");
+            die(failure);
+            co_return std::unexpected(std::move(failure));
+        }
+
+        const auto deadline = Clock::now() + options_.connectTimeout;
+        const auto [error, endpoint] =
+            co_await asio::async_connect(socket_, endpoints, asio::cancel_after(options_.connectTimeout, useTuple));
+        if (error)
+        {
+            auto failure = error != asio::error::operation_aborted
+                ? errorOf(RemoteErrorKind::NoConnection, fmt::format("Could not connect: {}", error.message()))
+                : Clock::now() >= deadline
+                ? errorOf(
+                      RemoteErrorKind::TimedOut,
+                      fmt::format("No connection within {} ms", options_.connectTimeout.count())
+                  )
+                : errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled");
+            die(failure);
+            co_return std::unexpected(std::move(failure));
+        }
+        remote_ = endpoint;
+        state_ = ControlState::Open;
+        if (const auto configured = applyControlSocketOptions(socket_, options_.socket); !configured)
+        {
+            die(configured.error());
+            co_return std::unexpected(configured.error());
+        }
+
+        // The greeting is owed without a command, and within the connect timeout, a 120 before it included.
+        const auto greeting = std::make_shared<PendingCommand>(strand_, std::nullopt, std::string{});
+        greeting->stage_ = PendingCommand::Stage::Written;
+        greeting->deadline_ = deadline;
+        awaiting_.push_back(greeting);
+        armDeadline();
+        asio::co_spawn(
+            strand_,
+            readReplies(shared_from_this()),
+            [self = shared_from_this()](std::exception_ptr exception)
+            {
+                if (exception)
+                    self->die(errorOf(RemoteErrorKind::Failure, "The reader of the control connection threw"));
+            }
+        );
+
+        auto reply = co_await greeting->finalReply();
+        if (!reply)
+        {
+            die(reply.error());
+            co_return reply;
+        }
+        if (reply->code != 220)
+        {
+            auto failure = replyError(*reply, std::nullopt);
+            die(failure);
+            co_return std::unexpected(std::move(failure));
+        }
+        co_return reply;
+    }
+
+    std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> ControlConnection::send(Command command)
+    {
+        assert(strand_.running_in_this_thread() && "ControlConnection::send() runs on the strand of the connection");
+        if (state_ != ControlState::Open)
+            return std::unexpected(
+                failure_.value_or(errorOf(RemoteErrorKind::NoConnection, "The control connection is not open"))
+            );
+        auto bytes = command.encode();
+        if (!bytes)
+            return std::unexpected(bytes.error());
+
+        auto pending = std::make_shared<PendingCommand>(strand_, std::move(command), std::move(*bytes));
+        queued_.push_back(pending);
+        writeNext();
+        return pending;
+    }
+
+    asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> ControlConnection::execute(Command command)
+    {
+        const auto pending = send(std::move(command));
+        if (!pending)
+            co_return std::unexpected(pending.error());
+        auto reply = co_await (*pending)->finalReply();
+        if (!reply && reply.error().kind == RemoteErrorKind::Cancelled)
+            withdraw(**pending);
+        co_return reply;
+    }
+
+    bool ControlConnection::withdraw(PendingCommand const& pending)
+    {
+        const auto found = std::ranges::find_if(
+            queued_,
+            [&pending](std::shared_ptr<PendingCommand> const& queued)
+            {
+                return queued.get() == &pending;
+            }
+        );
+        if (found == queued_.end())
+            return false;
+        (*found)->fail(errorOf(RemoteErrorKind::Cancelled, "The command was withdrawn before it was written"));
+        queued_.erase(found);
+        writeNext();
+        return true;
+    }
+
+    void ControlConnection::limitFinalReply(PendingCommand& pending, std::chrono::milliseconds timeout)
+    {
+        const auto awaited = std::ranges::any_of(
+            awaiting_,
+            [&pending](std::shared_ptr<PendingCommand> const& awaiting)
+            {
+                return awaiting.get() == &pending;
+            }
+        );
+        if (!awaited)
+            return;
+        pending.deadline_ = Clock::now() + timeout;
+        armDeadline();
+    }
+
+    void ControlConnection::close()
+    {
+        asio::dispatch(
+            strand_,
+            [self = shared_from_this()]()
+            {
+                self->end(
+                    ControlState::Closed, errorOf(RemoteErrorKind::Cancelled, "The control connection was closed")
+                );
+            }
+        );
+    }
+
+    void ControlConnection::onEnd(EndHandler handler)
+    {
+        assert(state_ == ControlState::Unconnected && "ControlConnection::onEnd() is set before connect()");
+        endHandler_ = std::move(handler);
+    }
+
+    ControlState ControlConnection::state() const
+    {
+        return state_;
+    }
+
+    std::optional<RemoteIo::RemoteError> const& ControlConnection::failure() const
+    {
+        return failure_;
+    }
+
+    asio::ip::tcp::endpoint ControlConnection::remoteEndpoint() const
+    {
+        return remote_;
+    }
+
+    asio::awaitable<void> ControlConnection::readReplies([[maybe_unused]] std::shared_ptr<ControlConnection> self)
+    {
+        boost::system::error_code error{};
+        while (!error && isLive())
+        {
+            std::size_t received = 0u;
+            std::tie(error, received) = co_await socket_.async_read_some(asio::buffer(readBuffer_), useTuple);
+            if (received > 0u && isLive())
+                takeBytes(std::string_view{readBuffer_.data(), received});
+        }
+        if (error)
+            takeEndOfStream(error);
+    }
+
+    void ControlConnection::takeBytes(std::string_view bytes)
+    {
+        const auto fed = framer_.feed(bytes);
+        deliverFramedReplies();
+        if (!isLive())
+            return;
+        if (!fed)
+        {
+            die(fed.error());
+            return;
+        }
+        if (framer_.holdsPossibleEnd())
+            armSettle();
+        else
+            settleTimer_.cancel();
+    }
+
+    void ControlConnection::deliverFramedReplies()
+    {
+        auto reply = framer_.next();
+        while (reply && isLive())
+        {
+            dispatch(std::move(*reply));
+            reply = isLive() ? framer_.next() : std::nullopt;
+        }
+    }
+
+    void ControlConnection::dispatch(Reply reply)
+    {
+        const auto code = reply.code;
+        const auto preliminary = isPreliminary(code);
+        if (awaiting_.empty())
+        {
+            // Some servers send a 150 after a transfer failed, the end of the transfer is not in doubt.
+            if (preliminary)
+            {
+                Log::debug("FTP: Dropped a {} reply that no command waited for", code);
+                return;
+            }
+            Log::warn("FTP: A {} reply came while no command waited for one", code);
+            if (code != 421)
+            {
+                die(protocolViolation(fmt::format("A {} reply came while no command waited for one", code), code));
+                return;
+            }
+            // replyError() reads a 421 without a command as a refused greeting, an open session lost its connection.
+            auto closing = replyError(reply, std::nullopt);
+            if (closing.kind == RemoteErrorKind::NoConnection)
+                closing.kind = RemoteErrorKind::ConnectionLost;
+            die(std::move(closing));
+            return;
+        }
+
+        const auto pending = awaiting_.front();
+        if (pending->replies_.size() >= PendingCommand::maximumHeldReplies)
+        {
+            die(protocolViolation(fmt::format("{} was sent more replies than it can hold", nameOf(*pending)), code));
+            return;
+        }
+        const auto verb = pending->verb();
+        if (preliminary)
+            pending->deadline_ = deadlineAfterPreliminary(*pending);
+        else
+            awaiting_.pop_front();
+
+        // A 421 ends the connection like a close (RFC 1123 4.1.2.11), the command still gets it as its reply.
+        auto closing = code == 421 ? std::optional{replyError(reply, verb)} : std::nullopt;
+        const auto quitAnswered = verb == Verb::Quit && classifyReply(code) == ReplyClass::PositiveCompletion;
+        pending->take(std::move(reply));
+        if (closing)
+        {
+            die(std::move(*closing));
+            return;
+        }
+        if (quitAnswered)
+        {
+            end(ControlState::Closed, errorOf(RemoteErrorKind::Cancelled, "The control connection ended with QUIT"));
+            return;
+        }
+        armDeadline();
+        writeNext();
+    }
+
+    void ControlConnection::takeEndOfStream(boost::system::error_code error)
+    {
+        if (!isLive())
+            return;
+        if (error != asio::error::eof)
+        {
+            die(transportError("Reading from", error));
+            return;
+        }
+        const auto finished = framer_.finish();
+        deliverFramedReplies();
+        if (!isLive())
+            return;
+        die(finished ? errorOf(RemoteErrorKind::ConnectionLost, "The server closed the control connection")
+                     : finished.error());
+    }
+
+    void ControlConnection::writeNext()
+    {
+        if (writing_ || queued_.empty() || state_ != ControlState::Open)
+            return;
+        const auto everyAnswered = std::ranges::all_of(
+            awaiting_,
+            [](std::shared_ptr<PendingCommand> const& pending)
+            {
+                return pending->answered();
+            }
+        );
+        if (!everyAnswered || (!awaiting_.empty() && !mayInterrupt(queued_.front()->verb())))
+            return;
+
+        const auto pending = queued_.front();
+        queued_.pop_front();
+        pending->stage_ = PendingCommand::Stage::Written;
+        pending->deadline_ = Clock::now() + options_.commandTimeout;
+        awaiting_.push_back(pending);
+        armDeadline();
+        writing_ = true;
+        Log::debug("FTP: Sending {}", pending->command_->toLogString());
+        asio::async_write(
+            socket_,
+            asio::buffer(pending->bytes_),
+            [self = shared_from_this(), pending](boost::system::error_code error, std::size_t)
+            {
+                self->writing_ = false;
+                if (error)
+                {
+                    self->die(transportError("Writing to", error));
+                    return;
+                }
+                self->writeNext();
+            }
+        );
+    }
+
+    void ControlConnection::armDeadline()
+    {
+        std::optional<Clock::time_point> earliest{};
+        for (auto const& pending : awaiting_)
+        {
+            if (pending->deadline_ && (!earliest || *pending->deadline_ < *earliest))
+                earliest = pending->deadline_;
+        }
+        if (!earliest)
+        {
+            deadlineTimer_.cancel();
+            return;
+        }
+        deadlineTimer_.expires_at(*earliest);
+        deadlineTimer_.async_wait(
+            [weak = weak_from_this()](boost::system::error_code error)
+            {
+                if (error)
+                    return;
+                if (const auto self = weak.lock())
+                    self->takeDeadline();
+            }
+        );
+    }
+
+    void ControlConnection::takeDeadline()
+    {
+        if (!isLive())
+            return;
+        const auto now = Clock::now();
+        const auto late = std::ranges::find_if(
+            awaiting_,
+            [now](std::shared_ptr<PendingCommand> const& pending)
+            {
+                return pending->deadline_ && *pending->deadline_ <= now;
+            }
+        );
+        if (late == awaiting_.end())
+        {
+            armDeadline();
+            return;
+        }
+        die(errorOf(RemoteErrorKind::TimedOut, fmt::format("No reply to {} came in time", nameOf(**late))));
+    }
+
+    void ControlConnection::armSettle()
+    {
+        settleTimer_.expires_after(options_.settleTime);
+        settleTimer_.async_wait(
+            [weak = weak_from_this()](boost::system::error_code error)
+            {
+                const auto self = error ? nullptr : weak.lock();
+                if (!self || !self->isLive())
+                    return;
+                self->framer_.settle();
+                self->deliverFramedReplies();
+            }
+        );
+    }
+
+    std::optional<Clock::time_point> ControlConnection::deadlineAfterPreliminary(PendingCommand const& pending)
+    {
+        const auto verb = pending.verb();
+        // The greeting keeps the connect deadline.
+        if (!verb)
+            return pending.deadline_;
+        if (isTransfer(*verb))
+            return std::nullopt;
+        return Clock::now() + options_.commandTimeout;
+    }
+
+    void ControlConnection::die(RemoteIo::RemoteError error)
+    {
+        end(ControlState::Dead, std::move(error));
+    }
+
+    void ControlConnection::end(ControlState state, RemoteIo::RemoteError error)
+    {
+        if (!isLive())
+            return;
+        state_ = state;
+        if (state == ControlState::Dead)
+        {
+            Log::debug("FTP: Control connection ended: {}", RemoteIo::toString(error.kind));
+            failure_ = error;
+        }
+        boost::system::error_code ignored{};
+        socket_.close(ignored);
+        deadlineTimer_.cancel();
+        settleTimer_.cancel();
+        const auto awaiting = std::exchange(awaiting_, {});
+        const auto queued = std::exchange(queued_, {});
+        for (auto const& pending : awaiting)
+            pending->fail(error);
+        for (auto const& pending : queued)
+            pending->fail(error);
+        if (endHandler_)
+        {
+            asio::post(
+                strand_,
+                [handler = std::exchange(endHandler_, {}), error = std::move(error)]()
+                {
+                    handler(error);
+                }
+            );
+        }
+    }
+
+    bool ControlConnection::isLive() const
+    {
+        return state_ == ControlState::Unconnected || state_ == ControlState::Open;
+    }
+}
