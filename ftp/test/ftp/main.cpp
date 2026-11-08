@@ -1,6 +1,7 @@
 #include <utility/process_temporary_directory.hpp>
 #include "test_command.hpp"
 #include "test_control_connection.hpp"
+#include "test_control_connection_tls.hpp"
 #include "test_features.hpp"
 #include "test_listing.hpp"
 #include "test_printable.hpp"

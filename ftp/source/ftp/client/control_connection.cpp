@@ -9,6 +9,7 @@
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/ssl/stream.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/write.hpp>
@@ -103,7 +104,97 @@ namespace FileTransferProtocol
                 return "the greeting";
             return std::string{wireName(*verb).value_or("an unknown verb")};
         }
+
+        bool acceptsAuthentication(int code)
+        {
+            return code == 234 || code == 334;
+        }
     }
+
+    /**
+     * @brief The socket and, once there is one, the TLS stream over it. Every operation in flight holds it next to the
+     *        connection, so it outlives them. Used on the strand of the connection only.
+     */
+    class ControlConnection::Transport
+    {
+      public:
+        explicit Transport(asio::strand<asio::any_io_executor> const& strand)
+            : socket_{strand}
+        {}
+
+        asio::ip::tcp::socket& socket()
+        {
+            return socket_;
+        }
+
+        bool secured() const
+        {
+            return tls_.has_value();
+        }
+
+        void secure(SslHandle handle)
+        {
+            // The stream takes the handle over.
+            tls_.emplace(socket_, handle.release());
+        }
+
+        asio::ssl::stream<asio::ip::tcp::socket&>& tls()
+        {
+            return *tls_;
+        }
+
+        SSL* tlsHandle()
+        {
+            return tls_ ? tls_->native_handle() : nullptr;
+        }
+
+        template <typename HandlerT>
+        void readSome(asio::mutable_buffer buffer, HandlerT&& handler)
+        {
+            if (tls_)
+                tls_->async_read_some(buffer, std::forward<HandlerT>(handler));
+            else
+                socket_.async_read_some(buffer, std::forward<HandlerT>(handler));
+        }
+
+        template <typename BuffersT, typename HandlerT>
+        void write(BuffersT const& buffers, HandlerT&& handler)
+        {
+            if (tls_)
+                asio::async_write(*tls_, buffers, std::forward<HandlerT>(handler));
+            else
+                asio::async_write(socket_, buffers, std::forward<HandlerT>(handler));
+        }
+
+        void close()
+        {
+            boost::system::error_code ignored{};
+            socket_.close(ignored);
+        }
+
+        /**
+         * @brief Sends close_notify without waiting for the server's, then closes, within @p timeout.
+         */
+        static void closeAfterNotify(std::shared_ptr<Transport> transport, std::chrono::milliseconds timeout)
+        {
+            // The server's close_notify counts as received, the shutdown ends once ours is out.
+            SSL_set_shutdown(transport->tlsHandle(), SSL_RECEIVED_SHUTDOWN);
+            auto& stream = *transport->tls_;
+            stream.async_shutdown(
+                asio::cancel_after(
+                    timeout,
+                    [transport = std::move(transport)](boost::system::error_code)
+                    {
+                        transport->close();
+                    }
+                )
+            );
+        }
+
+      private:
+        asio::ip::tcp::socket socket_;
+        std::optional<asio::ssl::stream<asio::ip::tcp::socket&>> tls_{};
+    };
 
     std::shared_ptr<ControlConnection>
     ControlConnection::create(asio::any_io_executor executor, ControlConnectionOptions options)
@@ -114,7 +205,7 @@ namespace FileTransferProtocol
     ControlConnection::ControlConnection(Private, asio::any_io_executor executor, ControlConnectionOptions options)
         : options_{std::move(options)}
         , strand_{asio::make_strand(std::move(executor))}
-        , socket_{strand_}
+        , transport_{std::make_shared<Transport>(strand_)}
         , framer_{options_.replyLimits}
         , deadlineTimer_{strand_}
         , settleTimer_{strand_}
@@ -123,13 +214,12 @@ namespace FileTransferProtocol
 
     ControlConnection::~ControlConnection()
     {
-        // Pending commands are waited on from strand(), the destructor may run elsewhere.
-        if (awaiting_.empty() && queued_.empty())
-            return;
+        // The socket and pending commands are used from strand(), the destructor may run elsewhere.
         asio::post(
             strand_,
-            [awaiting = std::move(awaiting_), queued = std::move(queued_)]()
+            [transport = std::move(transport_), awaiting = std::move(awaiting_), queued = std::move(queued_)]()
             {
+                transport->close();
                 const auto error = errorOf(RemoteErrorKind::Cancelled, "The control connection was destroyed");
                 for (auto const& pending : awaiting)
                     pending->fail(error);
@@ -144,8 +234,10 @@ namespace FileTransferProtocol
         return strand_;
     }
 
-    asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
-    ControlConnection::connect(std::vector<asio::ip::tcp::endpoint> endpoints)
+    asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> ControlConnection::connect(
+        std::vector<asio::ip::tcp::endpoint> endpoints,
+        std::optional<TlsConnectionSettings> implicitTls
+    )
     {
         assert(strand_.running_in_this_thread() && "ControlConnection::connect() runs on the strand of the connection");
         if (state_ == ControlState::Closed)
@@ -158,6 +250,17 @@ namespace FileTransferProtocol
             die(failure);
             co_return std::unexpected(std::move(failure));
         }
+        std::optional<SslHandle> tlsHandle{};
+        if (implicitTls)
+        {
+            auto handle = makeTlsHandle(*implicitTls);
+            if (!handle)
+            {
+                die(handle.error());
+                co_return std::unexpected(handle.error());
+            }
+            tlsHandle = std::move(*handle);
+        }
 
         const auto deadline = Clock::now() + options_.connectTimeout;
         const auto endpoint = co_await connectToFirst(endpoints, deadline);
@@ -168,10 +271,15 @@ namespace FileTransferProtocol
         }
         remote_ = *endpoint;
         state_ = ControlState::Open;
-        if (const auto configured = applyControlSocketOptions(socket_, options_.socket); !configured)
+        if (const auto configured = applyControlSocketOptions(transport_->socket(), options_.socket); !configured)
         {
             die(configured.error());
             co_return std::unexpected(configured.error());
+        }
+        if (tlsHandle)
+        {
+            if (const auto secured = co_await handshake(std::move(*tlsHandle), deadline); !secured)
+                co_return std::unexpected(secured.error());
         }
 
         // The greeting is owed without a command, and within the connect timeout, a 120 before it included.
@@ -205,9 +313,9 @@ namespace FileTransferProtocol
         {
             // Each endpoint gets its share of the time left, so one that never answers leaves time for the rest.
             const auto share = (deadline - Clock::now()) / static_cast<Clock::rep>(endpoints.size() - index);
-            boost::system::error_code ignored{};
-            socket_.close(ignored);
-            const auto [error] = co_await socket_.async_connect(endpoints[index], asio::cancel_after(share, useTuple));
+            transport_->close();
+            const auto [error] =
+                co_await transport_->socket().async_connect(endpoints[index], asio::cancel_after(share, useTuple));
             // close() ran while the connect was under way.
             if (!isLive())
                 co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled"));
@@ -221,9 +329,112 @@ namespace FileTransferProtocol
         co_return std::unexpected(connectError(lastError, deadline, options_.connectTimeout));
     }
 
+    asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
+    ControlConnection::startTls(TlsConnectionSettings settings)
+    {
+        assert(
+            strand_.running_in_this_thread() && "ControlConnection::startTls() runs on the strand of the connection"
+        );
+        if (state_ != ControlState::Open)
+            co_return std::unexpected(
+                failure_.value_or(errorOf(RemoteErrorKind::NoConnection, "The control connection is not open"))
+            );
+        if (transport_->secured() || upgrading_)
+            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The control connection has TLS already"));
+        if (!awaiting_.empty() || !queued_.empty())
+            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "AUTH TLS waits for an idle connection"));
+        // A handle that cannot be made fails before anything is sent.
+        auto handle = makeTlsHandle(settings);
+        if (!handle)
+            co_return std::unexpected(handle.error());
+
+        const auto pending = enqueue(Command{.verb = Verb::Authenticate, .argument = "TLS"});
+        if (!pending)
+            co_return std::unexpected(pending.error());
+        upgrading_ = true;
+        const auto reply = co_await (*pending)->finalReply();
+        if (!reply || !acceptsAuthentication(reply->code))
+        {
+            upgrading_ = false;
+            if (!reply)
+                co_return std::unexpected(reply.error());
+            co_return std::unexpected(replyError(*reply, Verb::Authenticate));
+        }
+        if (!isLive())
+        {
+            upgrading_ = false;
+            co_return std::unexpected(
+                failure_.value_or(errorOf(RemoteErrorKind::Cancelled, "The control connection was closed"))
+            );
+        }
+        if (framer_.inReply() || framer_.holdsPossibleEnd())
+        {
+            upgrading_ = false;
+            auto injected = protocolViolation("The server sent bytes behind its reply to AUTH TLS", reply->code);
+            die(injected);
+            co_return std::unexpected(std::move(injected));
+        }
+
+        auto trusted = co_await handshake(std::move(*handle), Clock::now() + options_.commandTimeout);
+        upgrading_ = false;
+        if (!trusted)
+            co_return trusted;
+        readerPaused_ = false;
+        readNext();
+        co_return trusted;
+    }
+
+    asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
+    ControlConnection::handshake(SslHandle handle, Clock::time_point deadline)
+    {
+        const auto transport = transport_;
+        transport->secure(std::move(handle));
+        const auto timeLeft = std::max(
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()), std::chrono::milliseconds{0}
+        );
+        const auto [error] = co_await transport->tls().async_handshake(
+            asio::ssl::stream_base::client, asio::cancel_after(timeLeft, useTuple)
+        );
+        // close() ran during the handshake.
+        if (!isLive())
+            co_return std::unexpected(
+                failure_.value_or(errorOf(RemoteErrorKind::Cancelled, "The TLS handshake was cancelled"))
+            );
+        if ((co_await asio::this_coro::cancellation_state).cancelled() != asio::cancellation_type::none)
+        {
+            auto cancelled = errorOf(RemoteErrorKind::Cancelled, "The TLS handshake was cancelled");
+            die(cancelled);
+            co_return std::unexpected(std::move(cancelled));
+        }
+        if (error)
+        {
+            untrustedCertificate_ = refusedCertificate(transport->tlsHandle());
+            auto failure = handshakeError(transport->tlsHandle(), error, error == asio::error::operation_aborted);
+            die(failure);
+            co_return std::unexpected(std::move(failure));
+        }
+        auto trusted = trustOf(transport->tlsHandle());
+        if (!trusted)
+        {
+            die(trusted.error());
+            co_return std::unexpected(trusted.error());
+        }
+        trustedCertificate_ = *trusted;
+        co_return trusted;
+    }
+
     std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> ControlConnection::send(Command command)
     {
         assert(strand_.running_in_this_thread() && "ControlConnection::send() runs on the strand of the connection");
+        if (command.verb == Verb::Authenticate)
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "AUTH goes through startTls()"));
+        if (upgrading_)
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The control connection is starting TLS"));
+        return enqueue(std::move(command));
+    }
+
+    std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> ControlConnection::enqueue(Command command)
+    {
         if (state_ != ControlState::Open)
             return std::unexpected(
                 failure_.value_or(errorOf(RemoteErrorKind::NoConnection, "The control connection is not open"))
@@ -324,11 +535,34 @@ namespace FileTransferProtocol
         return remote_;
     }
 
+    std::optional<TrustedCertificate> const& ControlConnection::trustedCertificate() const
+    {
+        return trustedCertificate_;
+    }
+
+    std::optional<CertificateInfo> const& ControlConnection::untrustedCertificate() const
+    {
+        return untrustedCertificate_;
+    }
+
+    std::optional<SslSessionHandle> ControlConnection::sessionForData()
+    {
+        assert(
+            strand_.running_in_this_thread() &&
+            "ControlConnection::sessionForData() runs on the strand of the connection"
+        );
+        if (!transport_->secured())
+            return std::nullopt;
+        return resumableSession(transport_->tlsHandle());
+    }
+
     void ControlConnection::readNext()
     {
-        socket_.async_read_some(
+        transport_->readSome(
             asio::buffer(*readBuffer_),
-            [weak = weak_from_this(), buffer = readBuffer_](boost::system::error_code error, std::size_t received)
+            [weak = weak_from_this(),
+                buffer = readBuffer_,
+                transport = transport_](boost::system::error_code error, std::size_t received)
             {
                 const auto self = weak.lock();
                 if (!self)
@@ -344,7 +578,7 @@ namespace FileTransferProtocol
             takeBytes(bytes);
         if (error)
             takeEndOfStream(error);
-        else if (isLive())
+        else if (isLive() && !readerPaused_)
             readNext();
     }
 
@@ -422,6 +656,9 @@ namespace FileTransferProtocol
         // A 421 ends the connection like a close (RFC 1123 4.1.2.11), the command still gets it as its reply.
         auto closing = code == 421 ? std::optional{replyError(reply, verb)} : std::nullopt;
         const auto quitAnswered = verb == Verb::Quit && classifyReply(code) == ReplyClass::PositiveCompletion;
+        // What follows belongs to the handshake, startTls() takes it from the socket.
+        if (verb == Verb::Authenticate && upgrading_ && acceptsAuthentication(code))
+            readerPaused_ = true;
         pending->take(std::move(reply));
         if (closing)
         {
@@ -545,10 +782,11 @@ namespace FileTransferProtocol
         }
         armDeadline();
         writing_ = true;
-        asio::async_write(
-            socket_,
+        transport_->write(
             buffers,
-            [weak = weak_from_this(), written = std::move(written)](boost::system::error_code error, std::size_t)
+            [weak = weak_from_this(),
+                written = std::move(written),
+                transport = transport_](boost::system::error_code error, std::size_t)
             {
                 const auto self = weak.lock();
                 if (!self)
@@ -570,8 +808,8 @@ namespace FileTransferProtocol
             return queued_.begin();
         if (!runningTransfer())
             return queued_.end();
-        // Only ABOR goes into the transfer, ahead of commands queued before it (RFC 959 4.2). STAT and QUIT wait: proftpd
-        // and pyftpdlib answer them at once, before the final reply of the transfer, so the replies would swap.
+        // Only ABOR goes into the transfer, ahead of commands queued before it (RFC 959 4.2). STAT and QUIT wait:
+        // proftpd and pyftpdlib answer them at once, before the final reply of the transfer, so the replies would swap.
         return std::ranges::find_if(
             queued_,
             [](std::shared_ptr<PendingCommand> const& queued)
@@ -686,8 +924,11 @@ namespace FileTransferProtocol
             Log::debug("FTP: Control connection ended: {}", RemoteIo::toString(error.kind));
             failure_ = error;
         }
-        boost::system::error_code ignored{};
-        socket_.close(ignored);
+        // A failed handshake leaves no TLS to close.
+        if (state == ControlState::Closed && trustedCertificate_)
+            Transport::closeAfterNotify(transport_, options_.closeNotifyTimeout);
+        else
+            transport_->close();
         deadlineTimer_.cancel();
         armedDeadline_.reset();
         settleTimer_.cancel();
