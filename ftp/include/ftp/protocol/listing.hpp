@@ -110,7 +110,7 @@ namespace FileTransferProtocol
     class ListingParser
     {
       public:
-        /** @brief Longer lines are skipped as unreadable without being kept. */
+        /** @brief Bytes of one line, its line end included. Longer lines are skipped as unreadable. */
         static constexpr std::size_t maximumLineLength = 64u * 1024u;
         /** @brief Longer names are refused, file systems allow 255 bytes or 255 UTF-16 units. */
         static constexpr std::size_t maximumNameLength = 1024u;

@@ -80,16 +80,17 @@ namespace FileTransferProtocol
         while (position < bytes.size())
         {
             const auto lineEnd = bytes.find('\n', position);
-            const auto piece = bytes.substr(position, lineEnd == std::string_view::npos ? lineEnd : lineEnd - position);
-            position = lineEnd == std::string_view::npos ? bytes.size() : lineEnd + 1u;
+            const auto lineEnds = lineEnd != std::string_view::npos;
+            const auto piece = bytes.substr(position, lineEnds ? lineEnd - position : std::string_view::npos);
+            position = lineEnds ? lineEnd + 1u : bytes.size();
 
-            if (!skippingLongLine_ && pending_.size() + piece.size() > maximumLineLength)
+            const auto length = pending_.size() + piece.size() + (lineEnds ? 1u : 0u);
+            if (!skippingLongLine_ && length > maximumLineLength)
             {
                 ++listing_.unreadableLines;
                 pending_.clear();
                 skippingLongLine_ = true;
             }
-            const auto lineEnds = lineEnd != std::string_view::npos;
             if (!skippingLongLine_ && lineEnds && pending_.empty())
                 readLine(piece);
             else if (!skippingLongLine_)

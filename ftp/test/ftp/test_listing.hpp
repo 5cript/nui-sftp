@@ -843,13 +843,23 @@ namespace FileTransferProtocol::Test
 
     TEST(ListingParserTests, LongestLineIsRead)
     {
-        const std::string prefix = "type=file; ";
         const std::string name(ListingParser::maximumNameLength, 'n');
-        const std::string facts(ListingParser::maximumLineLength - prefix.size() - name.size() - 2u, 'x');
-        // One fact as long as the line allows: x...x=1; then the name and CRLF.
-        const auto line = fmt::format("{}=1;{}{}\r\n", facts.substr(0u, facts.size() - 3u), prefix, name);
-        ASSERT_EQ(line.size(), ListingParser::maximumLineLength);
-        EXPECT_EQ(onlyEntry(machineListingOf(line)).name, name);
+        // One fact as long as the line allows, then the name and the line end.
+        const auto lineOf = [&name](std::size_t length, std::string_view lineEnd)
+        {
+            const auto rest = fmt::format("=1;type=file; {}{}", name, lineEnd);
+            return std::string(length - rest.size(), 'x') + rest;
+        };
+        for (const auto lineEnd : {std::string_view{"\r\n"}, std::string_view{"\n"}})
+        {
+            const auto longest = lineOf(ListingParser::maximumLineLength, lineEnd);
+            ASSERT_EQ(longest.size(), ListingParser::maximumLineLength);
+            EXPECT_EQ(onlyEntry(machineListingOf(longest)).name, name);
+
+            const auto tooLong = machineListingOf(lineOf(ListingParser::maximumLineLength + 1u, lineEnd));
+            EXPECT_TRUE(tooLong.entries.empty());
+            EXPECT_EQ(tooLong.unreadableLines, 1u);
+        }
     }
 
     TEST(ListingParserTests, FinishStartsOver)
