@@ -521,7 +521,8 @@ namespace FileTransferProtocol::Test
         const auto listing = listOf(
             "drwxr-xr-x               folder        0 Aug 15 05:49 !!!-Tipp des Haus!\n"
             "-rw-r--r--        0   18446744073709551615 18446744073709551615 Nov 16  2006 VIDEO_TS.VOB\n"
-            "-rw-r--r--   1 owner 1234 Oct  1 12:34 no-group\n"
+            "-rw-r--r--   1 name 1234 Oct  1 12:34 link-count-or-owner-id\n"
+            "-rw-r--r-- 1000 1000 1234 Oct  1 12:34 two-numbers\n"
             "-rw-r--r-- owner group 1234 Oct  1 12:34 no-link-count\n"
             "-rw-r--r-- 1234 Oct  1 12:34 only-size\n"
         );
@@ -533,9 +534,12 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(folder.size, 0u);
         EXPECT_EQ(entryNamed(listing, "VIDEO_TS.VOB").size, std::numeric_limits<std::uint64_t>::max());
 
-        const auto noGroup = entryNamed(listing, "no-group");
-        EXPECT_EQ(noGroup.owner, "owner");
-        EXPECT_TRUE(noGroup.group.empty());
+        // "1 name" is a link count and an owner or an owner id and a group.
+        for (const auto name : {"link-count-or-owner-id", "two-numbers", "VIDEO_TS.VOB"})
+        {
+            EXPECT_TRUE(entryNamed(listing, name).owner.empty()) << name;
+            EXPECT_TRUE(entryNamed(listing, name).group.empty()) << name;
+        }
         const auto noLinkCount = entryNamed(listing, "no-link-count");
         EXPECT_EQ(noLinkCount.owner, "owner");
         EXPECT_EQ(noLinkCount.group, "group");

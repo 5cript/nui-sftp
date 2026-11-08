@@ -285,7 +285,8 @@ namespace FileTransferProtocol::Detail
 
         /**
          * @brief The owner and the group among the tokens between the mode and the size, which are a link count, the
-         *        owner and the group, each of them optional.
+         *        owner and the group, each of them optional. Both stay unknown when fewer than three start with a
+         *        number, which is a link count or the id of the owner.
          *
          * @return Nothing for more than three tokens.
          */
@@ -293,14 +294,11 @@ namespace FileTransferProtocol::Detail
         {
             if (middle.size() > 3u)
                 return std::nullopt;
-            if (middle.size() == 3u || (!middle.empty() && isDecimal(middle.front().text)))
-                middle = middle.subspan(1u);
-            OwnerAndGroup ownerAndGroup{};
-            if (!middle.empty())
-                ownerAndGroup.owner = middle.front().text;
-            if (middle.size() == 2u)
-                ownerAndGroup.group = middle.back().text;
-            return ownerAndGroup;
+            if (middle.size() == 3u)
+                return OwnerAndGroup{.owner = middle[1u].text, .group = middle[2u].text};
+            if (middle.empty() || isDecimal(middle.front().text))
+                return OwnerAndGroup{};
+            return OwnerAndGroup{.owner = middle.front().text, .group = middle.size() == 2u ? middle.back().text : ""};
         }
 
         /**

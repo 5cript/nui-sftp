@@ -126,7 +126,8 @@ namespace FileTransferProtocol
          *
          * - Unix: the name starts one space after the time or year, so leading spaces belong to it. A symlink is
          *   split at its first " -> ". An entry with a time of day but no year lies in the latest year that puts it at
-         *   most a day after @p today, where the day absorbs the time zone of the server.
+         *   most a day after @p today, where the day absorbs the time zone of the server. Owner and group stay empty
+         *   when a number that is a link count or the id of the owner comes before at most one other column.
          * - DOS: the spaces before the name are left out.
          *
          * @param today The current date of the client, UTC.
