@@ -59,7 +59,10 @@ namespace FileTransferProtocol
      * STAT and QUIT, which may interrupt a transfer (RFC 959 4.2). A connection whose replies cannot be matched to its
      * commands any more ends as Dead: a reply nothing waits for, a 421, a reply past its deadline, a framing error.
      *
-     * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits.
+     * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
+     * operations hold the connection weakly and own only their buffers and commands: the owner decides how long it
+     * lives, dropping the last shared_ptr closes it, and waiting commands fail as Cancelled. A caller of connect() or
+     * execute() keeps the connection while it waits.
      */
     class ControlConnection : public std::enable_shared_from_this<ControlConnection>
     {
@@ -76,6 +79,9 @@ namespace FileTransferProtocol
         create(boost::asio::any_io_executor executor, ControlConnectionOptions options = {});
 
         ControlConnection(Private, boost::asio::any_io_executor executor, ControlConnectionOptions options);
+        /**
+         * @brief Closes the socket, on whatever thread the last owner let go. Waiting commands fail on strand().
+         */
         ~ControlConnection();
         ControlConnection(ControlConnection const&) = delete;
         ControlConnection& operator=(ControlConnection const&) = delete;
@@ -131,7 +137,7 @@ namespace FileTransferProtocol
         void close();
 
         /**
-         * @brief Called on strand() once, when the connection ends for whatever reason, with the error waiting
+         * @brief Called on strand() once, when the connection ends while it is still owned, with the error waiting
          *        commands got.
          */
         void onEnd(EndHandler handler);
@@ -149,7 +155,8 @@ namespace FileTransferProtocol
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
       private:
-        boost::asio::awaitable<void> readReplies(std::shared_ptr<ControlConnection> self);
+        void readNext();
+        void takeRead(boost::system::error_code error, std::string_view bytes);
         void takeBytes(std::string_view bytes);
         void deliverFramedReplies();
         void dispatch(Reply reply);
@@ -170,7 +177,8 @@ namespace FileTransferProtocol
         ReplyFramer framer_;
         boost::asio::steady_timer deadlineTimer_;
         boost::asio::steady_timer settleTimer_;
-        std::array<char, 4096> readBuffer_{};
+        /** @brief Shared with the read in flight, which may still fill it after the connection is gone. */
+        std::shared_ptr<std::array<char, 4096>> readBuffer_;
         /** @brief Commands not written yet, in the order they were sent. */
         std::deque<std::shared_ptr<PendingCommand>> queued_{};
         /** @brief Written commands that still owe their final reply, oldest first. */

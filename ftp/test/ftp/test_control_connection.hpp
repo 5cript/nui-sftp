@@ -537,6 +537,34 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
     }
 
+    TEST_F(ControlConnectionTests, DroppingTheLastOwnerClosesTheConnection)
+    {
+        server_->addConnection(Script{}.reply("220 Ready").expect("NOOP").checkpoint("received").stall());
+        // Not through makeConnection(), which keeps a copy for the end of the test.
+        auto connection = ControlConnection::create(pool_.get_executor(), relaxedOptions());
+        connect(connection);
+        const auto pending =
+            run(connection,
+                [connection]() -> asio::awaitable<std::shared_ptr<PendingCommand>>
+                {
+                    co_return connection->send(command(Verb::Noop)).value();
+                });
+        ASSERT_TRUE(server_->waitForCheckpoint("received"));
+        auto waiting = asio::co_spawn(
+            connection->strand(),
+            [pending]() -> asio::awaitable<ReplyResult>
+            {
+                co_return co_await pending->finalReply();
+            },
+            asio::use_future
+        );
+
+        connection.reset();
+        EXPECT_TRUE(server_->waitForTranscriptEntry(TranscriptEntry::Kind::Disconnected));
+        ASSERT_EQ(waiting.wait_for(20s), std::future_status::ready);
+        expectError(waiting.get(), RemoteErrorKind::Cancelled);
+    }
+
     TEST_F(ControlConnectionTests, WithdrawnCommandIsNeverWritten)
     {
         server_->addConnection(

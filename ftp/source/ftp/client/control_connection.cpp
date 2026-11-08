@@ -7,7 +7,6 @@
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/cancel_after.hpp>
-#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/connect.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
@@ -17,7 +16,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <exception>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -112,9 +110,26 @@ namespace FileTransferProtocol
         , framer_{options_.replyLimits}
         , deadlineTimer_{strand_}
         , settleTimer_{strand_}
+        , readBuffer_{std::make_shared<std::array<char, 4096>>()}
     {}
 
-    ControlConnection::~ControlConnection() = default;
+    ControlConnection::~ControlConnection()
+    {
+        // Pending commands are waited on from strand(), the destructor may run elsewhere.
+        if (awaiting_.empty() && queued_.empty())
+            return;
+        asio::post(
+            strand_,
+            [awaiting = std::move(awaiting_), queued = std::move(queued_)]()
+            {
+                const auto error = errorOf(RemoteErrorKind::Cancelled, "The control connection was destroyed");
+                for (auto const& pending : awaiting)
+                    pending->fail(error);
+                for (auto const& pending : queued)
+                    pending->fail(error);
+            }
+        );
+    }
 
     asio::strand<asio::any_io_executor> const& ControlConnection::strand() const
     {
@@ -157,15 +172,7 @@ namespace FileTransferProtocol
         greeting->deadline_ = deadline;
         awaiting_.push_back(greeting);
         armDeadline();
-        asio::co_spawn(
-            strand_,
-            readReplies(shared_from_this()),
-            [self = shared_from_this()](std::exception_ptr exception)
-            {
-                if (exception)
-                    self->die(errorOf(RemoteErrorKind::Failure, "The reader of the control connection threw"));
-            }
-        );
+        readNext();
 
         auto reply = co_await greeting->finalReply();
         if (!reply)
@@ -246,8 +253,11 @@ namespace FileTransferProtocol
     {
         asio::dispatch(
             strand_,
-            [self = shared_from_this()]()
+            [weak = weak_from_this()]()
             {
+                const auto self = weak.lock();
+                if (!self)
+                    return;
                 self->end(
                     ControlState::Closed, errorOf(RemoteErrorKind::Cancelled, "The control connection was closed")
                 );
@@ -276,18 +286,28 @@ namespace FileTransferProtocol
         return remote_;
     }
 
-    asio::awaitable<void> ControlConnection::readReplies([[maybe_unused]] std::shared_ptr<ControlConnection> self)
+    void ControlConnection::readNext()
     {
-        boost::system::error_code error{};
-        while (!error && isLive())
-        {
-            std::size_t received = 0u;
-            std::tie(error, received) = co_await socket_.async_read_some(asio::buffer(readBuffer_), useTuple);
-            if (received > 0u && isLive())
-                takeBytes(std::string_view{readBuffer_.data(), received});
-        }
+        socket_.async_read_some(
+            asio::buffer(*readBuffer_),
+            [weak = weak_from_this(), buffer = readBuffer_](boost::system::error_code error, std::size_t received)
+            {
+                const auto self = weak.lock();
+                if (!self)
+                    return;
+                self->takeRead(error, std::string_view{buffer->data(), received});
+            }
+        );
+    }
+
+    void ControlConnection::takeRead(boost::system::error_code error, std::string_view bytes)
+    {
+        if (!bytes.empty() && isLive())
+            takeBytes(bytes);
         if (error)
             takeEndOfStream(error);
+        else if (isLive())
+            readNext();
     }
 
     void ControlConnection::takeBytes(std::string_view bytes)
@@ -415,8 +435,11 @@ namespace FileTransferProtocol
         asio::async_write(
             socket_,
             asio::buffer(pending->bytes_),
-            [self = shared_from_this(), pending](boost::system::error_code error, std::size_t)
+            [weak = weak_from_this(), pending](boost::system::error_code error, std::size_t)
             {
+                const auto self = weak.lock();
+                if (!self)
+                    return;
                 self->writing_ = false;
                 if (error)
                 {
