@@ -4,9 +4,10 @@
 #include "listing_lines.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -24,26 +25,47 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Keeps the first of the entries with one name.
+         * @brief For each entry, the entry kept in its place: itself, nothing for a repeated name, and for the first
+         *        of a name the first directory among the entries of that name, or itself.
+         */
+        std::vector<std::optional<std::size_t>> keptInPlaceOf(std::vector<ListingEntry> const& entries)
+        {
+            std::unordered_map<std::string_view, std::size_t> firstOfName{};
+            std::vector<std::optional<std::size_t>> kept(entries.size());
+            for (std::size_t index = 0u; index < entries.size(); ++index)
+            {
+                const auto [first, isFirst] = firstOfName.try_emplace(entries[index].name, index);
+                if (isFirst)
+                {
+                    kept[index] = index;
+                    continue;
+                }
+                auto& keptOfName = kept[first->second];
+                if (entries[*keptOfName].type != SharedData::FileType::Directory &&
+                    entries[index].type == SharedData::FileType::Directory)
+                    keptOfName = index;
+            }
+            return kept;
+        }
+
+        /**
+         * @brief Keeps one entry of each name, in the place of the first, see keptInPlaceOf.
          *
          * @return How many were left out.
          */
         std::size_t dropRepeatedNames(std::vector<ListingEntry>& entries)
         {
-            std::unordered_set<std::string_view> names{};
-            std::vector<bool> repeated(entries.size(), false);
-            for (std::size_t index = 0u; index < entries.size(); ++index)
-                repeated[index] = !names.insert(entries[index].name).second;
-            const auto count = static_cast<std::size_t>(std::ranges::count(repeated, true));
+            const auto keptInPlace = keptInPlaceOf(entries);
+            const auto count = static_cast<std::size_t>(std::ranges::count(keptInPlace, std::optional<std::size_t>{}));
             if (count == 0u)
                 return 0u;
 
             std::vector<ListingEntry> kept{};
             kept.reserve(entries.size() - count);
-            for (std::size_t index = 0u; index < entries.size(); ++index)
+            for (auto const& index : keptInPlace)
             {
-                if (!repeated[index])
-                    kept.push_back(std::move(entries[index]));
+                if (index)
+                    kept.push_back(std::move(entries[*index]));
             }
             entries = std::move(kept);
             return count;

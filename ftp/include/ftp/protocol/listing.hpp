@@ -107,8 +107,9 @@ namespace FileTransferProtocol
          */
         std::size_t refusedNames{0u};
         /**
-         * @brief Entries with the name of an earlier one, which is kept. RFC 3659 7.5.1.6 lists an item that is of
-         *        several types once per type.
+         * @brief Entries with the name of an earlier one. RFC 3659 7.5.1.6 lists an item that is of several types
+         *        once per type. One entry of each name is kept in the place of the first: the first directory, or the
+         *        first entry when none is a directory.
          */
         std::size_t repeatedNames{0u};
         /** @brief Entries past ListingLimits::entryCount, read but not kept. */

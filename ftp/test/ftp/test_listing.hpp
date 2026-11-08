@@ -786,16 +786,21 @@ namespace FileTransferProtocol::Test
         expectNothingLeftOut(listing);
     }
 
-    TEST(ListingParserTests, RepeatedNamesKeepTheFirst)
+    TEST(ListingParserTests, RepeatedNamesKeepADirectoryOrTheFirst)
     {
         // RFC 3659 7.5.1.6: an item of several types is listed once per type.
-        const auto listing =
-            machineListingOf("type=file;size=1; twice\ntype=dir; twice\ntype=file; other\ntype=file;size=3; twice\n");
-        EXPECT_EQ(listing.entries.size(), 2u);
-        EXPECT_EQ(listing.repeatedNames, 2u);
-        EXPECT_EQ(listing.entries.front().name, "twice");
-        EXPECT_EQ(listing.entries.front().size, 1u);
-        EXPECT_EQ(listing.entries.back().name, "other");
+        const auto listing = machineListingOf(
+            "type=file;size=1; twice\ntype=dir;size=2; twice\ntype=file; other\ntype=dir;size=3; twice\n"
+            "type=file;size=4; files\ntype=file;size=5; files\n"
+        );
+        EXPECT_EQ(listing.repeatedNames, 3u);
+        ASSERT_EQ(listing.entries.size(), 3u);
+        EXPECT_EQ(listing.entries[0u].name, "twice");
+        EXPECT_EQ(listing.entries[0u].type, FileType::Directory);
+        EXPECT_EQ(listing.entries[0u].size, 2u);
+        EXPECT_EQ(listing.entries[1u].name, "other");
+        EXPECT_EQ(listing.entries[2u].name, "files");
+        EXPECT_EQ(listing.entries[2u].size, 4u);
     }
 
     TEST(ListingParserTests, LineEndsOfAnyKind)
