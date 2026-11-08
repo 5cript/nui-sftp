@@ -7,6 +7,7 @@
 #include <chrono>
 #include <expected>
 #include <optional>
+#include <string_view>
 
 namespace FileTransferProtocol
 {
@@ -39,10 +40,27 @@ namespace FileTransferProtocol
 
     /**
      * @brief Sets TCP_NODELAY, the keepalive and on Linux TCP_USER_TIMEOUT on a connected socket. Where a system has no
-     *        option for the keepalive idle time, interval or count, it keeps its own value.
+     *        option for the keepalive idle time, interval or count, or for the user timeout, it keeps its own value.
      *
      * @return A Failure naming the first option the system refused.
      */
     std::expected<void, RemoteIo::RemoteError>
     applyControlSocketOptions(boost::asio::ip::tcp::socket& socket, ControlSocketOptions const& options);
+
+    namespace Detail
+    {
+        /**
+         * @brief Sets an int option that tunes the keepalive or a timeout. A system that does not know the option,
+         *        though its headers name it, keeps its own value.
+         *
+         * @return A Failure for any other error.
+         */
+        std::expected<void, RemoteIo::RemoteError> setTuningOption(
+            boost::asio::ip::tcp::socket& socket,
+            int level,
+            int option,
+            int value,
+            std::string_view optionName
+        );
+    }
 }

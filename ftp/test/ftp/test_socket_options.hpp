@@ -125,4 +125,23 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(applied.error().kind, RemoteIo::RemoteErrorKind::Failure);
         EXPECT_EQ(applied.error().protocol, RemoteIo::Protocol::Ftp);
     }
+
+    TEST(ControlSocketOptionsTests, TuningOptionTheSystemDoesNotKnowKeepsItsValue)
+    {
+        LoopbackConnection connection{};
+        // No system has a TCP option with this number, like an older one lacks TCP_KEEPIDLE its headers name.
+        constexpr int unknownOption = 0x7fff;
+        const auto applied =
+            Detail::setTuningOption(connection.client, IPPROTO_TCP, unknownOption, 1, "an option no system has");
+        EXPECT_TRUE(applied) << applied.error().toString();
+    }
+
+    TEST(ControlSocketOptionsTests, TuningOptionOnAClosedSocketIsRefused)
+    {
+        boost::asio::io_context context{};
+        tcp::socket socket{context};
+        const auto applied = Detail::setTuningOption(socket, IPPROTO_TCP, TCP_NODELAY, 1, "TCP_NODELAY");
+        ASSERT_FALSE(applied);
+        EXPECT_EQ(applied.error().kind, RemoteIo::RemoteErrorKind::Failure);
+    }
 }
