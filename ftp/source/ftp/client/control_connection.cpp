@@ -51,6 +51,19 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief Why a connect failed: TimedOut at @p deadline, Cancelled before it, NoConnection for any other error.
+         */
+        RemoteIo::RemoteError
+        connectError(boost::system::error_code error, Clock::time_point deadline, std::chrono::milliseconds timeout)
+        {
+            if (error != asio::error::operation_aborted)
+                return errorOf(RemoteErrorKind::NoConnection, fmt::format("Could not connect: {}", error.message()));
+            if (Clock::now() >= deadline)
+                return errorOf(RemoteErrorKind::TimedOut, fmt::format("No connection within {} ms", timeout.count()));
+            return errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled");
+        }
+
+        /**
          * @brief A command whose final reply follows its whole data transfer.
          */
         bool isTransfer(Verb verb)
@@ -126,14 +139,7 @@ namespace FileTransferProtocol
             co_await asio::async_connect(socket_, endpoints, asio::cancel_after(options_.connectTimeout, useTuple));
         if (error)
         {
-            auto failure = error != asio::error::operation_aborted
-                ? errorOf(RemoteErrorKind::NoConnection, fmt::format("Could not connect: {}", error.message()))
-                : Clock::now() >= deadline
-                ? errorOf(
-                      RemoteErrorKind::TimedOut,
-                      fmt::format("No connection within {} ms", options_.connectTimeout.count())
-                  )
-                : errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled");
+            auto failure = connectError(error, deadline, options_.connectTimeout);
             die(failure);
             co_return std::unexpected(std::move(failure));
         }
