@@ -12,6 +12,7 @@
 #include "test_server_profiles.hpp"
 #include "test_server_smoke.hpp"
 #include "test_socket_options.hpp"
+#include "test_tls.hpp"
 
 #include <gtest/gtest.h>
 

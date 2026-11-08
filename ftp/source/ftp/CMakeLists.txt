@@ -4,6 +4,7 @@ function(add_file_transfer_protocol_library name remoteIo)
     # Imported targets are only visible in the directory that found them, the test directory calls this too.
     find_package(fmt CONFIG REQUIRED)
     find_package(Boost CONFIG REQUIRED)
+    find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
     find_package(Threads REQUIRED)
     add_library(
         ${name}
@@ -11,6 +12,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/control_connection.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/pending_command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/socket_options.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/tls.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/features.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/list_line.cpp
@@ -29,7 +31,18 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/../../include
     )
 
-    target_link_libraries(${name} PUBLIC ${remoteIo} fmt::fmt Boost::headers Threads::Threads PRIVATE log)
+    target_link_libraries(
+        ${name}
+        PUBLIC
+            ${remoteIo}
+            fmt::fmt
+            Boost::headers
+            OpenSSL::SSL
+            OpenSSL::Crypto
+            Threads::Threads
+        PRIVATE
+            log
+    )
     if (WIN32)
         target_link_libraries(${name} PUBLIC ws2_32 mswsock)
     endif()
