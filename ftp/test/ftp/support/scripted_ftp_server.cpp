@@ -815,10 +815,13 @@ namespace FileTransferProtocol::Test
 
             asio::awaitable<bool> perform(Script::Dribble const& step)
             {
+                // Stops at the first byte the client did not take, the next read sees how the connection ended.
                 asio::steady_timer timer{server_.executor()};
-                for (auto const& byte : step.bytes)
+                error_code error{};
+                std::size_t position = 0u;
+                while (!error && position < step.bytes.size())
                 {
-                    co_await transport_.writeAll(asio::buffer(&byte, 1u));
+                    error = co_await transport_.writeAll(asio::buffer(&step.bytes[position++], 1u));
                     timer.expires_after(step.interval);
                     co_await timer.async_wait(noThrow);
                 }
