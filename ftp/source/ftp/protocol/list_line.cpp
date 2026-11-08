@@ -7,10 +7,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace FileTransferProtocol::Detail
 {
@@ -27,19 +27,31 @@ namespace FileTransferProtocol::Detail
         };
 
         /**
-         * @brief The first @p count words of @p line that spaces separate, fewer when the line has fewer.
+         * @brief The first words of a line that spaces separate, as many as a Unix line has up to its date: mode, link
+         *        count, owner, group, two device numbers, month, day and time or year.
          */
-        std::vector<Token> leadingTokens(std::string_view line, std::size_t count)
+        struct LeadingTokens
         {
-            std::vector<Token> tokens{};
+            std::array<Token, 9u> tokens{};
+            std::size_t count{0u};
+
+            std::span<Token const> span() const
+            {
+                return {tokens.data(), count};
+            }
+        };
+
+        LeadingTokens leadingTokensOf(std::string_view line)
+        {
+            LeadingTokens leading{};
             auto start = line.find_first_not_of(' ');
-            while (tokens.size() < count && start != std::string_view::npos)
+            while (leading.count < leading.tokens.size() && start != std::string_view::npos)
             {
                 const auto end = std::min(line.find(' ', start), line.size());
-                tokens.push_back(Token{.text = line.substr(start, end - start), .end = end});
+                leading.tokens[leading.count++] = Token{.text = line.substr(start, end - start), .end = end};
                 start = line.find_first_not_of(' ', end);
             }
-            return tokens;
+            return leading;
         }
 
         bool isDecimal(std::string_view text)
@@ -108,7 +120,7 @@ namespace FileTransferProtocol::Detail
             if (!type)
                 return std::nullopt;
 
-            constexpr std::array<Triplet, 3> triplets{{
+            constexpr std::array<Triplet, 3u> triplets{{
                 {perms::owner_read, perms::owner_write, perms::owner_exec, perms::set_uid, 's', 'S'},
                 {perms::group_read, perms::group_write, perms::group_exec, perms::set_gid, 's', 'S'},
                 {perms::others_read, perms::others_write, perms::others_exec, perms::sticky_bit, 't', 'T'},
@@ -143,7 +155,7 @@ namespace FileTransferProtocol::Detail
 
         std::optional<unsigned> monthOf(std::string_view text)
         {
-            constexpr std::array<std::string_view, 12> months{
+            constexpr std::array<std::string_view, 12u> months{
                 "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
             };
             const auto found = std::ranges::find_if(
@@ -212,7 +224,7 @@ namespace FileTransferProtocol::Detail
         /**
          * @brief Where the date of a Unix line starts: a month, a day, a time or year, after a size or a device minor.
          */
-        std::optional<std::size_t> dateIndexOf(std::vector<Token> const& tokens)
+        std::optional<std::size_t> dateIndexOf(std::span<Token const> tokens)
         {
             std::optional<std::size_t> found{};
             std::size_t index = 2u;
@@ -238,81 +250,125 @@ namespace FileTransferProtocol::Detail
         }
 
         /**
+         * @brief Where the size or the device numbers of a Unix line start, and the size when it is no device.
+         */
+        struct SizeColumn
+        {
+            std::size_t index{0u};
+            std::optional<std::uint64_t> size{};
+        };
+
+        std::optional<SizeColumn> sizeColumnOf(std::span<Token const> tokens, std::size_t dateIndex)
+        {
+            const auto index = dateIndex - 1u;
+            const auto sizeText = tokens[index].text;
+            if (sizeText.find(',') != std::string_view::npos)
+                return SizeColumn{.index = index};
+            if (endsDeviceMajor(tokens[index - 1u].text))
+                return SizeColumn{.index = index - 1u};
+            return decimalOf<std::uint64_t>(sizeText).transform(
+                [index](std::uint64_t size)
+                {
+                    return SizeColumn{.index = index, .size = size};
+                }
+            );
+        }
+
+        struct OwnerAndGroup
+        {
+            std::string_view owner{};
+            std::string_view group{};
+        };
+
+        /**
+         * @brief The owner and the group among the tokens between the mode and the size, which are a link count, the
+         *        owner and the group, each of them optional.
+         *
+         * @return Nothing for more than three tokens.
+         */
+        std::optional<OwnerAndGroup> ownerAndGroupOf(std::span<Token const> middle)
+        {
+            if (middle.size() > 3u)
+                return std::nullopt;
+            if (middle.size() == 3u || (!middle.empty() && isDecimal(middle.front().text)))
+                middle = middle.subspan(1u);
+            OwnerAndGroup ownerAndGroup{};
+            if (!middle.empty())
+                ownerAndGroup.owner = middle.front().text;
+            if (middle.size() == 2u)
+                ownerAndGroup.group = middle.back().text;
+            return ownerAndGroup;
+        }
+
+        /**
+         * @brief The time of the month, the day and the time or year that start at @p dateIndex, see dateIndexOf.
+         */
+        std::optional<ListedTime>
+        listedTimeOf(std::span<Token const> tokens, std::size_t dateIndex, std::chrono::sys_days today)
+        {
+            const auto month = std::chrono::month{*monthOf(tokens[dateIndex].text)};
+            const auto day = std::chrono::day{*dayOf(tokens[dateIndex + 1u].text)};
+            const auto timeOrYear = tokens[dateIndex + 2u].text;
+            if (const auto clock = clockOf(timeOrYear))
+            {
+                return recentDate(month, day, today)
+                    .transform(
+                        [clock](std::chrono::local_days date)
+                        {
+                            return ListedTime{.time = date + *clock, .precision = ListedTimePrecision::Minute};
+                        }
+                    );
+            }
+            const std::chrono::year_month_day date{std::chrono::year{*yearOf(timeOrYear)} / month / day};
+            if (!date.ok())
+                return std::nullopt;
+            return ListedTime{.time = std::chrono::local_days{date}, .precision = ListedTimePrecision::Day};
+        }
+
+        /**
+         * @brief Splits the name of a symlink at its first " -> " into the name and the target.
+         */
+        void splitLinkTarget(ListingEntry& entry)
+        {
+            constexpr std::string_view arrow = " -> ";
+            const auto arrowStart = entry.name.find(arrow);
+            if (arrowStart == std::string::npos)
+                return;
+            entry.linkTarget = entry.name.substr(arrowStart + arrow.size());
+            entry.name.resize(arrowStart);
+        }
+
+        /**
          * @brief Reads a line of "ls -l": mode, an optional link count, owner and group when listed, the size or the
          *        device numbers, the date, then the name one space after it.
          */
-        std::optional<ListingLine> readUnixLine(std::string_view line, std::chrono::sys_days today)
+        std::optional<ListingLine>
+        readUnixLine(std::string_view line, std::span<Token const> tokens, std::chrono::sys_days today)
         {
-            // Mode, link count, owner, group, two device numbers, month, day and time or year at most.
-            constexpr std::size_t tokensUpToDate = 9u;
-            const auto tokens = leadingTokens(line, tokensUpToDate);
-            if (tokens.empty())
-                return std::nullopt;
-            const auto mode = modeOf(tokens.front().text);
+            const auto mode = tokens.empty() ? std::nullopt : modeOf(tokens.front().text);
             const auto dateIndex = mode ? dateIndexOf(tokens) : std::nullopt;
             if (!dateIndex)
                 return std::nullopt;
-
-            ListingEntry entry{.type = mode->type, .permissions = mode->permissions};
-            auto sizeIndex = *dateIndex - 1u;
-            const auto sizeText = tokens[sizeIndex].text;
-            if (sizeText.find(',') == std::string_view::npos && !endsDeviceMajor(tokens[sizeIndex - 1u].text))
-            {
-                entry.size = decimalOf<std::uint64_t>(sizeText);
-                if (!entry.size)
-                    return std::nullopt;
-            }
-            else if (sizeText.find(',') == std::string_view::npos)
-                --sizeIndex;
-
-            // Between the mode and the size: a link count, the owner and the group, each may be missing.
-            std::vector<std::string_view> middle{};
-            for (std::size_t index = 1u; index < sizeIndex; ++index)
-                middle.push_back(tokens[index].text);
-            if (middle.size() > 3u)
+            const auto sizeColumn = sizeColumnOf(tokens, *dateIndex);
+            if (!sizeColumn)
                 return std::nullopt;
-            if (middle.size() == 3u || (middle.size() == 2u && isDecimal(middle.front())) ||
-                (middle.size() == 1u && isDecimal(middle.front())))
-                middle.erase(middle.begin());
-            if (!middle.empty())
-                entry.owner = std::string{middle.front()};
-            if (middle.size() == 2u)
-                entry.group = std::string{middle.back()};
-
-            const auto month = std::chrono::month{*monthOf(tokens[*dateIndex].text)};
-            const auto day = std::chrono::day{*dayOf(tokens[*dateIndex + 1u].text)};
-            auto const& timeOrYear = tokens[*dateIndex + 2u];
-            if (const auto clock = clockOf(timeOrYear.text))
-            {
-                const auto date = recentDate(month, day, today);
-                if (!date)
-                    return std::nullopt;
-                entry.listedTime = ListedTime{.time = *date + *clock, .precision = ListedTimePrecision::Minute};
-            }
-            else
-            {
-                const std::chrono::year_month_day date{std::chrono::year{*yearOf(timeOrYear.text)} / month / day};
-                if (!date.ok())
-                    return std::nullopt;
-                entry.listedTime =
-                    ListedTime{.time = std::chrono::local_days{date}, .precision = ListedTimePrecision::Day};
-            }
-
-            const auto nameStart = timeOrYear.end + 1u;
-            if (nameStart >= line.size())
+            const auto ownerAndGroup = ownerAndGroupOf(tokens.subspan(1u, sizeColumn->index - 1u));
+            const auto listedTime = listedTimeOf(tokens, *dateIndex, today);
+            const auto nameStart = tokens[*dateIndex + 2u].end + 1u;
+            if (!ownerAndGroup || !listedTime || nameStart >= line.size())
                 return std::nullopt;
-            auto name = line.substr(nameStart);
+
+            ListingEntry entry{
+                .name = std::string{line.substr(nameStart)},
+                .type = mode->type,
+                .size = sizeColumn->size,
+                .listedTime = listedTime,
+                .permissions = mode->permissions,
+                .owner = std::string{ownerAndGroup->owner},
+                .group = std::string{ownerAndGroup->group},
+            };
             if (entry.type == FileType::Symlink)
-            {
-                constexpr std::string_view arrow = " -> ";
-                const auto arrowStart = name.find(arrow);
-                if (arrowStart != std::string_view::npos)
-                {
-                    entry.linkTarget = std::string{name.substr(arrowStart + arrow.size())};
-                    name = name.substr(0u, arrowStart);
-                }
-            }
-            entry.name = std::string{name};
+                splitLinkTarget(entry);
             return ListingLine{.entry = std::move(entry)};
         }
 
@@ -322,7 +378,7 @@ namespace FileTransferProtocol::Detail
          */
         std::optional<std::chrono::local_days> dosDateOf(std::string_view text)
         {
-            if ((text.size() != 8u && text.size() != 10u) || text[2] != '-' || text[5] != '-')
+            if ((text.size() != 8u && text.size() != 10u) || text[2u] != '-' || text[5u] != '-')
                 return std::nullopt;
             const auto month = decimalOf<unsigned>(text.substr(0u, 2u));
             const auto day = decimalOf<unsigned>(text.substr(3u, 2u));
@@ -361,48 +417,48 @@ namespace FileTransferProtocol::Detail
         /**
          * @brief Reads a line of the DOS format of IIS: date, time, "<DIR>" or the size, then the name.
          */
-        std::optional<ListingLine> readDosLine(std::string_view line)
+        std::optional<ListingLine> readDosLine(std::string_view line, std::span<Token const> tokens)
         {
-            const auto tokens = leadingTokens(line, 3u);
             if (tokens.size() < 3u)
                 return std::nullopt;
-            const auto date = dosDateOf(tokens[0].text);
-            const auto clock = dosClockOf(tokens[1].text);
+            const auto date = dosDateOf(tokens[0u].text);
+            const auto clock = dosClockOf(tokens[1u].text);
             if (!date || !clock)
                 return std::nullopt;
 
             ListingEntry entry{
                 .listedTime = ListedTime{.time = *date + *clock, .precision = ListedTimePrecision::Minute}
             };
-            if (equalIgnoringCase(tokens[2].text, "<DIR>"))
+            if (equalIgnoringCase(tokens[2u].text, "<DIR>"))
                 entry.type = FileType::Directory;
             else
             {
                 entry.type = FileType::Regular;
-                entry.size = decimalOf<std::uint64_t>(tokens[2].text);
+                entry.size = decimalOf<std::uint64_t>(tokens[2u].text);
                 if (!entry.size)
                     return std::nullopt;
             }
-            const auto nameStart = line.find_first_not_of(' ', tokens[2].end);
+            const auto nameStart = line.find_first_not_of(' ', tokens[2u].end);
             if (nameStart == std::string_view::npos)
                 return std::nullopt;
             entry.name = std::string{line.substr(nameStart)};
             return ListingLine{.entry = std::move(entry)};
         }
 
-        bool isTotalLine(std::string_view line)
+        bool isTotalLine(std::span<Token const> tokens)
         {
-            const auto tokens = leadingTokens(line, 3u);
-            return tokens.size() == 2u && equalIgnoringCase(tokens[0].text, "total") && isDecimal(tokens[1].text);
+            return tokens.size() == 2u && equalIgnoringCase(tokens[0u].text, "total") && isDecimal(tokens[1u].text);
         }
     }
 
     std::optional<ListingLine> readListLine(std::string_view line, std::chrono::sys_days today)
     {
-        if (isTotalLine(line))
+        const auto leading = leadingTokensOf(line);
+        const auto tokens = leading.span();
+        if (isTotalLine(tokens))
             return ListingLine{};
-        if (isDigit(line.front()))
-            return readDosLine(line);
-        return readUnixLine(line, today);
+        if (!line.empty() && isDigit(line.front()))
+            return readDosLine(line, tokens);
+        return readUnixLine(line, tokens, today);
     }
 }
