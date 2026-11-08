@@ -207,6 +207,21 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(commandsAfterDisconnect(connection).at(1u), "FEAT");
     }
 
+    TEST_F(LoginTests, PasswordAnsweredWith202IsALogin)
+    {
+        // 202: the command was superfluous, the login needs no password after all (RFC 959 5.4).
+        Script script{};
+        script.reply("220 Ready")
+            .expect("USER", "user")
+            .reply("331 Password required")
+            .expect("PASS", "password")
+            .reply("202 Already logged in");
+        server_->addConnection(afterAuthentication(script).expectDisconnect());
+        const auto connection = makeConnection();
+        const auto result = login(connection, LoginOptions{.credentials = testCredentials()});
+        ASSERT_TRUE(result) << result.error().toString();
+    }
+
     TEST_F(LoginTests, AccountIsSentWhenAskedFor)
     {
         Script script{};
