@@ -31,6 +31,9 @@ namespace FileTransferProtocol
 
         constexpr auto useTuple = asio::as_tuple(asio::use_awaitable);
 
+        /** @brief The reply of PWD, the marker behind ABOR. No reply to a transfer or to ABOR has this code. */
+        constexpr int markerReplyCode = 257;
+
         RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
         {
             return RemoteIo::RemoteError{
@@ -371,6 +374,11 @@ namespace FileTransferProtocol
             die(std::move(closing));
             return;
         }
+        if (drain_)
+        {
+            takeDrainedReply(std::move(reply));
+            return;
+        }
 
         const auto pending = awaiting_.front();
         if (pending->replies_.size() >= PendingCommand::maximumHeldReplies)
@@ -402,6 +410,70 @@ namespace FileTransferProtocol
         writeNext();
     }
 
+    void ControlConnection::takeDrainedReply(Reply reply)
+    {
+        const auto code = reply.code;
+        if (isPreliminary(code))
+        {
+            Log::debug("FTP: Dropped a {} reply after ABOR", code);
+            return;
+        }
+        if (code == 421)
+        {
+            die(replyError(reply, drain_->transfer->verb()));
+            return;
+        }
+        if (code == markerReplyCode)
+        {
+            finishDrain(std::move(reply));
+            return;
+        }
+        if (drain_->replies.size() >= PendingCommand::maximumHeldReplies)
+        {
+            die(protocolViolation("ABOR was sent more replies than it can hold", code));
+            return;
+        }
+        drain_->replies.push_back(std::move(reply));
+    }
+
+    void ControlConnection::finishDrain(Reply markerReply)
+    {
+        auto drain = std::move(*drain_);
+        drain_.reset();
+        std::erase_if(
+            awaiting_,
+            [&drain](std::shared_ptr<PendingCommand> const& pending)
+            {
+                return pending == drain.transfer || pending == drain.abort || pending == drain.marker;
+            }
+        );
+        if (drain.replies.empty())
+        {
+            const auto missing = unreadableReply("The server answered neither the aborted transfer nor ABOR");
+            drain.transfer->fail(missing);
+            drain.abort->fail(missing);
+        }
+        else
+        {
+            if (drain.replies.size() > 2u)
+                Log::debug("FTP: Dropped {} replies between the transfer and ABOR", drain.replies.size() - 2u);
+            // A single reply answers both, the server did not say which it meant.
+            drain.transfer->take(drain.replies.front());
+            drain.abort->take(std::move(drain.replies.back()));
+        }
+        drain.marker->take(std::move(markerReply));
+        armDeadline();
+        writeNext();
+    }
+
+    std::shared_ptr<PendingCommand> ControlConnection::makeMarker() const
+    {
+        Command marker{.verb = Verb::PrintWorkingDirectory};
+        auto bytes = marker.encode();
+        assert(bytes && "PWD without an argument always encodes");
+        return std::make_shared<PendingCommand>(strand_, std::move(marker), std::move(*bytes));
+    }
+
     void ControlConnection::takeEndOfStream(boost::system::error_code error)
     {
         if (!isLive())
@@ -427,18 +499,29 @@ namespace FileTransferProtocol
         if (next == queued_.end())
             return;
 
-        const auto pending = *next;
+        std::vector<std::shared_ptr<PendingCommand>> written{*next};
         queued_.erase(next);
-        pending->stage_ = PendingCommand::Stage::Written;
-        pending->deadline_ = Clock::now() + options_.commandTimeout;
-        awaiting_.push_back(pending);
+        if (const auto transfer = runningTransfer(); transfer && written.front()->verb() == Verb::Abort)
+        {
+            drain_ = AbortDrain{.transfer = transfer, .abort = written.front(), .marker = makeMarker()};
+            written.push_back(drain_->marker);
+        }
+
+        std::vector<asio::const_buffer> buffers{};
+        for (auto const& pending : written)
+        {
+            pending->stage_ = PendingCommand::Stage::Written;
+            pending->deadline_ = Clock::now() + options_.commandTimeout;
+            awaiting_.push_back(pending);
+            buffers.push_back(asio::buffer(pending->bytes_));
+            Log::debug("FTP: Sending {}", pending->command_->toLogString());
+        }
         armDeadline();
         writing_ = true;
-        Log::debug("FTP: Sending {}", pending->command_->toLogString());
         asio::async_write(
             socket_,
-            asio::buffer(pending->bytes_),
-            [weak = weak_from_this(), pending](boost::system::error_code error, std::size_t)
+            buffers,
+            [weak = weak_from_this(), written = std::move(written)](boost::system::error_code error, std::size_t)
             {
                 const auto self = weak.lock();
                 if (!self)
@@ -581,6 +664,7 @@ namespace FileTransferProtocol
         socket_.close(ignored);
         deadlineTimer_.cancel();
         settleTimer_.cancel();
+        drain_.reset();
         const auto awaiting = std::exchange(awaiting_, {});
         const auto queued = std::exchange(queued_, {});
         for (auto const& pending : awaiting)

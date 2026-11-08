@@ -18,8 +18,10 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -37,6 +39,9 @@ namespace FileTransferProtocol::Test
         {
             return ControlConnectionOptions{.connectTimeout = 10s, .commandTimeout = 10s};
         }
+
+        /** @brief The reply to PWD, the marker the connection writes behind ABOR into a transfer. */
+        constexpr std::string_view currentDirectory = "257 \"/\" is the current directory";
 
         Command command(Verb verb, std::string argument = {})
         {
@@ -353,6 +358,8 @@ namespace FileTransferProtocol::Test
                 .reply("150 Opening")
                 .expect("ABOR")
                 .replyRaw("426 Transfer aborted\r\n226 Abort successful\r\n")
+                .expect("PWD")
+                .reply(currentDirectory)
                 .expect("NOOP")
                 .reply("200 Fine")
                 .expectDisconnect()
@@ -466,6 +473,8 @@ namespace FileTransferProtocol::Test
                 .reply("150 Opening")
                 .expect("ABOR")
                 .replyRaw("426 Transfer aborted\r\n226 Abort successful\r\n")
+                .expect("PWD")
+                .reply(currentDirectory)
                 .expect("NOOP")
                 .reply("200 Fine")
                 .expectDisconnect()
@@ -1021,4 +1030,163 @@ namespace FileTransferProtocol::Test
         expectReply(replies.first, 150);
         expectError(replies.second, RemoteErrorKind::TimedOut);
     }
+
+    TEST_F(ControlConnectionTests, AbortWithoutAReplyBeforeTheMarkerFailsBothAndKeepsTheConnection)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .expect("ABOR")
+                .expect("PWD")
+                .reply(currentDirectory)
+                .expect("NOOP")
+                .reply("200 Fine")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto replies =
+            run(connection,
+                [connection]() -> asio::awaitable<std::pair<ReplyResult, ReplyResult>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    auto opened = co_await retrieve->nextReply();
+                    if (!opened)
+                        co_return std::pair{opened, opened};
+                    const auto abort = connection->send(command(Verb::Abort)).value();
+                    auto transferEnd = co_await retrieve->finalReply();
+                    auto abortReply = co_await abort->finalReply();
+                    co_return std::pair{std::move(transferEnd), std::move(abortReply)};
+                });
+        expectError(replies.first, RemoteErrorKind::Failure);
+        expectError(replies.second, RemoteErrorKind::Failure);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(ControlConnectionTests, MarkerWithoutItsReplyEndsTheConnectionInTime)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .abortSequence(AbortReplies::ProftpdPlainLike)
+                .expect("PWD")
+                .reply("550 Not allowed")
+                .stall()
+        );
+        auto options = relaxedOptions();
+        options.commandTimeout = 500ms;
+        const auto connection = makeConnection(options);
+        connect(connection);
+        const auto transferEnd =
+            run(connection,
+                [connection]() -> asio::awaitable<ReplyResult>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    if (!opened)
+                        co_return opened;
+                    const auto abort = connection->send(command(Verb::Abort));
+                    if (!abort)
+                        co_return std::unexpected(abort.error());
+                    co_return co_await retrieve->finalReply();
+                });
+        expectError(transferEnd, RemoteErrorKind::TimedOut);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+    }
+
+    struct AbortCase
+    {
+        std::string_view name{};
+        AbortReplies replies{};
+        int transferCode{0};
+        int abortCode{0};
+    };
+
+    void PrintTo(AbortCase const& abortCase, std::ostream* stream)
+    {
+        *stream << abortCase.name;
+    }
+
+    class ControlConnectionAbortTests
+        : public ControlConnectionTests
+        , public ::testing::WithParamInterface<AbortCase>
+    {};
+
+    TEST_P(ControlConnectionAbortTests, RepliesUpToTheMarkerAnswerTheTransferAndAbort)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .abortSequence(GetParam().replies)
+                .expect("PWD")
+                .reply(currentDirectory)
+                .expect("NOOP")
+                .reply("200 Fine")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto codes =
+            run(connection,
+                [connection]() -> asio::awaitable<std::vector<int>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    if (!opened)
+                        co_return std::vector<int>{};
+                    const auto abort = connection->send(command(Verb::Abort)).value();
+                    const auto transferEnd = co_await retrieve->finalReply();
+                    const auto abortReply = co_await abort->finalReply();
+                    co_return std::vector<int>{
+                        transferEnd ? transferEnd->code : 0,
+                        abortReply ? abortReply->code : 0,
+                    };
+                });
+        EXPECT_EQ(codes, (std::vector<int>{GetParam().transferCode, GetParam().abortCode}));
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(stateOf(connection), ControlState::Open);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        ServerSequences,
+        ControlConnectionAbortTests,
+        ::testing::Values(
+            AbortCase{.name = "VsftpdLike", .replies = AbortReplies::VsftpdLike, .transferCode = 426, .abortCode = 225},
+            AbortCase{
+                .name = "ProftpdPlainLike",
+                .replies = AbortReplies::ProftpdPlainLike,
+                .transferCode = 426,
+                .abortCode = 226,
+            },
+            AbortCase{
+                .name = "ProftpdTlsLike",
+                .replies = AbortReplies::ProftpdTlsLike,
+                .transferCode = 226,
+                .abortCode = 426,
+            },
+            AbortCase{
+                .name = "PureFtpdLike",
+                .replies = AbortReplies::PureFtpdLike,
+                .transferCode = 426,
+                .abortCode = 226,
+            },
+            AbortCase{
+                .name = "PureFtpdFailedLike",
+                .replies = AbortReplies::PureFtpdFailedLike,
+                .transferCode = 426,
+                .abortCode = 451,
+            },
+            AbortCase{.name = "FinalOnly", .replies = AbortReplies::FinalOnly, .transferCode = 226, .abortCode = 226}
+        ),
+        [](::testing::TestParamInfo<AbortCase> const& info)
+        {
+            return std::string{info.param.name};
+        }
+    );
 }

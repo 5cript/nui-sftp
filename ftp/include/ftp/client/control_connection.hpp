@@ -61,6 +61,10 @@ namespace FileTransferProtocol
      * whose replies cannot be matched to its commands any more ends as Dead: a reply nothing waits for, a 421, a reply
      * past its deadline, a framing error.
      *
+     * ABOR into a transfer is followed by PWD as a marker. Servers answer the two with two replies in either order, with
+     * one, or with none; the final replies before the 257 of PWD go to the transfer and ABOR: the first to the transfer,
+     * the last to ABOR, a single one to both.
+     *
      * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
      * operations hold the connection weakly and own only their buffers and commands: the owner decides how long it
      * lives, dropping the last shared_ptr closes it, and waiting commands fail as Cancelled. A caller of connect() or
@@ -157,11 +161,26 @@ namespace FileTransferProtocol
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
       private:
+        /**
+         * @brief ABOR written into a transfer with its marker behind it, and the final replies that came before the
+         *        marker's.
+         */
+        struct AbortDrain
+        {
+            std::shared_ptr<PendingCommand> transfer{};
+            std::shared_ptr<PendingCommand> abort{};
+            std::shared_ptr<PendingCommand> marker{};
+            std::vector<Reply> replies{};
+        };
+
         void readNext();
         void takeRead(boost::system::error_code error, std::string_view bytes);
         void takeBytes(std::string_view bytes);
         void deliverFramedReplies();
         void dispatch(Reply reply);
+        void takeDrainedReply(Reply reply);
+        void finishDrain(Reply markerReply);
+        std::shared_ptr<PendingCommand> makeMarker() const;
         void takeEndOfStream(boost::system::error_code error);
         void writeNext();
         std::deque<std::shared_ptr<PendingCommand>>::iterator nextToWrite();
@@ -191,6 +210,7 @@ namespace FileTransferProtocol
         std::deque<std::shared_ptr<PendingCommand>> queued_{};
         /** @brief Written commands that still owe their final reply, oldest first. */
         std::deque<std::shared_ptr<PendingCommand>> awaiting_{};
+        std::optional<AbortDrain> drain_{};
         bool writing_{false};
         ControlState state_{ControlState::Unconnected};
         std::optional<RemoteIo::RemoteError> failure_{};
