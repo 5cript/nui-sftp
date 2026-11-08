@@ -825,7 +825,7 @@ namespace FileTransferProtocol::Test
 
     TEST(ListingParserTests, LongLinesAreSkipped)
     {
-        const std::string longName(ListingParser::maximumLineLength, 'n');
+        const std::string longName(ListingLimits{}.lineLength, 'n');
         const auto bytes = fmt::format("type=file; {}\r\ntype=file; after\r\n", longName);
         const auto whole = machineListingOf(bytes);
         EXPECT_EQ(namesOf(whole), std::set<std::string>{"after"});
@@ -852,14 +852,25 @@ namespace FileTransferProtocol::Test
         };
         for (const auto lineEnd : {std::string_view{"\r\n"}, std::string_view{"\n"}})
         {
-            const auto longest = lineOf(ListingParser::maximumLineLength, lineEnd);
-            ASSERT_EQ(longest.size(), ListingParser::maximumLineLength);
+            const auto longest = lineOf(ListingLimits{}.lineLength, lineEnd);
+            ASSERT_EQ(longest.size(), ListingLimits{}.lineLength);
             EXPECT_EQ(onlyEntry(machineListingOf(longest)).name, name);
 
-            const auto tooLong = machineListingOf(lineOf(ListingParser::maximumLineLength + 1u, lineEnd));
+            const auto tooLong = machineListingOf(lineOf(ListingLimits{}.lineLength + 1u, lineEnd));
             EXPECT_TRUE(tooLong.entries.empty());
             EXPECT_EQ(tooLong.unreadableLines, 1u);
         }
+    }
+
+    TEST(ListingParserTests, EntriesPastTheLimitAreDropped)
+    {
+        const auto listing = parsed(
+            ListingParser::machineListing(ListingLimits{.entryCount = 2u}),
+            "type=file; a\ntype=file; .\ntype=file; a/b\ntype=file; b\ntype=file; c\ntype=file; d\n"
+        );
+        EXPECT_EQ(namesOf(listing), (std::set<std::string>{"a", "b"}));
+        EXPECT_EQ(listing.refusedNames, 1u);
+        EXPECT_EQ(listing.droppedEntries, 2u);
     }
 
     TEST(ListingParserTests, FinishStartsOver)

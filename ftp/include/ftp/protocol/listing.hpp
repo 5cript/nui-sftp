@@ -74,6 +74,17 @@ namespace FileTransferProtocol
     };
 
     /**
+     * @brief Bounds on a listing, so a broken or hostile server cannot exhaust memory.
+     */
+    struct ListingLimits
+    {
+        /** @brief Bytes of one line, its line end included. Longer lines are skipped as unreadable. */
+        std::size_t lineLength{64u * 1024u};
+        /** @brief Entries kept of one listing, later ones are counted as dropped. */
+        std::size_t entryCount{1'000'000u};
+    };
+
+    /**
      * @brief The entries of a listing and what the parser left out. Names of children are checked: an entry named
      *        "." or ".." is never a child and is left out without being counted.
      */
@@ -81,8 +92,8 @@ namespace FileTransferProtocol
     {
         std::vector<ListingEntry> entries{};
         /**
-         * @brief Lines in no format the parser reads, or longer than ListingParser::maximumLineLength. Blank lines
-         *        and the "total" line of LIST are not counted.
+         * @brief Lines in no format the parser reads, or longer than ListingLimits::lineLength. Blank lines and the
+         *        "total" line of LIST are not counted.
          */
         std::size_t unreadableLines{0u};
         /**
@@ -100,6 +111,8 @@ namespace FileTransferProtocol
          *        several types once per type.
          */
         std::size_t repeatedNames{0u};
+        /** @brief Entries past ListingLimits::entryCount, read but not kept. */
+        std::size_t droppedEntries{0u};
 
         bool operator==(Listing const&) const = default;
     };
@@ -110,8 +123,6 @@ namespace FileTransferProtocol
     class ListingParser
     {
       public:
-        /** @brief Bytes of one line, its line end included. Longer lines are skipped as unreadable. */
-        static constexpr std::size_t maximumLineLength = 64u * 1024u;
         /** @brief Longer names are refused, file systems allow 255 bytes or 255 UTF-16 units. */
         static constexpr std::size_t maximumNameLength = 1024u;
 
@@ -119,7 +130,7 @@ namespace FileTransferProtocol
          * @brief Reads MLSD (RFC 3659 7): facts in any case, one space, then the name. cdir and pdir entries are
          *        left out.
          */
-        static ListingParser machineListing();
+        static ListingParser machineListing(ListingLimits limits = {});
 
         /**
          * @brief Reads LIST in the format of Unix "ls -l" and in the DOS format of IIS, line by line.
@@ -132,7 +143,7 @@ namespace FileTransferProtocol
          *
          * @param today The current date of the client, UTC.
          */
-        static ListingParser list(std::chrono::sys_days today);
+        static ListingParser list(std::chrono::sys_days today, ListingLimits limits = {});
 
         /**
          * @brief Reads NLST: one name per line, of unknown type.
@@ -140,7 +151,7 @@ namespace FileTransferProtocol
          * @param listedPath The argument of NLST, empty for none. Servers that list each name behind it lose the
          *        prefix.
          */
-        static ListingParser nameList(std::string_view listedPath);
+        static ListingParser nameList(std::string_view listedPath, ListingLimits limits = {});
 
         /**
          * @brief Reads the complete lines of @p bytes and keeps the rest for the next call.
@@ -161,12 +172,13 @@ namespace FileTransferProtocol
             NameList,
         };
 
-        ListingParser(Format format, std::chrono::sys_days today, std::string listedPrefix);
+        ListingParser(Format format, ListingLimits limits, std::chrono::sys_days today, std::string listedPrefix);
 
         void readLine(std::string_view line);
         void keep(ListingEntry entry);
 
         Format format_;
+        ListingLimits limits_;
         std::chrono::sys_days today_;
         std::string listedPrefix_;
         std::string pending_{};

@@ -50,28 +50,34 @@ namespace FileTransferProtocol
         }
     }
 
-    ListingParser::ListingParser(Format format, std::chrono::sys_days today, std::string listedPrefix)
+    ListingParser::ListingParser(
+        Format format,
+        ListingLimits limits,
+        std::chrono::sys_days today,
+        std::string listedPrefix
+    )
         : format_{format}
+        , limits_{limits}
         , today_{today}
         , listedPrefix_{std::move(listedPrefix)}
     {}
 
-    ListingParser ListingParser::machineListing()
+    ListingParser ListingParser::machineListing(ListingLimits limits)
     {
-        return ListingParser{Format::Machine, {}, {}};
+        return ListingParser{Format::Machine, limits, {}, {}};
     }
 
-    ListingParser ListingParser::list(std::chrono::sys_days today)
+    ListingParser ListingParser::list(std::chrono::sys_days today, ListingLimits limits)
     {
-        return ListingParser{Format::List, today, {}};
+        return ListingParser{Format::List, limits, today, {}};
     }
 
-    ListingParser ListingParser::nameList(std::string_view listedPath)
+    ListingParser ListingParser::nameList(std::string_view listedPath, ListingLimits limits)
     {
         std::string prefix{listedPath};
         if (!prefix.empty() && prefix.back() != '/')
             prefix.push_back('/');
-        return ListingParser{Format::NameList, {}, std::move(prefix)};
+        return ListingParser{Format::NameList, limits, {}, std::move(prefix)};
     }
 
     void ListingParser::feed(std::string_view bytes)
@@ -85,7 +91,7 @@ namespace FileTransferProtocol
             position = lineEnds ? lineEnd + 1u : bytes.size();
 
             const auto length = pending_.size() + piece.size() + (lineEnds ? 1u : 0u);
-            if (!skippingLongLine_ && length > maximumLineLength)
+            if (!skippingLongLine_ && length > limits_.lineLength)
             {
                 ++listing_.unreadableLines;
                 pending_.clear();
@@ -153,6 +159,11 @@ namespace FileTransferProtocol
         if (!namesChild(entry.name))
         {
             ++listing_.refusedNames;
+            return;
+        }
+        if (listing_.entries.size() >= limits_.entryCount)
+        {
+            ++listing_.droppedEntries;
             return;
         }
         listing_.entries.push_back(std::move(entry));

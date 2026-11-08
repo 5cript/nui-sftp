@@ -14,6 +14,8 @@ namespace
     using namespace FileTransferProtocol;
 
     constexpr std::chrono::sys_days today{std::chrono::year{2026} / 10 / 28};
+    /** @brief Small enough that inputs reach them. */
+    constexpr ListingLimits smallLimits{.lineLength = 64u, .entryCount = 4u};
 
     void check(bool condition)
     {
@@ -29,10 +31,11 @@ namespace
     }
 
     /**
-     * @brief Every entry names a child once, and every line gave at most one entry or count.
+     * @brief Every entry names a child once, the limits hold and every line gave at most one entry or count.
      */
-    void checkListing(Listing const& listing, std::string_view bytes)
+    void checkListing(Listing const& listing, std::string_view bytes, ListingLimits limits)
     {
+        check(listing.entries.size() <= limits.entryCount);
         std::unordered_set<std::string_view> names{};
         for (auto const& entry : listing.entries)
         {
@@ -42,16 +45,23 @@ namespace
             check(names.insert(entry.name).second);
         }
         const auto lines = static_cast<std::size_t>(std::ranges::count(bytes, '\n')) + 1u;
-        check(listing.entries.size() + listing.unreadableLines + listing.refusedNames + listing.repeatedNames <= lines);
+        check(
+            listing.entries.size() + listing.unreadableLines + listing.refusedNames + listing.repeatedNames +
+                listing.droppedEntries <=
+            lines
+        );
     }
 
     template <typename MakeParserT>
     void checkFormat(MakeParserT makeParser, std::string_view bytes)
     {
-        const auto whole = parsedInPieces(makeParser(), bytes, std::max<std::size_t>(bytes.size(), 1u));
-        checkListing(whole, bytes);
-        check(parsedInPieces(makeParser(), bytes, 1u) == whole);
-        check(parsedInPieces(makeParser(), bytes, 7u) == whole);
+        for (const auto limits : {ListingLimits{}, smallLimits})
+        {
+            const auto whole = parsedInPieces(makeParser(limits), bytes, std::max<std::size_t>(bytes.size(), 1u));
+            checkListing(whole, bytes, limits);
+            check(parsedInPieces(makeParser(limits), bytes, 1u) == whole);
+            check(parsedInPieces(makeParser(limits), bytes, 7u) == whole);
+        }
     }
 
     void checkMachineListReply(std::string_view bytes)
@@ -74,16 +84,16 @@ extern "C" int LLVMFuzzerTestOneInput(std::uint8_t const* data, std::size_t size
     const std::string_view bytes{reinterpret_cast<char const*>(data), size};
     checkFormat(ListingParser::machineListing, bytes);
     checkFormat(
-        []
+        [](ListingLimits limits)
         {
-            return ListingParser::list(today);
+            return ListingParser::list(today, limits);
         },
         bytes
     );
     checkFormat(
-        []
+        [](ListingLimits limits)
         {
-            return ListingParser::nameList("dir");
+            return ListingParser::nameList("dir", limits);
         },
         bytes
     );
