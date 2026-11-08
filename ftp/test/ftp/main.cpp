@@ -10,6 +10,7 @@
 #include "test_scripted_ftp_server.hpp"
 #include "test_server_profiles.hpp"
 #include "test_server_smoke.hpp"
+#include "test_socket_options.hpp"
 
 #include <gtest/gtest.h>
 

@@ -3,9 +3,12 @@ function(add_file_transfer_protocol_library name remoteIo)
     set(FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
     # Imported targets are only visible in the directory that found them, the test directory calls this too.
     find_package(fmt CONFIG REQUIRED)
+    find_package(Boost CONFIG REQUIRED)
+    find_package(Threads REQUIRED)
     add_library(
         ${name}
         STATIC
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/socket_options.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/features.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/list_line.cpp
@@ -24,7 +27,10 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/../../include
     )
 
-    target_link_libraries(${name} PUBLIC ${remoteIo} fmt::fmt)
+    target_link_libraries(${name} PUBLIC ${remoteIo} fmt::fmt Boost::headers Threads::Threads)
+    if (WIN32)
+        target_link_libraries(${name} PUBLIC ws2_32 mswsock)
+    endif()
 endfunction()
 
 add_file_transfer_protocol_library(file-transfer-protocol remote-io)
