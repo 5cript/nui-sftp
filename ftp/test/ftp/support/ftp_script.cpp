@@ -183,6 +183,12 @@ namespace FileTransferProtocol::Test
         steps.emplace_back(Checkpoint{.name = std::move(name)});
         return *this;
     }
+
+    Script& Script::awaitRelease(std::string name)
+    {
+        steps.emplace_back(AwaitRelease{.name = std::move(name)});
+        return *this;
+    }
     Script& Script::passive(DataPlan plan)
     {
         steps.emplace_back(Passive{.plan = std::move(plan)});
