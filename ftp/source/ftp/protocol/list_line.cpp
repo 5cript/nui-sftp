@@ -348,7 +348,9 @@ namespace FileTransferProtocol::Detail
             if (!morning && !afternoon)
                 return text.size() == 5u ? clockOf(text) : std::nullopt;
             const auto clock = text.size() == 7u ? clockOf(text.substr(0u, 5u)) : std::nullopt;
-            const auto hour = clock ? std::chrono::floor<hours>(*clock) : hours{0};
+            if (!clock)
+                return std::nullopt;
+            const auto hour = std::chrono::floor<hours>(*clock);
             if (hour < hours{1} || hour > hours{12})
                 return std::nullopt;
             // 12 AM is midnight, 12 PM noon.
