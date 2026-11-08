@@ -120,6 +120,22 @@ namespace FileTransferProtocol::Test
                 return tls_ && SSL_session_reused(tls_->native_handle()) == 1;
             }
 
+            /**
+             * @brief Sends a HelloRequest, the client's handshake is taken in by the next read.
+             */
+            asio::awaitable<bool> requestRenegotiation()
+            {
+                if (!tls_ || SSL_renegotiate(tls_->native_handle()) != 1)
+                    co_return false;
+                const auto [error] = co_await tls_->async_handshake(ssl::stream_base::server, noThrow);
+                co_return !error;
+            }
+
+            bool renegotiationPending()
+            {
+                return tls_ && SSL_renegotiate_pending(tls_->native_handle()) == 1;
+            }
+
             std::string tlsVersion()
             {
                 return tls_ ? SSL_get_version(tls_->native_handle()) : "";
@@ -413,9 +429,20 @@ namespace FileTransferProtocol::Test
          */
         std::shared_ptr<ssl::context> contextFor(TlsBehaviour const& behaviour)
         {
-            if (!behaviour.refuseResumption && !behaviour.issueNoTickets && !behaviour.certificate)
+            if (!behaviour.refuseResumption && !behaviour.issueNoTickets && !behaviour.certificate &&
+                !behaviour.maximumVersion)
                 return context_;
             auto context = makeContext(behaviour.certificate.value_or(certificate_));
+            if (behaviour.maximumVersion)
+            {
+                SSL_CTX_set_max_proto_version(context->native_handle(), *behaviour.maximumVersion);
+                // Versions before TLS 1.2 need the lowest security level of OpenSSL 3.
+                if (*behaviour.maximumVersion < TLS1_2_VERSION)
+                {
+                    SSL_CTX_set_security_level(context->native_handle(), 0);
+                    SSL_CTX_set_min_proto_version(context->native_handle(), TLS1_VERSION);
+                }
+            }
             if (behaviour.refuseResumption || behaviour.issueNoTickets)
             {
                 SSL_CTX_set_num_tickets(context->native_handle(), 0u);
@@ -851,6 +878,11 @@ namespace FileTransferProtocol::Test
                     server_.fail(diff(expected, fmt::format("command {}", *line)));
                     co_return false;
                 }
+                if (renegotiationRequested_ && !transport_.renegotiationPending())
+                {
+                    renegotiationRequested_ = false;
+                    server_.record(connection_, Kind::TlsEstablished, "control renegotiated");
+                }
                 co_return true;
             }
 
@@ -923,6 +955,17 @@ namespace FileTransferProtocol::Test
                 server_.record(connection_, Kind::Disconnected, "the TLS handshake failed");
                 co_await transport_.close(false);
                 co_return false;
+            }
+
+            asio::awaitable<bool> perform(Script::RenegotiateTls const&)
+            {
+                if (!co_await transport_.requestRenegotiation())
+                {
+                    server_.fail(diff("a renegotiation", "no HelloRequest could be sent"));
+                    co_return false;
+                }
+                renegotiationRequested_ = true;
+                co_return true;
             }
 
             asio::awaitable<bool> perform(Script::Checkpoint const& step)
@@ -1047,6 +1090,7 @@ namespace FileTransferProtocol::Test
             /** @brief Every passive() so far, the last one is what beginData() and its kin act on. */
             std::vector<std::shared_ptr<DataSession>> dataPlans_{};
             bool closeNotify_{true};
+            bool renegotiationRequested_{false};
             bool closed_{false};
             bool silent_{false};
         };
