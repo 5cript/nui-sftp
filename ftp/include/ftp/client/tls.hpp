@@ -166,16 +166,23 @@ namespace FileTransferProtocol
     /**
      * @brief Who vouched for the certificate of a completed handshake on @p handle.
      *
-     * @return A Failure when the handshake left no certificate behind, which the verify callback does not allow.
+     * @return NoSecureConnection when the handshake left no certificate behind, which the verify callback does not
+     *         allow.
      */
     std::expected<TrustedCertificate, RemoteIo::RemoteError> trustOf(SSL* handle);
 
     /**
      * @brief Why a handshake on @p handle failed: TrustRequired when the verify callback refused the certificate,
-     *        TimedOut when @p timedOut, otherwise ConnectionLost for an end of the stream and a Failure with OpenSSL's
-     *        reason for the rest.
+     *        otherwise NoSecureConnection that says whether it timed out (@p timedOut), the stream ended or what
+     *        OpenSSL reported.
      */
     RemoteIo::RemoteError handshakeError(SSL* handle, boost::system::error_code error, bool timedOut);
+
+    /**
+     * @brief @p error as the reason a connection got no TLS: NoSecureConnection with its message and code. A
+     *        TrustRequired, which the trust prompt answers, and a cancel keep their kind.
+     */
+    RemoteIo::RemoteError asNoSecureConnection(RemoteIo::RemoteError error);
 
     /**
      * @brief The certificate the verify callback refused on @p handle.

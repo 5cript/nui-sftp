@@ -109,6 +109,18 @@ namespace FileTransferProtocol
         {
             return code == 234 || code == 334;
         }
+
+        RemoteIo::RemoteError refusedAuthentication(Reply const& reply)
+        {
+            auto error = replyError(reply, Verb::Authenticate);
+            error.message = fmt::format("The server refused AUTH TLS: {}", error.message);
+            return error;
+        }
+
+        bool isCancelled(asio::cancellation_state const& state)
+        {
+            return state.cancelled() != asio::cancellation_type::none;
+        }
     }
 
     /**
@@ -256,8 +268,9 @@ namespace FileTransferProtocol
             auto handle = makeTlsHandle(*implicitTls);
             if (!handle)
             {
-                die(handle.error());
-                co_return std::unexpected(handle.error());
+                auto failure = asNoSecureConnection(std::move(handle).error());
+                die(failure);
+                co_return std::unexpected(std::move(failure));
             }
             tlsHandle = std::move(*handle);
         }
@@ -278,8 +291,8 @@ namespace FileTransferProtocol
         }
         if (tlsHandle)
         {
-            if (const auto secured = co_await handshake(std::move(*tlsHandle), deadline); !secured)
-                co_return std::unexpected(secured.error());
+            if (auto secured = co_await handshake(std::move(*tlsHandle), deadline); !secured)
+                co_return std::unexpected(asNoSecureConnection(std::move(secured).error()));
         }
 
         // The greeting is owed without a command, and within the connect timeout, a 120 before it included.
@@ -320,7 +333,7 @@ namespace FileTransferProtocol
             if (!isLive())
                 co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled"));
             // A cancelled coroutine would throw at its next co_await.
-            if ((co_await asio::this_coro::cancellation_state).cancelled() != asio::cancellation_type::none)
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
                 co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled"));
             if (!error)
                 co_return endpoints[index];
@@ -335,50 +348,46 @@ namespace FileTransferProtocol
         assert(
             strand_.running_in_this_thread() && "ControlConnection::startTls() runs on the strand of the connection"
         );
+        if (transport_->secured() || upgrading_)
+            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The control connection has or starts TLS"));
+        // From here on the connection ends up secured or ends.
         if (state_ != ControlState::Open)
             co_return std::unexpected(
-                failure_.value_or(errorOf(RemoteErrorKind::NoConnection, "The control connection is not open"))
+                endTls(failure_.value_or(errorOf(RemoteErrorKind::NoConnection, "The control connection is not open")))
             );
-        if (transport_->secured() || upgrading_)
-            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The control connection has TLS already"));
         if (!awaiting_.empty() || !queued_.empty())
-            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "AUTH TLS waits for an idle connection"));
-        // A handle that cannot be made fails before anything is sent.
+            co_return std::unexpected(
+                endTls(errorOf(RemoteErrorKind::Failure, "AUTH TLS waits for an idle connection"))
+            );
         auto handle = makeTlsHandle(settings);
         if (!handle)
-            co_return std::unexpected(handle.error());
+            co_return std::unexpected(endTls(std::move(handle).error()));
 
         const auto pending = enqueue(Command{.verb = Verb::Authenticate, .argument = "TLS"});
         if (!pending)
-            co_return std::unexpected(pending.error());
+            co_return std::unexpected(endTls(pending.error()));
         upgrading_ = true;
         const auto reply = co_await (*pending)->finalReply();
-        if (!reply || !acceptsAuthentication(reply->code))
-        {
-            upgrading_ = false;
-            if (!reply)
-                co_return std::unexpected(reply.error());
-            co_return std::unexpected(replyError(*reply, Verb::Authenticate));
-        }
+        // A cancel that came with the reply counts too, the next co_await would throw.
+        if (isCancelled(co_await asio::this_coro::cancellation_state))
+            co_return std::unexpected(endTls(errorOf(RemoteErrorKind::Cancelled, "The start of TLS was cancelled")));
+        if (!reply)
+            co_return std::unexpected(endTls(reply.error()));
+        if (!acceptsAuthentication(reply->code))
+            co_return std::unexpected(endTls(refusedAuthentication(*reply)));
         if (!isLive())
-        {
-            upgrading_ = false;
             co_return std::unexpected(
-                failure_.value_or(errorOf(RemoteErrorKind::Cancelled, "The control connection was closed"))
+                endTls(failure_.value_or(errorOf(RemoteErrorKind::Cancelled, "The control connection was closed")))
             );
-        }
         if (framer_.inReply() || framer_.holdsPossibleEnd())
-        {
-            upgrading_ = false;
-            auto injected = protocolViolation("The server sent bytes behind its reply to AUTH TLS", reply->code);
-            die(injected);
-            co_return std::unexpected(std::move(injected));
-        }
+            co_return std::unexpected(endTls(protocolViolation(
+                "The server sent bytes behind its reply to AUTH TLS, they could be injected", reply->code
+            )));
 
         auto trusted = co_await handshake(std::move(*handle), Clock::now() + options_.commandTimeout);
-        upgrading_ = false;
         if (!trusted)
-            co_return trusted;
+            co_return std::unexpected(endTls(std::move(trusted).error()));
+        upgrading_ = false;
         readerPaused_ = false;
         readNext();
         co_return trusted;
@@ -400,7 +409,7 @@ namespace FileTransferProtocol
             co_return std::unexpected(
                 failure_.value_or(errorOf(RemoteErrorKind::Cancelled, "The TLS handshake was cancelled"))
             );
-        if ((co_await asio::this_coro::cancellation_state).cancelled() != asio::cancellation_type::none)
+        if (isCancelled(co_await asio::this_coro::cancellation_state))
         {
             auto cancelled = errorOf(RemoteErrorKind::Cancelled, "The TLS handshake was cancelled");
             die(cancelled);
@@ -421,6 +430,16 @@ namespace FileTransferProtocol
         }
         trustedCertificate_ = *trusted;
         co_return trusted;
+    }
+
+    RemoteIo::RemoteError ControlConnection::endTls(RemoteIo::RemoteError error)
+    {
+        upgrading_ = false;
+        if (state_ == ControlState::Closed)
+            return errorOf(RemoteErrorKind::Cancelled, "The control connection was closed");
+        auto failure = asNoSecureConnection(std::move(error));
+        die(failure);
+        return failure;
     }
 
     std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> ControlConnection::send(Command command)

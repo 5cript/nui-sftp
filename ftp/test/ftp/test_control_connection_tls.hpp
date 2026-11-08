@@ -5,7 +5,10 @@
 #include <ftp/client/tls.hpp>
 #include <ftp/support/test_pki.hpp>
 
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
 #include <openssl/bio.h>
@@ -178,25 +181,70 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
-    TEST_F(ControlConnectionTlsTests, RefusedAuthLeavesThePlainConnectionUsable)
+    TEST_F(ControlConnectionTlsTests, RefusedAuthEndsTheConnection)
     {
         server_->addConnection(
-            Script{}
-                .reply("220 Ready")
-                .expect("AUTH", "TLS")
-                .reply("502 Not implemented")
-                .expect("NOOP")
-                .reply("200 Fine")
-                .expectDisconnect()
+            Script{}.reply("220 Ready").expect("AUTH", "TLS").reply("502 Not implemented").expectDisconnect()
         );
         const auto connection = makeConnection();
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
-        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << trusted.error().toString();
-        EXPECT_EQ(stateOf(connection), ControlState::Open);
-        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
+        EXPECT_EQ(trusted.error().protocolCode, 502);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+        expectError(execute(connection, command(Verb::Noop)), RemoteIo::RemoteErrorKind::NoSecureConnection);
         EXPECT_FALSE(connection->trustedCertificate());
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
+    }
+
+    TEST_F(ControlConnectionTlsTests, CancelledStartTlsEndsTheConnection)
+    {
+        // A 234 after the cancel would otherwise reach a reader that goes on in plaintext.
+        server_->addConnection(Script{}.reply("220 Ready").expect("AUTH", "TLS").checkpoint("received").stall());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto signal = std::make_shared<asio::cancellation_signal>();
+        auto starting = asio::co_spawn(
+            connection->strand(),
+            connection->startTls(settings()),
+            asio::bind_cancellation_slot(signal->slot(), asio::use_future)
+        );
+        ASSERT_TRUE(server_->waitForCheckpoint("received"));
+        asio::post(
+            connection->strand(),
+            [signal]()
+            {
+                signal->emit(asio::cancellation_type::terminal);
+            }
+        );
+        ASSERT_EQ(starting.wait_for(20s), std::future_status::ready);
+        const auto trusted = starting.get();
+        ASSERT_FALSE(trusted);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << trusted.error().toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+        expectError(execute(connection, command(Verb::Noop)), RemoteIo::RemoteErrorKind::Cancelled);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
+    }
+
+    TEST_F(ControlConnectionTlsTests, AuthTlsOnABusyConnectionEndsIt)
+    {
+        server_->addConnection(Script{}.reply("220 Ready").expect("NOOP").checkpoint("received").stall());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto sent =
+            run(connection,
+                [connection]() -> asio::awaitable<bool>
+                {
+                    co_return connection->send(command(Verb::Noop)).has_value();
+                });
+        ASSERT_TRUE(sent);
+        ASSERT_TRUE(server_->waitForCheckpoint("received"));
+        const auto trusted = startTls(connection, settings());
+        ASSERT_FALSE(trusted);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"NOOP"}));
     }
 
     TEST_F(ControlConnectionTlsTests, ReplyBehindTheAuthReplyEndsTheConnection)
@@ -213,7 +261,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
-        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::ProtocolViolation) << trusted.error().toString();
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
     }
@@ -227,7 +275,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
-        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::ProtocolViolation) << trusted.error().toString();
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
     }
 
@@ -239,6 +287,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
         EXPECT_FALSE(hasEntry(server_->transcript(), TranscriptEntry::Kind::TlsEstablished, "control"));
@@ -370,7 +419,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
-        EXPECT_NE(trusted.error().kind, RemoteIo::RemoteErrorKind::TrustRequired) << trusted.error().toString();
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
         EXPECT_FALSE(connection->untrustedCertificate());
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
@@ -395,7 +444,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
-        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << trusted.error().toString();
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
@@ -406,7 +455,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
-        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::Failure) << trusted.error().toString();
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 

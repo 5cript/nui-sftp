@@ -70,7 +70,8 @@ namespace FileTransferProtocol
      *
      * TLS starts before the greeting (implicit) or after a 234 to AUTH TLS (explicit, RFC 4217), and stays to the end:
      * a close sends close_notify, CCC is never sent. The certificate is checked during the handshake, so no command
-     * goes out before the decision: trusted authorities first, then the pin.
+     * goes out before the decision: trusted authorities first, then the pin. A connection that was to get TLS either
+     * gets it or ends, it never goes on in plaintext.
      *
      * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
      * operations hold the connection weakly and own only their buffers, commands and the socket with its TLS stream:
@@ -111,8 +112,8 @@ namespace FileTransferProtocol
          * @param implicitTls Makes the TLS handshake before the greeting, within the connect timeout.
          * @return The 220 greeting. NoConnection when no endpoint accepted, TimedOut past the connect timeout,
          *         Cancelled by close(), also one before connect(), or a cancelled wait, the replyError() of any other
-         *         greeting, the handshakeError() of a failed handshake. The connection is Dead after an error, Closed
-         *         after close().
+         *         greeting. With implicitTls TrustRequired for a certificate to ask about and NoSecureConnection for
+         *         any other failure of the handshake. The connection is Dead after an error, Closed after close().
          */
         boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> connect(
             std::vector<boost::asio::ip::tcp::endpoint> endpoints,
@@ -122,11 +123,13 @@ namespace FileTransferProtocol
         /**
          * @brief Sends AUTH TLS on the idle plain connection and makes the handshake after a 234, or a 334 as curl
          *        accepts it. Nothing may follow that reply in plaintext: such bytes could have been injected before
-         *        the handshake. The handshake has the command timeout.
+         *        the handshake. The handshake has the command timeout. Every failure ends the connection, it never
+         *        goes on in plaintext.
          *
-         * @return Who vouched for the certificate. The replyError() of a refused AUTH, the connection stays open and
-         *         plain. A Failure while commands are in flight or TLS is up already. A ProtocolViolation for bytes
-         *         behind the reply and the handshakeError() of a failed handshake end the connection.
+         * @return Who vouched for the certificate. TrustRequired for a certificate to ask about, Cancelled after a
+         *         cancel or close(), NoSecureConnection with the reason for any other failure, a refused AUTH and bytes
+         *         behind its reply included. Only a Failure for a connection that has or starts TLS already leaves it
+         *         as it is.
          */
         boost::asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
         startTls(TlsConnectionSettings settings);
@@ -136,7 +139,7 @@ namespace FileTransferProtocol
          *
          * @return The command, whose replies the caller takes. InvalidPath for an argument that cannot be sent, the
          *         connection stays usable. The error of the connection when it is not open. A Failure for AUTH, which
-         *         goes through startTls(), and for any command while startTls() runs.
+         *         goes through startTls(), and for any command while TLS starts.
          */
         std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> send(Command command);
 
@@ -226,6 +229,12 @@ namespace FileTransferProtocol
          */
         boost::asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
         handshake(SslHandle handle, std::chrono::steady_clock::time_point deadline);
+        /**
+         * @brief Ends the connection after a failed start of TLS.
+         *
+         * @return What startTls() reports: Cancelled after close(), else asNoSecureConnection() of @p error.
+         */
+        RemoteIo::RemoteError endTls(RemoteIo::RemoteError error);
         std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> enqueue(Command command);
         void readNext();
         void takeRead(boost::system::error_code error, std::string_view bytes);
@@ -269,7 +278,7 @@ namespace FileTransferProtocol
         std::deque<std::shared_ptr<PendingCommand>> awaiting_{};
         std::optional<AbortDrain> drain_{};
         bool writing_{false};
-        /** @brief startTls() runs, no other command may be sent. */
+        /** @brief TLS starts, implicitly or through startTls(), no command may be sent. */
         bool upgrading_{false};
         /** @brief AUTH TLS was accepted, the bytes behind its reply belong to the handshake. */
         bool readerPaused_{false};

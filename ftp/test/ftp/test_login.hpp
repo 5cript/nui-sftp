@@ -191,9 +191,9 @@ namespace FileTransferProtocol::Test
         );
         const auto connection = makeConnection();
         const auto result = login(connection, explicitOptions());
-        ASSERT_FALSE(result);
+        expectLoginError(result, RemoteIo::RemoteErrorKind::NoSecureConnection);
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
-        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
     TEST_F(LoginTests, UserAloneMayLogIn)

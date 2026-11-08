@@ -422,16 +422,22 @@ namespace FileTransferProtocol
     {
         auto const* const verification = verificationOf(handle);
         if (verification == nullptr)
-            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The connection has no certificate check"));
+            return std::unexpected(
+                errorOf(RemoteErrorKind::NoSecureConnection, "The connection has no certificate check")
+            );
         const CertificateHandle certificate{SSL_get1_peer_certificate(handle)};
         auto info = describeCertificate(certificate.get());
         if (!info)
-            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The server's certificate cannot be read"));
+            return std::unexpected(
+                errorOf(RemoteErrorKind::NoSecureConnection, "The server's certificate cannot be read")
+            );
         if (verification->firstFailure == X509_V_OK)
             return TrustedCertificate{.certificate = std::move(*info), .source = TrustSource::Authorities};
         info->verifyFailure = X509_verify_cert_error_string(verification->firstFailure);
         if (!verification->trustedByPin)
-            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The certificate check let a refused one pass"));
+            return std::unexpected(
+                errorOf(RemoteErrorKind::NoSecureConnection, "The certificate check let a refused one pass")
+            );
         return TrustedCertificate{.certificate = std::move(*info), .source = TrustSource::Pin};
     }
 
@@ -448,10 +454,22 @@ namespace FileTransferProtocol
             );
         }
         if (timedOut)
-            return errorOf(RemoteErrorKind::TimedOut, "The TLS handshake did not end in time");
+            return errorOf(RemoteErrorKind::NoSecureConnection, "The TLS handshake did not end in time");
         if (isEndOfStream(error))
-            return errorOf(RemoteErrorKind::ConnectionLost, "The server ended the connection during the TLS handshake");
-        return errorOf(RemoteErrorKind::Failure, fmt::format("The TLS handshake failed: {}", error.message()));
+            return errorOf(
+                RemoteErrorKind::NoSecureConnection, "The server ended the connection during the TLS handshake"
+            );
+        return errorOf(
+            RemoteErrorKind::NoSecureConnection, fmt::format("The TLS handshake failed: {}", error.message())
+        );
+    }
+
+    RemoteIo::RemoteError asNoSecureConnection(RemoteIo::RemoteError error)
+    {
+        if (error.kind == RemoteErrorKind::TrustRequired || error.kind == RemoteErrorKind::Cancelled)
+            return error;
+        error.kind = RemoteErrorKind::NoSecureConnection;
+        return error;
     }
 
     std::optional<CertificateInfo> refusedCertificate(SSL* handle)
