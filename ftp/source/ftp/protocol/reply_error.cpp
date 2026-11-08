@@ -103,8 +103,23 @@ namespace FileTransferProtocol
             return std::nullopt;
         }
 
+        /**
+         * @brief A refused login that asks for TLS: vsftpd's "Non-anonymous sessions must use encryption", proftpd's
+         *        "SSL/TLS required on the control channel", pure-ftpd's "cleartext sessions ... are not accepted",
+         *        FileZilla Server's "does not allow plain FTP" and IIS' "Policy requires SSL".
+         */
+        bool demandsTls(std::optional<Verb> verb, std::string_view text)
+        {
+            const auto login = verb == Verb::User || verb == Verb::Password || verb == Verb::Account;
+            return login &&
+                mentionsAny(text, {"tls", "ssl", "encryption", "cleartext", "plain ftp", "secure connection"}) &&
+                mentionsAny(text, {"must", "require", "not accepted", "not allow", "need"});
+        }
+
         RemoteErrorKind kindOf(int code, std::string_view text, std::optional<Verb> verb)
         {
+            if (demandsTls(verb, text))
+                return RemoteErrorKind::NoSecureConnection;
             switch (code)
             {
                 case 421:

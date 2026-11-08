@@ -317,6 +317,21 @@ namespace FileTransferProtocol::Test
             unknownUser.reply("220 Ready").expect("USER", "user").reply("530 This FTP server is anonymous only.");
             Script vsftpdLimit{};
             vsftpdLimit.reply("421 There are too many connections from your internet address.");
+            Script vsftpdDemandsTls{};
+            vsftpdDemandsTls.reply("220 Ready")
+                .expect("USER", "user")
+                .reply("530 Non-anonymous sessions must use encryption.");
+            Script proftpdDemandsTls{};
+            proftpdDemandsTls.reply("220 Ready")
+                .expect("USER", "user")
+                .reply("550 SSL/TLS required on the control channel");
+            Script pureFtpdDemandsTls{};
+            pureFtpdDemandsTls.reply("220 Ready")
+                .expect("USER", "user")
+                .replyRaw(
+                    "421-Sorry, cleartext sessions and weak ciphers are not accepted on this server.\r\n"
+                    "421 Please reconnect using TLS security mechanisms.\r\n"
+                );
             return {
                 {.name = "WrongPassword",
                     .script = wrongPassword,
@@ -328,6 +343,15 @@ namespace FileTransferProtocol::Test
                 {.name = "ConnectionLimitAtTheGreeting",
                     .script = vsftpdLimit,
                     .kind = RemoteIo::RemoteErrorKind::ConnectionLimit},
+                {.name = "VsftpdDemandsTls",
+                    .script = vsftpdDemandsTls,
+                    .kind = RemoteIo::RemoteErrorKind::NoSecureConnection},
+                {.name = "ProftpdDemandsTls",
+                    .script = proftpdDemandsTls,
+                    .kind = RemoteIo::RemoteErrorKind::NoSecureConnection},
+                {.name = "PureFtpdDemandsTls",
+                    .script = pureFtpdDemandsTls,
+                    .kind = RemoteIo::RemoteErrorKind::NoSecureConnection},
                 {.name = "FeatFailed",
                     .script = refusedAfter("FEAT", "451 Local error"),
                     .kind = RemoteIo::RemoteErrorKind::Failure},
