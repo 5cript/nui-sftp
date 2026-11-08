@@ -1,7 +1,7 @@
 #include "listing_lines.hpp"
 #include "text.hpp"
 
-#include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -67,11 +67,6 @@ namespace FileTransferProtocol::Detail
             }
         }
 
-        bool isOctalDigit(char character)
-        {
-            return character >= '0' && character <= '7';
-        }
-
         /**
          * @brief Reads UNIX.mode, octal with or without a leading 0, or 0o as pyftpdlib writes it.
          */
@@ -79,13 +74,9 @@ namespace FileTransferProtocol::Detail
         {
             if (startsWithIgnoringCase(value, "0o"))
                 value.remove_prefix(2u);
-            if (value.empty() || !std::ranges::all_of(value, isOctalDigit))
-                return std::nullopt;
             unsigned mode = 0u;
-            std::size_t position = 0u;
-            while (mode <= 07777u && position < value.size())
-                mode = mode * 8u + static_cast<unsigned>(value[position++] - '0');
-            if (mode > 07777u)
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), mode, 8);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || mode > 07777u)
                 return std::nullopt;
             return static_cast<std::filesystem::perms>(mode);
         }
