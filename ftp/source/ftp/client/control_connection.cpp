@@ -80,12 +80,10 @@ namespace FileTransferProtocol
             }
         }
 
-        /**
-         * @brief A command that RFC 959 4.2 lets go between the preliminary and the final reply of a transfer.
-         */
-        bool mayInterrupt(std::optional<Verb> verb)
+        bool isTransferCommand(std::shared_ptr<PendingCommand> const& pending)
         {
-            return verb == Verb::Abort || verb == Verb::Status || verb == Verb::Quit;
+            const auto verb = pending->verb();
+            return verb && isTransfer(*verb);
         }
 
         std::string nameOf(PendingCommand const& pending)
@@ -412,20 +410,14 @@ namespace FileTransferProtocol
 
     void ControlConnection::writeNext()
     {
-        if (writing_ || queued_.empty() || state_ != ControlState::Open)
+        if (writing_ || state_ != ControlState::Open)
             return;
-        const auto everyAnswered = std::ranges::all_of(
-            awaiting_,
-            [](std::shared_ptr<PendingCommand> const& pending)
-            {
-                return pending->answered();
-            }
-        );
-        if (!everyAnswered || (!awaiting_.empty() && !mayInterrupt(queued_.front()->verb())))
+        const auto next = nextToWrite();
+        if (next == queued_.end())
             return;
 
-        const auto pending = queued_.front();
-        queued_.pop_front();
+        const auto pending = *next;
+        queued_.erase(next);
         pending->stage_ = PendingCommand::Stage::Written;
         pending->deadline_ = Clock::now() + options_.commandTimeout;
         awaiting_.push_back(pending);
@@ -449,6 +441,45 @@ namespace FileTransferProtocol
                 self->writeNext();
             }
         );
+    }
+
+    std::deque<std::shared_ptr<PendingCommand>>::iterator ControlConnection::nextToWrite()
+    {
+        if (awaiting_.empty())
+            return queued_.begin();
+        if (!runningTransfer())
+            return queued_.end();
+        // ABOR goes into the transfer ahead of commands queued before it, QUIT in its turn (RFC 959 4.2). STAT waits:
+        // the server answers it at once, before the final reply of the transfer, so the replies would swap.
+        const auto abort = std::ranges::find_if(
+            queued_,
+            [](std::shared_ptr<PendingCommand> const& queued)
+            {
+                return queued->verb() == Verb::Abort;
+            }
+        );
+        if (abort != queued_.end())
+            return abort;
+        if (!queued_.empty() && queued_.front()->verb() == Verb::Quit)
+            return queued_.begin();
+        return queued_.end();
+    }
+
+    std::shared_ptr<PendingCommand> ControlConnection::runningTransfer() const
+    {
+        const auto everyAnswered = std::ranges::all_of(
+            awaiting_,
+            [](std::shared_ptr<PendingCommand> const& pending)
+            {
+                return pending->answered();
+            }
+        );
+        if (!everyAnswered)
+            return nullptr;
+        const auto transfer = std::ranges::find_if(awaiting_, isTransferCommand);
+        if (transfer == awaiting_.end())
+            return nullptr;
+        return *transfer;
     }
 
     void ControlConnection::armDeadline()

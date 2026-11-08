@@ -420,6 +420,81 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stages, (std::vector<int>{150, 1, 226, 200}));
     }
 
+    TEST_F(ControlConnectionTests, StatWaitsForTheEndOfATransfer)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .awaitRelease("finish")
+                .reply("226 Done")
+                .expect("STAT")
+                .reply("211 Connected")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto stages =
+            run(connection,
+                [connection, server = server_.get()]() -> asio::awaitable<std::vector<int>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    // A server answers STAT at once, its reply would take the place of the 226.
+                    const auto status = connection->send(command(Verb::Status)).value();
+                    const auto queued = status->stage() == PendingCommand::Stage::Queued;
+                    server->release("finish");
+                    const auto transferEnd = co_await retrieve->finalReply();
+                    const auto statusReply = co_await status->finalReply();
+                    co_return std::vector<int>{
+                        opened ? opened->code : 0,
+                        queued ? 1 : 0,
+                        transferEnd ? transferEnd->code : 0,
+                        statusReply ? statusReply->code : 0,
+                    };
+                });
+        EXPECT_EQ(stages, (std::vector<int>{150, 1, 226, 211}));
+    }
+
+    TEST_F(ControlConnectionTests, AbortGoesAheadOfCommandsQueuedBeforeIt)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .expect("ABOR")
+                .replyRaw("426 Transfer aborted\r\n226 Abort successful\r\n")
+                .expect("NOOP")
+                .reply("200 Fine")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto codes =
+            run(connection,
+                [connection]() -> asio::awaitable<std::vector<int>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    const auto noop = connection->send(command(Verb::Noop)).value();
+                    const auto abort = connection->send(command(Verb::Abort)).value();
+                    if (abort->stage() != PendingCommand::Stage::Written)
+                        co_return std::vector<int>{opened ? opened->code : 0};
+                    const auto transferEnd = co_await retrieve->finalReply();
+                    const auto abortReply = co_await abort->finalReply();
+                    const auto noopReply = co_await noop->finalReply();
+                    co_return std::vector<int>{
+                        opened ? opened->code : 0,
+                        transferEnd ? transferEnd->code : 0,
+                        abortReply ? abortReply->code : 0,
+                        noopReply ? noopReply->code : 0,
+                    };
+                });
+        EXPECT_EQ(codes, (std::vector<int>{150, 426, 226, 200}));
+    }
+
     TEST_F(ControlConnectionTests, PreliminaryReplyNothingWaitsForIsDropped)
     {
         // The final reply before the 150, and a 150 after a failure, as some servers send them.

@@ -55,9 +55,11 @@ namespace FileTransferProtocol
      *        is open, also while it is idle, so a 421, an EOF or a reset is seen at once. Replies go to the commands
      *        in the order the commands were written.
      *
-     * A command is written once every earlier one has its first reply (RFC 959 5.4) and has completed, except ABOR,
-     * STAT and QUIT, which may interrupt a transfer (RFC 959 4.2). A connection whose replies cannot be matched to its
-     * commands any more ends as Dead: a reply nothing waits for, a 421, a reply past its deadline, a framing error.
+     * A command is written once every earlier one has its first reply (RFC 959 5.4) and has completed. Only ABOR and
+     * QUIT go into a transfer that got its preliminary reply (RFC 959 4.2), ABOR ahead of commands queued before it.
+     * STAT waits like any other command: a server answers it before the final reply of the transfer. A connection
+     * whose replies cannot be matched to its commands any more ends as Dead: a reply nothing waits for, a 421, a reply
+     * past its deadline, a framing error.
      *
      * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
      * operations hold the connection weakly and own only their buffers and commands: the owner decides how long it
@@ -162,6 +164,11 @@ namespace FileTransferProtocol
         void dispatch(Reply reply);
         void takeEndOfStream(boost::system::error_code error);
         void writeNext();
+        std::deque<std::shared_ptr<PendingCommand>>::iterator nextToWrite();
+        /**
+         * @brief The transfer commands may go into: every written command has its first reply and one is a transfer.
+         */
+        std::shared_ptr<PendingCommand> runningTransfer() const;
         void armDeadline();
         void takeDeadline();
         void armSettle();
