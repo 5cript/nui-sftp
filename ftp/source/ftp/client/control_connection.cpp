@@ -291,7 +291,11 @@ namespace FileTransferProtocol
         }
         if (tlsHandle)
         {
-            if (auto secured = co_await handshake(std::move(*tlsHandle), deadline); !secured)
+            // Nothing goes out before the greeting, and nothing into the handshake.
+            upgrading_ = true;
+            auto secured = co_await handshake(std::move(*tlsHandle), deadline);
+            upgrading_ = false;
+            if (!secured)
                 co_return std::unexpected(asNoSecureConnection(std::move(secured).error()));
         }
 

@@ -16,6 +16,7 @@
 #include <openssl/x509.h>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -491,6 +492,48 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(connection->trustedCertificate());
         EXPECT_EQ(connection->trustedCertificate()->source, TrustSource::Authorities);
         expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(ControlConnectionTlsTests, CommandsCannotBeSentDuringTheImplicitHandshake)
+    {
+        asio::io_context context{};
+        // Takes the ClientHello and never answers it.
+        asio::ip::tcp::acceptor silent{context, asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0u}};
+        asio::ip::tcp::socket peer{context};
+        std::array<char, 512u> received{};
+        std::size_t receivedSize = 0u;
+        silent.async_accept(
+            peer,
+            [&peer, &received, &receivedSize](boost::system::error_code error)
+            {
+                if (error)
+                    return;
+                peer.async_read_some(
+                    asio::buffer(received),
+                    [&receivedSize](boost::system::error_code, std::size_t size)
+                    {
+                        receivedSize = size;
+                    }
+                );
+            }
+        );
+        const auto connection = makeConnection();
+        auto connecting = asio::co_spawn(
+            connection->strand(), connection->connect({silent.local_endpoint()}, settings()), asio::use_future
+        );
+        context.run_for(20s);
+        ASSERT_GT(receivedSize, 0u);
+
+        const auto sent =
+            run(connection,
+                [connection]() -> asio::awaitable<bool>
+                {
+                    co_return connection->send(command(Verb::Noop)).has_value();
+                });
+        EXPECT_FALSE(sent);
+        connection->close();
+        ASSERT_EQ(connecting.wait_for(20s), std::future_status::ready);
+        expectError(connecting.get(), RemoteIo::RemoteErrorKind::Cancelled);
     }
 
     TEST_F(ControlConnectionTlsTests, ImplicitTlsWithAnUntrustedCertificateSendsNothing)
