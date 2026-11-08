@@ -133,9 +133,8 @@ namespace FileTransferProtocol
             return;
         }
 
-        const auto read = format_ == Format::Machine
-            ? Detail::readMachineListingLine(line, Detail::CurrentAndParent::Skip)
-            : Detail::readListLine(line, today_);
+        auto read = format_ == Format::Machine ? Detail::readMachineListingLine(line, Detail::CurrentAndParent::Skip)
+                                               : Detail::readListLine(line, today_);
         if (!read)
         {
             ++listing_.unreadableLines;
