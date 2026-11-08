@@ -432,6 +432,21 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(connection->failure());
     }
 
+    TEST_F(ControlConnectionTests, CloseBeforeConnectCancelsIt)
+    {
+        const auto connection = makeConnection();
+        connection->close();
+        const auto greeting =
+            run(connection,
+                [connection, endpoints = endpoints()]() -> asio::awaitable<ReplyResult>
+                {
+                    co_return co_await connection->connect(endpoints);
+                });
+        expectError(greeting, RemoteErrorKind::Cancelled);
+        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+        EXPECT_TRUE(server_->transcript().empty());
+    }
+
     TEST_F(ControlConnectionTests, RepliesGoToTheCommandsInOrder)
     {
         server_->addConnection(

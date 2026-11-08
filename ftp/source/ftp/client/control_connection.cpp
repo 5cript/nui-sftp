@@ -148,6 +148,8 @@ namespace FileTransferProtocol
     ControlConnection::connect(std::vector<asio::ip::tcp::endpoint> endpoints)
     {
         assert(strand_.running_in_this_thread() && "ControlConnection::connect() runs on the strand of the connection");
+        if (state_ == ControlState::Closed)
+            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The control connection was closed"));
         if (state_ != ControlState::Unconnected)
             co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The control connection was connected before"));
         if (endpoints.empty())

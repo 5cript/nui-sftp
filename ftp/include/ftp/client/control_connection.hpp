@@ -102,8 +102,8 @@ namespace FileTransferProtocol
          *        time for the rest.
          *
          * @return The 220 greeting. NoConnection when no endpoint accepted, TimedOut past the connect timeout,
-         *         Cancelled by close() or a cancelled wait, the replyError() of any other greeting. The connection is
-         *         Dead after an error, Closed after close().
+         *         Cancelled by close(), also one before connect(), or a cancelled wait, the replyError() of any other
+         *         greeting. The connection is Dead after an error, Closed after close().
          */
         boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
         connect(std::vector<boost::asio::ip::tcp::endpoint> endpoints);
