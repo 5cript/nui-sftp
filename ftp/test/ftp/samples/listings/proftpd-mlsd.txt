@@ -1,0 +1,12 @@
+modify=20261001123456;perm=adfrw;size=9;type=OS.unix=symlink;unique=70U1002C7A;UNIX.mode=0777; link-to-plain.txt
+modify=20261001123456;perm=adfrw;size=7;type=file;unique=70U1002C78;UNIX.mode=0644; name with spaces.txt
+modify=20200102030405;perm=adfrw;size=4;type=file;unique=70U1002C79;UNIX.mode=0644; old.txt
+modify=20261001123456;perm=flcdmpe;type=dir;unique=70U1002C7B;UNIX.mode=0755; subdir
+modify=20261001123456;perm=adfrw;size=6;type=OS.unix=symlink;unique=70U1002C7B;UNIX.mode=0777; link-to-subdir
+modify=20261001123456;perm=adfrw;size=6;type=file;unique=70U1002C74;UNIX.mode=0644; a -> b.txt
+modify=20261001123456;perm=adfrw;size=7;type=file;unique=70U1002C73;UNIX.mode=0644; .hidden
+modify=20261001123456;perm=flcdmpe;type=cdir;unique=70U1002C71;UNIX.mode=0755; .
+modify=20261001123456;perm=adfrw;size=8;type=file;unique=70U1002C72;UNIX.mode=0644;  leading space.txt
+modify=20261001123456;perm=adfrw;size=5;type=file;unique=70U1002C7D;UNIX.mode=0644; ünïcödé-名前.txt
+modify=20261001123456;perm=adfrw;size=11;type=file;unique=70U1002C7A;UNIX.mode=0644; plain.txt
+modify=20261027234928;perm=flcdmpe;type=pdir;unique=70U1002C6C;UNIX.mode=0700; ..

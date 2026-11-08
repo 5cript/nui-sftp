@@ -14,10 +14,7 @@ namespace FileTransferProtocol
 {
     namespace
     {
-        bool isDigit(char character)
-        {
-            return character >= '0' && character <= '9';
-        }
+        using Detail::isDigit;
 
         /**
          * @brief The unsigned number of the digits at @p position, which moves behind them.
@@ -199,9 +196,8 @@ namespace FileTransferProtocol
         if (reply.code != 213)
             return std::unexpected(replyError(reply, Verb::Size));
         const auto text = Detail::trimmedSpaces(textOfLine(reply.lines.front()));
-        std::size_t position = 0u;
-        const auto size = numberAt<std::uint64_t>(text, position);
-        if (!size || position != text.size())
+        const auto size = Detail::decimalOf<std::uint64_t>(text);
+        if (!size)
             return std::unexpected(unreadableReply(fmt::format("Not a size: '{}'", printable(text)), reply.code));
         return *size;
     }

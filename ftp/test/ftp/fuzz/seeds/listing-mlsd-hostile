@@ -1,0 +1,9 @@
+type=file;size=1; twice
+type=dir; twice
+type=cdir; /home/user
+Type=OS.unix=slink:/target;UNIX.mode=0o755;UNIX.ownername=me;unique=AbC; link
+type=file;size=18446744073709551616;modify=2015081317525; bad-facts
+type=file;type=dir; two-types
+ name-without-facts
+type=file; a/b
+type=file; ..

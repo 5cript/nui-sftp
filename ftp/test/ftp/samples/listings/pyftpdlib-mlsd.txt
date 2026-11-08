@@ -1,0 +1,10 @@
+modify=20261001123456;perm=radfwMT;size=11;type=file;unique=80g100427e;unix.mode=0o644; link-to-plain.txt
+modify=20261001123456;perm=radfwMT;size=7;type=file;unique=80g100427c;unix.mode=0o644; name with spaces.txt
+modify=20200102030405;perm=radfwMT;size=4;type=file;unique=80g100427d;unix.mode=0o644; old.txt
+modify=20261001123456;perm=eldfmMTcp;size=4096;type=dir;unique=80g100427f;unix.mode=0o755; subdir
+modify=20261001123456;perm=eldfmMTcp;size=4096;type=dir;unique=80g100427f;unix.mode=0o755; link-to-subdir
+modify=20261001123456;perm=radfwMT;size=6;type=file;unique=80g1004278;unix.mode=0o644; a -> b.txt
+modify=20261001123456;perm=radfwMT;size=7;type=file;unique=80g1004277;unix.mode=0o644; .hidden
+modify=20261001123456;perm=radfwMT;size=8;type=file;unique=80g1004276;unix.mode=0o644;  leading space.txt
+modify=20261001123456;perm=radfwMT;size=5;type=file;unique=80g1004281;unix.mode=0o644; ünïcödé-名前.txt
+modify=20261001123456;perm=radfwMT;size=11;type=file;unique=80g100427e;unix.mode=0o644; plain.txt

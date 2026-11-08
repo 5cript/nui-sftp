@@ -16,17 +16,22 @@ endif()
 
 option(NUI_SFTP_FTP_FUZZ "Let ctest fuzz each FTP fuzz target for NUI_SFTP_FTP_FUZZ_SECONDS" OFF)
 set(NUI_SFTP_FTP_FUZZ_SECONDS 30 CACHE STRING "How long ctest fuzzes each FTP fuzz target with NUI_SFTP_FTP_FUZZ")
-file(GLOB fuzzSeeds CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/seeds/*")
 
 set(fuzzSanitizers -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
 add_file_transfer_protocol_library(file-transfer-protocol-fuzz remote-io-asan)
 target_compile_options(file-transfer-protocol-fuzz PRIVATE -fsanitize=fuzzer-no-link ${fuzzSanitizers})
 
-# ctest runs every seed once through each target, with the same result each time. Fuzzing finds new inputs by chance,
-# so a retry of a failed run can pass: only NUI_SFTP_FTP_FUZZ adds it, for NUI_SFTP_FTP_FUZZ_SECONDS under the label
-# fuzz. New inputs go to a corpus in the build tree, a crashing input to test/fuzz/<target>-crash-*. A crash becomes a
-# unit test and a seed.
-function(add_ftp_fuzz_target name testName)
+# ctest runs every seed in seedDirectories once through each target, with the same result each time. Fuzzing finds new
+# inputs by chance, so a retry of a failed run can pass: only NUI_SFTP_FTP_FUZZ adds it, for NUI_SFTP_FTP_FUZZ_SECONDS
+# under the label fuzz. New inputs go to a corpus in the build tree, a crashing input to test/fuzz/<target>-crash-*. A
+# crash becomes a unit test and a seed.
+function(add_ftp_fuzz_target name testName seedDirectories)
+    set(fuzzSeeds "")
+    foreach(seedDirectory IN LISTS seedDirectories)
+        file(GLOB seeds CONFIGURE_DEPENDS "${seedDirectory}/*")
+        list(APPEND fuzzSeeds ${seeds})
+    endforeach()
+
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PRIVATE file-transfer-protocol-fuzz)
     target_compile_options(${name} PRIVATE -fsanitize=fuzzer ${fuzzSanitizers})
@@ -46,11 +51,14 @@ function(add_ftp_fuzz_target name testName)
                 -max_total_time=${NUI_SFTP_FTP_FUZZ_SECONDS}
                 -artifact_prefix=${artifactPrefix}
                 "${corpus}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/seeds"
+                ${seedDirectories}
         )
         set_tests_properties(FtpFuzz.${testName} PROPERTIES LABELS fuzz)
     endif()
 endfunction()
 
-add_ftp_fuzz_target(nui-sftp-ftp-fuzz-reply-framer ReplyFramer fuzz_reply_framer.cpp)
-add_ftp_fuzz_target(nui-sftp-ftp-fuzz-reply-parsers ReplyParsers fuzz_reply_parsers.cpp)
+set(replySeeds "${CMAKE_CURRENT_SOURCE_DIR}/seeds")
+set(listingSeeds "${CMAKE_CURRENT_SOURCE_DIR}/seeds;${CMAKE_CURRENT_SOURCE_DIR}/../samples/listings")
+add_ftp_fuzz_target(nui-sftp-ftp-fuzz-reply-framer ReplyFramer "${replySeeds}" fuzz_reply_framer.cpp)
+add_ftp_fuzz_target(nui-sftp-ftp-fuzz-reply-parsers ReplyParsers "${replySeeds}" fuzz_reply_parsers.cpp)
+add_ftp_fuzz_target(nui-sftp-ftp-fuzz-listing Listing "${listingSeeds}" fuzz_listing.cpp)

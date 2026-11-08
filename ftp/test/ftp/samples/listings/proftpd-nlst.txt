@@ -1,0 +1,9 @@
+listing/link-to-plain.txt
+listing/name with spaces.txt
+listing/old.txt
+listing/subdir
+listing/link-to-subdir
+listing/a -> b.txt
+listing/ leading space.txt
+listing/ünïcödé-名前.txt
+listing/plain.txt
