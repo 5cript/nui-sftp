@@ -201,6 +201,8 @@ namespace FileTransferProtocol::Test
             ioContext_.stop();
             if (thread_.joinable())
                 thread_.join();
+            // Timers of scripts still waiting for a release, they must go before ioContext_.
+            releaseWaiters_.clear();
         }
         Implementation(Implementation const&) = delete;
         Implementation& operator=(Implementation const&) = delete;

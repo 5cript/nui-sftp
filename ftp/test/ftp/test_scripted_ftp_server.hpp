@@ -183,6 +183,38 @@ namespace FileTransferProtocol::Test
         expectNoFailures();
     }
 
+    TEST_F(ScriptedFtpServerTests, AReleaseLetsTheScriptGoOn)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.reply("220 Ready").awaitRelease("go").reply("200 Released").expectDisconnect();
+        server_->addConnection(std::move(script));
+
+        connectClient();
+        const auto greeting = client_.readReply();
+        ASSERT_TRUE(greeting.has_value()) << greeting.error();
+        server_->release("go");
+        const auto released = client_.readReply();
+        ASSERT_TRUE(released.has_value()) << released.error();
+        EXPECT_EQ(released->code, 200);
+        client_.close();
+        expectNoFailures();
+    }
+
+    TEST_F(ScriptedFtpServerTests, AServerStoppedWhileAScriptAwaitsAReleaseEndsCleanly)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.reply("220 Ready").checkpoint("waiting").awaitRelease("never").expectDisconnect();
+        server_->addConnection(std::move(script));
+
+        connectClient();
+        ASSERT_TRUE(server_->waitForCheckpoint("waiting"));
+        // The steps run on without a suspension, so the script waits for the release once the server thread ended.
+        server_.reset();
+        client_.close();
+    }
+
     TEST_F(ScriptedFtpServerTests, RawBytesAndDribbledRepliesArriveAsSent)
     {
         ASSERT_NO_FATAL_FAILURE(startServer());
