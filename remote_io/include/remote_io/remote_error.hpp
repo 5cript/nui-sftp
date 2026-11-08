@@ -49,6 +49,8 @@ namespace RemoteIo
         Truncated,
         // The server's certificate is not trusted yet.
         TrustRequired,
+        // TLS was asked for and could not be set up, or the server demands it of a plain session.
+        NoSecureConnection,
         ProtocolViolation,
         AuthenticationFailed,
         Failure,
@@ -71,6 +73,7 @@ namespace RemoteIo
         EndOfFile,
         Truncated,
         TrustRequired,
+        NoSecureConnection,
         ProtocolViolation,
         AuthenticationFailed,
         Failure

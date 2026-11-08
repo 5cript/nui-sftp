@@ -141,11 +141,15 @@ namespace Test::FailureReason
         );
     }
 
-    TEST(FailureReasonTests, NoFreeConnectionAnUntrustedServerAndAFailedLoginAreConnectionProblems)
+    TEST(FailureReasonTests, NoFreeConnectionAnUntrustedOrInsecureServerAndAFailedLoginAreConnectionProblems)
     {
         EXPECT_EQ(failureInfoOf(remoteFailure(RemoteErrorKind::Busy)).reason, UploadFailureReason::ConnectionProblem);
         EXPECT_EQ(
             failureInfoOf(remoteFailure(RemoteErrorKind::TrustRequired)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::NoSecureConnection)).reason,
+            UploadFailureReason::ConnectionProblem
         );
         EXPECT_EQ(
             failureInfoOf(remoteFailure(RemoteErrorKind::AuthenticationFailed)).reason,
