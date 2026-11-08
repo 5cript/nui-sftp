@@ -619,6 +619,10 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(timeOf("Oct 29 10:00", today), listedAt(2026, 10, 29, 10, 0));
         EXPECT_EQ(timeOf("Oct 30 10:00", today), listedAt(2025, 10, 30, 10, 0));
         EXPECT_EQ(
+            timeOf("Jan  1 00:30", std::chrono::sys_days{std::chrono::year{2026} / 12 / 31}),
+            listedAt(2027, 1, 1, 0, 30)
+        );
+        EXPECT_EQ(
             timeOf("Dec 31 23:00", std::chrono::sys_days{std::chrono::year{2027} / 1 / 1}),
             listedAt(2026, 12, 31, 23, 0)
         );

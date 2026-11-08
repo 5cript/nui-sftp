@@ -189,21 +189,24 @@ namespace FileTransferProtocol::Detail
         }
 
         /**
-         * @brief The date of a month and day that LIST printed with a time of day: in the year of @p today, unless
-         *        that is more than a day ahead of it or does not exist, then in the year before.
+         * @brief The date of a month and day that LIST printed with a time of day: in the latest of the year after,
+         *        the year of and the year before @p today that puts it at most a day after @p today.
          */
         std::optional<std::chrono::local_days>
         recentDate(std::chrono::month month, std::chrono::day day, std::chrono::sys_days today)
         {
             using namespace std::chrono;
-            const year_month_day current{today};
-            const year_month_day candidate{current.year() / month / day};
-            if (candidate.ok() && sys_days{candidate} <= today + days{1})
-                return local_days{candidate};
-            const year_month_day earlier{(current.year() - years{1}) / month / day};
-            if (!earlier.ok())
-                return std::nullopt;
-            return local_days{earlier};
+            const auto currentYear = year_month_day{today}.year();
+            std::optional<local_days> date{};
+            auto candidateYear = currentYear + years{1};
+            while (!date && candidateYear >= currentYear - years{1})
+            {
+                const year_month_day candidate{candidateYear / month / day};
+                if (candidate.ok() && sys_days{candidate} <= today + days{1})
+                    date = local_days{candidate};
+                candidateYear -= years{1};
+            }
+            return date;
         }
 
         /**

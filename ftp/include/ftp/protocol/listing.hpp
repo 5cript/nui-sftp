@@ -125,8 +125,8 @@ namespace FileTransferProtocol
          * @brief Reads LIST in the format of Unix "ls -l" and in the DOS format of IIS, line by line.
          *
          * - Unix: the name starts one space after the time or year, so leading spaces belong to it. A symlink is
-         *   split at its first " -> ". An entry with a time of day but no year lies in the year that puts it at most
-         *   a day after @p today, where the day absorbs the time zone of the server.
+         *   split at its first " -> ". An entry with a time of day but no year lies in the latest year that puts it at
+         *   most a day after @p today, where the day absorbs the time zone of the server.
          * - DOS: the spaces before the name are left out.
          *
          * @param today The current date of the client, UTC.
