@@ -278,6 +278,8 @@ namespace FileTransferProtocol
         std::deque<std::shared_ptr<PendingCommand>> awaiting_{};
         std::optional<AbortDrain> drain_{};
         bool writing_{false};
+        /** @brief A read is under way. */
+        bool reading_{false};
         /** @brief TLS starts, implicitly or through startTls(), no command may be sent. */
         bool upgrading_{false};
         /** @brief AUTH TLS was accepted, the bytes behind its reply belong to the handshake. */

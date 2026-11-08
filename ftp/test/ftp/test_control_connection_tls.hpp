@@ -248,14 +248,34 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"NOOP"}));
     }
 
-    TEST_F(ControlConnectionTlsTests, ReplyBehindTheAuthReplyEndsTheConnection)
+    struct InjectedCase
     {
-        // The 200 could have been injected into the plaintext before the handshake.
+        std::string_view name{};
+        std::string bytes{};
+    };
+
+    void PrintTo(InjectedCase const& injected, std::ostream* stream)
+    {
+        *stream << injected.name;
+    }
+
+    /**
+     * @brief Bytes behind the 234 in the same read could have been injected into the plaintext before the handshake.
+     *        The server would go on with TLS, so a connection that takes them in silently gets secured.
+     */
+    class ControlConnectionInjectedTests
+        : public ControlConnectionTlsTests
+        , public ::testing::WithParamInterface<InjectedCase>
+    {};
+
+    TEST_P(ControlConnectionInjectedTests, BytesBehindTheAuthReplyEndTheConnection)
+    {
         server_->addConnection(
             Script{}
                 .reply("220 Ready")
                 .expect("AUTH", "TLS")
-                .replyRaw("234 Proceed\r\n200 Injected\r\n")
+                .replyRaw("234 Proceed\r\n" + GetParam().bytes)
+                .startTls()
                 .expectDisconnect()
         );
         const auto connection = makeConnection();
@@ -267,17 +287,41 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
     }
 
-    TEST_F(ControlConnectionTlsTests, PartOfALineBehindTheAuthReplyEndsTheConnection)
+    INSTANTIATE_TEST_SUITE_P(
+        Injected,
+        ControlConnectionInjectedTests,
+        ::testing::Values(
+            InjectedCase{.name = "Reply", .bytes = "200 Injected\r\n"},
+            InjectedCase{.name = "PartOfALine", .bytes = "2"},
+            InjectedCase{.name = "PreliminaryReply", .bytes = "150 Injected\r\n"},
+            InjectedCase{.name = "BlankLine", .bytes = "\r\n"},
+            InjectedCase{.name = "TelnetNegotiation", .bytes = "\xff\xfb\x01"}
+        ),
+        [](::testing::TestParamInfo<InjectedCase> const& info)
+        {
+            return std::string{info.param.name};
+        }
+    );
+
+    TEST_F(ControlConnectionTlsTests, AuthReplyEndedByTheSettleTimeEndsTheConnection)
     {
+        // The closing line has another code, the reply ends only after a quiet time while the next read is under way.
         server_->addConnection(
-            Script{}.reply("220 Ready").expect("AUTH", "TLS").replyRaw("234 Proceed\r\n2").expectDisconnect()
+            Script{}
+                .reply("220 Ready")
+                .expect("AUTH", "TLS")
+                .replyRaw("200-Hello\r\n234 Proceed\r\n")
+                .startTls()
+                .expectDisconnect()
         );
         const auto connection = makeConnection();
         connect(connection);
         const auto trusted = startTls(connection, settings());
         ASSERT_FALSE(trusted);
         EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
-        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
+        // Without the check the read under way takes the ServerHello and the connection ends on a garbled reply.
+        EXPECT_NE(trusted.error().message.find("quiet time"), std::string::npos) << trusted.error().toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
     TEST_F(ControlConnectionTlsTests, PlaintextBeforeTheHandshakeEndsTheConnection)

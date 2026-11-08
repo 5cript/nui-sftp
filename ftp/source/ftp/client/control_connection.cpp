@@ -110,6 +110,14 @@ namespace FileTransferProtocol
             return code == 234 || code == 334;
         }
 
+        RemoteIo::RemoteError injectedBytes()
+        {
+            return errorOf(
+                RemoteErrorKind::NoSecureConnection,
+                "The server sent bytes behind its reply to AUTH TLS, they could be injected"
+            );
+        }
+
         RemoteIo::RemoteError refusedAuthentication(Reply const& reply)
         {
             auto error = replyError(reply, Verb::Authenticate);
@@ -384,9 +392,7 @@ namespace FileTransferProtocol
                 endTls(failure_.value_or(errorOf(RemoteErrorKind::Cancelled, "The control connection was closed")))
             );
         if (framer_.inReply() || framer_.holdsPossibleEnd())
-            co_return std::unexpected(endTls(protocolViolation(
-                "The server sent bytes behind its reply to AUTH TLS, they could be injected", reply->code
-            )));
+            co_return std::unexpected(endTls(injectedBytes()));
 
         auto trusted = co_await handshake(std::move(*handle), Clock::now() + options_.commandTimeout);
         if (!trusted)
@@ -581,6 +587,7 @@ namespace FileTransferProtocol
 
     void ControlConnection::readNext()
     {
+        reading_ = true;
         transport_->readSome(
             asio::buffer(*readBuffer_),
             [weak = weak_from_this(),
@@ -590,6 +597,7 @@ namespace FileTransferProtocol
                 const auto self = weak.lock();
                 if (!self)
                     return;
+                self->reading_ = false;
                 self->takeRead(error, std::string_view{buffer->data(), received});
             }
         );
@@ -607,14 +615,24 @@ namespace FileTransferProtocol
 
     void ControlConnection::takeBytes(std::string_view bytes)
     {
-        const auto fed = framer_.feed(bytes);
-        deliverFramedReplies();
-        if (!isLive())
-            return;
-        if (!fed)
+        // While TLS starts the bytes go in one at a time, any behind the reply to AUTH could have been injected.
+        const auto piece = upgrading_ ? std::size_t{1u} : bytes.size();
+        for (std::size_t offset = 0u; offset < bytes.size(); offset += piece)
         {
-            die(fed.error());
-            return;
+            if (readerPaused_)
+            {
+                die(injectedBytes());
+                return;
+            }
+            const auto fed = framer_.feed(bytes.substr(offset, piece));
+            deliverFramedReplies();
+            if (!isLive())
+                return;
+            if (!fed)
+            {
+                die(fed.error());
+                return;
+            }
         }
         if (framer_.holdsPossibleEnd())
             armSettle();
@@ -634,6 +652,12 @@ namespace FileTransferProtocol
 
     void ControlConnection::dispatch(Reply reply)
     {
+        // Nothing may follow the reply to AUTH in plaintext.
+        if (readerPaused_)
+        {
+            die(injectedBytes());
+            return;
+        }
         const auto code = reply.code;
         const auto preliminary = isPreliminary(code);
         // Only the greeting and transfers get 1yz replies (RFC 959 5.4). Some servers send a 150 after a transfer
@@ -671,6 +695,16 @@ namespace FileTransferProtocol
             return;
         }
         const auto verb = pending->verb();
+        const auto startsTls = verb == Verb::Authenticate && upgrading_ && acceptsAuthentication(code);
+        // Ended by the settle time, the read under way would take the first bytes of the handshake.
+        if (startsTls && reading_)
+        {
+            die(errorOf(
+                RemoteErrorKind::NoSecureConnection,
+                "The reply to AUTH TLS ended only after a quiet time, a read was under way"
+            ));
+            return;
+        }
         if (preliminary)
             pending->deadline_ = deadlineAfterPreliminary(*pending);
         else
@@ -680,7 +714,7 @@ namespace FileTransferProtocol
         auto closing = code == 421 ? std::optional{replyError(reply, verb)} : std::nullopt;
         const auto quitAnswered = verb == Verb::Quit && classifyReply(code) == ReplyClass::PositiveCompletion;
         // What follows belongs to the handshake, startTls() takes it from the socket.
-        if (verb == Verb::Authenticate && upgrading_ && acceptsAuthentication(code))
+        if (startsTls)
             readerPaused_ = true;
         pending->take(std::move(reply));
         if (closing)
