@@ -915,8 +915,14 @@ namespace FileTransferProtocol::Test
             asio::awaitable<bool> perform(Script::StartTls const& step)
             {
                 closeNotify_ = !step.behaviour.closeWithoutCloseNotify;
-                co_await secure(server_, connection_, transport_, step.behaviour, "control");
-                co_return true;
+                const auto outcome = co_await secure(server_, connection_, transport_, step.behaviour, "control");
+                if (outcome != TlsOutcome::Failed)
+                    co_return true;
+                // A stream whose handshake failed reads nothing more, the script ends with the connection.
+                closed_ = true;
+                server_.record(connection_, Kind::Disconnected, "the TLS handshake failed");
+                co_await transport_.close(false);
+                co_return false;
             }
 
             asio::awaitable<bool> perform(Script::Checkpoint const& step)
