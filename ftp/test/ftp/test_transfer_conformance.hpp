@@ -100,6 +100,7 @@ namespace FileTransferProtocol::Test
                 .control = connection_,
                 .passiveChoice = std::make_shared<PassiveChoice>(),
                 .tls = loginOptions.tls,
+                .restartStream = result->features.has("REST", "STREAM"),
             };
         }
 
@@ -179,6 +180,62 @@ namespace FileTransferProtocol::Test
             {.path = pathOf("chunk.bin"), .offset = 1000u, .expectedSize = whole.size()},
             std::string_view{whole}.substr(1000u)
         ));
+    }
+
+    TEST_P(TransferConformance, PausedDownloadContinuesWithRest)
+    {
+        ASSERT_TRUE(session_.restartStream) << "the server does not list REST STREAM";
+        const auto whole = fixtureContent(10485760u);
+        auto options = transferOptions();
+        options.pauseDropAfter = 300ms;
+        auto started = onStrand(
+            connection_,
+            [session = session_, path = pathOf("large.bin"), size = whole.size(), options]()
+                -> boost::asio::awaitable<std::expected<std::shared_ptr<Download>, RemoteIo::RemoteError>>
+            {
+                co_return co_await Download::start(session, {.path = path, .expectedSize = size}, options);
+            }
+        );
+        ASSERT_TRUE(started) << started.error().toString();
+        auto const download = std::move(started).value();
+        const auto read = [this, &download](std::size_t size)
+        {
+            return onStrand(
+                connection_,
+                [download, size]() -> boost::asio::awaitable<DownloadResult>
+                {
+                    co_return co_await readPart(download, size);
+                }
+            );
+        };
+        const auto first = read(64u * 1024u);
+        ASSERT_TRUE(first) << first.error().toString();
+        // Nobody reads now. A command is written only once the transfer ended, so the reply to this one shows that
+        // the drop aborted the RETR. It is through before the next read sends the commands that continue.
+        const auto noop = onStrand(
+            connection_,
+            [connection = connection_]() -> boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
+            {
+                co_return co_await connection->execute(Command{.verb = Verb::Noop});
+            }
+        );
+        ASSERT_TRUE(noop) << noop.error().toString();
+        EXPECT_EQ(noop->code, 200);
+        const auto rest = read(whole.size());
+        ASSERT_TRUE(rest) << rest.error().toString();
+        EXPECT_EQ(first->content.size() + rest->content.size(), whole.size());
+        EXPECT_TRUE(first->content + rest->content == whole);
+        const auto finished = onStrand(
+            connection_,
+            [download]() -> boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>>
+            {
+                co_return co_await download->finish();
+            }
+        );
+        ASSERT_TRUE(finished) << finished.error().toString();
+        EXPECT_EQ(finished->bytes, whole.size());
+        ASSERT_TRUE(finished->finalReply);
+        EXPECT_EQ(finished->finalReply->code / 100, 2);
     }
 
     TEST_P(TransferConformance, UploadsReadBackTheSame)

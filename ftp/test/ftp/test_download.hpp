@@ -56,6 +56,25 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief Reads until @p size bytes came or the data ended.
+         */
+        asio::awaitable<DownloadResult> readPart(std::shared_ptr<Download> download, std::size_t size)
+        {
+            DownloadOutcome outcome{};
+            std::array<char, 16u * 1024u> buffer{};
+            std::expected<std::size_t, RemoteIo::RemoteError> read = std::size_t{1u};
+            while (read && *read > 0u && outcome.content.size() < size)
+            {
+                read = co_await download->readSome(asio::buffer(buffer));
+                if (read)
+                    outcome.content.append(buffer.data(), *read);
+            }
+            if (!read)
+                co_return std::unexpected(read.error());
+            co_return outcome;
+        }
+
+        /**
          * @brief EPSV with @p plan behind it, then RETR @p path answered by @p preliminary.
          */
         Script& retrieveWith(Script& script, DataPlan plan, std::string_view preliminary, std::string path = "file")
@@ -144,18 +163,7 @@ namespace FileTransferProtocol::Test
                 connection,
                 [download, size]() -> asio::awaitable<DownloadResult>
                 {
-                    DownloadOutcome outcome{};
-                    std::array<char, 16> buffer{};
-                    std::expected<std::size_t, RemoteIo::RemoteError> read = std::size_t{1u};
-                    while (read && *read > 0u && outcome.content.size() < size)
-                    {
-                        read = co_await download->readSome(asio::buffer(buffer));
-                        if (read)
-                            outcome.content.append(buffer.data(), *read);
-                    }
-                    if (!read)
-                        co_return std::unexpected(read.error());
-                    co_return outcome;
+                    co_return co_await readPart(download, size);
                 }
             );
         }
