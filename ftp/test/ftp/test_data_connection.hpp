@@ -309,6 +309,8 @@ namespace FileTransferProtocol::Test
                 .reply("220 Ready")
                 .expect("EPSV")
                 .passive(DataPlan{}.send("ab").reset())
+                // A reset before the client saw its connect complete would fail the connect instead.
+                .awaitRelease("connected")
                 .beginData()
                 .awaitData()
                 .expectDisconnect()
@@ -317,6 +319,7 @@ namespace FileTransferProtocol::Test
         connect(connection);
         const auto data = openData(connection);
         ASSERT_TRUE(data) << data.error().toString();
+        server_->release("connected");
         const auto content = readAll(connection, *data);
         ASSERT_FALSE(content);
         EXPECT_EQ(content.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << content.error().toString();
