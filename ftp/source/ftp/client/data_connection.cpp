@@ -252,12 +252,8 @@ namespace FileTransferProtocol
             // The server's close_notify came, the shutdown only sends ours.
             SSL_set_shutdown(tls_->native_handle(), SSL_RECEIVED_SHUTDOWN);
             co_await tls_->async_shutdown(asio::cancel_after(options_.closeNotifyTimeout, useTuple));
-            if (isCancelled(co_await asio::this_coro::cancellation_state))
-            {
-                close();
-                co_return;
-            }
         }
+        // Nothing is awaited behind the shutdown, so a cancel that came with it needs no way out of its own.
         close();
     }
 
