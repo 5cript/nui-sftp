@@ -75,6 +75,14 @@ namespace FileTransferProtocol
     std::expected<std::uint16_t, RemoteIo::RemoteError> parseExtendedPassiveReply(Reply const& reply);
 
     /**
+     * @brief The size a 150 or 125 reply to RETR announces, "(16384 bytes)" as vsftpd and proftpd send it. Servers
+     *        name the whole file or what is left after REST, so it only counts for a transfer from the start.
+     *
+     * @return Nothing when the reply names no size.
+     */
+    std::optional<std::uint64_t> parseAnnouncedSize(Reply const& reply);
+
+    /**
      * @brief The quoted path of a 257 reply to PWD or MKD, doubled quotes undoubled (RFC 959 Appendix II) and CR NUL
      *        read as CR (RFC 2640 3.1).
      *
