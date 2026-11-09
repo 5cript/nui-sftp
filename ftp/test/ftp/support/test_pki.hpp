@@ -33,6 +33,10 @@ namespace FileTransferProtocol::Test
         CertifiedKey expired{};
         /** @brief Signed by the test authority for another name. */
         CertifiedKey wrongName{};
+        /** @brief Signed by the test authority for f*.nui-sftp.test, a partial wildcard. */
+        CertifiedKey partialWildcard{};
+        /** @brief Signed by the test authority for *.nui-sftp.test. */
+        CertifiedKey wildcard{};
         /** @brief Signed by an authority no client trusts. */
         CertifiedKey otherAuthority{};
     };

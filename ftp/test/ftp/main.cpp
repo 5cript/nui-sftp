@@ -1,8 +1,11 @@
 #include <utility/process_temporary_directory.hpp>
 #include "test_command.hpp"
 #include "test_control_connection.hpp"
+#include "test_control_connection_tls.hpp"
 #include "test_features.hpp"
 #include "test_listing.hpp"
+#include "test_login.hpp"
+#include "test_login_conformance.hpp"
 #include "test_printable.hpp"
 #include "test_reply_code.hpp"
 #include "test_reply_error.hpp"
@@ -12,6 +15,7 @@
 #include "test_server_profiles.hpp"
 #include "test_server_smoke.hpp"
 #include "test_socket_options.hpp"
+#include "test_tls.hpp"
 
 #include <gtest/gtest.h>
 

@@ -32,6 +32,8 @@ namespace FileTransferProtocol::Test
         std::optional<CertifiedKey> certificate{};
         /** @brief Ends the connection without close_notify. */
         bool closeWithoutCloseNotify{false};
+        /** @brief The newest version the server speaks, TLS1_2_VERSION for one before TLS 1.3. */
+        std::optional<int> maximumVersion{};
     };
 
     /**
@@ -178,6 +180,8 @@ namespace FileTransferProtocol::Test
         {
             TlsBehaviour behaviour{};
         };
+        struct RenegotiateTls
+        {};
         struct Checkpoint
         {
             std::string name{};
@@ -206,6 +210,7 @@ namespace FileTransferProtocol::Test
             Stall,
             ExpectDisconnect,
             StartTls,
+            RenegotiateTls,
             Checkpoint,
             AwaitRelease,
             Passive,
@@ -234,6 +239,11 @@ namespace FileTransferProtocol::Test
         /** @brief Waits for the client to end the connection, a command fails the script. */
         Script& expectDisconnect();
         Script& startTls(TlsBehaviour behaviour = {});
+        /**
+         * @brief Asks the client for a new handshake on the control connection, TLS 1.2 only. The next step that reads
+         *        takes the handshake in, the transcript then says "control renegotiated".
+         */
+        Script& renegotiateTls();
         /** @brief A sync point, see ScriptedFtpServer::waitForCheckpoint(). */
         Script& checkpoint(std::string name);
         /** @brief Waits until the test calls ScriptedFtpServer::release(@p name), the other way round of a checkpoint.

@@ -2,6 +2,7 @@
 
 #include <ftp/client/pending_command.hpp>
 #include <ftp/client/socket_options.hpp>
+#include <ftp/client/tls.hpp>
 #include <ftp/protocol/command.hpp>
 #include <ftp/protocol/reply.hpp>
 #include <remote_io/remote_error.hpp>
@@ -36,6 +37,8 @@ namespace FileTransferProtocol
         /** @brief Quiet time after which a line with another code ends a multi-line reply, see ReplyFramer::settle().
          */
         std::chrono::milliseconds settleTime{200};
+        /** @brief How long a close over TLS may take to send close_notify, the server's is not awaited. */
+        std::chrono::milliseconds closeNotifyTimeout{2'000};
         ControlSocketOptions socket{};
         ReplyLimits replyLimits{};
     };
@@ -65,10 +68,15 @@ namespace FileTransferProtocol
      * with one, or with none; the final replies before the 257 of PWD go to the transfer and ABOR: the first to the
      * transfer, the last to ABOR, a single one to both.
      *
+     * TLS starts before the greeting (implicit) or after a 234 to AUTH TLS (explicit, RFC 4217), and stays to the end:
+     * a close sends close_notify, CCC is never sent. The certificate is checked during the handshake, so no command
+     * goes out before the decision: trusted authorities first, then the pin. A connection that was to get TLS either
+     * gets it or ends, it never goes on in plaintext.
+     *
      * Everything but close() runs on strand(), and all of it stays there: the reader, the timers, the waits. Its
-     * operations hold the connection weakly and own only their buffers and commands: the owner decides how long it
-     * lives, dropping the last shared_ptr closes it, and waiting commands fail as Cancelled. A caller of connect()
-     * keeps the connection while it waits.
+     * operations hold the connection weakly and own only their buffers, commands and the socket with its TLS stream:
+     * the owner decides how long it lives, dropping the last shared_ptr closes it, and waiting commands fail as
+     * Cancelled. A caller of connect() or startTls() keeps the connection while it waits.
      */
     class ControlConnection : public std::enable_shared_from_this<ControlConnection>
     {
@@ -101,18 +109,37 @@ namespace FileTransferProtocol
          *        waits for the greeting. Each endpoint gets its share of the time left, one that never answers leaves
          *        time for the rest.
          *
+         * @param implicitTls Makes the TLS handshake before the greeting, within the connect timeout.
          * @return The 220 greeting. NoConnection when no endpoint accepted, TimedOut past the connect timeout,
          *         Cancelled by close(), also one before connect(), or a cancelled wait, the replyError() of any other
-         *         greeting. The connection is Dead after an error, Closed after close().
+         *         greeting. With implicitTls TrustRequired for a certificate to ask about and NoSecureConnection for
+         *         any other failure of the handshake. The connection is Dead after an error, Closed after close().
          */
-        boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
-        connect(std::vector<boost::asio::ip::tcp::endpoint> endpoints);
+        boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> connect(
+            std::vector<boost::asio::ip::tcp::endpoint> endpoints,
+            std::optional<TlsConnectionSettings> implicitTls = std::nullopt
+        );
+
+        /**
+         * @brief Sends AUTH TLS on the idle plain connection and makes the handshake after a 234, or a 334 as curl
+         *        accepts it. Nothing may follow that reply in plaintext: such bytes could have been injected before
+         *        the handshake. The handshake has the command timeout. Every failure ends the connection, it never
+         *        goes on in plaintext.
+         *
+         * @return Who vouched for the certificate. TrustRequired for a certificate to ask about, Cancelled after a
+         *         cancel or close(), NoSecureConnection with the reason for any other failure, a refused AUTH and bytes
+         *         behind its reply included. Only a Failure for a connection that has or starts TLS already leaves it
+         *         as it is.
+         */
+        boost::asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
+        startTls(TlsConnectionSettings settings);
 
         /**
          * @brief Queues @p command, it is written as soon as the commands before it allow.
          *
          * @return The command, whose replies the caller takes. InvalidPath for an argument that cannot be sent, the
-         *         connection stays usable. The error of the connection when it is not open.
+         *         connection stays usable. The error of the connection when it is not open. A Failure for AUTH, which
+         *         goes through startTls(), and for any command while TLS starts.
          */
         std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> send(Command command);
 
@@ -162,7 +189,25 @@ namespace FileTransferProtocol
          */
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
+        /**
+         * @brief The certificate of the handshake and who vouched for it, nothing without TLS.
+         */
+        std::optional<TrustedCertificate> const& trustedCertificate() const;
+
+        /**
+         * @brief The certificate a failed handshake refused, what a trust prompt shows.
+         */
+        std::optional<CertificateInfo> const& untrustedCertificate() const;
+
+        /**
+         * @brief A copy of the TLS session for one data connection to resume, see resumableSession(). Nothing without
+         *        TLS and while no resumable session arrived.
+         */
+        std::optional<SslSessionHandle> sessionForData();
+
       private:
+        class Transport;
+
         /**
          * @brief ABOR written into a transfer with its marker behind it, and the final replies that came before the
          *        marker's.
@@ -179,6 +224,18 @@ namespace FileTransferProtocol
             std::vector<boost::asio::ip::tcp::endpoint> const& endpoints,
             std::chrono::steady_clock::time_point deadline
         );
+        /**
+         * @brief The handshake of @p handle on the connected socket, the connection is Dead when it fails.
+         */
+        boost::asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
+        handshake(SslHandle handle, std::chrono::steady_clock::time_point deadline);
+        /**
+         * @brief Ends the connection after a failed start of TLS.
+         *
+         * @return What startTls() reports: Cancelled after close(), else asNoSecureConnection() of @p error.
+         */
+        RemoteIo::RemoteError endTls(RemoteIo::RemoteError error);
+        std::expected<std::shared_ptr<PendingCommand>, RemoteIo::RemoteError> enqueue(Command command);
         void readNext();
         void takeRead(boost::system::error_code error, std::string_view bytes);
         void takeBytes(std::string_view bytes);
@@ -205,7 +262,8 @@ namespace FileTransferProtocol
 
         ControlConnectionOptions options_;
         boost::asio::strand<boost::asio::any_io_executor> strand_;
-        boost::asio::ip::tcp::socket socket_;
+        /** @brief Shared with the operations in flight, an ssl::stream must outlive them. */
+        std::shared_ptr<Transport> transport_;
         boost::asio::ip::tcp::endpoint remote_{};
         ReplyFramer framer_;
         boost::asio::steady_timer deadlineTimer_;
@@ -220,6 +278,14 @@ namespace FileTransferProtocol
         std::deque<std::shared_ptr<PendingCommand>> awaiting_{};
         std::optional<AbortDrain> drain_{};
         bool writing_{false};
+        /** @brief A read is under way. */
+        bool reading_{false};
+        /** @brief TLS starts, implicitly or through startTls(), no command may be sent. */
+        bool upgrading_{false};
+        /** @brief AUTH TLS was accepted, the bytes behind its reply belong to the handshake. */
+        bool readerPaused_{false};
+        std::optional<TrustedCertificate> trustedCertificate_{};
+        std::optional<CertificateInfo> untrustedCertificate_{};
         ControlState state_{ControlState::Unconnected};
         std::optional<RemoteIo::RemoteError> failure_{};
         EndHandler endHandler_{};

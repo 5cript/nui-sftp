@@ -58,6 +58,40 @@ namespace FileTransferProtocol::Test
         );
     }
 
+    TEST(ReplyErrorTests, LoginRefusedForWantOfTlsIsNoSecureConnection)
+    {
+        EXPECT_EQ(
+            kindOf(530, "Non-anonymous sessions must use encryption.", Verb::User), RemoteErrorKind::NoSecureConnection
+        );
+        EXPECT_EQ(
+            kindOf(550, "SSL/TLS required on the control channel", Verb::Password), RemoteErrorKind::NoSecureConnection
+        );
+        EXPECT_EQ(
+            kindOf(
+                421,
+                "Sorry, cleartext sessions and weak ciphers are not accepted on this server.\n"
+                "Please reconnect using TLS security mechanisms.",
+                Verb::User
+            ),
+            RemoteErrorKind::NoSecureConnection
+        );
+        EXPECT_EQ(
+            kindOf(530, "This server does not allow plain FTP. You have to use FTP over TLS.", Verb::User),
+            RemoteErrorKind::NoSecureConnection
+        );
+        EXPECT_EQ(kindOf(534, "Policy requires SSL.", Verb::Account), RemoteErrorKind::NoSecureConnection);
+    }
+
+    TEST(ReplyErrorTests, OtherRefusalsThatNameTlsKeepTheirKind)
+    {
+        // vsftpd refuses anonymous logins over TLS, the session has TLS.
+        EXPECT_EQ(
+            kindOf(530, "Anonymous sessions may not use encryption.", Verb::User), RemoteErrorKind::AuthenticationFailed
+        );
+        EXPECT_EQ(kindOf(530, "User tls-backup cannot log in.", Verb::Password), RemoteErrorKind::AuthenticationFailed);
+        EXPECT_EQ(kindOf(550, "SSL/TLS required on the data channel", Verb::Retrieve), RemoteErrorKind::Failure);
+    }
+
     TEST(ReplyErrorTests, CodesOfOtherServers)
     {
         EXPECT_EQ(kindOf(430, "Invalid username or password", Verb::Password), RemoteErrorKind::AuthenticationFailed);

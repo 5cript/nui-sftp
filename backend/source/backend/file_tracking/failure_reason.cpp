@@ -72,6 +72,7 @@ namespace FileTracking
                 case RemoteErrorKind::Busy:
                 case RemoteErrorKind::TimedOut:
                 case RemoteErrorKind::TrustRequired:
+                case RemoteErrorKind::NoSecureConnection:
                 case RemoteErrorKind::AuthenticationFailed:
                     return UploadFailureReason::ConnectionProblem;
                 case RemoteErrorKind::NoSuchFile:

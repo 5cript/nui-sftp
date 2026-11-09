@@ -173,6 +173,12 @@ namespace FileTransferProtocol::Test
         steps.emplace_back(ExpectDisconnect{});
         return *this;
     }
+    Script& Script::renegotiateTls()
+    {
+        steps.emplace_back(RenegotiateTls{});
+        return *this;
+    }
+
     Script& Script::startTls(TlsBehaviour behaviour)
     {
         steps.emplace_back(StartTls{.behaviour = std::move(behaviour)});
