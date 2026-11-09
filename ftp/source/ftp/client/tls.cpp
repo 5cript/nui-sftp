@@ -1,5 +1,6 @@
 #include <ftp/client/tls.hpp>
 #include <ftp/protocol/protocol_error.hpp>
+#include "client_support.hpp"
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -25,6 +26,7 @@ namespace FileTransferProtocol
 {
     namespace
     {
+        using Detail::errorOf;
         using RemoteIo::RemoteErrorKind;
 
         template <auto release>
@@ -42,15 +44,6 @@ namespace FileTransferProtocol
         using GeneralNames = std::unique_ptr<GENERAL_NAMES, Release<GENERAL_NAMES_free>>;
 
         constexpr std::array<unsigned char, 4> applicationProtocols{3u, 'f', 't', 'p'};
-
-        RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
-        {
-            return RemoteIo::RemoteError{
-                .kind = kind,
-                .protocol = RemoteIo::Protocol::Ftp,
-                .message = std::move(message),
-            };
-        }
 
         /**
          * @brief The oldest error OpenSSL queued, the queue is empty afterwards.
