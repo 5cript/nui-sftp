@@ -26,17 +26,21 @@ namespace FileTransferProtocol
         using RemoteIo::RemoteErrorKind;
         using Detail::errorOf;
         using Detail::isCancelled;
+        using Detail::refused;
+        using Detail::succeeded;
         using Detail::useTuple;
 
-        bool succeeded(Reply const& reply)
+        RemoteIo::RemoteError cancelled()
         {
-            return classifyReply(reply.code) == ReplyClass::PositiveCompletion;
+            return errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled");
         }
 
-        bool refused(Reply const& reply)
+        /**
+         * @brief What a transfer answers once it was aborted.
+         */
+        RemoteIo::RemoteError aborted()
         {
-            const auto replyClass = classifyReply(reply.code);
-            return replyClass == ReplyClass::TransientNegative || replyClass == ReplyClass::PermanentNegative;
+            return errorOf(RemoteErrorKind::Cancelled, "The transfer was aborted");
         }
 
         /**
@@ -126,7 +130,7 @@ namespace FileTransferProtocol
             control.limitFinalReply(command, timeout);
             auto reply = co_await command.finalReply();
             if (isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
+                co_return std::unexpected(cancelled());
             co_return reply;
         }
 
@@ -171,7 +175,7 @@ namespace FileTransferProtocol
                     // The server may have taken the restart, the next transfer must not start there.
                     if (const auto cleared = control->send(Command{.verb = Verb::Restart, .argument = "0"}); !cleared)
                         Log::debug("FTP: REST 0 could not be sent after a cancelled restart");
-                    co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
+                    co_return std::unexpected(cancelled());
                 }
                 if (!restart || restart->code != 350)
                 {
@@ -210,7 +214,7 @@ namespace FileTransferProtocol
             {
                 data->reset();
                 abortTransfer(*control, **command, "a cancelled transfer");
-                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
+                co_return std::unexpected(cancelled());
             }
 
             if (!first)
@@ -271,7 +275,7 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>> Download::readSome(asio::mutable_buffer buffer)
     {
         if (aborted_)
-            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was aborted"));
+            co_return std::unexpected(aborted());
         if (dataEnded_)
             co_return std::size_t{0u};
         reading_ = true;
@@ -309,7 +313,7 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> Download::finish()
     {
         if (aborted_)
-            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was aborted"));
+            co_return std::unexpected(aborted());
         if (!dataEnded_)
             co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The download's data did not end yet"));
 
@@ -358,7 +362,7 @@ namespace FileTransferProtocol
         // Fewer or more bytes than expected, or TLS that ended without close_notify: the server's size decides now.
         const auto reply = co_await session_.control->execute(Command{.verb = Verb::Size, .argument = request_.path});
         if (isCancelled(co_await asio::this_coro::cancellation_state))
-            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was cancelled"));
+            co_return std::unexpected(cancelled());
         const auto size = reply.and_then(
             [](Reply const& sizeReply)
             {
@@ -505,7 +509,7 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> Upload::write(asio::const_buffer buffer)
     {
         if (aborted_)
-            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was aborted"));
+            co_return std::unexpected(aborted());
         const auto written = co_await data_->writeAll(buffer);
         if (!written)
         {
@@ -525,7 +529,7 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> Upload::finish()
     {
         if (aborted_)
-            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was aborted"));
+            co_return std::unexpected(aborted());
         const auto ended = co_await data_->finishUpload();
         if (!ended)
         {

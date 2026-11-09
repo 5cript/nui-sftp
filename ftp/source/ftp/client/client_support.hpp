@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ftp/protocol/reply.hpp>
+#include <ftp/protocol/reply_code.hpp>
 #include <remote_io/remote_error.hpp>
 
 #include <boost/asio/as_tuple.hpp>
@@ -25,5 +27,22 @@ namespace FileTransferProtocol::Detail
     inline bool isCancelled(boost::asio::cancellation_state const& state)
     {
         return state.cancelled() != boost::asio::cancellation_type::none;
+    }
+
+    /**
+     * @brief A 2yz reply.
+     */
+    inline bool succeeded(Reply const& reply)
+    {
+        return classifyReply(reply.code) == ReplyClass::PositiveCompletion;
+    }
+
+    /**
+     * @brief A 4yz or 5yz reply.
+     */
+    inline bool refused(Reply const& reply)
+    {
+        const auto replyClass = classifyReply(reply.code);
+        return replyClass == ReplyClass::TransientNegative || replyClass == ReplyClass::PermanentNegative;
     }
 }
