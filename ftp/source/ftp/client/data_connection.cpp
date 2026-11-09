@@ -1,15 +1,14 @@
 #include <ftp/client/data_connection.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 #include <log/log.hpp>
+#include "client_support.hpp"
 
-#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/write.hpp>
 #include <fmt/format.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
@@ -25,26 +24,13 @@ namespace FileTransferProtocol
     {
         namespace asio = boost::asio;
         using RemoteIo::RemoteErrorKind;
-
-        constexpr auto useTuple = asio::as_tuple(asio::use_awaitable);
-
-        RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
-        {
-            return RemoteIo::RemoteError{
-                .kind = kind,
-                .protocol = RemoteIo::Protocol::Ftp,
-                .message = std::move(message),
-            };
-        }
+        using Detail::errorOf;
+        using Detail::isCancelled;
+        using Detail::useTuple;
 
         RemoteIo::RemoteError cancelled()
         {
             return errorOf(RemoteErrorKind::Cancelled, "The data connection was closed");
-        }
-
-        bool isCancelled(asio::cancellation_state const& state)
-        {
-            return state.cancelled() != asio::cancellation_type::none;
         }
 
         std::optional<Sha256Digest> certificateDigestOf(SSL* handle)
@@ -119,7 +105,7 @@ namespace FileTransferProtocol
         auto data = std::make_shared<DataConnection>(Private{}, control->strand(), options);
 
         const bool extendedFailedBefore = choice && choice->extendedPassiveFailed();
-        if (mode == ExtendedPassive::Always || ipv6 || (mode == ExtendedPassive::Automatic && !extendedFailedBefore))
+        if (mode == ExtendedPassive::Always || (mode == ExtendedPassive::Automatic && (ipv6 || !extendedFailedBefore)))
         {
             auto extended = co_await data->openExtended(*control, peer.address());
             if (extended)
@@ -229,6 +215,7 @@ namespace FileTransferProtocol
                 RemoteErrorKind::NoSecureConnection,
                 "The data connection presented another certificate than the control connection"
             ));
+        secured_ = true;
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
@@ -258,13 +245,18 @@ namespace FileTransferProtocol
     {
         if (closed_)
             co_return std::unexpected(cancelled());
-        const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
-        const auto [error, size] = tls_ ? co_await asio::async_write(*tls_, buffer, token)
-                                        : co_await asio::async_write(socket_, buffer, token);
-        if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
-            co_return std::unexpected(cancelled());
-        if (error)
-            co_return std::unexpected(transferError(error, error == asio::error::operation_aborted, "Writing"));
+        // The inactivity timeout limits each piece, a slow link may take longer for the whole buffer.
+        while (buffer.size() > 0u)
+        {
+            const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
+            const auto [error, size] = tls_ ? co_await tls_->async_write_some(buffer, token)
+                                            : co_await socket_.async_write_some(buffer, token);
+            if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
+                co_return std::unexpected(cancelled());
+            if (error)
+                co_return std::unexpected(transferError(error, error == asio::error::operation_aborted, "Writing"));
+            buffer += size;
+        }
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
@@ -349,7 +341,7 @@ namespace FileTransferProtocol
 
     bool DataConnection::secured() const
     {
-        return tls_.has_value();
+        return secured_;
     }
 
     bool DataConnection::endedWithoutCloseNotify() const

@@ -27,7 +27,7 @@ namespace FileTransferProtocol
         Automatic,
         /** @brief EPSV only. */
         Always,
-        /** @brief PASV only, which needs an IPv4 control connection. */
+        /** @brief PASV only, which needs an IPv4 control connection: an IPv6 one fails as Unsupported. */
         Never,
     };
 
@@ -77,7 +77,8 @@ namespace FileTransferProtocol
          *        remembered in @p choice. An IPv6 control connection uses EPSV only (RFC 2428).
          *
          * @return The connection. The replyError() of a refused PASV or EPSV, NoConnection for a port that cannot
-         *         be connected, TimedOut past the connect timeout. The control connection stays usable.
+         *         be connected, TimedOut past the connect timeout, Unsupported for ExtendedPassive::Never on IPv6. The
+         *         control connection stays usable.
          */
         static boost::asio::awaitable<std::expected<std::shared_ptr<DataConnection>, RemoteIo::RemoteError>> open(
             std::shared_ptr<ControlConnection> control,
@@ -119,7 +120,7 @@ namespace FileTransferProtocol
         readSome(boost::asio::mutable_buffer buffer);
 
         /**
-         * @brief Writes all of @p buffer, errors as for readSome().
+         * @brief Writes all of @p buffer, errors as for readSome(). The inactivity timeout limits each piece written.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> writeAll(boost::asio::const_buffer buffer);
 
@@ -148,6 +149,9 @@ namespace FileTransferProtocol
          */
         void reset();
 
+        /**
+         * @brief The handshake of secure() ended and the certificate was checked.
+         */
         bool secured() const;
 
         /**
@@ -187,6 +191,7 @@ namespace FileTransferProtocol
         /** @brief Takes what the server sends after an upload, until its end. */
         std::array<char, 512> drainBuffer_{};
         bool endedWithoutCloseNotify_{false};
+        bool secured_{false};
         bool resumed_{false};
         bool closed_{false};
     };

@@ -264,6 +264,23 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(commandsOf(connection), (std::vector<std::string>{"EPSV"}));
     }
 
+    TEST_F(DataConnectionTests, NeverOnIpVersion6IsUnsupported)
+    {
+        auto started = ScriptedFtpServer::start({.ipv6 = true});
+        if (!started)
+            GTEST_SKIP() << "No IPv6 loopback: " << started.error();
+        server_ = std::move(started).value();
+        server_->addConnection(Script{}.reply("220 Ready").expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        auto options = quickDataOptions();
+        options.extendedPassive = ExtendedPassive::Never;
+        const auto data = openData(connection, options);
+        ASSERT_FALSE(data);
+        EXPECT_EQ(data.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << data.error().toString();
+        EXPECT_TRUE(commandsOf(connection).empty());
+    }
+
     TEST_F(DataConnectionTests, SilentDataTimesOut)
     {
         server_->addConnection(
