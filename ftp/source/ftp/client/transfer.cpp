@@ -55,9 +55,9 @@ namespace FileTransferProtocol
             return data.secured() && !data.resumed() && (reply.code == 522 || reply.code == 425 || reply.code == 450);
         }
 
-        RemoteIo::RemoteError sessionReuseRequired(Reply const& reply)
+        RemoteIo::RemoteError sessionReuseRequired(Reply const& reply, Verb verb)
         {
-            auto error = replyError(reply, Verb::Retrieve);
+            auto error = replyError(reply, verb);
             error.kind = RemoteErrorKind::NoSecureConnection;
             error.message = fmt::format(
                 "The server requires data connections to resume the control connection's TLS session: {}", error.message
@@ -93,6 +93,107 @@ namespace FileTransferProtocol
         }
     }
 
+    namespace
+    {
+        /**
+         * @brief A transfer command that runs: its data connection, the command, its first reply.
+         */
+        struct StartedTransfer
+        {
+            std::shared_ptr<DataConnection> data{};
+            std::shared_ptr<PendingCommand> command{};
+            Reply first{};
+            /** @brief The data handshake failed while the server went on, the caller aborts. */
+            std::optional<RemoteIo::RemoteError> unsecured{};
+        };
+
+        /**
+         * @brief Opens the data connection, sends REST when @p restartAt is not 0, then @p transfer, and waits for
+         *        its first reply. With TLS the data handshake runs next to that wait.
+         */
+        asio::awaitable<std::expected<StartedTransfer, RemoteIo::RemoteError>> startTransfer(
+            TransferSession const& session,
+            TransferOptions const& options,
+            std::uint64_t restartAt,
+            Command transfer
+        )
+        {
+            auto const control = session.control;
+            const auto verb = transfer.verb;
+            auto opened = co_await DataConnection::open(control, options.data, session.passiveChoice);
+            if (!opened)
+                co_return std::unexpected(std::move(opened).error());
+            auto const data = std::move(opened).value();
+
+            if (restartAt > 0u)
+            {
+                const auto restart =
+                    co_await control->execute(Command{.verb = Verb::Restart, .argument = fmt::format("{}", restartAt)});
+                if (isCancelled(co_await asio::this_coro::cancellation_state))
+                {
+                    data->close();
+                    co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
+                }
+                if (!restart || restart->code != 350)
+                {
+                    data->close();
+                    co_return std::unexpected(restart ? replyError(*restart, Verb::Restart) : restart.error());
+                }
+            }
+
+            auto command = control->send(std::move(transfer));
+            if (!command)
+            {
+                data->close();
+                co_return std::unexpected(std::move(command).error());
+            }
+
+            std::expected<Reply, RemoteIo::RemoteError> first = std::unexpected(RemoteIo::RemoteError{});
+            std::expected<void, RemoteIo::RemoteError> secured{};
+            if (session.tls)
+            {
+                auto [order, secureException, secureResult, replyException, replyResult] =
+                    co_await asio::experimental::make_parallel_group(
+                        asio::co_spawn(control->strand(), secureData(data, control, *session.tls), asio::deferred),
+                        asio::co_spawn(control->strand(), firstReply(*command, data), asio::deferred)
+                    )
+                        .async_wait(asio::experimental::wait_for_all(), asio::use_awaitable);
+                if (secureException)
+                    std::rethrow_exception(secureException);
+                if (replyException)
+                    std::rethrow_exception(replyException);
+                secured = std::move(secureResult);
+                first = std::move(replyResult);
+            }
+            else
+                first = co_await firstReply(*command, data);
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+            {
+                data->close();
+                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
+            }
+
+            if (!first)
+            {
+                data->close();
+                co_return std::unexpected(std::move(first).error());
+            }
+            if (refused(*first))
+            {
+                if (refusedForSessionReuse(*first, *data))
+                {
+                    control->close();
+                    co_return std::unexpected(sessionReuseRequired(*first, verb));
+                }
+                co_return std::unexpected(replyError(*first, verb));
+            }
+            StartedTransfer started{.data = data, .command = std::move(command).value(), .first = std::move(*first)};
+            if (!secured)
+                started.unsecured = std::move(secured).error();
+            co_return started;
+        }
+    }
+
     Download::Download(
         Private,
         TransferSession session,
@@ -113,87 +214,22 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<std::shared_ptr<Download>, RemoteIo::RemoteError>>
     Download::start(TransferSession session, DownloadRequest request, TransferOptions options)
     {
-        auto const control = session.control;
-        auto opened = co_await DataConnection::open(control, options.data, session.passiveChoice);
-        if (!opened)
-            co_return std::unexpected(std::move(opened).error());
-        auto const data = std::move(opened).value();
-
-        if (request.offset > 0u)
-        {
-            const auto restart = co_await control->execute(
-                Command{.verb = Verb::Restart, .argument = fmt::format("{}", request.offset)}
-            );
-            if (isCancelled(co_await asio::this_coro::cancellation_state))
-            {
-                data->close();
-                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was cancelled"));
-            }
-            if (!restart || restart->code != 350)
-            {
-                data->close();
-                co_return std::unexpected(restart ? replyError(*restart, Verb::Restart) : restart.error());
-            }
-        }
-
-        auto retrieve = control->send(Command{.verb = Verb::Retrieve, .argument = request.path});
-        if (!retrieve)
-        {
-            data->close();
-            co_return std::unexpected(std::move(retrieve).error());
-        }
-
-        std::expected<Reply, RemoteIo::RemoteError> first = std::unexpected(RemoteIo::RemoteError{});
-        std::expected<void, RemoteIo::RemoteError> secured{};
-        if (session.tls)
-        {
-            auto [order, secureException, secureResult, replyException, replyResult] =
-                co_await asio::experimental::make_parallel_group(
-                    asio::co_spawn(control->strand(), secureData(data, control, *session.tls), asio::deferred),
-                    asio::co_spawn(control->strand(), firstReply(*retrieve, data), asio::deferred)
-                )
-                    .async_wait(asio::experimental::wait_for_all(), asio::use_awaitable);
-            if (secureException)
-                std::rethrow_exception(secureException);
-            if (replyException)
-                std::rethrow_exception(replyException);
-            secured = std::move(secureResult);
-            first = std::move(replyResult);
-        }
-        else
-            first = co_await firstReply(*retrieve, data);
-        if (isCancelled(co_await asio::this_coro::cancellation_state))
-        {
-            data->close();
-            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was cancelled"));
-        }
-
-        if (!first)
-        {
-            data->close();
-            co_return std::unexpected(std::move(first).error());
-        }
-        if (refused(*first))
-        {
-            if (refusedForSessionReuse(*first, *data))
-            {
-                control->close();
-                co_return std::unexpected(sessionReuseRequired(*first));
-            }
-            co_return std::unexpected(replyError(*first, Verb::Retrieve));
-        }
-
+        auto started = co_await startTransfer(
+            session, options, request.offset, Command{.verb = Verb::Retrieve, .argument = request.path}
+        );
+        if (!started)
+            co_return std::unexpected(std::move(started).error());
         auto download = std::make_shared<Download>(
-            Private{}, std::move(session), std::move(request), std::move(options), data, *retrieve
+            Private{}, std::move(session), std::move(request), std::move(options), started->data, started->command
         );
         if (download->request_.offset == 0u)
-            download->announced_ = parseAnnouncedSize(*first);
-        if (!isPreliminary(first->code))
-            download->earlyFinalReply_ = std::move(*first);
-        if (!secured)
+            download->announced_ = parseAnnouncedSize(started->first);
+        if (!isPreliminary(started->first.code))
+            download->earlyFinalReply_ = std::move(started->first);
+        if (started->unsecured)
         {
             download->abort();
-            co_return std::unexpected(std::move(secured).error());
+            co_return std::unexpected(std::move(*started->unsecured));
         }
         co_return download;
     }
@@ -255,7 +291,7 @@ namespace FileTransferProtocol
             if (refusedForSessionReuse(*reply, *data_))
             {
                 session_.control->close();
-                co_return std::unexpected(sessionReuseRequired(*reply));
+                co_return std::unexpected(sessionReuseRequired(*reply, Verb::Retrieve));
             }
             co_return std::unexpected(replyError(*reply, Verb::Retrieve));
         }
