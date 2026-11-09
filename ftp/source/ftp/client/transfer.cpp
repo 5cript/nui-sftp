@@ -107,10 +107,29 @@ namespace FileTransferProtocol
             if (const auto abortSent = control.send(Command{.verb = Verb::Abort}); !abortSent)
                 Log::debug("FTP: ABOR could not be sent for {}", what);
         }
-    }
 
-    namespace
-    {
+        /**
+         * @brief The final reply of @p command once its data ended: @p early when it came before the end, else the
+         *        one that comes within @p timeout.
+         *
+         * @return Cancelled for a cancel that came with the reply, the caller must await nothing more then.
+         */
+        asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> finalReplyBehindData(
+            ControlConnection& control,
+            PendingCommand& command,
+            std::optional<Reply> early,
+            std::chrono::milliseconds timeout
+        )
+        {
+            if (early)
+                co_return std::move(*early);
+            control.limitFinalReply(command, timeout);
+            auto reply = co_await command.finalReply();
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
+            co_return reply;
+        }
+
         /**
          * @brief A transfer command that runs: its data connection, the command, its first reply.
          */
@@ -294,17 +313,9 @@ namespace FileTransferProtocol
         if (!dataEnded_)
             co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The download's data did not end yet"));
 
-        std::expected<Reply, RemoteIo::RemoteError> reply = std::unexpected(RemoteIo::RemoteError{});
-        if (earlyFinalReply_)
-            reply = *earlyFinalReply_;
-        else
-        {
-            session_.control->limitFinalReply(*retrieve_, options_.finalReplyTimeout);
-            reply = co_await retrieve_->finalReply();
-            if (isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was cancelled"));
-        }
-
+        auto reply = co_await finalReplyBehindData(
+            *session_.control, *retrieve_, earlyFinalReply_, options_.finalReplyTimeout
+        );
         if (!reply)
         {
             // Its deadline ended the control connection. All the data that should come is proof enough.
@@ -532,16 +543,8 @@ namespace FileTransferProtocol
         }
         dataEnded_ = true;
 
-        std::expected<Reply, RemoteIo::RemoteError> reply = std::unexpected(RemoteIo::RemoteError{});
-        if (earlyFinalReply_)
-            reply = *earlyFinalReply_;
-        else
-        {
-            session_.control->limitFinalReply(*store_, options_.finalReplyTimeout);
-            reply = co_await store_->finalReply();
-            if (isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was cancelled"));
-        }
+        auto reply =
+            co_await finalReplyBehindData(*session_.control, *store_, earlyFinalReply_, options_.finalReplyTimeout);
         if (!reply)
         {
             // Its deadline ended the control connection, SIZE on another one has to tell.
