@@ -4,9 +4,11 @@
 
 #include <ftp/client/login.hpp>
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -352,9 +354,9 @@ namespace FileTransferProtocol::Test
                 {.name = "PureFtpdDemandsTls",
                     .script = pureFtpdDemandsTls,
                     .kind = RemoteIo::RemoteErrorKind::NoSecureConnection},
-                {.name = "FeatFailed",
-                    .script = refusedAfter("FEAT", "451 Local error"),
-                    .kind = RemoteIo::RemoteErrorKind::Failure},
+                {.name = "FeatClosesTheConnection",
+                    .script = refusedAfter("FEAT", "421 Service not available, closing control connection."),
+                    .kind = RemoteIo::RemoteErrorKind::ConnectionLost},
                 {.name = "BinaryTypeRefused",
                     .script = refusedAfter("TYPE", "504 Type not implemented"),
                     .kind = RemoteIo::RemoteErrorKind::Unsupported},
@@ -391,13 +393,18 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
     }
 
-    TEST_F(LoginTests, ServerWithoutFeatLogsInWithoutFeatures)
+    class LoginWithoutFeaturesTests
+        : public LoginTests
+        , public ::testing::WithParamInterface<std::string_view>
+    {};
+
+    TEST_P(LoginWithoutFeaturesTests, LogsInWithoutFeatures)
     {
         Script script{};
         script.reply("220 Ready");
         credentials(script)
             .expect("FEAT")
-            .reply("502 Command not implemented")
+            .reply(GetParam())
             .expect("OPTS", "UTF8 ON")
             .reply("501 Option not understood")
             .expect("TYPE", "I")
@@ -412,6 +419,16 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(result->utf8Accepted);
         EXPECT_EQ(result->homeDirectory, "/");
     }
+
+    INSTANTIATE_TEST_SUITE_P(
+        FeatReplies,
+        LoginWithoutFeaturesTests,
+        ::testing::Values(std::string_view{"502 Command not implemented"}, std::string_view{"451 Local error"}),
+        [](::testing::TestParamInfo<std::string_view> const& info)
+        {
+            return fmt::format("Reply{}", info.param.substr(0u, 3u));
+        }
+    );
 
     TEST_F(LoginTests, TlsWithoutItsSettingsSendsNothing)
     {

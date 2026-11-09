@@ -1,4 +1,5 @@
 #include <ftp/protocol/features.hpp>
+#include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
 #include <utility/algorithm/case_convert.hpp>
 #include "text.hpp"
@@ -26,11 +27,21 @@ namespace FileTransferProtocol
             }
             return list;
         }
+
+        /**
+         * @brief An error reply that leaves the connection open, the commands probe for themselves, RFC 2389 3.2.
+         */
+        bool isRefusal(Reply const& reply)
+        {
+            const auto replyClass = classifyReply(reply.code);
+            return reply.code != 421 &&
+                (replyClass == ReplyClass::TransientNegative || replyClass == ReplyClass::PermanentNegative);
+        }
     }
 
     std::expected<Features, RemoteIo::RemoteError> Features::fromReply(Reply const& reply)
     {
-        if (reply.code == 500 || reply.code == 502)
+        if (isRefusal(reply))
             return Features{};
         if (reply.code != 211)
             return std::unexpected(replyError(reply, Verb::Features));

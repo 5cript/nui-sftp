@@ -43,10 +43,10 @@ namespace FileTransferProtocol
         Features() = default;
 
         /**
-         * @brief Reads the reply to FEAT: the lines of a 211 reply that start with a space are features, 500 and 502
-         *        mean none.
+         * @brief Reads the reply to FEAT: the lines of a 211 reply that start with a space are features, an error reply
+         *        other than 421 means none.
          *
-         * @return The error of any other reply.
+         * @return The error of a 421 or of a reply that is neither 211 nor an error.
          */
         static std::expected<Features, RemoteIo::RemoteError> fromReply(Reply const& reply);
 

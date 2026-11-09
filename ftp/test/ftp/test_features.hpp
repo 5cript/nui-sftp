@@ -176,11 +176,21 @@ namespace FileTransferProtocol::Test
         }
     }
 
+    TEST(FeaturesTests, AnErrorReplyMeansNoFeatures)
+    {
+        for (const auto code : {450, 451, 501, 504, 530, 550})
+        {
+            const auto features = Features::fromReply(Reply{.code = code, .lines = {fmt::format("{} Not now", code)}});
+            ASSERT_TRUE(features) << code;
+            EXPECT_TRUE(features->all().empty());
+        }
+    }
+
     TEST(FeaturesTests, OtherRepliesAreErrors)
     {
-        const auto refused = Features::fromReply(Reply{.code = 530, .lines = {"530 Please login with USER and PASS."}});
-        ASSERT_FALSE(refused);
-        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::AuthenticationFailed);
+        const auto closing = Features::fromReply(Reply{.code = 421, .lines = {"421 Timeout."}});
+        ASSERT_FALSE(closing);
+        EXPECT_EQ(closing.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost);
         const auto unexpected = Features::fromReply(Reply{.code = 200, .lines = {"200 OK"}});
         ASSERT_FALSE(unexpected);
         EXPECT_EQ(unexpected.error().kind, RemoteIo::RemoteErrorKind::ProtocolViolation);
