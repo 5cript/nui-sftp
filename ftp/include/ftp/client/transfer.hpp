@@ -134,6 +134,12 @@ namespace FileTransferProtocol
          */
         std::optional<std::uint64_t> announcedSize() const;
 
+        /**
+         * @brief Ends the download as cancelled: closes the data connection and sends ABOR, the control connection
+         *        drains behind it and stays usable. Reads and finish() fail as Cancelled from then on.
+         */
+        void abort();
+
       private:
         /**
          * @brief readSome() without its pause bookkeeping: a transfer dropped for a pause starts again first, the end
@@ -163,7 +169,6 @@ namespace FileTransferProtocol
          * @brief Closes the data connection of a paused download and sends ABOR, the login stays.
          */
         void dropForPause();
-        void abort();
 
         TransferSession session_;
         DownloadRequest request_;
@@ -261,7 +266,8 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
         /**
-         * @brief Ends the upload as failed: resets the data connection and sends ABOR.
+         * @brief Ends the upload as failed: resets the data connection and sends ABOR. A final reply that comes after
+         *        it never completes the upload, not even a 226: the server may keep the partial file.
          */
         void abort();
 

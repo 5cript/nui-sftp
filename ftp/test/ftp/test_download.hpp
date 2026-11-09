@@ -374,6 +374,42 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"EPSV", "RETR file", "ABOR", "PWD"}));
     }
 
+    TEST_F(DownloadTests, AbortByItsOwnerDrainsAndKeepsTheLogin)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.stallAfter("abc"), "150 Opening BINARY mode data connection for file (7 bytes)."
+        )
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto const download = startDownload(
+            {.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()}, quickTransferOptions()
+        );
+        ASSERT_TRUE(download);
+        const auto first = readUpTo(connection, download, 3u);
+        ASSERT_TRUE(first) << first.error().toString();
+        run(connection,
+            [download]() -> asio::awaitable<void>
+            {
+                download->abort();
+                co_return;
+            });
+        const auto after = readUpTo(connection, download, 100u);
+        ASSERT_FALSE(after);
+        EXPECT_EQ(after.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << after.error().toString();
+        const auto finished = finishDownload(connection, download);
+        ASSERT_FALSE(finished);
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << finished.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(DownloadTests, PausedDownloadDropsItsDataAndContinuesWithRest)
     {
         Script script{};
