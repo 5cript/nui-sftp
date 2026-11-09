@@ -9,6 +9,7 @@
 #include "test_listing.hpp"
 #include "test_login.hpp"
 #include "test_login_conformance.hpp"
+#include "test_transfer_conformance.hpp"
 #include "test_printable.hpp"
 #include "test_reply_code.hpp"
 #include "test_reply_error.hpp"
