@@ -207,6 +207,7 @@ namespace FileTransferProtocol
         , options_{std::move(options)}
         , data_{std::move(data)}
         , retrieve_{std::move(retrieve)}
+        , pauseTimer_{session_.control->strand()}
     {}
 
     Download::~Download() = default;
@@ -236,10 +237,16 @@ namespace FileTransferProtocol
 
     asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>> Download::readSome(asio::mutable_buffer buffer)
     {
+        pauseTimer_.cancel();
         if (aborted_)
             co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was aborted"));
         if (dataEnded_)
             co_return std::size_t{0u};
+        if (dropped_)
+        {
+            if (auto resumed = co_await resume(); !resumed)
+                co_return std::unexpected(std::move(resumed).error());
+        }
         const auto read = co_await data_->readSome(buffer);
         if (!read)
         {
@@ -249,6 +256,7 @@ namespace FileTransferProtocol
         if (*read > 0u)
         {
             bytes_ += *read;
+            armPauseDrop();
             co_return *read;
         }
         dataEnded_ = true;
@@ -341,6 +349,61 @@ namespace FileTransferProtocol
         );
         truncated.protocolCode = finalReply.code;
         co_return std::unexpected(std::move(truncated));
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>> Download::resume()
+    {
+        auto started = co_await startTransfer(
+            session_, options_, request_.offset + bytes_, Command{.verb = Verb::Retrieve, .argument = request_.path}
+        );
+        if (!started)
+        {
+            aborted_ = true;
+            co_return std::unexpected(std::move(started).error());
+        }
+        data_ = started->data;
+        retrieve_ = started->command;
+        dropped_ = false;
+        earlyFinalReply_.reset();
+        if (!isPreliminary(started->first.code))
+            earlyFinalReply_ = std::move(started->first);
+        if (started->unsecured)
+        {
+            abort();
+            co_return std::unexpected(std::move(*started->unsecured));
+        }
+        Log::debug("FTP: Continued a paused download with REST");
+        co_return std::expected<void, RemoteIo::RemoteError>{};
+    }
+
+    void Download::armPauseDrop()
+    {
+        if (!options_.pauseDropAfter)
+            return;
+        pauseTimer_.expires_after(*options_.pauseDropAfter);
+        pauseTimer_.async_wait(
+            [weak = weak_from_this()](boost::system::error_code error)
+            {
+                if (error)
+                    return;
+                if (const auto self = weak.lock())
+                    self->dropForPause();
+            }
+        );
+    }
+
+    void Download::dropForPause()
+    {
+        if (dataEnded_ || aborted_ || dropped_)
+            return;
+        Log::debug("FTP: Dropped the data connection of a paused download");
+        dropped_ = true;
+        data_->close();
+        if (session_.control->state() == ControlState::Open && retrieve_->stage() != PendingCommand::Stage::Completed)
+        {
+            if (const auto abortSent = session_.control->send(Command{.verb = Verb::Abort}); !abortSent)
+                Log::debug("FTP: ABOR could not be sent for a paused download");
+        }
     }
 
     void Download::abort()

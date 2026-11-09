@@ -8,6 +8,7 @@
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -35,6 +36,12 @@ namespace FileTransferProtocol
         DataConnectionOptions data{};
         /** @brief From the end of the data to the final reply. */
         std::chrono::milliseconds finalReplyTimeout{15'000};
+        /**
+         * @brief A download not read for this long drops its data connection and continues with REST on the next
+         *        read, before the server's data timeout ends more (IIS after 30 s, vsftpd the whole session). Nothing
+         *        never drops.
+         */
+        std::optional<std::chrono::milliseconds> pauseDropAfter{std::chrono::seconds{20}};
     };
 
     struct TransferResult
@@ -62,7 +69,7 @@ namespace FileTransferProtocol
      *        of the data and a positive final reply, in either order. Data that ended earlier than the expected size
      *        is checked again with SIZE: the same size now means the file changed, else Truncated.
      */
-    class Download
+    class Download : public std::enable_shared_from_this<Download>
     {
         struct Private
         {};
@@ -94,9 +101,11 @@ namespace FileTransferProtocol
         Download& operator=(Download&&) = delete;
 
         /**
-         * @brief The next bytes, 0 once the data ended, then finish() tells whether the download is complete.
+         * @brief The next bytes, 0 once the data ended, then finish() tells whether the download is complete. After a
+         *        drop for a pause the transfer continues with REST at the bytes read so far.
          *
-         * @return The data connection's error, after which the transfer is aborted with ABOR.
+         * @return The data connection's error, after which the transfer is aborted with ABOR, or the error of the
+         *         new start after a drop.
          */
         boost::asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
         readSome(boost::asio::mutable_buffer buffer);
@@ -121,6 +130,15 @@ namespace FileTransferProtocol
          */
         std::optional<std::uint64_t> expectedBytes() const;
         boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> checkSize(Reply finalReply);
+        /**
+         * @brief Starts the transfer again at the bytes read so far, after a drop for a pause.
+         */
+        boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> resume();
+        void armPauseDrop();
+        /**
+         * @brief Closes the data connection of a paused download and sends ABOR, the login stays.
+         */
+        void dropForPause();
         void abort();
 
         TransferSession session_;
@@ -132,8 +150,11 @@ namespace FileTransferProtocol
         /** @brief A final reply that came before the end of the data. */
         std::optional<Reply> earlyFinalReply_{};
         std::uint64_t bytes_{0u};
+        boost::asio::steady_timer pauseTimer_;
         bool dataEnded_{false};
         bool aborted_{false};
+        /** @brief Dropped for a pause, the next read starts the transfer again. */
+        bool dropped_{false};
     };
 
     enum class UploadMode : std::uint8_t
