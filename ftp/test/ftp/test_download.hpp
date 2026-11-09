@@ -428,6 +428,47 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
+    TEST_F(DownloadTests, CancelledReadAbortsTheDownloadAndKeepsTheLogin)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.stallAfter("abc"), "150 Opening BINARY mode data connection for file (7 bytes)."
+        )
+            .beginData()
+            .abortSequence(AbortReplies::ProftpdPlainLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto const download = startDownload(
+            {.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()}, quickTransferOptions()
+        );
+        ASSERT_TRUE(download);
+        const auto first = readUpTo(connection, download, 3u);
+        ASSERT_TRUE(first) << first.error().toString();
+        // Nothing more comes, the read waits for the cancel.
+        const auto cancelled =
+            run(connection,
+                [connection, download]() -> asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
+                {
+                    std::array<char, 16> buffer{};
+                    const auto [exception, result] = co_await asio::co_spawn(
+                        connection->strand(),
+                        download->readSome(asio::buffer(buffer)),
+                        asio::cancel_after(200ms, asio::as_tuple(asio::use_awaitable))
+                    );
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        ASSERT_FALSE(cancelled);
+        EXPECT_EQ(cancelled.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << cancelled.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(DownloadTests, SeekToTheReachedPositionCostsNothing)
     {
         Script script{};
