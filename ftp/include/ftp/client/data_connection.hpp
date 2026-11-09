@@ -143,6 +143,11 @@ namespace FileTransferProtocol
          */
         void close();
 
+        /**
+         * @brief Closes with a TCP reset, so a server cannot take a cut upload for a complete one.
+         */
+        void reset();
+
         bool secured() const;
 
         /**

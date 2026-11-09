@@ -356,4 +356,132 @@ namespace FileTransferProtocol
                 Log::debug("FTP: ABOR could not be sent for a failed download");
         }
     }
+
+    Upload::Upload(
+        Private,
+        TransferSession session,
+        UploadRequest request,
+        TransferOptions options,
+        std::shared_ptr<DataConnection> data,
+        std::shared_ptr<PendingCommand> store
+    )
+        : session_{std::move(session)}
+        , request_{std::move(request)}
+        , options_{std::move(options)}
+        , data_{std::move(data)}
+        , store_{std::move(store)}
+    {}
+
+    Upload::~Upload() = default;
+
+    asio::awaitable<std::expected<std::shared_ptr<Upload>, RemoteIo::RemoteError>>
+    Upload::start(TransferSession session, UploadRequest request, TransferOptions options)
+    {
+        const bool appending = request.mode == UploadMode::Append;
+        const auto restartAt = appending ? std::uint64_t{0u} : request.offset;
+        auto started = co_await startTransfer(
+            session,
+            options,
+            restartAt,
+            Command{.verb = appending ? Verb::Append : Verb::Store, .argument = request.path}
+        );
+        if (!started)
+            co_return std::unexpected(std::move(started).error());
+        auto upload = std::make_shared<Upload>(
+            Private{}, std::move(session), std::move(request), std::move(options), started->data, started->command
+        );
+        if (!isPreliminary(started->first.code))
+            upload->earlyFinalReply_ = std::move(started->first);
+        if (started->unsecured)
+        {
+            upload->abort();
+            co_return std::unexpected(std::move(*started->unsecured));
+        }
+        co_return upload;
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>> Upload::write(asio::const_buffer buffer)
+    {
+        if (aborted_)
+            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was aborted"));
+        const auto written = co_await data_->writeAll(buffer);
+        if (!written)
+            co_return std::unexpected(co_await failure(written.error()));
+        bytes_ += buffer.size();
+        co_return std::expected<void, RemoteIo::RemoteError>{};
+    }
+
+    asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> Upload::finish()
+    {
+        if (aborted_)
+            co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was aborted"));
+        const auto ended = co_await data_->finishUpload();
+        if (!ended)
+            co_return std::unexpected(co_await failure(ended.error()));
+
+        std::expected<Reply, RemoteIo::RemoteError> reply = std::unexpected(RemoteIo::RemoteError{});
+        if (earlyFinalReply_)
+            reply = *earlyFinalReply_;
+        else
+        {
+            session_.control->limitFinalReply(*store_, options_.finalReplyTimeout);
+            reply = co_await store_->finalReply();
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was cancelled"));
+        }
+        if (!reply)
+        {
+            // Its deadline ended the control connection, SIZE on another one has to tell.
+            if (reply.error().kind == RemoteErrorKind::TimedOut)
+                co_return UploadResult{.bytes = bytes_};
+            co_return std::unexpected(reply.error());
+        }
+        if (!succeeded(*reply))
+        {
+            if (refusedForSessionReuse(*reply, *data_))
+            {
+                session_.control->close();
+                co_return std::unexpected(sessionReuseRequired(*reply, verb()));
+            }
+            co_return std::unexpected(replyError(*reply, verb()));
+        }
+        co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply)};
+    }
+
+    asio::awaitable<RemoteIo::RemoteError> Upload::failure(RemoteIo::RemoteError dataError)
+    {
+        // A server that refused the rest, for a full disk say, closed the data connection behind its reply.
+        if (store_->stage() == PendingCommand::Stage::Completed)
+        {
+            const auto reply = co_await store_->finalReply();
+            if (reply && refused(*reply))
+            {
+                aborted_ = true;
+                data_->reset();
+                co_return replyError(*reply, verb());
+            }
+        }
+        abort();
+        co_return dataError;
+    }
+
+    Verb Upload::verb() const
+    {
+        if (request_.mode == UploadMode::Append)
+            return Verb::Append;
+        return Verb::Store;
+    }
+
+    void Upload::abort()
+    {
+        if (aborted_)
+            return;
+        aborted_ = true;
+        data_->reset();
+        if (session_.control->state() == ControlState::Open && store_->stage() != PendingCommand::Stage::Completed)
+        {
+            if (const auto abortSent = session_.control->send(Command{.verb = Verb::Abort}); !abortSent)
+                Log::debug("FTP: ABOR could not be sent for a failed upload");
+        }
+    }
 }

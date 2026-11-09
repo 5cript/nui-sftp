@@ -4,6 +4,7 @@
 #include "test_control_connection_tls.hpp"
 #include "test_data_connection.hpp"
 #include "test_download.hpp"
+#include "test_upload.hpp"
 #include "test_features.hpp"
 #include "test_listing.hpp"
 #include "test_login.hpp"

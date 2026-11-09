@@ -302,17 +302,28 @@ namespace FileTransferProtocol
         if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
             co_return std::unexpected(cancelled());
         close();
-        if (error != asio::error::eof)
+        if (error == asio::error::eof)
+            co_return std::expected<void, RemoteIo::RemoteError>{};
+        // No error left the loop at its deadline.
+        if (!error || error == asio::error::operation_aborted)
             co_return std::unexpected(
                 errorOf(RemoteErrorKind::TimedOut, "The server did not end the upload's data connection in time")
             );
-        co_return std::expected<void, RemoteIo::RemoteError>{};
+        co_return std::unexpected(transferError(error, false, "Ending"));
     }
 
     void DataConnection::close()
     {
         closed_ = true;
         boost::system::error_code ignored{};
+        socket_.close(ignored);
+    }
+
+    void DataConnection::reset()
+    {
+        closed_ = true;
+        boost::system::error_code ignored{};
+        socket_.set_option(asio::socket_base::linger{true, 0}, ignored);
         socket_.close(ignored);
     }
 

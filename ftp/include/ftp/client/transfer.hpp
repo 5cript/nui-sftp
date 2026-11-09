@@ -135,4 +135,99 @@ namespace FileTransferProtocol
         bool dataEnded_{false};
         bool aborted_{false};
     };
+
+    enum class UploadMode : std::uint8_t
+    {
+        /** @brief STOR, with REST before it to continue at an offset. */
+        Store,
+        /** @brief APPE, adds to the end of the file. */
+        Append,
+    };
+
+    struct UploadRequest
+    {
+        std::string path{};
+        UploadMode mode{UploadMode::Store};
+        /** @brief REST before STOR, to continue a partial file (RFC 3659 5). Not used with Append. */
+        std::uint64_t offset{0u};
+    };
+
+    struct UploadResult
+    {
+        /** @brief Bytes of this transfer, without the offset it started at. */
+        std::uint64_t bytes{0u};
+        /**
+         * @brief Nothing when no final reply came in time. The control connection is Dead then, and the upload is
+         *        complete only when SIZE on another connection shows the offset plus these bytes.
+         */
+        std::optional<Reply> finalReply{};
+    };
+
+    /**
+     * @brief One STOR or APPE on its own data connection, on the strand of the control connection. The data ends so
+     *        that the server sees all of it before the final reply counts. A failed upload resets its data connection:
+     *        a FIN could make the server take the cut file for a complete one.
+     */
+    class Upload
+    {
+        struct Private
+        {};
+
+      public:
+        /**
+         * @brief Opens the data connection, sends REST for a Store at an offset, STOR or APPE, and waits for the first
+         *        reply, the TLS handshake beside it as for Download::start().
+         *
+         * @return The running upload, errors as for Download::start().
+         */
+        static boost::asio::awaitable<std::expected<std::shared_ptr<Upload>, RemoteIo::RemoteError>>
+        start(TransferSession session, UploadRequest request, TransferOptions options = {});
+
+        Upload(
+            Private,
+            TransferSession session,
+            UploadRequest request,
+            TransferOptions options,
+            std::shared_ptr<DataConnection> data,
+            std::shared_ptr<PendingCommand> store
+        );
+        ~Upload();
+        Upload(Upload const&) = delete;
+        Upload& operator=(Upload const&) = delete;
+        Upload(Upload&&) = delete;
+        Upload& operator=(Upload&&) = delete;
+
+        /**
+         * @brief Writes all of @p buffer.
+         *
+         * @return The replyError() of a server that ended the transfer meanwhile, a full disk for one, else the data
+         *         connection's error. The upload is aborted then.
+         */
+        boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> write(boost::asio::const_buffer buffer);
+
+        /**
+         * @brief Ends the data so the server takes all of it, then the final reply.
+         *
+         * @return The result. The replyError() of a negative final reply, the error of a data end that failed.
+         */
+        boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
+
+      private:
+        /**
+         * @brief What a failed write or end of the data means: the server's refusal when it ended the transfer, else
+         *        @p dataError after an abort.
+         */
+        boost::asio::awaitable<RemoteIo::RemoteError> failure(RemoteIo::RemoteError dataError);
+        Verb verb() const;
+        void abort();
+
+        TransferSession session_;
+        UploadRequest request_;
+        TransferOptions options_;
+        std::shared_ptr<DataConnection> data_;
+        std::shared_ptr<PendingCommand> store_;
+        std::optional<Reply> earlyFinalReply_{};
+        std::uint64_t bytes_{0u};
+        bool aborted_{false};
+    };
 }
