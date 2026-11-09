@@ -41,6 +41,19 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief Writes @p content again and again until a write fails, at most @p rounds times. How much the sockets
+         *        take before a write waits differs per system.
+         */
+        asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+        writeUntilItFails(std::shared_ptr<Upload> upload, std::string const& content, std::size_t rounds)
+        {
+            std::expected<void, RemoteIo::RemoteError> written{};
+            for (std::size_t round = 0u; round < rounds && written; ++round)
+                written = co_await upload->write(asio::buffer(content));
+            co_return written;
+        }
+
+        /**
          * @brief EPSV with @p plan behind it, then @p verb @p path answered by @p preliminary.
          */
         Script& storeWith(Script& script, DataPlan plan, std::string_view preliminary, std::string verb = "STOR")
@@ -263,7 +276,7 @@ namespace FileTransferProtocol::Test
 
     TEST_F(UploadTests, CancelledWriteAbortsTheUpload)
     {
-        // No plan begins, nothing reads the data, so the write waits for the cancel.
+        // No plan begins and nothing reads the data, so the writes wait for the cancel once the sockets are full.
         Script script{};
         script.reply("220 Ready");
         storeWith(script, DataPlan{}, "150 Ok to send data.")
@@ -283,7 +296,7 @@ namespace FileTransferProtocol::Test
                     const std::string content(32u << 20u, 'c');
                     const auto [exception, result] = co_await asio::co_spawn(
                         connection->strand(),
-                        (*started)->write(asio::buffer(content)),
+                        writeUntilItFails(*started, content, 16u),
                         asio::cancel_after(300ms, asio::as_tuple(asio::use_awaitable))
                     );
                     if (exception)
