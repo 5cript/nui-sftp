@@ -244,6 +244,25 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(result.error().protocolCode, 552) << result.error().toString();
     }
 
+    TEST_F(UploadTests, ConfirmedUploadWhoseDataEndFailedIsComplete)
+    {
+        // The server took everything and says so, then resets the data connection instead of closing it.
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.expectUpload(1024u).reset(), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const auto result = upload(connection, {.path = "file"}, "content");
+        ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_EQ(result->bytes, 7u);
+        ASSERT_TRUE(result->finalReply);
+        EXPECT_EQ(result->finalReply->code, 226);
+        EXPECT_EQ(uploadedAfterDisconnect(connection), std::optional<std::string>{"content"});
+    }
+
     TEST_F(UploadTests, CancelledWriteAbortsTheUpload)
     {
         // No plan begins, nothing reads the data, so the write waits for the cancel.

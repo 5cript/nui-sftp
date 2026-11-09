@@ -519,7 +519,8 @@ namespace FileTransferProtocol
                 abort();
                 co_return std::unexpected(written.error());
             }
-            co_return std::unexpected(co_await failure(written.error()));
+            const auto answer = co_await answerToFailedData();
+            co_return std::unexpected(failureOf(answer, written.error()));
         }
         bytes_ += buffer.size();
         co_return std::expected<void, RemoteIo::RemoteError>{};
@@ -537,7 +538,12 @@ namespace FileTransferProtocol
                 abort();
                 co_return std::unexpected(ended.error());
             }
-            co_return std::unexpected(co_await failure(ended.error()));
+            // Every byte was written: a server that confirms the upload took it, however its side of the data ended.
+            const auto answer = co_await answerToFailedData();
+            if (!answer || !succeeded(*answer))
+                co_return std::unexpected(failureOf(answer, ended.error()));
+            dataEnded_ = true;
+            co_return UploadResult{.bytes = bytes_, .finalReply = *answer};
         }
         dataEnded_ = true;
 
@@ -570,20 +576,27 @@ namespace FileTransferProtocol
         co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply)};
     }
 
-    asio::awaitable<RemoteIo::RemoteError> Upload::failure(RemoteIo::RemoteError dataError)
+    asio::awaitable<std::optional<Reply>> Upload::answerToFailedData()
     {
         // A server that refused the rest, for a full disk say, may close the data connection before its reply comes.
         const auto [exception, reply] = co_await asio::co_spawn(
             session_.control->strand(), store_->finalReply(), asio::cancel_after(options_.refusalWait, useTuple)
         );
-        if (!exception && reply && refused(*reply))
+        if (exception || !reply)
+            co_return std::nullopt;
+        co_return *reply;
+    }
+
+    RemoteIo::RemoteError Upload::failureOf(std::optional<Reply> const& answer, RemoteIo::RemoteError dataError)
+    {
+        if (answer && refused(*answer))
         {
             aborted_ = true;
             data_->reset();
-            co_return replyError(*reply, verb());
+            return replyError(*answer, verb());
         }
         abort();
-        co_return dataError;
+        return dataError;
     }
 
     Verb Upload::verb() const

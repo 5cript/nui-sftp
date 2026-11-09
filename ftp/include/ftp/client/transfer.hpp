@@ -44,7 +44,7 @@ namespace FileTransferProtocol
          *        with TransferSession::restartStream, nothing never drops.
          */
         std::optional<std::chrono::milliseconds> pauseDropAfter{std::chrono::seconds{20}};
-        /** @brief How long a failed upload waits for the server's reason, which may come after the data broke. */
+        /** @brief How long a failed upload waits for the server's final reply, which may come after the data broke. */
         std::chrono::milliseconds refusalWait{1'000};
     };
 
@@ -250,7 +250,8 @@ namespace FileTransferProtocol
         /**
          * @brief Ends the data so the server takes all of it, then the final reply.
          *
-         * @return The result. The replyError() of a negative final reply, the error of a data end that failed.
+         * @return The result. The replyError() of a negative final reply. The error of a data end that failed, unless
+         *         a positive final reply within the refusal wait confirms the upload.
          */
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
@@ -261,10 +262,14 @@ namespace FileTransferProtocol
 
       private:
         /**
-         * @brief What a failed write or end of the data means: the server's refusal when it ended the transfer, else
-         *        @p dataError after an abort.
+         * @brief The final reply behind a failed write or end of the data, when it is there within the refusal wait.
          */
-        boost::asio::awaitable<RemoteIo::RemoteError> failure(RemoteIo::RemoteError dataError);
+        boost::asio::awaitable<std::optional<Reply>> answerToFailedData();
+        /**
+         * @brief Ends the upload as failed: with the server's refusal when @p answer is one, else with @p dataError
+         *        after an abort.
+         */
+        RemoteIo::RemoteError failureOf(std::optional<Reply> const& answer, RemoteIo::RemoteError dataError);
         Verb verb() const;
 
         TransferSession session_;
