@@ -172,10 +172,20 @@ namespace FileTransferProtocol
         template <typename HandlerT>
         void readSome(asio::mutable_buffer buffer, HandlerT&& handler)
         {
+            reading_ = true;
+            auto read = [transport = shared_from_this(), handler = std::forward<HandlerT>(handler)](
+                            boost::system::error_code error, std::size_t size
+                        ) mutable
+            {
+                transport->reading_ = false;
+                if (transport->sendingShutDown_)
+                    transport->drain();
+                handler(error, size);
+            };
             if (tls_)
-                tls_->async_read_some(buffer, std::forward<HandlerT>(handler));
+                tls_->async_read_some(buffer, std::move(read));
             else
-                socket_.async_read_some(buffer, std::forward<HandlerT>(handler));
+                socket_.async_read_some(buffer, std::move(read));
         }
 
         template <typename BuffersT, typename HandlerT>
@@ -205,8 +215,10 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Sends close_notify without waiting for the server's, then closes, all within @p timeout. A write in
-         *        flight goes first: Asio's ssl::stream drops the output of a shutdown that had to wait for one.
+         * @brief Sends close_notify without waiting for the server's, shuts the sending side down and closes once the
+         *        server ended its side, all within @p timeout. A write in flight goes first: Asio's ssl::stream drops
+         *        the output of a shutdown that had to wait for one. Closing the socket before the server took the sent
+         *        bytes can reset the connection on Windows, which loses them.
          */
         void closeAfterNotify(std::chrono::milliseconds timeout)
         {
@@ -235,7 +247,36 @@ namespace FileTransferProtocol
             tls_->async_shutdown(
                 [transport = shared_from_this()](boost::system::error_code)
                 {
-                    transport->close();
+                    transport->shutDownSending();
+                }
+            );
+        }
+
+        void shutDownSending()
+        {
+            boost::system::error_code ignored{};
+            socket_.shutdown(asio::ip::tcp::socket::shutdown_send, ignored);
+            sendingShutDown_ = true;
+            // A read under way sees the end first and drains on.
+            if (!reading_)
+                drain();
+        }
+
+        /**
+         * @brief Reads past the end of TLS until the server closes its side, then closes.
+         */
+        void drain()
+        {
+            if (!socket_.is_open())
+                return;
+            socket_.async_read_some(
+                asio::buffer(drainBuffer_),
+                [transport = shared_from_this()](boost::system::error_code error, std::size_t)
+                {
+                    if (error)
+                        transport->close();
+                    else
+                        transport->drain();
                 }
             );
         }
@@ -245,7 +286,12 @@ namespace FileTransferProtocol
         std::optional<asio::ssl::stream<asio::ip::tcp::socket&>> tls_{};
         /** @brief Bounds a close over TLS. */
         asio::steady_timer closeTimer_;
+        /** @brief Takes what the server sends after the end of TLS, the drain holds the transport. */
+        std::array<char, 512> drainBuffer_{};
+        bool reading_{false};
         bool writing_{false};
+        /** @brief close_notify went out and the sending side is shut, the rest is waiting for the server's end. */
+        bool sendingShutDown_{false};
         /** @brief close_notify waits for the write in flight. */
         bool notifyAfterWrite_{false};
     };
