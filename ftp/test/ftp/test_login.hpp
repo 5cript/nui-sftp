@@ -4,9 +4,16 @@
 
 #include <ftp/client/login.hpp>
 
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/use_future.hpp>
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <future>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -391,6 +398,30 @@ namespace FileTransferProtocol::Test
         expectLoginError(result, RemoteIo::RemoteErrorKind::NoSecureConnection);
         EXPECT_EQ(result.error().protocolCode, 536);
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
+    }
+
+    TEST_F(LoginTests, CancelledLoginSendsNoPassword)
+    {
+        server_->addConnection(Script{}.reply("220 Ready").expect("USER", "user").checkpoint("received").stall());
+        const auto connection = makeConnection();
+        const auto signal = std::make_shared<asio::cancellation_signal>();
+        auto loggingIn = asio::co_spawn(
+            connection->strand(),
+            FileTransferProtocol::logIn(connection, endpoints(), LoginOptions{.credentials = testCredentials()}),
+            asio::bind_cancellation_slot(signal->slot(), asio::use_future)
+        );
+        ASSERT_TRUE(server_->waitForCheckpoint("received"));
+        asio::post(
+            connection->strand(),
+            [signal]()
+            {
+                signal->emit(asio::cancellation_type::terminal);
+            }
+        );
+        ASSERT_EQ(loggingIn.wait_for(20s), std::future_status::ready);
+        expectLoginError(loggingIn.get(), RemoteIo::RemoteErrorKind::Cancelled);
+        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"USER user"}));
     }
 
     class LoginWithoutFeaturesTests

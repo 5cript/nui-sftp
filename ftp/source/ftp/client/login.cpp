@@ -3,6 +3,8 @@
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 
+#include <boost/asio/this_coro.hpp>
+
 #include <utility>
 
 namespace FileTransferProtocol
@@ -28,12 +30,24 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief Runs @p command. A cancel that came with the reply counts too, the next co_await would throw.
+         */
+        asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> ask(ControlConnection& connection, Command command)
+        {
+            auto reply = co_await connection.execute(std::move(command));
+            const auto state = co_await asio::this_coro::cancellation_state;
+            if (state.cancelled() != asio::cancellation_type::none)
+                co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The login was cancelled"));
+            co_return reply;
+        }
+
+        /**
          * @brief @p command, whose reply has to be a 2xx.
          */
         asio::awaitable<Result> require(ControlConnection& connection, Command command)
         {
             const auto verb = command.verb;
-            const auto reply = co_await connection.execute(std::move(command));
+            const auto reply = co_await ask(connection, std::move(command));
             if (!reply)
                 co_return std::unexpected(reply.error());
             if (!succeeded(*reply))
@@ -58,7 +72,7 @@ namespace FileTransferProtocol
          */
         asio::awaitable<Result> authenticate(ControlConnection& connection, Credentials const& credentials)
         {
-            const auto user = co_await connection.execute(Command{.verb = Verb::User, .argument = credentials.user});
+            const auto user = co_await ask(connection, Command{.verb = Verb::User, .argument = credentials.user});
             if (!user)
                 co_return std::unexpected(user.error());
             if (succeeded(*user))
@@ -69,7 +83,7 @@ namespace FileTransferProtocol
                 co_return std::unexpected(replyError(*user, Verb::User));
 
             const auto password =
-                co_await connection.execute(Command{.verb = Verb::Password, .argument = credentials.password});
+                co_await ask(connection, Command{.verb = Verb::Password, .argument = credentials.password});
             if (!password)
                 co_return std::unexpected(password.error());
             if (succeeded(*password))
@@ -98,7 +112,7 @@ namespace FileTransferProtocol
 
         asio::awaitable<std::expected<Features, RemoteIo::RemoteError>> askFeatures(ControlConnection& connection)
         {
-            const auto reply = co_await connection.execute(Command{.verb = Verb::Features});
+            const auto reply = co_await ask(connection, Command{.verb = Verb::Features});
             if (!reply)
                 co_return std::unexpected(reply.error());
             co_return Features::fromReply(*reply);
@@ -109,7 +123,7 @@ namespace FileTransferProtocol
          */
         asio::awaitable<std::expected<bool, RemoteIo::RemoteError>> askForUtf8(ControlConnection& connection)
         {
-            const auto reply = co_await connection.execute(Command{.verb = Verb::Options, .argument = "UTF8 ON"});
+            const auto reply = co_await ask(connection, Command{.verb = Verb::Options, .argument = "UTF8 ON"});
             if (!reply)
                 co_return std::unexpected(reply.error());
             co_return succeeded(*reply);
@@ -117,7 +131,7 @@ namespace FileTransferProtocol
 
         asio::awaitable<std::expected<std::string, RemoteIo::RemoteError>> askHome(ControlConnection& connection)
         {
-            const auto reply = co_await connection.execute(Command{.verb = Verb::PrintWorkingDirectory});
+            const auto reply = co_await ask(connection, Command{.verb = Verb::PrintWorkingDirectory});
             if (!reply)
                 co_return std::unexpected(reply.error());
             co_return parsePathReply(*reply, Verb::PrintWorkingDirectory);

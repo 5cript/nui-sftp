@@ -350,6 +350,13 @@ namespace FileTransferProtocol
         readNext();
 
         auto reply = co_await greeting->finalReply();
+        // A cancel that came with the greeting counts too, the next co_await would throw.
+        if (isCancelled(co_await asio::this_coro::cancellation_state))
+        {
+            auto cancelled = errorOf(RemoteErrorKind::Cancelled, "The connect was cancelled");
+            die(cancelled);
+            co_return std::unexpected(std::move(cancelled));
+        }
         if (!reply)
         {
             die(reply.error());
