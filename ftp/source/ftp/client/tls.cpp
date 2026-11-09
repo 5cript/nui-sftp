@@ -415,6 +415,8 @@ namespace FileTransferProtocol
             return std::unexpected(refused("the server name indication"));
         if (SSL_set1_host(handle.get(), settings.serverName.c_str()) != 1)
             return std::unexpected(refused("the name check"));
+        // RFC 6125 6.4.3 lets a client refuse "f*.example.com", browsers do.
+        SSL_set_hostflags(handle.get(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
         return handle;
     }
 
@@ -425,6 +427,11 @@ namespace FileTransferProtocol
             return std::unexpected(
                 errorOf(RemoteErrorKind::NoSecureConnection, "The connection has no certificate check")
             );
+        // The verify callback does not run for a resumed session, it would read as trusted by the authorities.
+        if (SSL_session_reused(handle) == 1)
+            return std::unexpected(errorOf(
+                RemoteErrorKind::NoSecureConnection, "The handshake resumed a session, it checked no certificate"
+            ));
         const CertificateHandle certificate{SSL_get1_peer_certificate(handle)};
         auto info = describeCertificate(certificate.get());
         if (!info)

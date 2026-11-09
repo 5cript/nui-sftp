@@ -69,7 +69,8 @@ namespace FileTransferProtocol::Test
             return key;
         }
 
-        std::expected<void, std::string> addExtension(X509V3_CTX& context, X509* certificate, int kind, char const* value)
+        std::expected<void, std::string>
+        addExtension(X509V3_CTX& context, X509* certificate, int kind, char const* value)
         {
             const Extension extension{X509V3_EXT_conf_nid(nullptr, &context, kind, value)};
             if (!extension || X509_add_ext(certificate, extension.get(), -1) != 1)
@@ -91,8 +92,7 @@ namespace FileTransferProtocol::Test
 
             X509_NAME* subject = X509_get_subject_name(certificate.get());
             const std::string commonName{request.commonName};
-            const bool valid =
-                X509_set_version(certificate.get(), X509_VERSION_3) == 1 &&
+            const bool valid = X509_set_version(certificate.get(), X509_VERSION_3) == 1 &&
                 ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), nextSerial++) == 1 &&
                 X509_gmtime_adj(
                     X509_getm_notBefore(certificate.get()),
@@ -104,13 +104,7 @@ namespace FileTransferProtocol::Test
                 ) != nullptr &&
                 X509_set_pubkey(certificate.get(), key) == 1 &&
                 X509_NAME_add_entry_by_txt(
-                    subject,
-                    "CN",
-                    MBSTRING_ASC,
-                    reinterpret_cast<unsigned char const*>(commonName.c_str()),
-                    -1,
-                    -1,
-                    0
+                    subject, "CN", MBSTRING_ASC, reinterpret_cast<unsigned char const*>(commonName.c_str()), -1, -1, 0
                 ) == 1 &&
                 X509_set_issuer_name(
                     certificate.get(), issuer ? X509_get_subject_name(issuer->certificate.get()) : subject
@@ -122,8 +116,7 @@ namespace FileTransferProtocol::Test
             X509V3_set_ctx(
                 &context, issuer ? issuer->certificate.get() : certificate.get(), certificate.get(), nullptr, nullptr, 0
             );
-            const auto extended =
-                request.names.empty()
+            const auto extended = request.names.empty()
                 ? addExtension(context, certificate.get(), NID_basic_constraints, "critical,CA:TRUE")
                       .and_then(
                           [&]()
@@ -195,9 +188,7 @@ namespace FileTransferProtocol::Test
                     const auto keyText = toPem(
                         [&key](BIO* memory)
                         {
-                            return PEM_write_bio_PrivateKey(
-                                memory, key.get(), nullptr, nullptr, 0, nullptr, nullptr
-                            );
+                            return PEM_write_bio_PrivateKey(memory, key.get(), nullptr, nullptr, 0, nullptr, nullptr);
                         }
                     );
                     if (!certificateText || !keyText)
@@ -225,14 +216,18 @@ namespace FileTransferProtocol::Test
                 .validUntil = -oneDay,
             };
             const Request wrongName{.commonName = "nui-sftp other host", .names = "DNS:other.invalid"};
+            const Request partialWildcard{.commonName = "nui-sftp partial wildcard", .names = "DNS:f*.nui-sftp.test"};
+            const Request wildcard{.commonName = "nui-sftp wildcard", .names = "DNS:*.nui-sftp.test"};
 
             TestPki pki{.authority = *authorityText};
-            const std::array<std::pair<CertifiedKey*, std::expected<CertifiedKey, std::string>>, 6> made{{
+            const std::array<std::pair<CertifiedKey*, std::expected<CertifiedKey, std::string>>, 8> made{{
                 {&pki.server, makeServer(server, &*authority)},
                 {&pki.otherServer, makeServer(server, &*authority)},
                 {&pki.selfSigned, makeServer(server, nullptr)},
                 {&pki.expired, makeServer(expired, &*authority)},
                 {&pki.wrongName, makeServer(wrongName, &*authority)},
+                {&pki.partialWildcard, makeServer(partialWildcard, &*authority)},
+                {&pki.wildcard, makeServer(wildcard, &*authority)},
                 {&pki.otherAuthority, makeServer(server, &*foreign)},
             }};
             for (auto const& [target, result] : made)

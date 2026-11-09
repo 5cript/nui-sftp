@@ -155,9 +155,9 @@ namespace FileTransferProtocol
     using SslSessionHandle = std::unique_ptr<SSL_SESSION, SslSessionDeleter>;
 
     /**
-     * @brief A handle for one client connection, ready for the handshake: the name check, SNI for a DNS name, and a
-     *        verify callback that never blocks. The callback keeps the certificate and the first verify failure, and
-     *        accepts a failed certificate only when its public key matches the pin.
+     * @brief A handle for one client connection, ready for the handshake: the name check without partial wildcards,
+     *        SNI for a DNS name, and a verify callback that never blocks. The callback keeps the certificate and the
+     * first verify failure, and accepts a failed certificate only when its public key matches the pin.
      *
      * @return A Failure naming the setting OpenSSL refused.
      */
@@ -166,8 +166,8 @@ namespace FileTransferProtocol
     /**
      * @brief Who vouched for the certificate of a completed handshake on @p handle.
      *
-     * @return NoSecureConnection when the handshake left no certificate behind, which the verify callback does not
-     *         allow.
+     * @return NoSecureConnection when the handshake resumed a session, which checks no certificate, or left no
+     *         certificate behind, which the verify callback does not allow.
      */
     std::expected<TrustedCertificate, RemoteIo::RemoteError> trustOf(SSL* handle);
 

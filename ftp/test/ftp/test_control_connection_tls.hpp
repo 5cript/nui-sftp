@@ -8,11 +8,15 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/read_until.hpp>
+#include <boost/asio/ssl/stream.hpp>
 #include <boost/asio/use_future.hpp>
 #include <gtest/gtest.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
+#include <openssl/ssl.h>
 #include <openssl/x509.h>
 
 #include <algorithm>
@@ -445,6 +449,68 @@ namespace FileTransferProtocol::Test
         const auto trusted = startTls(connection, settings(std::nullopt, "localhost"));
         ASSERT_TRUE(trusted) << trusted.error().toString();
         EXPECT_EQ(trusted->source, TrustSource::Authorities);
+    }
+
+    TEST_F(ControlConnectionTlsTests, WildcardNamesTheServer)
+    {
+        server_->addConnection(explicitTls({.certificate = tlsTestPki().wildcard}).expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto trusted = startTls(connection, settings(std::nullopt, "ftp.nui-sftp.test"));
+        ASSERT_TRUE(trusted) << trusted.error().toString();
+        EXPECT_EQ(trusted->source, TrustSource::Authorities);
+    }
+
+    TEST_F(ControlConnectionTlsTests, PartialWildcardDoesNotNameTheServer)
+    {
+        server_->addConnection(explicitTls({.certificate = tlsTestPki().partialWildcard}).expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto trusted = startTls(connection, settings(std::nullopt, "ftp.nui-sftp.test"));
+        ASSERT_FALSE(trusted);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::TrustRequired) << trusted.error().toString();
+    }
+
+    TEST_F(ControlConnectionTlsTests, ResumedHandshakeIsNotTrusted)
+    {
+        ASSERT_NO_FATAL_FAILURE(restartServer({.implicitTls = true}));
+        server_->addConnection(Script{}.reply("220 Ready").expect("NOOP").reply("200 Fine").expectDisconnect());
+        server_->addConnection(Script{}.reply("220 Ready").expectDisconnect());
+        const auto connection = makeConnection();
+        const auto tls = settings();
+        expectReply(connectWithImplicitTls(connection, tls), 220);
+        // The reply was read after the TLS 1.3 tickets.
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        const auto session =
+            run(connection,
+                [connection]() -> asio::awaitable<std::optional<SslSessionHandle>>
+                {
+                    co_return connection->sessionForData();
+                });
+        ASSERT_TRUE(session);
+
+        auto handle = makeTlsHandle(tls);
+        ASSERT_TRUE(handle) << handle.error().toString();
+        ASSERT_EQ(SSL_set_session(handle->get(), session->get()), 1);
+        asio::io_context context{};
+        asio::ip::tcp::socket socket{context};
+        socket.connect(endpoints().front());
+        asio::ssl::stream<asio::ip::tcp::socket&> stream{socket, handle->release()};
+        boost::system::error_code error{};
+        stream.handshake(asio::ssl::stream_base::client, error);
+        ASSERT_FALSE(error) << error.message();
+        ASSERT_EQ(SSL_session_reused(stream.native_handle()), 1);
+        const auto trusted = trustOf(stream.native_handle());
+        ASSERT_FALSE(trusted);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << trusted.error().toString();
+
+        std::string greeting{};
+        asio::read_until(stream, asio::dynamic_buffer(greeting), "\r\n", error);
+        EXPECT_TRUE(greeting.starts_with("220")) << greeting;
+        // Sends close_notify without waiting for the server's.
+        SSL_set_shutdown(stream.native_handle(), SSL_RECEIVED_SHUTDOWN);
+        stream.shutdown(error);
+        socket.close();
     }
 
     /**
