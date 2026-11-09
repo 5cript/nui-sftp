@@ -681,9 +681,7 @@ namespace FileTransferProtocol::Test
     {
         // The data connection behind the pause resumes nothing. Bytes of the one before it prove no session reuse.
         auto script = securedPrefix();
-        retrieveWith(
-            script, DataPlan{}.tls({.requireResumption = true}).stallAfter("abc"), "150 Opening (7 bytes)"
-        )
+        retrieveWith(script, DataPlan{}.tls({.requireResumption = true}).stallAfter("abc"), "150 Opening (7 bytes)")
             .beginData()
             .abortSequence(AbortReplies::ProftpdTlsLike)
             .expect("PWD")

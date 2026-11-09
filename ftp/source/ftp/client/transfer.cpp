@@ -317,9 +317,8 @@ namespace FileTransferProtocol
         if (!dataEnded_)
             co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The download's data did not end yet"));
 
-        auto reply = co_await finalReplyBehindData(
-            *session_.control, *retrieve_, earlyFinalReply_, options_.finalReplyTimeout
-        );
+        auto reply =
+            co_await finalReplyBehindData(*session_.control, *retrieve_, earlyFinalReply_, options_.finalReplyTimeout);
         if (!reply)
         {
             // Its deadline ended the control connection. All the data that should come is proof enough.
