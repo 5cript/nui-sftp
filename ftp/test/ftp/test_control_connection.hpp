@@ -1329,8 +1329,10 @@ namespace FileTransferProtocol::Test
                 .reply("550 Not allowed")
                 .stall()
         );
+        // The drain has its own limit, the command timeout would outlast the wait for the end.
         auto options = relaxedOptions();
-        options.commandTimeout = 500ms;
+        options.commandTimeout = 60s;
+        options.drainTimeout = 500ms;
         const auto connection = makeConnection(options);
         connect(connection);
         const auto transferEnd =
