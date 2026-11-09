@@ -191,4 +191,14 @@ namespace FileTransferProtocol
             .message = text,
         };
     }
+
+    bool tellsOfMissingSessionReuse(Reply const& reply)
+    {
+        if (reply.code == 522)
+            return true;
+        if (reply.code != 425 && reply.code != 450)
+            return false;
+        const auto text = reply.text();
+        return mentionsAny(text, {"session", "resum"}) || aLineEndsWithAny(text, {"operation not permitted"});
+    }
 }

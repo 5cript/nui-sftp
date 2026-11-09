@@ -40,18 +40,18 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief A refused transfer after a full TLS handshake on the data connection: vsftpd answers 522, proftpd 425
-         *        and others 450 when they require the control connection's session. A handshake that a refusal cut
-         *        short proves nothing.
+         * @brief The error of a refused transfer. A refusal that tells of a missing session reuse, behind a full TLS
+         *        handshake on the data connection that resumed nothing, is NoSecureConnection and ends the login: its
+         *        session would not resume for the next transfer either. A handshake that a refusal cut short proves
+         *        nothing.
          */
-        bool refusedForSessionReuse(Reply const& reply, DataConnection const& data)
-        {
-            return data.secured() && !data.resumed() && (reply.code == 522 || reply.code == 425 || reply.code == 450);
-        }
-
-        RemoteIo::RemoteError sessionReuseRequired(Reply const& reply, Verb verb)
+        RemoteIo::RemoteError
+        refusalOf(Reply const& reply, Verb verb, DataConnection const& data, ControlConnection& control)
         {
             auto error = replyError(reply, verb);
+            if (!data.secured() || data.resumed() || !tellsOfMissingSessionReuse(reply))
+                return error;
+            control.close();
             error.kind = RemoteErrorKind::NoSecureConnection;
             error.message = fmt::format(
                 "The server requires data connections to resume the control connection's TLS session: {}", error.message
@@ -200,14 +200,7 @@ namespace FileTransferProtocol
                 co_return std::unexpected(std::move(first).error());
             }
             if (refused(*first))
-            {
-                if (refusedForSessionReuse(*first, *data))
-                {
-                    control->close();
-                    co_return std::unexpected(sessionReuseRequired(*first, verb));
-                }
-                co_return std::unexpected(replyError(*first, verb));
-            }
+                co_return std::unexpected(refusalOf(*first, verb, *data, *control));
             if (!secured)
             {
                 // The server went on, the data must not flow unprotected.
@@ -325,15 +318,7 @@ namespace FileTransferProtocol
             co_return std::unexpected(reply.error());
         }
         if (!succeeded(*reply))
-        {
-            // A server that wants session reuse refuses before any data.
-            if (bytes_ == 0u && refusedForSessionReuse(*reply, *data_))
-            {
-                session_.control->close();
-                co_return std::unexpected(sessionReuseRequired(*reply, Verb::Retrieve));
-            }
-            co_return std::unexpected(replyError(*reply, Verb::Retrieve));
-        }
+            co_return std::unexpected(refusalOf(*reply, Verb::Retrieve, *data_, *session_.control));
         co_return co_await checkSize(std::move(*reply));
     }
 
@@ -565,14 +550,7 @@ namespace FileTransferProtocol
             co_return std::unexpected(reply.error());
         }
         if (!succeeded(*reply))
-        {
-            if (bytes_ == 0u && refusedForSessionReuse(*reply, *data_))
-            {
-                session_.control->close();
-                co_return std::unexpected(sessionReuseRequired(*reply, verb()));
-            }
-            co_return std::unexpected(replyError(*reply, verb()));
-        }
+            co_return std::unexpected(refusalOf(*reply, verb(), *data_, *session_.control));
         co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply)};
     }
 
@@ -593,7 +571,7 @@ namespace FileTransferProtocol
         {
             aborted_ = true;
             data_->reset();
-            return replyError(*answer, verb());
+            return refusalOf(*answer, verb(), *data_, *session_.control);
         }
         abort();
         return dataError;

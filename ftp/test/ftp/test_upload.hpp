@@ -371,6 +371,23 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
     }
 
+    TEST_F(UploadTests, TlsUploadRefusedForSessionReuseIsNoSecureConnection)
+    {
+        // The bytes went out before the refusal came, they prove no session reuse either.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls({.refuseResumption = true}).expectUpload(1024u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .reply("522 SSL connection failed: session reuse required")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        expectUploadError(
+            upload(connection, {.path = "file"}, "content", tls), RemoteIo::RemoteErrorKind::NoSecureConnection
+        );
+        EXPECT_EQ(stateOf(connection), ControlState::Closed);
+    }
+
     TEST_F(UploadTests, TlsUploadWhoseServerEndsWithoutCloseNotifyIsComplete)
     {
         auto script = securedPrefix();

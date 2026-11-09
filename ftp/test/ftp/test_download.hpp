@@ -562,6 +562,36 @@ namespace FileTransferProtocol::Test
             script.expect("NOOP").reply("200 Fine");
             return script;
         }
+
+        struct RefusedDownload
+        {
+            DownloadResult result{};
+            ControlState state{};
+        };
+
+        /**
+         * @brief A download whose data connection made a full handshake and resumed nothing, and whose server answers
+         *        @p refusal behind the 150.
+         */
+        RefusedDownload downloadRefusedWith(std::string_view refusal)
+        {
+            auto script = securedPrefix();
+            retrieveWith(script, DataPlan{}.tls({.refuseResumption = true}), "150 Here it comes")
+                .beginData()
+                .awaitData()
+                .reply(refusal)
+                .expectDisconnect();
+            const auto tls = settings();
+            const auto connection = securedWith(std::move(script), tls);
+            auto result = download(connection, {.path = "file"}, tls);
+            return RefusedDownload{.result = std::move(result), .state = stateOf(connection)};
+        }
+
+        void expectSessionReuseRequired(RefusedDownload const& refused)
+        {
+            expectDownloadError(refused.result, RemoteIo::RemoteErrorKind::NoSecureConnection);
+            EXPECT_EQ(refused.state, ControlState::Closed);
+        }
     };
 
     TEST_F(DownloadTlsTests, DownloadResumesTheControlSession)
@@ -611,15 +641,73 @@ namespace FileTransferProtocol::Test
 
     TEST_F(DownloadTlsTests, RefusalForAMissingSessionReuseIsNoSecureConnection)
     {
+        // What vsftpd sends.
+        expectSessionReuseRequired(downloadRefusedWith("522 SSL connection failed: session reuse required"));
+    }
+
+    TEST_F(DownloadTlsTests, RefusalOfProftpdForAMissingSessionReuseIsNoSecureConnection)
+    {
+        expectSessionReuseRequired(downloadRefusedWith("425 Unable to build data connection: Operation not permitted"));
+    }
+
+    TEST_F(DownloadTlsTests, RefusalThatNamesTheSessionIsNoSecureConnection)
+    {
+        // What FileZilla Server sends.
+        expectSessionReuseRequired(downloadRefusedWith(
+            "450 TLS session of data connection has not resumed or the session does not match the control connection"
+        ));
+    }
+
+    TEST_F(DownloadTlsTests, OtherRefusalBehindAFullDataHandshakeKeepsTheLogin)
+    {
+        // No session was resumed, but the server does not ask for that: its refusal has another reason.
+        const auto refused = downloadRefusedWith("450 Requested file action not taken.");
+        ASSERT_FALSE(refused.result);
+        EXPECT_EQ(refused.result.error().protocolCode, 450) << refused.result.error().toString();
+        EXPECT_NE(refused.result.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection)
+            << refused.result.error().toString();
+        EXPECT_EQ(refused.state, ControlState::Open);
+    }
+
+    TEST_F(DownloadTlsTests, ContinuedDownloadRefusedForSessionReuseIsNoSecureConnection)
+    {
+        // The data connection behind the pause resumes nothing. Bytes of the one before it prove no session reuse.
         auto script = securedPrefix();
-        retrieveWith(script, DataPlan{}.tls({.refuseResumption = true}), "150 Here it comes")
+        retrieveWith(
+            script, DataPlan{}.tls({.requireResumption = true}).stallAfter("abc"), "150 Opening (7 bytes)"
+        )
+            .beginData()
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .checkpoint("drained")
+            .expect("EPSV")
+            .passive(DataPlan{}.tls({.refuseResumption = true}))
+            .expect("REST", "3")
+            .reply("350 Restarting at 3.")
+            .expect("RETR", "file")
+            .reply("150 Opening (4 bytes)")
             .beginData()
             .awaitData()
             .reply("522 SSL connection failed: session reuse required")
             .expectDisconnect();
         const auto tls = settings();
         const auto connection = securedWith(std::move(script), tls);
-        expectDownloadError(download(connection, {.path = "file"}, tls), RemoteIo::RemoteErrorKind::NoSecureConnection);
+        auto options = quickTransferOptions();
+        options.pauseDropAfter = 200ms;
+        auto session = restartingSession(connection);
+        session.tls = tls;
+        auto const download = startDownload(session, options);
+        ASSERT_TRUE(download);
+        const auto first = readUpTo(connection, download, 3u);
+        ASSERT_TRUE(first) << first.error().toString();
+        ASSERT_TRUE(server_->waitForCheckpoint("drained"));
+        const auto rest = readUpTo(connection, download, 100u);
+        ASSERT_TRUE(rest) << rest.error().toString();
+        EXPECT_EQ(rest->content, "");
+        const auto finished = finishDownload(connection, download);
+        ASSERT_FALSE(finished);
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << finished.error().toString();
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
     }
 
