@@ -60,6 +60,14 @@ namespace FileTransferProtocol::Test
                 .reply("200 PROT now Private.");
         }
 
+        /**
+         * @brief Names a case of a reply parameter by its code.
+         */
+        std::string nameOfReply(::testing::TestParamInfo<std::string_view> const& info)
+        {
+            return fmt::format("Reply{}", info.param.substr(0u, 3u));
+        }
+
         std::vector<std::string> const& plainCommands()
         {
             static const std::vector<std::string> commands{
@@ -202,16 +210,32 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
-    TEST_F(LoginTests, UserAloneMayLogIn)
+    class LoginWithoutPasswordTests
+        : public LoginTests
+        , public ::testing::WithParamInterface<std::string_view>
+    {};
+
+    TEST_P(LoginWithoutPasswordTests, UserAloneMayLogIn)
     {
         Script script{};
-        script.reply("220 Ready").expect("USER", "user").reply("230 Logged in without a password");
+        script.reply("220 Ready").expect("USER", "user").reply(GetParam());
         server_->addConnection(afterAuthentication(script).expectDisconnect());
         const auto connection = makeConnection();
         const auto result = login(connection, LoginOptions{.credentials = testCredentials()});
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_EQ(commandsAfterDisconnect(connection).at(1u), "FEAT");
     }
+
+    // 232 is a login the security exchange authorized, RFC 2228 4.
+    INSTANTIATE_TEST_SUITE_P(
+        UserReplies,
+        LoginWithoutPasswordTests,
+        ::testing::Values(
+            std::string_view{"230 Logged in without a password"},
+            std::string_view{"232 User logged in, authorized by security data exchange"}
+        ),
+        nameOfReply
+    );
 
     TEST_F(LoginTests, PasswordAnsweredWith202IsALogin)
     {
@@ -321,6 +345,16 @@ namespace FileTransferProtocol::Test
                 .reply("530 Sorry, the maximum number of clients (3) from your host are already connected.");
             Script unknownUser{};
             unknownUser.reply("220 Ready").expect("USER", "user").reply("530 This FTP server is anonymous only.");
+            Script banAfterPassword{};
+            banAfterPassword.reply("220 Ready")
+                .expect("USER", "user")
+                .reply("331 Password required")
+                .expect("PASS", "password")
+                .reply("421 Too many failed login attempts, closing control connection.");
+            Script oneTimePassword{};
+            oneTimePassword.reply("220 Ready")
+                .expect("USER", "user")
+                .reply("336 Username okay, need password. Challenge is \"otp-md5 499 ke1234\"");
             Script vsftpdLimit{};
             vsftpdLimit.reply("421 There are too many connections from your internet address.");
             Script vsftpdDemandsTls{};
@@ -346,6 +380,12 @@ namespace FileTransferProtocol::Test
                     .script = proftpdLimit,
                     .kind = RemoteIo::RemoteErrorKind::ConnectionLimit},
                 {.name = "UserRefused", .script = unknownUser, .kind = RemoteIo::RemoteErrorKind::AuthenticationFailed},
+                {.name = "BanAfterFailedLogins",
+                    .script = banAfterPassword,
+                    .kind = RemoteIo::RemoteErrorKind::AuthenticationFailed},
+                {.name = "OneTimePasswordChallenge",
+                    .script = oneTimePassword,
+                    .kind = RemoteIo::RemoteErrorKind::ProtocolViolation},
                 {.name = "ConnectionLimitAtTheGreeting",
                     .script = vsftpdLimit,
                     .kind = RemoteIo::RemoteErrorKind::ConnectionLimit},
@@ -452,10 +492,7 @@ namespace FileTransferProtocol::Test
         FeatReplies,
         LoginWithoutFeaturesTests,
         ::testing::Values(std::string_view{"502 Command not implemented"}, std::string_view{"451 Local error"}),
-        [](::testing::TestParamInfo<std::string_view> const& info)
-        {
-            return fmt::format("Reply{}", info.param.substr(0u, 3u));
-        }
+        nameOfReply
     );
 
     TEST_F(LoginTests, TlsWithoutItsSettingsSendsNothing)
