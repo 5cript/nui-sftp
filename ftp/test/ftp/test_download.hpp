@@ -168,6 +168,21 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        std::expected<void, RemoteIo::RemoteError> seekTo(
+            std::shared_ptr<ControlConnection> const& connection,
+            std::shared_ptr<Download> const& download,
+            std::uint64_t position
+        )
+        {
+            return run(
+                connection,
+                [download, position]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    co_return download->seek(position);
+                }
+            );
+        }
+
         std::expected<TransferResult, RemoteIo::RemoteError>
         finishDownload(std::shared_ptr<ControlConnection> const& connection, std::shared_ptr<Download> const& download)
         {
@@ -407,7 +422,108 @@ namespace FileTransferProtocol::Test
         const auto finished = finishDownload(connection, download);
         ASSERT_FALSE(finished);
         EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << finished.error().toString();
+        const auto sought = seekTo(connection, download, 0u);
+        ASSERT_FALSE(sought);
+        EXPECT_EQ(sought.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << sought.error().toString();
         expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(DownloadTests, SeekToTheReachedPositionCostsNothing)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(script, DataPlan{}.send("abcdefg"), "150 Opening BINARY mode data connection for file (7 bytes).")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto const download = startDownload(
+            {.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()}, quickTransferOptions()
+        );
+        ASSERT_TRUE(download);
+        ASSERT_TRUE(seekTo(connection, download, 0u));
+        const auto first = readUpTo(connection, download, 3u);
+        ASSERT_TRUE(first) << first.error().toString();
+        ASSERT_TRUE(seekTo(connection, download, first->content.size()));
+        const auto rest = readUpTo(connection, download, 100u);
+        ASSERT_TRUE(rest) << rest.error().toString();
+        EXPECT_EQ(first->content + rest->content, "abcdefg");
+        const auto finished = finishDownload(connection, download);
+        ASSERT_TRUE(finished) << finished.error().toString();
+        EXPECT_EQ(finished->bytes, 7u);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"EPSV", "RETR file"}));
+    }
+
+    TEST_F(DownloadTests, SeekBackStartsAgainWithRestOnTheSameLogin)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.stallAfter("abcde"), "150 Opening BINARY mode data connection for file (7 bytes)."
+        )
+            .beginData()
+            .abortSequence(AbortReplies::ProftpdPlainLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("EPSV")
+            .passive(DataPlan{}.send("cdefg"))
+            .expect("REST", "2")
+            .reply("350 Restarting at 2.")
+            .expect("RETR", "file")
+            .reply("150 Opening BINARY mode data connection for file (5 bytes).")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto const download = startDownload(
+            {.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()}, quickTransferOptions()
+        );
+        ASSERT_TRUE(download);
+        const auto first = readUpTo(connection, download, 5u);
+        ASSERT_TRUE(first) << first.error().toString();
+        EXPECT_EQ(first->content, "abcde");
+        ASSERT_TRUE(seekTo(connection, download, 2u));
+        const auto rest = readUpTo(connection, download, 100u);
+        ASSERT_TRUE(rest) << rest.error().toString();
+        EXPECT_EQ(rest->content, "cdefg");
+        // The 7 bytes the first reply announced are the whole file, 5 of them lie behind the new position.
+        const auto finished = finishDownload(connection, download);
+        ASSERT_TRUE(finished) << finished.error().toString();
+        EXPECT_EQ(finished->bytes, 5u);
+    }
+
+    TEST_F(DownloadTests, SeekToTheStartSendsNoRest)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.stallAfter("abc"), "150 Opening BINARY mode data connection for file (7 bytes)."
+        )
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory);
+        retrieveWith(script, DataPlan{}.send("abcdefg"), "150 Opening BINARY mode data connection for file (7 bytes).")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto const download = startDownload(
+            {.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()}, quickTransferOptions()
+        );
+        ASSERT_TRUE(download);
+        const auto first = readUpTo(connection, download, 3u);
+        ASSERT_TRUE(first) << first.error().toString();
+        ASSERT_TRUE(seekTo(connection, download, 0u));
+        const auto whole = readUpTo(connection, download, 100u);
+        ASSERT_TRUE(whole) << whole.error().toString();
+        EXPECT_EQ(whole->content, "abcdefg");
+        const auto finished = finishDownload(connection, download);
+        ASSERT_TRUE(finished) << finished.error().toString();
+        EXPECT_EQ(finished->bytes, 7u);
     }
 
     TEST_F(DownloadTests, PausedDownloadDropsItsDataAndContinuesWithRest)

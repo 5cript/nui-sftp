@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace FileTransferProtocol
 {
@@ -56,7 +57,7 @@ namespace FileTransferProtocol
 
     struct TransferResult
     {
-        /** @brief Bytes of this transfer, without the offset it started at. */
+        /** @brief Bytes of this transfer, without the offset it started or a download was sought at. */
         std::uint64_t bytes{0u};
         /**
          * @brief Nothing when no final reply came in time and the size showed the data complete. The control
@@ -140,6 +141,15 @@ namespace FileTransferProtocol
          */
         void abort();
 
+        /**
+         * @brief Continues the download at @p position of the file. The position it reached costs nothing. Any other
+         *        one ends the running transfer like abort(), and the next read starts it again there, with REST unless
+         *        @p position is 0, on the same control connection. Not while a read is under way.
+         *
+         * @return Cancelled after abort().
+         */
+        std::expected<void, RemoteIo::RemoteError> seek(std::uint64_t position);
+
       private:
         /**
          * @brief readSome() without its pause bookkeeping: a transfer dropped for a pause starts again first, the end
@@ -148,12 +158,12 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
         readData(boost::asio::mutable_buffer buffer);
         /**
-         * @brief Bytes this transfer should bring, from the caller or the announcement.
+         * @brief Bytes this transfer should bring from its offset on, from the caller's size or the announcement.
          */
         std::optional<std::uint64_t> expectedBytes() const;
         boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> checkSize(Reply finalReply);
         /**
-         * @brief Starts the transfer again at the bytes read so far, after a drop for a pause.
+         * @brief Starts the transfer again at the bytes read so far, after a drop for a pause or a seek.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> resume();
         /**
@@ -169,6 +179,10 @@ namespace FileTransferProtocol
          * @brief Closes the data connection of a paused download and sends ABOR, the login stays.
          */
         void dropForPause();
+        /**
+         * @brief Closes the data connection and sends ABOR, the next read starts the transfer again.
+         */
+        void drop(std::string_view why);
 
         TransferSession session_;
         DownloadRequest request_;
@@ -185,7 +199,7 @@ namespace FileTransferProtocol
         bool reading_{false};
         bool dataEnded_{false};
         bool aborted_{false};
-        /** @brief Dropped for a pause, the next read starts the transfer again. */
+        /** @brief Dropped for a pause or a seek, the next read starts the transfer again. */
         bool dropped_{false};
     };
 
