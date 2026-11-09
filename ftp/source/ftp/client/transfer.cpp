@@ -251,6 +251,8 @@ namespace FileTransferProtocol
         if (download->request_.offset == 0u)
             download->announced_ = parseAnnouncedSize(started->first);
         download->earlyFinalReply_ = finalReplyOf(std::move(started->first));
+        // The wait for the first read is a pause as well.
+        download->armPauseDrop();
         co_return download;
     }
 

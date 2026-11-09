@@ -145,7 +145,7 @@ namespace FileTransferProtocol
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> resume();
         /**
-         * @brief Notes a read and starts the pause timer unless it runs already.
+         * @brief Notes the start or a read and starts the pause timer unless it runs already.
          */
         void armPauseDrop();
         void waitForPause(std::chrono::steady_clock::duration duration);

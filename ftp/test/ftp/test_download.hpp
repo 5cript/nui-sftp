@@ -103,6 +103,74 @@ namespace FileTransferProtocol::Test
             ASSERT_FALSE(result) << "downloaded '" << result->content << "'";
             EXPECT_EQ(result.error().kind, kind) << result.error().toString();
         }
+
+        /**
+         * @brief A session whose server continues transfers with REST, so a paused download may drop its data.
+         */
+        static TransferSession restartingSession(std::shared_ptr<ControlConnection> const& connection)
+        {
+            return TransferSession{
+                .control = connection,
+                .passiveChoice = std::make_shared<PassiveChoice>(),
+                .restartStream = true,
+            };
+        }
+
+        /**
+         * @brief The download of "file" once it started, nothing read yet.
+         */
+        std::shared_ptr<Download> startDownload(TransferSession const& session, TransferOptions const& options)
+        {
+            return run(
+                session.control,
+                [session, options]() -> asio::awaitable<std::shared_ptr<Download>>
+                {
+                    auto started = co_await Download::start(session, {.path = "file"}, options);
+                    co_return started ? *started : nullptr;
+                }
+            );
+        }
+
+        /**
+         * @brief Reads until @p size bytes came or the data ended.
+         */
+        DownloadResult readUpTo(
+            std::shared_ptr<ControlConnection> const& connection,
+            std::shared_ptr<Download> const& download,
+            std::size_t size
+        )
+        {
+            return run(
+                connection,
+                [download, size]() -> asio::awaitable<DownloadResult>
+                {
+                    DownloadOutcome outcome{};
+                    std::array<char, 16> buffer{};
+                    std::expected<std::size_t, RemoteIo::RemoteError> read = std::size_t{1u};
+                    while (read && *read > 0u && outcome.content.size() < size)
+                    {
+                        read = co_await download->readSome(asio::buffer(buffer));
+                        if (read)
+                            outcome.content.append(buffer.data(), *read);
+                    }
+                    if (!read)
+                        co_return std::unexpected(read.error());
+                    co_return outcome;
+                }
+            );
+        }
+
+        std::expected<TransferResult, RemoteIo::RemoteError>
+        finishDownload(std::shared_ptr<ControlConnection> const& connection, std::shared_ptr<Download> const& download)
+        {
+            return run(
+                connection,
+                [download]() -> asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>>
+                {
+                    co_return co_await download->finish();
+                }
+            );
+        }
     };
 
     TEST_F(DownloadTests, DownloadsTheWholeFile)
@@ -323,54 +391,49 @@ namespace FileTransferProtocol::Test
         const auto connection = plainConnection(std::move(script));
         auto options = quickTransferOptions();
         options.pauseDropAfter = 200ms;
-        const TransferSession session{
-            .control = connection,
-            .passiveChoice = std::make_shared<PassiveChoice>(),
-            .restartStream = true,
-        };
-        auto const download =
-            run(connection,
-                [session, options]() -> asio::awaitable<std::shared_ptr<Download>>
-                {
-                    auto started = co_await Download::start(session, {.path = "file"}, options);
-                    co_return started ? *started : nullptr;
-                });
+        auto const download = startDownload(restartingSession(connection), options);
         ASSERT_TRUE(download);
-        const auto readUpTo = [&](std::size_t size)
-        {
-            return run(
-                connection,
-                [download, size]() -> asio::awaitable<DownloadResult>
-                {
-                    DownloadOutcome outcome{};
-                    std::array<char, 16> buffer{};
-                    std::expected<std::size_t, RemoteIo::RemoteError> read = std::size_t{1u};
-                    while (read && *read > 0u && outcome.content.size() < size)
-                    {
-                        read = co_await download->readSome(asio::buffer(buffer));
-                        if (read)
-                            outcome.content.append(buffer.data(), *read);
-                    }
-                    if (!read)
-                        co_return std::unexpected(read.error());
-                    co_return outcome;
-                }
-            );
-        };
-        const auto first = readUpTo(3u);
+        const auto first = readUpTo(connection, download, 3u);
         ASSERT_TRUE(first) << first.error().toString();
         EXPECT_EQ(first->content, "abc");
         // Nobody reads now, the download drops its data connection and the control connection drains.
         ASSERT_TRUE(server_->waitForCheckpoint("drained"));
-        const auto rest = readUpTo(100u);
+        const auto rest = readUpTo(connection, download, 100u);
         ASSERT_TRUE(rest) << rest.error().toString();
         EXPECT_EQ(rest->content, "rest");
-        const auto finished =
-            run(connection,
-                [download]() -> asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>>
-                {
-                    co_return co_await download->finish();
-                });
+        const auto finished = finishDownload(connection, download);
+        ASSERT_TRUE(finished) << finished.error().toString();
+        EXPECT_EQ(finished->bytes, 7u);
+    }
+
+    TEST_F(DownloadTests, DownloadNobodyReadsDropsItsDataAndStartsOver)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.stallAfter("abc"), "150 Opening BINARY mode data connection for file (7 bytes)."
+        )
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .checkpoint("drained");
+        // Nothing was read, so no REST goes out.
+        retrieveWith(script, DataPlan{}.send("abcdefg"), "150 Opening BINARY mode data connection for file (7 bytes).")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto options = quickTransferOptions();
+        options.pauseDropAfter = 200ms;
+        auto const download = startDownload(restartingSession(connection), options);
+        ASSERT_TRUE(download);
+        ASSERT_TRUE(server_->waitForCheckpoint("drained"));
+        const auto whole = readUpTo(connection, download, 100u);
+        ASSERT_TRUE(whole) << whole.error().toString();
+        EXPECT_EQ(whole->content, "abcdefg");
+        const auto finished = finishDownload(connection, download);
         ASSERT_TRUE(finished) << finished.error().toString();
         EXPECT_EQ(finished->bytes, 7u);
     }
