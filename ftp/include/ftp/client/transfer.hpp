@@ -23,6 +23,12 @@ namespace FileTransferProtocol
     /**
      * @brief What a transfer takes from its session: the logged-in control connection, the passive choice its
      *        connections share, the TLS settings of the login when the data is protected (PROT P).
+     *
+     * The control connection is the transfer's alone from start() until finish() returned or the transfer is gone,
+     * nothing else may send commands on it meanwhile. EPSV or PASV, REST and the transfer command belong together: a
+     * command between them would take the passive port (RFC 1123 4.1.2.6) or the restart offset (RFC 3659 5.3), and
+     * a download that continues after a pause sends all of them again from readSome(). Nothing enforces this, the
+     * owner of the connection hands it to one transfer at a time.
      */
     struct TransferSession
     {
