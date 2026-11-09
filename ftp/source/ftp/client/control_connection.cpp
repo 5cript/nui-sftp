@@ -3,6 +3,7 @@
 #include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
 #include <log/log.hpp>
+#include "client_support.hpp"
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/buffer.hpp>
@@ -29,20 +30,12 @@ namespace FileTransferProtocol
         namespace asio = boost::asio;
         using Clock = std::chrono::steady_clock;
         using RemoteIo::RemoteErrorKind;
-
-        constexpr auto useTuple = asio::as_tuple(asio::use_awaitable);
+        using Detail::errorOf;
+        using Detail::isCancelled;
+        using Detail::useTuple;
 
         /** @brief The reply of PWD, the marker behind ABOR. No reply to a transfer or to ABOR has this code. */
         constexpr int markerReplyCode = 257;
-
-        RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
-        {
-            return RemoteIo::RemoteError{
-                .kind = kind,
-                .protocol = RemoteIo::Protocol::Ftp,
-                .message = std::move(message),
-            };
-        }
 
         RemoteIo::RemoteError transportError(std::string_view operation, boost::system::error_code error)
         {
@@ -123,11 +116,6 @@ namespace FileTransferProtocol
             auto error = replyError(reply, Verb::Authenticate);
             error.message = fmt::format("The server refused AUTH TLS: {}", error.message);
             return error;
-        }
-
-        bool isCancelled(asio::cancellation_state const& state)
-        {
-            return state.cancelled() != asio::cancellation_type::none;
         }
     }
 

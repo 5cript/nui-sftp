@@ -172,6 +172,13 @@ namespace FileTransferProtocol
     std::expected<TrustedCertificate, RemoteIo::RemoteError> trustOf(SSL* handle);
 
     /**
+     * @brief The SHA-256 of the certificate the peer presented on @p handle, of the whole certificate in DER.
+     *
+     * @return Nothing without a certificate, or when OpenSSL cannot hash it.
+     */
+    std::optional<Sha256Digest> peerCertificateDigest(SSL* handle);
+
+    /**
      * @brief Why a handshake on @p handle failed: TrustRequired when the verify callback refused the certificate,
      *        otherwise NoSecureConnection that says whether it timed out (@p timedOut), the stream ended or what
      *        OpenSSL reported.

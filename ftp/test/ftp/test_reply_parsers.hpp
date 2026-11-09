@@ -332,4 +332,32 @@ namespace FileTransferProtocol::Test
             expectUnreadable(workingDirectoryOf(replyOf(257, text)), 257);
         }
     }
+
+    TEST(ReplyParserTests, AnnouncedSizeOfATransfer)
+    {
+        EXPECT_EQ(
+            parseAnnouncedSize(
+                Reply{.code = 150, .lines = {"150 Opening BINARY mode data connection for big.bin (16384 bytes)."}}
+            ),
+            std::optional<std::uint64_t>{16384u}
+        );
+        EXPECT_EQ(
+            parseAnnouncedSize(
+                Reply{.code = 150, .lines = {"150 Opening BINARY mode data connection for (x) (0 bytes)"}}
+            ),
+            std::optional<std::uint64_t>{0u}
+        );
+        EXPECT_EQ(
+            parseAnnouncedSize(
+                Reply{.code = 150, .lines = {"150 Opening data connection for f (18446744073709551615 bytes)"}}
+            ),
+            std::optional<std::uint64_t>{18446744073709551615u}
+        );
+        EXPECT_FALSE(parseAnnouncedSize(Reply{.code = 150, .lines = {"150 Here it comes."}}));
+        EXPECT_FALSE(parseAnnouncedSize(Reply{.code = 150, .lines = {"150 Opening for f (12x bytes)"}}));
+        EXPECT_FALSE(
+            parseAnnouncedSize(Reply{.code = 150, .lines = {"150 Opening for f (18446744073709551616 bytes)"}})
+        );
+        EXPECT_FALSE(parseAnnouncedSize(Reply{.code = 150, .lines = {"150 Opening for f ( bytes)"}}));
+    }
 }

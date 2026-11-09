@@ -1,7 +1,7 @@
 #include <ftp/client/login.hpp>
-#include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
+#include "client_support.hpp"
 
 #include <boost/asio/this_coro.hpp>
 
@@ -13,21 +13,9 @@ namespace FileTransferProtocol
     {
         namespace asio = boost::asio;
         using RemoteIo::RemoteErrorKind;
+        using Detail::errorOf;
+        using Detail::succeeded;
         using Result = std::expected<void, RemoteIo::RemoteError>;
-
-        RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
-        {
-            return RemoteIo::RemoteError{
-                .kind = kind,
-                .protocol = RemoteIo::Protocol::Ftp,
-                .message = std::move(message),
-            };
-        }
-
-        bool succeeded(Reply const& reply)
-        {
-            return classifyReply(reply.code) == ReplyClass::PositiveCompletion;
-        }
 
         /**
          * @brief Runs @p command. A cancel that came with the reply counts too, the next co_await would throw.

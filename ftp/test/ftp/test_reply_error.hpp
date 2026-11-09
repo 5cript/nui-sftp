@@ -92,6 +92,26 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(kindOf(550, "SSL/TLS required on the data channel", Verb::Retrieve), RemoteErrorKind::Failure);
     }
 
+    TEST(ReplyErrorTests, RefusalsThatTellOfAMissingSessionReuse)
+    {
+        const auto tells = [](int code, std::string_view text)
+        {
+            return tellsOfMissingSessionReuse(Reply{.code = code, .lines = {fmt::format("{} {}", code, text)}});
+        };
+        EXPECT_TRUE(tells(522, "SSL connection failed: session reuse required"));
+        EXPECT_TRUE(tells(425, "Unable to build data connection: Operation not permitted"));
+        EXPECT_TRUE(tells(425, "Unable to build data connection: TLS session of data connection not resumed."));
+        EXPECT_TRUE(tells(
+            450, "TLS session of data connection has not resumed or the session does not match the control connection"
+        ));
+        EXPECT_FALSE(tells(425, "Can't open data connection."));
+        EXPECT_FALSE(tells(425, "Failed to establish connection."));
+        EXPECT_FALSE(tells(450, "Requested file action not taken."));
+        EXPECT_FALSE(tells(450, "Transfer aborted."));
+        EXPECT_FALSE(tells(550, "session.log: Operation not permitted"));
+        EXPECT_FALSE(tells(426, "Connection closed; transfer aborted."));
+    }
+
     TEST(ReplyErrorTests, CodesOfOtherServers)
     {
         EXPECT_EQ(kindOf(430, "Invalid username or password", Verb::Password), RemoteErrorKind::AuthenticationFailed);

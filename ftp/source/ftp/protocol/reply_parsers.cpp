@@ -249,6 +249,22 @@ namespace FileTransferProtocol
         return std::unexpected(unreadableReply("The extended passive reply names no port", reply.code));
     }
 
+    std::optional<std::uint64_t> parseAnnouncedSize(Reply const& reply)
+    {
+        constexpr std::string_view suffix = " bytes)";
+        for (auto const& line : reply.lines)
+        {
+            const auto text = textOfLine(line);
+            const auto end = text.rfind(suffix);
+            const auto open = end == std::string_view::npos ? std::string_view::npos : text.rfind('(', end);
+            if (open == std::string_view::npos)
+                continue;
+            if (auto size = Detail::decimalOf<std::uint64_t>(text.substr(open + 1u, end - open - 1u)))
+                return size;
+        }
+        return std::nullopt;
+    }
+
     std::expected<std::string, RemoteIo::RemoteError> parsePathReply(Reply const& reply, Verb verb)
     {
         if (reply.code != 257)

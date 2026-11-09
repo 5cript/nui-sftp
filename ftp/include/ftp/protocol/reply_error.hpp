@@ -21,4 +21,12 @@ namespace FileTransferProtocol
      * @return A ProtocolViolation for a positive reply, which the caller did not expect when it asks.
      */
     RemoteIo::RemoteError replyError(Reply const& reply, std::optional<Verb> verb);
+
+    /**
+     * @brief A refused transfer whose reply fits a data connection that did not resume the TLS session of the control
+     *        connection: a 522 (RFC 4217 10.2) as vsftpd sends it, a 425 or 450 that names the session as FileZilla
+     *        Server does, or that ends in proftpd's "Operation not permitted". The reply alone proves nothing, the
+     *        caller has to know that the data connection has TLS and resumed no session.
+     */
+    bool tellsOfMissingSessionReuse(Reply const& reply);
 }
