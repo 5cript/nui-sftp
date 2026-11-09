@@ -13,6 +13,7 @@
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/asio/use_future.hpp>
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
@@ -75,6 +76,23 @@ namespace FileTransferProtocol::Test
                     return entry.kind == kind && entry.detail.find(detail) != std::string::npos;
                 }
             );
+        }
+    }
+
+    namespace
+    {
+        /**
+         * @brief How the server saw the control connections end, for failure messages.
+         */
+        std::string endsOf(std::vector<TranscriptEntry> const& transcript)
+        {
+            std::string ends{};
+            for (auto const& entry : transcript)
+            {
+                if (entry.kind == TranscriptEntry::Kind::Disconnected)
+                    ends += fmt::format("[{}] ", entry.detail);
+            }
+            return ends;
         }
     }
 
@@ -667,7 +685,8 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Quit)), 221);
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
         ASSERT_TRUE(server_->waitUntilDisconnected());
-        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"));
+        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"))
+            << "the server saw " << endsOf(server_->transcript());
     }
 
     TEST_F(ControlConnectionTlsTests, CloseOverTlsSendsCloseNotify)
@@ -678,7 +697,8 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(startTls(connection, settings()));
         connection->close();
         ASSERT_TRUE(server_->waitUntilDisconnected());
-        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"));
+        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"))
+            << "the server saw " << endsOf(server_->transcript());
     }
 
     TEST_F(ControlConnectionTlsTests, CloseDuringAWriteSendsCloseNotifyBehindIt)
@@ -701,7 +721,8 @@ namespace FileTransferProtocol::Test
         connection->close();
         server_->release("read");
         ASSERT_TRUE(server_->waitUntilDisconnected());
-        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"));
+        EXPECT_TRUE(hasEntry(server_->transcript(), TranscriptEntry::Kind::Disconnected, "end of stream"))
+            << "the server saw " << endsOf(server_->transcript());
     }
 
     TEST_F(ControlConnectionTlsTests, ServerClosingTlsEndsTheConnection)
