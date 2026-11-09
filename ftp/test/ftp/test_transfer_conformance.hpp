@@ -192,8 +192,7 @@ namespace FileTransferProtocol::Test
             const auto content = uploadContent(size);
             const auto uploaded = upload({.path = pathOf(name)}, content);
             ASSERT_TRUE(uploaded) << name << ": " << uploaded.error().toString();
-            ASSERT_TRUE(uploaded->finalReply) << name;
-            EXPECT_EQ(uploaded->finalReply->code / 100, 2) << name;
+            EXPECT_EQ(uploaded->finalReply.code / 100, 2) << name;
             ASSERT_NO_FATAL_FAILURE(expectDownload({.path = pathOf(name), .expectedSize = size}, content));
         }
     }

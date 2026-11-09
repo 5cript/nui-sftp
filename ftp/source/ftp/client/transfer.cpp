@@ -546,7 +546,10 @@ namespace FileTransferProtocol
         {
             // Its deadline ended the control connection, SIZE on another one has to tell.
             if (reply.error().kind == RemoteErrorKind::TimedOut)
-                co_return UploadResult{.bytes = bytes_};
+                co_return std::unexpected(errorOf(
+                    RemoteErrorKind::TimedOut,
+                    "The server did not confirm the upload in time, only the file's size tells whether it is complete"
+                ));
             co_return std::unexpected(reply.error());
         }
         if (!succeeded(*reply))

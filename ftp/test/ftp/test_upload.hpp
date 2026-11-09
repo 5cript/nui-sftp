@@ -129,8 +129,7 @@ namespace FileTransferProtocol::Test
         const auto result = upload(connection, {.path = "file"}, content);
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_EQ(result->bytes, content.size());
-        ASSERT_TRUE(result->finalReply);
-        EXPECT_EQ(result->finalReply->code, 226);
+        EXPECT_EQ(result->finalReply.code, 226);
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
     }
 
@@ -179,7 +178,7 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
-    TEST_F(UploadTests, MissingFinalReplyLeavesTheUploadUnconfirmed)
+    TEST_F(UploadTests, MissingFinalReplyFailsTheUploadAsTimedOut)
     {
         Script script{};
         script.reply("220 Ready");
@@ -187,10 +186,10 @@ namespace FileTransferProtocol::Test
         const auto connection = plainConnection(std::move(script));
         auto options = quickTransferOptions();
         options.finalReplyTimeout = 300ms;
-        const auto result = upload(connection, {.path = "file"}, "content", std::nullopt, options);
-        ASSERT_TRUE(result) << result.error().toString();
-        EXPECT_EQ(result->bytes, 7u);
-        EXPECT_FALSE(result->finalReply);
+        // The server may have taken the file or not, no success says more than is known.
+        expectUploadError(
+            upload(connection, {.path = "file"}, "content", std::nullopt, options), RemoteIo::RemoteErrorKind::TimedOut
+        );
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
@@ -258,8 +257,7 @@ namespace FileTransferProtocol::Test
         const auto result = upload(connection, {.path = "file"}, "content");
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_EQ(result->bytes, 7u);
-        ASSERT_TRUE(result->finalReply);
-        EXPECT_EQ(result->finalReply->code, 226);
+        EXPECT_EQ(result->finalReply.code, 226);
         EXPECT_EQ(uploadedAfterDisconnect(connection), std::optional<std::string>{"content"});
     }
 

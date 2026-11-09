@@ -198,11 +198,8 @@ namespace FileTransferProtocol
     {
         /** @brief Bytes of this transfer, without the offset it started at. */
         std::uint64_t bytes{0u};
-        /**
-         * @brief Nothing when no final reply came in time. The control connection is Dead then, and the upload is
-         *        complete only when SIZE on another connection shows the offset plus these bytes.
-         */
-        std::optional<Reply> finalReply{};
+        /** @brief The positive final reply, without it no upload counts as complete. */
+        Reply finalReply{};
     };
 
     /**
@@ -251,7 +248,9 @@ namespace FileTransferProtocol
          * @brief Ends the data so the server takes all of it, then the final reply.
          *
          * @return The result. The replyError() of a negative final reply. The error of a data end that failed, unless
-         *         a positive final reply within the refusal wait confirms the upload.
+         *         a positive final reply within the refusal wait confirms the upload. TimedOut when no final reply
+         *         came in time: the control connection is Dead then, and the upload is complete only when SIZE on
+         *         another connection shows the offset plus the bytes written.
          */
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
