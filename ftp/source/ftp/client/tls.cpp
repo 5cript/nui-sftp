@@ -437,6 +437,14 @@ namespace FileTransferProtocol
         return TrustedCertificate{.certificate = std::move(*info), .source = TrustSource::Pin};
     }
 
+    std::optional<Sha256Digest> peerCertificateDigest(SSL* handle)
+    {
+        const CertificateHandle certificate{SSL_get1_peer_certificate(handle)};
+        if (!certificate)
+            return std::nullopt;
+        return certificateDigest(certificate.get());
+    }
+
     RemoteIo::RemoteError handshakeError(SSL* handle, boost::system::error_code error, bool timedOut)
     {
         if (auto const* const verification = verificationOf(handle); verification != nullptr && verification->refused)

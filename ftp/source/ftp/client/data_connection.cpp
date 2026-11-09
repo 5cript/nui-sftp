@@ -10,8 +10,7 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <fmt/format.h>
-#include <openssl/evp.h>
-#include <openssl/x509.h>
+#include <openssl/ssl.h>
 
 #include <optional>
 #include <string>
@@ -31,20 +30,6 @@ namespace FileTransferProtocol
         RemoteIo::RemoteError cancelled()
         {
             return errorOf(RemoteErrorKind::Cancelled, "The data connection was closed");
-        }
-
-        std::optional<Sha256Digest> certificateDigestOf(SSL* handle)
-        {
-            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
-                SSL_get1_peer_certificate(handle), &X509_free
-            };
-            if (!certificate)
-                return std::nullopt;
-            Sha256Digest digest{};
-            unsigned int length = 0u;
-            if (X509_digest(certificate.get(), EVP_sha256(), digest.data(), &length) != 1 || length != digest.size())
-                return std::nullopt;
-            return digest;
         }
 
         /**
@@ -210,7 +195,7 @@ namespace FileTransferProtocol
         }
         resumed_ = SSL_session_reused(tls_->native_handle()) == 1;
         // A resumed session was trusted with the control connection; anything else has to show its certificate.
-        if (!resumed_ && certificateDigestOf(tls_->native_handle()) != controlCertificate)
+        if (!resumed_ && peerCertificateDigest(tls_->native_handle()) != controlCertificate)
             co_return std::unexpected(errorOf(
                 RemoteErrorKind::NoSecureConnection,
                 "The data connection presented another certificate than the control connection"
