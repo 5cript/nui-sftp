@@ -157,7 +157,7 @@ namespace FileTransferProtocol
     /**
      * @brief A handle for one client connection, ready for the handshake: the name check without partial wildcards,
      *        SNI for a DNS name, and a verify callback that never blocks. The callback keeps the certificate and the
-     * first verify failure, and accepts a failed certificate only when its public key matches the pin.
+     *        first verify failure, and accepts a failed certificate only when its public key matches the pin.
      *
      * @return A Failure naming the setting OpenSSL refused.
      */
