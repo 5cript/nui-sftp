@@ -108,7 +108,6 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(result->homeDirectory, "/home/user");
         EXPECT_TRUE(result->features.has("EPSV"));
         EXPECT_TRUE(result->utf8Accepted);
-        EXPECT_FALSE(result->dataProtected);
         EXPECT_FALSE(result->certificate);
         EXPECT_EQ(commandsAfterDisconnect(connection), plainCommands());
     }
@@ -122,7 +121,6 @@ namespace FileTransferProtocol::Test
         const auto connection = makeConnection();
         const auto result = login(connection, explicitOptions());
         ASSERT_TRUE(result) << result.error().toString();
-        EXPECT_TRUE(result->dataProtected);
         ASSERT_TRUE(result->certificate);
         EXPECT_EQ(result->certificate->source, TrustSource::Authorities);
         EXPECT_EQ(result->homeDirectory, "/home/user");
@@ -161,7 +159,6 @@ namespace FileTransferProtocol::Test
             connection, LoginOptions{.tlsMode = TlsMode::Implicit, .tls = settings(), .credentials = testCredentials()}
         );
         ASSERT_TRUE(result) << result.error().toString();
-        EXPECT_TRUE(result->dataProtected);
         ASSERT_TRUE(result->certificate);
         EXPECT_EQ(commandsAfterDisconnect(connection).front(), "USER user");
     }

@@ -168,7 +168,6 @@ namespace FileTransferProtocol
             {
                 if (const auto protectedData = co_await protectData(*connection); !protectedData)
                     co_return std::unexpected(protectedData.error());
-                result.dataProtected = true;
             }
 
             auto features = co_await askFeatures(*connection);

@@ -45,8 +45,6 @@ namespace FileTransferProtocol
         std::string homeDirectory{};
         /** @brief The server took OPTS UTF8 ON, which servers that use UTF-8 anyway may refuse. */
         bool utf8Accepted{false};
-        /** @brief PROT P was accepted, data connections use TLS. */
-        bool dataProtected{false};
         /** @brief The server's certificate and who vouched for it, nothing without TLS. */
         std::optional<TrustedCertificate> certificate{};
     };

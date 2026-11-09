@@ -145,7 +145,6 @@ namespace FileTransferProtocol::Test
             ASSERT_TRUE(result) << result.error().toString();
             ASSERT_TRUE(result->certificate);
             EXPECT_EQ(result->certificate->source, TrustSource::Pin);
-            EXPECT_TRUE(result->dataProtected);
             const auto resumable = onStrand(
                 connection,
                 [connection]() -> boost::asio::awaitable<bool>
