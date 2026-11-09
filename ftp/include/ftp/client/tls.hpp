@@ -45,7 +45,7 @@ namespace FileTransferProtocol
     std::string formatDigest(Sha256Digest const& digest);
 
     /**
-     * @brief Reads a digest of 64 hex digits in any case, the pairs separated by colons or not at all.
+     * @brief Reads a digest of 64 hex digits in any case, plain or as 32 pairs with a colon between each two.
      */
     std::optional<Sha256Digest> parseDigest(std::string_view text);
 

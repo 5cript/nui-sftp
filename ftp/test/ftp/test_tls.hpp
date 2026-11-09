@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace FileTransferProtocol::Test
@@ -112,6 +113,24 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(parseDigest(std::string(63u, 'a') + "g"));
         EXPECT_FALSE(parseDigest(std::string(63u, 'a') + " "));
         EXPECT_TRUE(parseDigest(std::string(64u, 'a')));
+    }
+
+    TEST(TlsDigestTests, RefusesColonsOutOfPlace)
+    {
+        const auto formatted = formatDigest(Sha256Digest{});
+        EXPECT_TRUE(parseDigest(formatted));
+        EXPECT_FALSE(parseDigest(":" + std::string(64u, 'a')));
+        EXPECT_FALSE(parseDigest("aa:" + std::string(62u, 'a')));
+        EXPECT_FALSE(parseDigest(formatted + ":"));
+        auto shifted = formatted;
+        std::swap(shifted[2u], shifted[3u]);
+        EXPECT_FALSE(parseDigest(shifted));
+        auto doubled = formatted;
+        doubled.insert(2u, ":");
+        EXPECT_FALSE(parseDigest(doubled));
+        auto dashed = formatted;
+        std::ranges::replace(dashed, ':', '-');
+        EXPECT_FALSE(parseDigest(dashed));
     }
 
     TEST(TlsCertificateTests, DescribesTheServerCertificateOfTheTestAuthority)

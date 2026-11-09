@@ -279,18 +279,11 @@ namespace FileTransferProtocol
 
     std::optional<Sha256Digest> parseDigest(std::string_view text)
     {
-        std::string digits{};
-        std::ranges::copy_if(
-            text,
-            std::back_inserter(digits),
-            [](char character)
-            {
-                return character != ':';
-            }
-        );
         Sha256Digest digest{};
-        if (digits.size() != digest.size() * 2u)
+        const bool separated = text.size() == digest.size() * 3u - 1u;
+        if (!separated && text.size() != digest.size() * 2u)
             return std::nullopt;
+        const std::size_t stride = separated ? 3u : 2u;
         const auto valueOf = [](char character) -> std::optional<std::uint8_t>
         {
             if (character >= '0' && character <= '9')
@@ -303,8 +296,11 @@ namespace FileTransferProtocol
         };
         for (std::size_t index = 0u; index < digest.size(); ++index)
         {
-            const auto high = valueOf(digits[index * 2u]);
-            const auto low = valueOf(digits[index * 2u + 1u]);
+            const auto position = index * stride;
+            if (separated && index != 0u && text[position - 1u] != ':')
+                return std::nullopt;
+            const auto high = valueOf(text[position]);
+            const auto low = valueOf(text[position + 1u]);
             if (!high || !low)
                 return std::nullopt;
             digest[index] = static_cast<std::uint8_t>((*high << 4u) | *low);
