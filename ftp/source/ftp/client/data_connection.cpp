@@ -14,7 +14,9 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 
+#include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -57,6 +59,24 @@ namespace FileTransferProtocol
             if (X509_digest(certificate.get(), EVP_sha256(), digest.data(), &length) != 1 || length != digest.size())
                 return std::nullopt;
             return digest;
+        }
+
+        /**
+         * @brief Makes the TLS stream over @p socket from @p handle, with an input buffer of @p inputBufferSize where
+         *        Asio takes one: it does since 1.38.2, Boost 1.90 brings 1.38.0.
+         */
+        template <typename StreamT>
+        void emplaceTls(
+            std::optional<StreamT>& tls,
+            asio::ip::tcp::socket& socket,
+            SSL* handle,
+            [[maybe_unused]] std::size_t inputBufferSize
+        )
+        {
+            if constexpr (std::is_constructible_v<StreamT, asio::ip::tcp::socket&, SSL*, std::size_t>)
+                tls.emplace(socket, handle, inputBufferSize);
+            else
+                tls.emplace(socket, handle);
         }
 
         /**
@@ -189,7 +209,7 @@ namespace FileTransferProtocol
                 errorOf(RemoteErrorKind::NoSecureConnection, "The data connection cannot take the control session")
             );
         // The stream takes the handle over.
-        tls_.emplace(socket_, handle->release(), options_.tlsInputBufferSize);
+        emplaceTls(tls_, socket_, handle->release(), options_.tlsInputBufferSize);
         const auto [error] = co_await tls_->async_handshake(
             asio::ssl::stream_base::client, asio::cancel_after(options_.connectTimeout, useTuple)
         );
