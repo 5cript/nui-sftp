@@ -29,6 +29,8 @@ namespace FileTransferProtocol
         std::shared_ptr<ControlConnection> control{};
         std::shared_ptr<PassiveChoice> passiveChoice{};
         std::optional<TlsConnectionSettings> tls{};
+        /** @brief The login's features name REST STREAM (RFC 3659 5.4), a transfer may continue at an offset. */
+        bool restartStream{false};
     };
 
     struct TransferOptions
@@ -38,10 +40,12 @@ namespace FileTransferProtocol
         std::chrono::milliseconds finalReplyTimeout{15'000};
         /**
          * @brief A download not read for this long drops its data connection and continues with REST on the next
-         *        read, before the server's data timeout ends more (IIS after 30 s, vsftpd the whole session). Nothing
-         *        never drops.
+         *        read, before the server's data timeout ends more (IIS after 30 s, vsftpd the whole session). Only
+         *        with TransferSession::restartStream, nothing never drops.
          */
         std::optional<std::chrono::milliseconds> pauseDropAfter{std::chrono::seconds{20}};
+        /** @brief How long a failed upload waits for the server's reason, which may come after the data broke. */
+        std::chrono::milliseconds refusalWait{1'000};
     };
 
     struct TransferResult
@@ -126,6 +130,12 @@ namespace FileTransferProtocol
 
       private:
         /**
+         * @brief readSome() without its pause bookkeeping: a transfer dropped for a pause starts again first, the end
+         *        of the data finishes the data connection.
+         */
+        boost::asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
+        readData(boost::asio::mutable_buffer buffer);
+        /**
          * @brief Bytes this transfer should bring, from the caller or the announcement.
          */
         std::optional<std::uint64_t> expectedBytes() const;
@@ -134,7 +144,15 @@ namespace FileTransferProtocol
          * @brief Starts the transfer again at the bytes read so far, after a drop for a pause.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> resume();
+        /**
+         * @brief Notes a read and starts the pause timer unless it runs already.
+         */
         void armPauseDrop();
+        void waitForPause(std::chrono::steady_clock::duration duration);
+        /**
+         * @brief The pause timer ended: waits on while a read is under way or the last one is recent, else drops.
+         */
+        void takePause();
         /**
          * @brief Closes the data connection of a paused download and sends ABOR, the login stays.
          */
@@ -151,6 +169,9 @@ namespace FileTransferProtocol
         std::optional<Reply> earlyFinalReply_{};
         std::uint64_t bytes_{0u};
         boost::asio::steady_timer pauseTimer_;
+        std::chrono::steady_clock::time_point lastRead_{};
+        bool pauseArmed_{false};
+        bool reading_{false};
         bool dataEnded_{false};
         bool aborted_{false};
         /** @brief Dropped for a pause, the next read starts the transfer again. */
@@ -186,8 +207,8 @@ namespace FileTransferProtocol
 
     /**
      * @brief One STOR or APPE on its own data connection, on the strand of the control connection. The data ends so
-     *        that the server sees all of it before the final reply counts. A failed upload resets its data connection:
-     *        a FIN could make the server take the cut file for a complete one.
+     *        that the server sees all of it before the final reply counts. A failed, aborted or dropped upload resets
+     *        its data connection: a FIN could make the server take the cut file for a complete one.
      */
     class Upload
     {
@@ -221,8 +242,8 @@ namespace FileTransferProtocol
         /**
          * @brief Writes all of @p buffer.
          *
-         * @return The replyError() of a server that ended the transfer meanwhile, a full disk for one, else the data
-         *         connection's error. The upload is aborted then.
+         * @return The replyError() of a server that ended the transfer meanwhile or does so within the refusal wait,
+         *         a full disk for one, else the data connection's error. The upload is aborted then.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> write(boost::asio::const_buffer buffer);
 
@@ -233,6 +254,11 @@ namespace FileTransferProtocol
          */
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
+        /**
+         * @brief Ends the upload as failed: resets the data connection and sends ABOR.
+         */
+        void abort();
+
       private:
         /**
          * @brief What a failed write or end of the data means: the server's refusal when it ended the transfer, else
@@ -240,7 +266,6 @@ namespace FileTransferProtocol
          */
         boost::asio::awaitable<RemoteIo::RemoteError> failure(RemoteIo::RemoteError dataError);
         Verb verb() const;
-        void abort();
 
         TransferSession session_;
         UploadRequest request_;
@@ -249,6 +274,8 @@ namespace FileTransferProtocol
         std::shared_ptr<PendingCommand> store_;
         std::optional<Reply> earlyFinalReply_{};
         std::uint64_t bytes_{0u};
+        /** @brief The data ended so that the server took all of it. */
+        bool dataEnded_{false};
         bool aborted_{false};
     };
 }

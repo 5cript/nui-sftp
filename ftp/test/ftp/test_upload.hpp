@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace FileTransferProtocol::Test
@@ -47,18 +48,23 @@ namespace FileTransferProtocol::Test
             return script.expect("EPSV").passive(std::move(plan)).expect(std::move(verb), "file").reply(preliminary);
         }
 
-        std::optional<std::string> uploadedContent(std::vector<TranscriptEntry> const& transcript)
+        std::optional<std::string> detailOf(std::vector<TranscriptEntry> const& transcript, TranscriptEntry::Kind kind)
         {
-            const auto uploaded = std::ranges::find_if(
+            const auto found = std::ranges::find_if(
                 transcript,
-                [](TranscriptEntry const& entry)
+                [kind](TranscriptEntry const& entry)
                 {
-                    return entry.kind == TranscriptEntry::Kind::DataUploaded;
+                    return entry.kind == kind;
                 }
             );
-            if (uploaded == transcript.end())
+            if (found == transcript.end())
                 return std::nullopt;
-            return uploaded->detail;
+            return found->detail;
+        }
+
+        std::optional<std::string> uploadedContent(std::vector<TranscriptEntry> const& transcript)
+        {
+            return detailOf(transcript, TranscriptEntry::Kind::DataUploaded);
         }
     }
 
@@ -217,6 +223,100 @@ namespace FileTransferProtocol::Test
         const auto result = upload(connection, {.path = "file"}, std::string(8u << 20u, 'x'));
         ASSERT_FALSE(result);
         EXPECT_EQ(result.error().protocolCode, 552) << result.error().toString();
+    }
+
+    TEST_F(UploadTests, RefusalBehindTheBrokenDataIsTheServersReason)
+    {
+        // The delay lets the broken data connection reach the client before the refusal does.
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.reset(), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .delay(200ms)
+            .reply("552 Exceeded storage allocation.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto options = quickTransferOptions();
+        options.refusalWait = 5s;
+        const auto result = upload(connection, {.path = "file"}, std::string(8u << 20u, 'x'), std::nullopt, options);
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().protocolCode, 552) << result.error().toString();
+    }
+
+    TEST_F(UploadTests, CancelledWriteAbortsTheUpload)
+    {
+        // No plan begins, nothing reads the data, so the write waits for the cancel.
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}, "150 Ok to send data.")
+            .abortSequence(AbortReplies::ProftpdPlainLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const auto written =
+            run(connection,
+                [connection, session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    const std::string content(32u << 20u, 'c');
+                    const auto [exception, result] = co_await asio::co_spawn(
+                        connection->strand(),
+                        (*started)->write(asio::buffer(content)),
+                        asio::cancel_after(300ms, asio::as_tuple(asio::use_awaitable))
+                    );
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        ASSERT_FALSE(written);
+        EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << written.error().toString();
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"EPSV", "STOR file", "ABOR", "PWD"}));
+    }
+
+    TEST_F(UploadTests, DroppedUploadResetsItsData)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.expectUpload(1024u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .reply("426 Connection closed; transfer aborted.")
+            .checkpoint("refused")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const auto written =
+            run(connection,
+                [session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    co_return co_await (*started)->write(asio::buffer(std::string_view{"partial"}));
+                });
+        ASSERT_TRUE(written) << written.error().toString();
+        ASSERT_TRUE(server_->waitForCheckpoint("refused"));
+        connection->close();
+        EXPECT_TRUE(server_->waitUntilDisconnected());
+        EXPECT_EQ(
+            detailOf(server_->transcript(), TranscriptEntry::Kind::DataEnded), std::optional<std::string>{"reset"}
+        );
+    }
+
+    TEST_F(UploadTests, PathThatCannotBeSentSendsNoRest)
+    {
+        Script script{};
+        script.reply("220 Ready").expect("NOOP").reply("200 Fine").expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const auto result = upload(connection, {.path = "a\nb", .offset = 5u}, "x");
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().wrapperError, RemoteIo::WrapperErrors::InvalidPath) << result.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
     TEST_F(UploadTests, ResetDataAbortsTheTransfer)

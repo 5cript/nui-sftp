@@ -3,15 +3,19 @@
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 #include <log/log.hpp>
+#include "client_support.hpp"
 
+#include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <fmt/format.h>
 
 #include <exception>
+#include <string_view>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -20,20 +24,9 @@ namespace FileTransferProtocol
     {
         namespace asio = boost::asio;
         using RemoteIo::RemoteErrorKind;
-
-        RemoteIo::RemoteError errorOf(RemoteErrorKind kind, std::string message)
-        {
-            return RemoteIo::RemoteError{
-                .kind = kind,
-                .protocol = RemoteIo::Protocol::Ftp,
-                .message = std::move(message),
-            };
-        }
-
-        bool isCancelled(asio::cancellation_state const& state)
-        {
-            return state.cancelled() != asio::cancellation_type::none;
-        }
+        using Detail::errorOf;
+        using Detail::isCancelled;
+        using Detail::useTuple;
 
         bool succeeded(Reply const& reply)
         {
@@ -47,8 +40,9 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief A refused transfer after a TLS data connection that resumed nothing: vsftpd answers 522, proftpd 425
-         *        and others 450 when they require the control connection's session.
+         * @brief A refused transfer after a full TLS handshake on the data connection: vsftpd answers 522, proftpd 425
+         *        and others 450 when they require the control connection's session. A handshake that a refusal cut
+         *        short proves nothing.
          */
         bool refusedForSessionReuse(Reply const& reply, DataConnection const& data)
         {
@@ -91,6 +85,28 @@ namespace FileTransferProtocol
                 data->close();
             co_return reply;
         }
+
+        /**
+         * @brief The first reply of a transfer when it is its final one already.
+         */
+        std::optional<Reply> finalReplyOf(Reply first)
+        {
+            if (isPreliminary(first.code))
+                return std::nullopt;
+            return first;
+        }
+
+        /**
+         * @brief Writes ABOR into the running transfer of @p command, the control connection takes the replies up to
+         *        its marker. Nothing once the transfer or the connection ended.
+         */
+        void abortTransfer(ControlConnection& control, PendingCommand const& command, std::string_view what)
+        {
+            if (control.state() != ControlState::Open || command.stage() == PendingCommand::Stage::Completed)
+                return;
+            if (const auto abortSent = control.send(Command{.verb = Verb::Abort}); !abortSent)
+                Log::debug("FTP: ABOR could not be sent for {}", what);
+        }
     }
 
     namespace
@@ -103,13 +119,11 @@ namespace FileTransferProtocol
             std::shared_ptr<DataConnection> data{};
             std::shared_ptr<PendingCommand> command{};
             Reply first{};
-            /** @brief The data handshake failed while the server went on, the caller aborts. */
-            std::optional<RemoteIo::RemoteError> unsecured{};
         };
 
         /**
          * @brief Opens the data connection, sends REST when @p restartAt is not 0, then @p transfer, and waits for
-         *        its first reply. With TLS the data handshake runs next to that wait.
+         *        its first reply. With TLS the data handshake runs next to that wait, a failed one aborts the transfer.
          */
         asio::awaitable<std::expected<StartedTransfer, RemoteIo::RemoteError>> startTransfer(
             TransferSession const& session,
@@ -118,6 +132,9 @@ namespace FileTransferProtocol
             Command transfer
         )
         {
+            // A REST the server took must not stay behind a transfer command that cannot be sent (RFC 3659 5.3).
+            if (const auto encoded = transfer.encode(); !encoded)
+                co_return std::unexpected(encoded.error());
             auto const control = session.control;
             const auto verb = transfer.verb;
             auto opened = co_await DataConnection::open(control, options.data, session.passiveChoice);
@@ -132,6 +149,9 @@ namespace FileTransferProtocol
                 if (isCancelled(co_await asio::this_coro::cancellation_state))
                 {
                     data->close();
+                    // The server may have taken the restart, the next transfer must not start there.
+                    if (const auto cleared = control->send(Command{.verb = Verb::Restart, .argument = "0"}); !cleared)
+                        Log::debug("FTP: REST 0 could not be sent after a cancelled restart");
                     co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
                 }
                 if (!restart || restart->code != 350)
@@ -169,7 +189,8 @@ namespace FileTransferProtocol
                 first = co_await firstReply(*command, data);
             if (isCancelled(co_await asio::this_coro::cancellation_state))
             {
-                data->close();
+                data->reset();
+                abortTransfer(*control, **command, "a cancelled transfer");
                 co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer was cancelled"));
             }
 
@@ -187,10 +208,14 @@ namespace FileTransferProtocol
                 }
                 co_return std::unexpected(replyError(*first, verb));
             }
-            StartedTransfer started{.data = data, .command = std::move(command).value(), .first = std::move(*first)};
             if (!secured)
-                started.unsecured = std::move(secured).error();
-            co_return started;
+            {
+                // The server went on, the data must not flow unprotected.
+                data->reset();
+                abortTransfer(*control, **command, "a transfer without TLS");
+                co_return std::unexpected(std::move(secured).error());
+            }
+            co_return StartedTransfer{.data = data, .command = std::move(command).value(), .first = std::move(*first)};
         }
     }
 
@@ -225,23 +250,26 @@ namespace FileTransferProtocol
         );
         if (download->request_.offset == 0u)
             download->announced_ = parseAnnouncedSize(started->first);
-        if (!isPreliminary(started->first.code))
-            download->earlyFinalReply_ = std::move(started->first);
-        if (started->unsecured)
-        {
-            download->abort();
-            co_return std::unexpected(std::move(*started->unsecured));
-        }
+        download->earlyFinalReply_ = finalReplyOf(std::move(started->first));
         co_return download;
     }
 
     asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>> Download::readSome(asio::mutable_buffer buffer)
     {
-        pauseTimer_.cancel();
         if (aborted_)
             co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The download was aborted"));
         if (dataEnded_)
             co_return std::size_t{0u};
+        reading_ = true;
+        const auto read = co_await readData(buffer);
+        reading_ = false;
+        if (read && *read > 0u)
+            armPauseDrop();
+        co_return read;
+    }
+
+    asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>> Download::readData(asio::mutable_buffer buffer)
+    {
         if (dropped_)
         {
             if (auto resumed = co_await resume(); !resumed)
@@ -256,10 +284,10 @@ namespace FileTransferProtocol
         if (*read > 0u)
         {
             bytes_ += *read;
-            armPauseDrop();
             co_return *read;
         }
         dataEnded_ = true;
+        pauseTimer_.cancel();
         co_await data_->finishDownload();
         co_return std::size_t{0u};
     }
@@ -296,7 +324,8 @@ namespace FileTransferProtocol
         }
         if (!succeeded(*reply))
         {
-            if (refusedForSessionReuse(*reply, *data_))
+            // A server that wants session reuse refuses before any data.
+            if (bytes_ == 0u && refusedForSessionReuse(*reply, *data_))
             {
                 session_.control->close();
                 co_return std::unexpected(sessionReuseRequired(*reply, Verb::Retrieve));
@@ -364,46 +393,56 @@ namespace FileTransferProtocol
         data_ = started->data;
         retrieve_ = started->command;
         dropped_ = false;
-        earlyFinalReply_.reset();
-        if (!isPreliminary(started->first.code))
-            earlyFinalReply_ = std::move(started->first);
-        if (started->unsecured)
-        {
-            abort();
-            co_return std::unexpected(std::move(*started->unsecured));
-        }
+        earlyFinalReply_ = finalReplyOf(std::move(started->first));
         Log::debug("FTP: Continued a paused download with REST");
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
     void Download::armPauseDrop()
     {
-        if (!options_.pauseDropAfter)
+        lastRead_ = std::chrono::steady_clock::now();
+        if (!options_.pauseDropAfter || !session_.restartStream || pauseArmed_)
             return;
-        pauseTimer_.expires_after(*options_.pauseDropAfter);
+        waitForPause(*options_.pauseDropAfter);
+    }
+
+    void Download::waitForPause(std::chrono::steady_clock::duration duration)
+    {
+        pauseArmed_ = true;
+        pauseTimer_.expires_after(duration);
         pauseTimer_.async_wait(
             [weak = weak_from_this()](boost::system::error_code error)
             {
-                if (error)
+                const auto self = weak.lock();
+                if (!self)
                     return;
-                if (const auto self = weak.lock())
-                    self->dropForPause();
+                self->pauseArmed_ = false;
+                if (!error)
+                    self->takePause();
             }
         );
     }
 
+    void Download::takePause()
+    {
+        // A read under way is no pause, the data it brings starts the timer again.
+        if (reading_ || dataEnded_ || aborted_ || dropped_)
+            return;
+        const auto idle = std::chrono::steady_clock::now() - lastRead_;
+        if (idle < *options_.pauseDropAfter)
+        {
+            waitForPause(*options_.pauseDropAfter - idle);
+            return;
+        }
+        dropForPause();
+    }
+
     void Download::dropForPause()
     {
-        if (dataEnded_ || aborted_ || dropped_)
-            return;
         Log::debug("FTP: Dropped the data connection of a paused download");
         dropped_ = true;
         data_->close();
-        if (session_.control->state() == ControlState::Open && retrieve_->stage() != PendingCommand::Stage::Completed)
-        {
-            if (const auto abortSent = session_.control->send(Command{.verb = Verb::Abort}); !abortSent)
-                Log::debug("FTP: ABOR could not be sent for a paused download");
-        }
+        abortTransfer(*session_.control, *retrieve_, "a paused download");
     }
 
     void Download::abort()
@@ -411,13 +450,9 @@ namespace FileTransferProtocol
         if (aborted_)
             return;
         aborted_ = true;
+        pauseTimer_.cancel();
         data_->close();
-        // Writes ABOR into the running transfer, the control connection takes the replies up to its marker.
-        if (session_.control->state() == ControlState::Open && retrieve_->stage() != PendingCommand::Stage::Completed)
-        {
-            if (const auto abortSent = session_.control->send(Command{.verb = Verb::Abort}); !abortSent)
-                Log::debug("FTP: ABOR could not be sent for a failed download");
-        }
+        abortTransfer(*session_.control, *retrieve_, "a failed download");
     }
 
     Upload::Upload(
@@ -435,7 +470,19 @@ namespace FileTransferProtocol
         , store_{std::move(store)}
     {}
 
-    Upload::~Upload() = default;
+    Upload::~Upload()
+    {
+        if (aborted_ || dataEnded_)
+            return;
+        // A FIN could make the server take the cut file for a complete one. The last owner may let go off the strand.
+        asio::post(
+            session_.control->strand(),
+            [data = std::move(data_)]()
+            {
+                data->reset();
+            }
+        );
+    }
 
     asio::awaitable<std::expected<std::shared_ptr<Upload>, RemoteIo::RemoteError>>
     Upload::start(TransferSession session, UploadRequest request, TransferOptions options)
@@ -453,13 +500,7 @@ namespace FileTransferProtocol
         auto upload = std::make_shared<Upload>(
             Private{}, std::move(session), std::move(request), std::move(options), started->data, started->command
         );
-        if (!isPreliminary(started->first.code))
-            upload->earlyFinalReply_ = std::move(started->first);
-        if (started->unsecured)
-        {
-            upload->abort();
-            co_return std::unexpected(std::move(*started->unsecured));
-        }
+        upload->earlyFinalReply_ = finalReplyOf(std::move(started->first));
         co_return upload;
     }
 
@@ -469,7 +510,15 @@ namespace FileTransferProtocol
             co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was aborted"));
         const auto written = co_await data_->writeAll(buffer);
         if (!written)
+        {
+            // A cancelled coroutine would throw at its next co_await.
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+            {
+                abort();
+                co_return std::unexpected(written.error());
+            }
             co_return std::unexpected(co_await failure(written.error()));
+        }
         bytes_ += buffer.size();
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
@@ -480,7 +529,15 @@ namespace FileTransferProtocol
             co_return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The upload was aborted"));
         const auto ended = co_await data_->finishUpload();
         if (!ended)
+        {
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+            {
+                abort();
+                co_return std::unexpected(ended.error());
+            }
             co_return std::unexpected(co_await failure(ended.error()));
+        }
+        dataEnded_ = true;
 
         std::expected<Reply, RemoteIo::RemoteError> reply = std::unexpected(RemoteIo::RemoteError{});
         if (earlyFinalReply_)
@@ -501,7 +558,7 @@ namespace FileTransferProtocol
         }
         if (!succeeded(*reply))
         {
-            if (refusedForSessionReuse(*reply, *data_))
+            if (bytes_ == 0u && refusedForSessionReuse(*reply, *data_))
             {
                 session_.control->close();
                 co_return std::unexpected(sessionReuseRequired(*reply, verb()));
@@ -513,16 +570,15 @@ namespace FileTransferProtocol
 
     asio::awaitable<RemoteIo::RemoteError> Upload::failure(RemoteIo::RemoteError dataError)
     {
-        // A server that refused the rest, for a full disk say, closed the data connection behind its reply.
-        if (store_->stage() == PendingCommand::Stage::Completed)
+        // A server that refused the rest, for a full disk say, may close the data connection before its reply comes.
+        const auto [exception, reply] = co_await asio::co_spawn(
+            session_.control->strand(), store_->finalReply(), asio::cancel_after(options_.refusalWait, useTuple)
+        );
+        if (!exception && reply && refused(*reply))
         {
-            const auto reply = co_await store_->finalReply();
-            if (reply && refused(*reply))
-            {
-                aborted_ = true;
-                data_->reset();
-                co_return replyError(*reply, verb());
-            }
+            aborted_ = true;
+            data_->reset();
+            co_return replyError(*reply, verb());
         }
         abort();
         co_return dataError;
@@ -541,10 +597,6 @@ namespace FileTransferProtocol
             return;
         aborted_ = true;
         data_->reset();
-        if (session_.control->state() == ControlState::Open && store_->stage() != PendingCommand::Stage::Completed)
-        {
-            if (const auto abortSent = session_.control->send(Command{.verb = Verb::Abort}); !abortSent)
-                Log::debug("FTP: ABOR could not be sent for a failed upload");
-        }
+        abortTransfer(*session_.control, *store_, "an aborted upload");
     }
 }

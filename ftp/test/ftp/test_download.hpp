@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace FileTransferProtocol::Test
@@ -322,7 +323,11 @@ namespace FileTransferProtocol::Test
         const auto connection = plainConnection(std::move(script));
         auto options = quickTransferOptions();
         options.pauseDropAfter = 200ms;
-        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .restartStream = true,
+        };
         auto const download =
             run(connection,
                 [session, options]() -> asio::awaitable<std::shared_ptr<Download>>
@@ -368,6 +373,112 @@ namespace FileTransferProtocol::Test
                 });
         ASSERT_TRUE(finished) << finished.error().toString();
         EXPECT_EQ(finished->bytes, 7u);
+    }
+
+    TEST_F(DownloadTests, SlowDataIsNoPause)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.send("abcdef", 1u, 100ms), "150 Opening BINARY mode data connection for file (6 bytes)."
+        )
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto options = quickTransferOptions();
+        // The timer ends during every read, a read under way is no pause.
+        options.pauseDropAfter = 30ms;
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .restartStream = true,
+        };
+        const auto result =
+            run(connection,
+                [session, options]() -> asio::awaitable<DownloadResult>
+                {
+                    co_return co_await downloadAll(session, {.path = "file"}, options);
+                });
+        ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_EQ(result->content, "abcdef");
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"EPSV", "RETR file"}));
+    }
+
+    TEST_F(DownloadTests, PauseWithoutRestartSupportKeepsTheDataConnection)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(
+            script, DataPlan{}.stallAfter("abc"), "150 Opening BINARY mode data connection for file (7 bytes)."
+        )
+            .beginData()
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto options = quickTransferOptions();
+        options.pauseDropAfter = 100ms;
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        auto download =
+            run(connection,
+                [session, options]() -> asio::awaitable<std::shared_ptr<Download>>
+                {
+                    auto started = co_await Download::start(session, {.path = "file"}, options);
+                    co_return started ? *started : nullptr;
+                });
+        ASSERT_TRUE(download);
+        const auto first =
+            run(connection,
+                [download]() -> asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
+                {
+                    std::array<char, 16> buffer{};
+                    co_return co_await download->readSome(asio::buffer(buffer));
+                });
+        ASSERT_TRUE(first) << first.error().toString();
+        // Only the clock tells a drop from none: well past pauseDropAfter, nothing may have been aborted.
+        std::this_thread::sleep_for(400ms);
+        download.reset();
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"EPSV", "RETR file"}));
+    }
+
+    TEST_F(DownloadTests, CancelledRestartIsClearedWithRestZero)
+    {
+        Script script{};
+        script.reply("220 Ready")
+            .expect("EPSV")
+            .passive(DataPlan{})
+            .expect("REST", "5")
+            .checkpoint("restart")
+            .awaitRelease("answer")
+            .reply("350 Restarting at 5.")
+            .expect("REST", "0")
+            .reply("350 Restarting at 0.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const auto signal = std::make_shared<asio::cancellation_signal>();
+        auto starting = asio::co_spawn(
+            connection->strand(),
+            Download::start(session, {.path = "file", .offset = 5u}, quickTransferOptions()),
+            asio::bind_cancellation_slot(signal->slot(), asio::use_future)
+        );
+        ASSERT_TRUE(server_->waitForCheckpoint("restart"));
+        asio::post(
+            connection->strand(),
+            [signal]()
+            {
+                signal->emit(asio::cancellation_type::terminal);
+            }
+        );
+        ASSERT_EQ(starting.wait_for(20s), std::future_status::ready);
+        const auto started = starting.get();
+        ASSERT_FALSE(started);
+        EXPECT_EQ(started.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << started.error().toString();
+        // The 350 comes after the cancel, the server holds the restart until REST 0.
+        server_->release("answer");
+        expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
     class DownloadTlsTests : public DownloadTests
@@ -447,6 +558,42 @@ namespace FileTransferProtocol::Test
         const auto connection = securedWith(std::move(script), tls);
         expectDownloadError(download(connection, {.path = "file"}, tls), RemoteIo::RemoteErrorKind::NoSecureConnection);
         EXPECT_EQ(stateOf(connection), ControlState::Closed);
+    }
+
+    TEST_F(DownloadTlsTests, RefusalBeforeTheDataHandshakeKeepsTheLogin)
+    {
+        // The refusal cuts the data handshake short, which proves nothing about session reuse.
+        auto script = securedPrefix();
+        retrieveWith(script, DataPlan{}.tls(), "425 Failed to establish connection.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const auto result = download(connection, {.path = "file"}, tls);
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().protocolCode, 425) << result.error().toString();
+        EXPECT_NE(result.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << result.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(DownloadTlsTests, NegativeFinalReplyAfterDataIsTheServersReason)
+    {
+        auto script = securedPrefix();
+        retrieveWith(script, DataPlan{}.tls({.refuseResumption = true}).send("part"), "150 Here it comes")
+            .beginData()
+            .awaitData()
+            .reply("450 Transfer aborted.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const auto result = download(connection, {.path = "file"}, tls);
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().protocolCode, 450) << result.error().toString();
+        EXPECT_NE(result.error().kind, RemoteIo::RemoteErrorKind::NoSecureConnection) << result.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
     TEST_F(DownloadTlsTests, FailedDataHandshakeAbortsTheTransfer)
