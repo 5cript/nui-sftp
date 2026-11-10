@@ -11,6 +11,8 @@ namespace FileTransferProtocol
 
     bool TaskGate::push(std::function<void()> task)
     {
+        if (!task)
+            return false;
         std::shared_lock lock{mutex_};
         return thread_ != nullptr && thread_->pushTask(std::move(task));
     }

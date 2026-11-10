@@ -22,8 +22,8 @@ namespace FileTransferProtocol
         ~TaskGate() = default;
 
         /**
-         * @return False once closed or when the thread refused the task, which is then destroyed outside the gate's
-         *         lock.
+         * @return False for an empty task, once closed, or when the thread refused the task, which is then destroyed
+         *         outside the gate's lock.
          */
         bool push(std::function<void()> task);
 

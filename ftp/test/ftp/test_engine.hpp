@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -301,6 +302,35 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(poolGone(engine));
     }
 
+    TEST_P(EngineTests, ExceptionAfterRefusePostsStillFailsTheSession)
+    {
+        const auto engine = makeEngine();
+        std::promise<void> release{};
+        const auto released = release.get_future().share();
+        std::promise<void> entered{};
+        auto running = entered.get_future();
+        ASSERT_TRUE(engine->post(
+            [&entered, released]()
+            {
+                entered.set_value();
+                released.wait();
+                throw std::runtime_error{"a handler broke during the teardown"};
+            }
+        ));
+        valueOf(running);
+        engine->refusePosts();
+        release.set_value();
+        ASSERT_NO_FATAL_FAILURE(expectOneLossThatSays("a handler broke during the teardown"));
+        EXPECT_TRUE(engine->failed());
+        EXPECT_TRUE(poolGone(engine));
+    }
+
+    TEST_P(EngineTests, EmptyTasksAreRefused)
+    {
+        const auto engine = makeEngine();
+        EXPECT_FALSE(engine->pushTask(std::function<void()>{}));
+    }
+
     TEST_P(EngineTests, TasksGoToTheProcessingThreadUntilTheGateCloses)
     {
         const auto engine = makeEngine();
@@ -374,7 +404,7 @@ namespace FileTransferProtocol::Test
         ));
         EXPECT_TRUE(poolGone(engine));
         EXPECT_TRUE(engine->failed());
-        // The report of the failure would be queued behind this task.
+        // A report of the failure would be queued before this task.
         auto behind = thread_.pushPromiseTask([]() {});
         behind.wait();
         const auto errors = reports_->recorded();

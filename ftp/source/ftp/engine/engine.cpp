@@ -77,15 +77,15 @@ namespace FileTransferProtocol
         return pool_->shared_from_this();
     }
 
-    bool Engine::spawn(asio::awaitable<void> work)
+    bool Engine::spawn(asio::awaitable<void> coroutine)
     {
         std::scoped_lock lock{postMutex_};
         if (postsRefused_)
             return false;
         asio::co_spawn(
             strand_,
-            std::move(work),
-            [self = shared_from_this(), token = this->work()](std::exception_ptr exception)
+            std::move(coroutine),
+            [self = shared_from_this(), token = work()](std::exception_ptr exception)
             {
                 if (exception)
                     self->handlerThrew(exception);

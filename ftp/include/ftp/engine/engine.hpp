@@ -12,6 +12,7 @@
 #include <boost/asio/strand.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -112,11 +113,11 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Runs @p work on the session strand, counted while it runs, from any thread.
+         * @brief Runs @p coroutine on the session strand, counted while it runs, from any thread.
          *
          * @return False once posts are refused.
          */
-        bool spawn(boost::asio::awaitable<void> work);
+        bool spawn(boost::asio::awaitable<void> coroutine);
 
         /**
          * @brief Counts what holds it as work of the session, for a handler or coroutine started otherwise.
@@ -126,7 +127,7 @@ namespace FileTransferProtocol
         /**
          * @brief Queues @p task on the ProcessingThread of the session, from any thread.
          *
-         * @return False once the gate is closed or the thread refused it.
+         * @return False for an empty task, once the gate is closed or when the thread refused it.
          */
         bool pushTask(std::function<void()> task);
 
@@ -152,6 +153,10 @@ namespace FileTransferProtocol
         void refusePosts();
 
         /**
+         * @brief A handler may still hold the engine after its count ended, so the last reference can drop on an
+         *        executor thread after this returned. The engine keeps no raw references and the pool's end goes
+         *        through its strand, so that is safe, but the engine is not gone yet.
+         *
          * @return Whether every counted handler and coroutine ended within @p limit.
          */
         bool waitIdle(std::chrono::milliseconds limit);
