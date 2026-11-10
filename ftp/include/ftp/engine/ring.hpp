@@ -12,6 +12,7 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace FileTransferProtocol
@@ -73,6 +74,12 @@ namespace FileTransferProtocol
         bool isPaused() const;
 
         /**
+         * @brief The bytes of @p slot, for the side that holds it. Uninitialized until a transfer fills them.
+         */
+        std::span<char> bytesOf(std::size_t slot);
+        std::size_t slotCount() const;
+
+        /**
          * @brief shared_from_this() as the ring @p RingT that derives from this one.
          */
         template <typename RingT>
@@ -83,7 +90,6 @@ namespace FileTransferProtocol
 
         const std::shared_ptr<Engine> engine_;
         const Strand strand_;
-        std::vector<std::vector<char>> slots_;
         /** @brief The connection strand's. */
         std::deque<std::size_t> free_{};
         boost::asio::steady_timer wakeTimer_;
@@ -94,6 +100,8 @@ namespace FileTransferProtocol
         bool closed_{false};
 
       private:
+        const std::size_t chunkSize_;
+        std::vector<std::unique_ptr<char[]>> slots_{};
         bool running_{false};
         Paused paused_{};
     };

@@ -61,7 +61,7 @@ namespace FileTransferProtocol
             filled_.pop_front();
             std::expected<void, RemoteIo::RemoteError> written{};
             if (next.count > 0u)
-                written = co_await sink(asio::buffer(slots_[next.slot].data(), next.count));
+                written = co_await sink(asio::buffer(bytesOf(next.slot).data(), next.count));
             free_.push_back(next.slot);
             if (!written)
                 co_return std::unexpected(written.error());
@@ -95,7 +95,7 @@ namespace FileTransferProtocol
 
     void SupplyRing::fill(std::size_t slot)
     {
-        auto& bytes = slots_[slot];
+        const auto bytes = bytesOf(slot);
         std::size_t count{0u};
         std::optional<RemoteIo::RemoteError> failure{};
         while (!closed_ && !sourceEnded_ && !sourceFailed_ && count < bytes.size())

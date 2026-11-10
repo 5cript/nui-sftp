@@ -14,12 +14,16 @@ namespace FileTransferProtocol
     Ring::Ring(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options)
         : engine_{std::move(engine)}
         , strand_{std::move(connectionStrand)}
-        , slots_(options.slots, std::vector<char>(options.chunkSize))
         , wakeTimer_{strand_, asio::steady_timer::time_point::max()}
+        , chunkSize_{options.chunkSize}
     {
         assert(options.slots > 0u && options.chunkSize > 0u && "A ring needs a slot of at least one byte");
-        for (std::size_t slot = 0u; slot < slots_.size(); ++slot)
+        // Not zeroed: every byte is written before it is read, and a small transfer touches few pages.
+        for (std::size_t slot = 0u; slot < options.slots; ++slot)
+        {
+            slots_.push_back(std::make_unique_for_overwrite<char[]>(chunkSize_));
             free_.push_back(slot);
+        }
     }
 
     void Ring::wake()
@@ -82,5 +86,15 @@ namespace FileTransferProtocol
     bool Ring::isPaused() const
     {
         return paused_ && paused_();
+    }
+
+    std::span<char> Ring::bytesOf(std::size_t slot)
+    {
+        return {slots_[slot].get(), chunkSize_};
+    }
+
+    std::size_t Ring::slotCount() const
+    {
+        return slots_.size();
     }
 }

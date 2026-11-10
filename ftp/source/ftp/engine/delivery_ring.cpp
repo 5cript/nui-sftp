@@ -58,7 +58,7 @@ namespace FileTransferProtocol
 
             const auto slot = free_.front();
             free_.pop_front();
-            auto& bytes = slots_[slot];
+            const auto bytes = bytesOf(slot);
             std::size_t filled{0u};
             while (!ended && filled < bytes.size())
             {
@@ -113,7 +113,7 @@ namespace FileTransferProtocol
 
     void DeliveryRing::deliver(std::size_t slot, std::size_t filled)
     {
-        if (!closed_ && !sink_(std::span<char const>{slots_[slot].data(), filled}))
+        if (!closed_ && !sink_(bytesOf(slot).first(filled)))
             close();
         giveBack(slot);
     }
@@ -133,7 +133,7 @@ namespace FileTransferProtocol
 
     void DeliveryRing::letGoWhenIdle()
     {
-        if (finished_ && free_.size() == slots_.size())
+        if (finished_ && free_.size() == slotCount())
             sink_ = nullptr;
     }
 
