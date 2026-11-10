@@ -107,6 +107,61 @@ namespace FileTransferProtocol::Test
         };
 
         /**
+         * @brief Keeps a strand busy until it goes out of scope, what is queued meanwhile runs after it in order.
+         */
+        class StrandHold
+        {
+          public:
+            explicit StrandHold(asio::strand<asio::any_io_executor> const& strand)
+            {
+                auto entered = std::make_shared<std::promise<void>>();
+                auto running = entered->get_future();
+                asio::post(
+                    strand,
+                    [entered, left = left_]()
+                    {
+                        entered->set_value();
+                        left.wait();
+                    }
+                );
+                if (running.wait_for(10s) != std::future_status::ready)
+                    throw std::runtime_error{"The strand did not run the hold"};
+            }
+
+            ~StrandHold()
+            {
+                leave_.set_value();
+            }
+
+            StrandHold(StrandHold const&) = delete;
+            StrandHold& operator=(StrandHold const&) = delete;
+            StrandHold(StrandHold&&) = delete;
+            StrandHold& operator=(StrandHold&&) = delete;
+
+          private:
+            std::promise<void> leave_{};
+            std::shared_future<void> left_{leave_.get_future().share()};
+        };
+
+        /**
+         * @brief Asks @p condition until it holds, for a state the pool shows by no event.
+         *
+         * @return False when it did not hold within ten seconds.
+         */
+        template <typename ConditionT>
+        bool eventually(ConditionT condition)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + 10s;
+            auto holds = condition();
+            while (!holds && std::chrono::steady_clock::now() < deadline)
+            {
+                std::this_thread::sleep_for(1ms);
+                holds = condition();
+            }
+            return holds;
+        }
+
+        /**
          * @brief What the lost handler of a pool got.
          */
         struct Losses
@@ -812,16 +867,30 @@ namespace FileTransferProtocol::Test
         expectError(waitFor(waiting), RemoteErrorKind::ConnectionLost);
     }
 
+    TEST_F(PoolTests, IdleTransferConnectionBecomesC0WithoutALogin)
+    {
+        server_->addConnection(loginThenResetOn("NOOP"));
+        server_->addConnection(loginThenDisconnect());
+        const auto pool = startedPool();
+        auto transfer = leaseFrom(run(pool->acquireTransfer()));
+        giveBack(transfer);
+        auto command = leaseFrom(run(pool->acquireCommand()));
+        ASSERT_FALSE(execute(command, Verb::Noop));
+
+        giveBack(command);
+        EXPECT_EQ(pool->health(), PoolHealth::Healthy);
+        EXPECT_EQ(leaseFrom(run(pool->acquireCommand())).name(), "C1");
+        EXPECT_EQ(connectionsAccepted(), 2u);
+    }
+
     TEST_F(PoolTests, TransferConnectionBecomesC0WhenTheTransfersHoldEverySlot)
     {
         server_->addConnection(loginThenResetOn("NOOP"));
         server_->addConnection(loginThenDisconnect());
         server_->addConnection(loginThenDisconnect());
-        Script refused{};
-        server_->addConnection(refused.reply("421 There are too many connections from your internet address.")
-                .checkpoint("refused")
-                .expectDisconnect());
+        server_->addConnection(refusedAtTheGreeting());
         auto poolOptions = options();
+        poolOptions.transferConnections = 3u;
         poolOptions.reloginBackoff = 10ms;
         const auto pool = startedPool(std::move(poolOptions));
         auto first = leaseFrom(run(pool->acquireTransfer()));
@@ -829,17 +898,46 @@ namespace FileTransferProtocol::Test
         auto command = leaseFrom(run(pool->acquireCommand()));
         ASSERT_FALSE(execute(command, Verb::Noop));
         giveBack(command);
-        // Waits for C0 itself, an idle transfer connection would serve a command that comes later.
         auto waiting = spawn(pool->acquireCommand());
-        flush(pool->strand());
-        ASSERT_TRUE(server_->waitForCheckpoint("refused"));
 
-        // The refusal and this release reach the pool in either order, both end with C1 as C0.
+        // The pool shows the refusal only through the limit it learned from it, 3 of the 4 its options allow.
+        ASSERT_TRUE(eventually(
+            [&pool]()
+            {
+                return pool->connectionLimit() == 3u;
+            }
+        ));
+        flush(pool->strand());
+        EXPECT_EQ(pool->health(), PoolHealth::Degraded);
+        EXPECT_NE(waiting.wait_for(0s), std::future_status::ready) << "the refusal ended the wait for C0";
+
         giveBack(first);
         const auto again = leaseFrom(waitFor(waiting));
         EXPECT_EQ(again.name(), "C1");
         EXPECT_EQ(pool->health(), PoolHealth::Healthy);
         EXPECT_TRUE(losses_->recorded().empty());
         EXPECT_EQ(connectionsAccepted(), 4u);
+    }
+
+    TEST_F(PoolTests, C0ThatEndedBeforeThePoolKnewIsNotHandedOut)
+    {
+        server_->addConnection(idleTimeoutAfterLogin());
+        Script again{};
+        server_->addConnection(loggedIn(again).expect("NOOP").reply("200 NOOP ok.").expectDisconnect());
+        const auto pool = startedPool();
+        std::future<Pool::LeaseResult> command{};
+        {
+            // The command is queued before the end of C0 reaches the pool, only C0's own strand knows of it.
+            const StrandHold hold{pool->strand()};
+            command = spawn(pool->acquireCommand());
+            ASSERT_NO_FATAL_FAILURE(endIdleMetadata());
+        }
+
+        const auto lease = leaseFrom(waitFor(command));
+        const auto reply = execute(lease, Verb::Noop);
+        ASSERT_TRUE(reply) << reply.error().toString();
+        EXPECT_EQ(reply->code, 200);
+        EXPECT_EQ(pool->health(), PoolHealth::Healthy);
+        EXPECT_EQ(connectionsAccepted(), 2u);
     }
 }
