@@ -15,7 +15,46 @@ namespace FileTransferProtocol
         using Detail::isCancelled;
         using Detail::useTuple;
         using RemoteIo::RemoteErrorKind;
+
+        RemoteIo::RemoteError lostDeliveries()
+        {
+            return errorOf(RemoteErrorKind::ConnectionLost, "The session's thread takes no more deliveries");
+        }
     }
+
+    /**
+     * @brief One delivery, owned by its task. Gives the slot back when the task ends, as lost unless the delivery
+     *        ended: when the sink threw, or the ProcessingThread dropped the task unrun, a refused push among them.
+     */
+    class DeliveryRing::DeliveryTask
+    {
+      public:
+        DeliveryTask(std::shared_ptr<DeliveryRing> ring, std::size_t slot, std::size_t filled)
+            : ring_{std::move(ring)}
+            , slot_{slot}
+            , filled_{filled}
+        {}
+        ~DeliveryTask()
+        {
+            ring_->giveBack(slot_, delivered_);
+        }
+        DeliveryTask(DeliveryTask const&) = delete;
+        DeliveryTask& operator=(DeliveryTask const&) = delete;
+        DeliveryTask(DeliveryTask&&) = delete;
+        DeliveryTask& operator=(DeliveryTask&&) = delete;
+
+        void run()
+        {
+            ring_->deliver(slot_, filled_);
+            delivered_ = true;
+        }
+
+      private:
+        const std::shared_ptr<DeliveryRing> ring_;
+        const std::size_t slot_;
+        const std::size_t filled_;
+        bool delivered_{false};
+    };
 
     std::shared_ptr<DeliveryRing>
     DeliveryRing::create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options)
@@ -37,10 +76,6 @@ namespace FileTransferProtocol
     {
         const auto self = sharedAs<DeliveryRing>();
         sink_ = std::move(sink);
-        const auto stopped = []()
-        {
-            return errorOf(RemoteErrorKind::Cancelled, "The download was stopped");
-        };
         // A cancelled coroutine starts no operation, an awaited one would throw.
         if (isCancelled(co_await asio::this_coro::cancellation_state))
             stopped_ = true;
@@ -54,7 +89,7 @@ namespace FileTransferProtocol
                     stopped_ = true;
             }
             if (stopped_)
-                co_return std::unexpected(stopped());
+                co_return std::unexpected(stopReason());
 
             const auto slot = free_.front();
             free_.pop_front();
@@ -86,7 +121,7 @@ namespace FileTransferProtocol
                 if (stopped_)
                 {
                     free_.push_back(slot);
-                    co_return std::unexpected(stopped());
+                    co_return std::unexpected(stopReason());
                 }
             }
             if (filled == 0u)
@@ -95,40 +130,64 @@ namespace FileTransferProtocol
                 continue;
             }
             const auto pushed = engine_->pushTask(
-                [self, slot, filled]()
+                [delivery = std::make_shared<DeliveryTask>(self, slot, filled)]() mutable
                 {
-                    self->deliver(slot, filled);
+                    // Ends with the delivery, the thread keeps a task until its batch ran.
+                    const auto ending = std::move(delivery);
+                    ending->run();
                 }
             );
+            // The refused task gave the slot back.
             if (!pushed)
-            {
-                free_.push_back(slot);
-                co_return std::unexpected(
-                    errorOf(RemoteErrorKind::ConnectionLost, "The session's thread takes no more deliveries")
-                );
-            }
+                co_return std::unexpected(lostDeliveries());
         }
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
     void DeliveryRing::deliver(std::size_t slot, std::size_t filled)
     {
-        if (!closed_ && !sink_(bytesOf(slot).first(filled)))
+        if (closed_)
+            return;
+        auto accepted = false;
+        try
+        {
+            accepted = sink_(bytesOf(slot).first(filled));
+        }
+        catch (...)
+        {
+            // The deliveries behind this one would follow a gap.
+            closed_ = true;
+            throw;
+        }
+        if (!accepted)
             close();
-        giveBack(slot);
     }
 
-    void DeliveryRing::giveBack(std::size_t slot)
+    void DeliveryRing::giveBack(std::size_t slot, bool delivered)
     {
-        engine_->postTo(
-            strand_,
-            [self = sharedAs<DeliveryRing>(), slot]()
+        auto takeBack = [self = sharedAs<DeliveryRing>(), slot, delivered]()
+        {
+            self->free_.push_back(slot);
+            if (!delivered)
             {
-                self->free_.push_back(slot);
-                self->wakeTimer_.cancel();
-                self->letGoWhenIdle();
+                self->lost_ = true;
+                self->stopped_ = true;
             }
-        );
+            self->wakeTimer_.cancel();
+            self->letGoWhenIdle();
+        };
+        // A refused push ends its task on the strand, where the engine may refuse posts already.
+        if (strand_.running_in_this_thread())
+            takeBack();
+        else
+            engine_->postTo(strand_, std::move(takeBack));
+    }
+
+    RemoteIo::RemoteError DeliveryRing::stopReason() const
+    {
+        if (lost_)
+            return lostDeliveries();
+        return errorOf(RemoteErrorKind::Cancelled, "The download was stopped");
     }
 
     void DeliveryRing::letGoWhenIdle()

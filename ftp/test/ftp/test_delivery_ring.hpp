@@ -126,6 +126,43 @@ namespace FileTransferProtocol::Test
             ));
         }
 
+        /**
+         * @brief Holds the ProcessingThread until @p release is ready, then ends its loop with an exception, which
+         *        drops the tasks pushed meanwhile. Returns once the task runs, so later pushes queue behind its batch.
+         */
+        void breakTheProcessingThreadAfter(std::shared_future<void> release)
+        {
+            const auto running = std::make_shared<std::promise<void>>();
+            auto holds = running->get_future();
+            ASSERT_TRUE(thread_.pushTask(
+                [running, release]()
+                {
+                    running->set_value();
+                    release.wait();
+                    throw std::runtime_error{"A task of the session broke"};
+                }
+            ));
+            valueOf(holds);
+        }
+
+        /**
+         * @brief Waits until the connection strand ran what was posted to it so far.
+         */
+        void flushStrand()
+        {
+            auto flushed = asio::post(connectionStrand_, asio::use_future);
+            valueOf(flushed);
+        }
+
+        /**
+         * @brief Waits until the ProcessingThread ended and the strand took back what its tasks owed the ring.
+         */
+        void settleTasks()
+        {
+            thread_.stop();
+            flushStrand();
+        }
+
         static void expectPattern(std::vector<char> const& bytes, std::size_t size)
         {
             ASSERT_EQ(bytes.size(), size);
@@ -527,6 +564,96 @@ namespace FileTransferProtocol::Test
         auto given = asio::post(connectionStrand_, asio::use_future);
         valueOf(given);
         EXPECT_TRUE(sinkState.expired()) << "the ring kept the sink after its source threw";
+    }
+
+    TEST_P(DeliveryRingTests, DeliveriesTheProcessingThreadDropsEndTheRingAsLost)
+    {
+        const auto engine = makeEngine();
+        const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
+        const auto download = std::make_shared<FakeDownload>();
+        download->size = std::numeric_limits<std::size_t>::max();
+        download->piece = options_.chunkSize;
+        std::promise<void> lastSlotFilling{};
+        auto filling = lastSlotFilling.get_future();
+        download->beforeRead = [&lastSlotFilling, slots = options_.slots](std::size_t number)
+        {
+            if (number + 1u == slots)
+                lastSlotFilling.set_value();
+        };
+        auto held = std::make_shared<int>(0);
+        const std::weak_ptr<int> sinkState = held;
+        const auto deliveries = std::make_shared<std::atomic<std::size_t>>(0u);
+        std::promise<void> release{};
+        ASSERT_NO_FATAL_FAILURE(breakTheProcessingThreadAfter(release.get_future().share()));
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                sourceOf(download),
+                [held = std::move(held), deliveries](std::span<char const>)
+                {
+                    ++*deliveries;
+                    return true;
+                }
+            ),
+            asio::use_future
+        );
+        valueOf(filling);
+        // The last read posts itself and is pushed when it comes back: the first flush runs behind that post being
+        // made, the second behind the push.
+        flushStrand();
+        flushStrand();
+        release.set_value();
+
+        const auto outcome = valueOf(ran);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        settleTasks();
+        EXPECT_EQ(download->reads.load(), options_.slots) << "the ring read on behind a lost delivery";
+        EXPECT_EQ(deliveries->load(), 0u);
+        EXPECT_TRUE(sinkState.expired()) << "the ring kept the sink after its deliveries were dropped";
+    }
+
+    TEST_P(DeliveryRingTests, ASinkThatThrowsGetsNoLaterBytesAndEndsTheRingAsLost)
+    {
+        const auto engine = makeEngine();
+        const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
+        const auto download = std::make_shared<FakeDownload>();
+        download->size = std::numeric_limits<std::size_t>::max();
+        download->piece = options_.chunkSize;
+        std::promise<void> twoPushed{};
+        auto pushed = twoPushed.get_future();
+        download->beforeRead = [&twoPushed](std::size_t number)
+        {
+            // One read fills one slot, so before the third read two deliveries were pushed.
+            if (number == 2u)
+                twoPushed.set_value();
+        };
+        auto held = std::make_shared<int>(0);
+        const std::weak_ptr<int> sinkState = held;
+        const auto deliveries = std::make_shared<std::atomic<std::size_t>>(0u);
+        std::promise<void> release{};
+        ASSERT_NO_FATAL_FAILURE(holdTheProcessingThread(release.get_future().share()));
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                sourceOf(download),
+                [held = std::move(held), deliveries](std::span<char const>) -> bool
+                {
+                    ++*deliveries;
+                    throw std::runtime_error{"The sink broke"};
+                }
+            ),
+            asio::use_future
+        );
+        valueOf(pushed);
+        release.set_value();
+
+        const auto outcome = valueOf(ran);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        settleTasks();
+        EXPECT_EQ(deliveries->load(), 1u) << "the sink got bytes behind the ones it threw on";
+        EXPECT_TRUE(sinkState.expired()) << "the ring kept the sink after it threw";
     }
 
     TEST_P(DeliveryRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)

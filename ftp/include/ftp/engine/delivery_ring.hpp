@@ -24,7 +24,8 @@ namespace FileTransferProtocol
      * Deliveries keep the ring alive, and the end of run() is pushed after the last of them, so a completion task the
      * caller pushes then runs after every delivery. The ring lets go of the sink once it ended and every slot is back,
      * so the sink may hold what holds the ring. Stop the ring before the engine refuses posts. close() ends the sink:
-     * later deliveries drop their bytes and give the slot back.
+     * later deliveries drop their bytes and give the slot back. A delivery gives its slot back also when its sink
+     * throws or the ProcessingThread drops it unrun, which ends the ring as lost, and the sink gets no later bytes.
      */
     class DeliveryRing : public Ring
     {
@@ -55,15 +56,27 @@ namespace FileTransferProtocol
          * @param paused Asked before each slot, the ring waits while it is true. Call wake() when it turns false.
          * @return Nothing once the data ended and every filled slot was handed over; the error of a failed read;
          *         Cancelled after stop(), close() or a refused delivery; ConnectionLost when the ProcessingThread takes
-         *         no more tasks. A slot that was not full yet is dropped with the error.
+         *         no more tasks, dropped a delivery, or the sink threw. A slot that was not full yet is dropped with
+         *         the error.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
         run(Source source, Sink sink, Paused paused = {});
 
       private:
+        class DeliveryTask;
+
         boost::asio::awaitable<Outcome> fillSlots(Source source, Sink sink);
         void deliver(std::size_t slot, std::size_t filled);
-        void giveBack(std::size_t slot);
+        /**
+         * @brief Takes @p slot back on the connection strand, from any thread.
+         *
+         * @param delivered False when the sink did not get the bytes of the slot, which stops the ring as lost.
+         */
+        void giveBack(std::size_t slot, bool delivered);
+        /**
+         * @brief Why the ring stopped, on the connection strand.
+         */
+        RemoteIo::RemoteError stopReason() const;
         bool mayRead() const;
         /**
          * @brief Drops the sink once run() ended and every delivery gave its slot back.
@@ -75,5 +88,7 @@ namespace FileTransferProtocol
          *        the last gave its slot back.
          */
         Sink sink_{};
+        /** @brief A delivery did not reach the sink, the ring is stopped. The connection strand's. */
+        bool lost_{false};
     };
 }
