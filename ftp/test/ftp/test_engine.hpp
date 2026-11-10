@@ -722,7 +722,7 @@ namespace FileTransferProtocol::Test
         auto start = asio::co_spawn(engine->strand(), engine->pool()->start(), asio::use_future);
         ASSERT_TRUE(valueOf(start));
 
-        EXPECT_TRUE(engine->close(thread_));
+        EXPECT_TRUE(engine->close());
         EXPECT_TRUE(engine->stopping());
         EXPECT_FALSE(engine->post([]() {}));
         EXPECT_FALSE(engine->pushTask([]() {}));
@@ -757,7 +757,7 @@ namespace FileTransferProtocol::Test
         );
         valueOf(waiting);
 
-        EXPECT_TRUE(engine->close(thread_));
+        EXPECT_TRUE(engine->close());
         const auto outcome = valueOf(stuck);
         ASSERT_FALSE(outcome);
         EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
@@ -804,7 +804,7 @@ namespace FileTransferProtocol::Test
         );
         valueOf(waiting);
 
-        EXPECT_TRUE(engine->close(thread_));
+        EXPECT_TRUE(engine->close());
         const auto outcome = valueOf(followUp);
         ASSERT_FALSE(outcome);
         EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
@@ -844,7 +844,7 @@ namespace FileTransferProtocol::Test
             SyncLimits{}
         );
 
-        EXPECT_TRUE(engine->close(thread_, TeardownOptions{.quitBackstop = 50ms, .drain = 50ms}));
+        EXPECT_TRUE(engine->close(TeardownOptions{.quitBackstop = 50ms, .drain = 50ms}));
         ASSERT_EQ(leftover.wait_for(0s), std::future_status::ready) << "the close returned before the leftover tasks";
         const auto outcome = leftover.get();
         ASSERT_FALSE(outcome);
@@ -857,7 +857,7 @@ namespace FileTransferProtocol::Test
     TEST_P(EngineTests, ACallOfACleanupTaskAfterTheCloseIsRefusedAsClosed)
     {
         const auto engine = makeEngine();
-        EXPECT_TRUE(engine->close(thread_));
+        EXPECT_TRUE(engine->close());
         const auto ran = std::make_shared<std::atomic<bool>>(false);
         std::optional<Engine::Result<int>> answer{};
         thread_.pushCleanupTask(
@@ -912,14 +912,14 @@ namespace FileTransferProtocol::Test
         const auto options = TeardownOptions{.quitBackstop = 50ms, .drain = 50ms};
         auto first = std::async(
             std::launch::async,
-            [this, engine, options]()
+            [engine, options]()
             {
-                return engine->close(thread_, options);
+                return engine->close(options);
             }
         );
         valueOf(firstRuns);
 
-        EXPECT_TRUE(engine->close(thread_, options));
+        EXPECT_TRUE(engine->close(options));
         EXPECT_FALSE(engine->post([]() {})) << "the second close returned while the first still ran";
         EXPECT_TRUE(valueOf(first));
     }
@@ -950,7 +950,7 @@ namespace FileTransferProtocol::Test
         );
         valueOf(waiting);
 
-        EXPECT_FALSE(engine->close(thread_, TeardownOptions{.quitBackstop = 50ms, .drain = 50ms, .closeGrace = 50ms}))
+        EXPECT_FALSE(engine->close(TeardownOptions{.quitBackstop = 50ms, .drain = 50ms, .closeGrace = 50ms}))
             << "the operation that still runs is not counted";
         const auto outcome = valueOf(answered);
         ASSERT_FALSE(outcome);

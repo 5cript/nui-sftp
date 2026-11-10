@@ -38,6 +38,12 @@ namespace FileTransferProtocol
         void close();
         bool closed() const;
 
+        /**
+         * @brief Stops the thread, whose leftover tasks run on the caller meanwhile and may still push, which the
+         *        stopping thread refuses, then closes the gate. Not on the thread itself.
+         */
+        void stopThreadAndClose();
+
       private:
         mutable std::shared_mutex mutex_{};
         RemoteIo::ProcessingThread* thread_;

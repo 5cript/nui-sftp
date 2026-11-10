@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -221,7 +222,7 @@ namespace FileTransferProtocol
         );
     }
 
-    bool Engine::close(RemoteIo::ProcessingThread& thread, TeardownOptions options)
+    bool Engine::close(TeardownOptions options)
     {
         assert(
             !strand_.running_in_this_thread() && !onProcessingThread() &&
@@ -239,10 +240,14 @@ namespace FileTransferProtocol
                 self->failCalls(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session was closed"));
             }
         );
-        auto quit = thread.pushPromiseTask(
-            [self = shared_from_this(), limits = SyncLimits{.backstop = options.quitBackstop, .drain = options.drain}]()
+        const auto quitEnded = std::make_shared<std::promise<void>>();
+        auto quit = quitEnded->get_future();
+        const auto queued = tasks_->push(
+            [self = shared_from_this(),
+                limits = SyncLimits{.backstop = options.quitBackstop, .drain = options.drain},
+                quitEnded]()
             {
-                return self->awaitCall<void>(
+                std::ignore = self->awaitCall<void>(
                     [self](std::shared_ptr<CallScope>) -> asio::awaitable<Result<void>>
                     {
                         if (const auto pool = self->pool())
@@ -252,9 +257,10 @@ namespace FileTransferProtocol
                     limits,
                     CallRole::Quit
                 );
+                quitEnded->set_value();
             }
         );
-        if (quit.wait_for(options.quitBackstop + options.drain) != std::future_status::ready)
+        if (queued && quit.wait_for(options.quitBackstop + options.drain) != std::future_status::ready)
             Log::warn("FTP: The QUIT of the session did not end in time");
 
         setStopping();
@@ -264,8 +270,7 @@ namespace FileTransferProtocol
                 self->endSession();
             }
         );
-        thread.stop();
-        tasks_->close();
+        tasks_->stopThreadAndClose();
         refusePosts();
         return waitIdle(options.closeGrace);
     }

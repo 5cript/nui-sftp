@@ -5,7 +5,6 @@
 #include <ftp/engine/task_gate.hpp>
 #include <ftp/engine/work_counter.hpp>
 #include <ftp/pool/pool.hpp>
-#include <remote_io/async/processing_thread.hpp>
 #include <remote_io/remote_error.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -208,18 +207,17 @@ namespace FileTransferProtocol
         bool waitIdle(std::chrono::milliseconds limit);
 
         /**
-         * @brief Ends the session, on a thread that is neither an engine thread nor @p thread, and never stops the
-         *        executor: fails the operations running now and refuses later ones, so no call holds up what follows;
-         *        sends QUIT on the connections in a final task through call(), the one operation it still starts;
-         *        sets stopping, ends the pool and fails what is left;
-         *        stops @p thread, whose leftover tasks find every call refused, and closes the task gate; refuses
-         *        posts and waits for the work of the session. A second close waits for the first, then for the work.
+         * @brief Ends the session, on a thread that is neither an engine thread nor the ProcessingThread, and never
+         *        stops the executor: fails the operations running now and refuses later ones, so no call holds up what
+         *        follows; sends QUIT on the connections in a final task through call(), the one operation it still
+         *        starts; sets stopping, ends the pool and fails what is left; stops the ProcessingThread through the
+         *        task gate, its leftover tasks find every call refused, and closes the gate; refuses posts and waits
+         *        for the work of the session. A second close waits for the first, then for the work.
          *
-         * @param thread The ProcessingThread behind the TaskGate of the engine.
          * @return Whether the work of the session ended within closeGrace. Work past it owns its state and ends on
          *         an engine thread.
          */
-        bool close(RemoteIo::ProcessingThread& thread, TeardownOptions options = {});
+        bool close(TeardownOptions options = {});
 
       private:
         /**

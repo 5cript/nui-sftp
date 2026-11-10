@@ -552,7 +552,7 @@ namespace FileTransferProtocol::Test
     {
         const auto engine = makeEngine();
         const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
-        EXPECT_TRUE(engine->close(thread_));
+        EXPECT_TRUE(engine->close());
         auto closed = false;
         thread_.pushCleanupTask(
             [&closed, ring]()
