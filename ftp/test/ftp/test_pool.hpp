@@ -847,6 +847,27 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(lookups_, 2u);
     }
 
+    TEST_F(PoolTests, SameAddressesInAnotherOrderAreNoNewServer)
+    {
+        auto started = ScriptedFtpServer::start();
+        ASSERT_TRUE(started) << started.error();
+        const auto other = std::move(started).value();
+        setEndpoints({endpointOf(*server_), endpointOf(*other)});
+        server_->addConnection(loginThenDisconnect());
+        Script refused{};
+        server_->addConnection(
+            refused.reply("421 Service not available, closing control connection.").expectDisconnect()
+        );
+        const auto pool = startedPool();
+
+        // What a DNS round robin answers the next time.
+        setEndpoints({endpointOf(*other), endpointOf(*server_)});
+        expectError(run(pool->acquireTransfer()), RemoteErrorKind::NoConnection);
+        EXPECT_EQ(lookups_, 2u);
+        EXPECT_EQ(connectionsAccepted(), 2u);
+        EXPECT_TRUE(other->transcript().empty()) << "the login was tried again at the same addresses";
+    }
+
     TEST_F(PoolTests, IdleTransferConnectionEndsWithQuitAfterItsLinger)
     {
         server_->addConnection(loginThenDisconnect());

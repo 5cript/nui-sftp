@@ -338,9 +338,11 @@ namespace FileTransferProtocol
         if (!connection && reachedNoEndpoint(connection.error()) && !closed_ &&
             !isCancelled(co_await asio::this_coro::cancellation_state))
         {
-            // Every endpoint failed, the server may have moved.
+            // Every endpoint failed, the server may have moved. The same addresses in another order, as a DNS round
+            // robin answers, are the same server.
             const auto found = co_await lookUp();
-            if (found && *found != endpoints_ && !closed_ && !isCancelled(co_await asio::this_coro::cancellation_state))
+            const auto moved = found && !std::ranges::is_permutation(*found, endpoints_);
+            if (moved && !closed_ && !isCancelled(co_await asio::this_coro::cancellation_state))
             {
                 Log::info("FTP: The server's addresses changed, logging in at the new ones");
                 endpoints_ = *found;
