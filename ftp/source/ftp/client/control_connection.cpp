@@ -233,14 +233,21 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The reply the server sent instead of taking part in TLS, nothing when the bytes it sent are no reply.
+         * @brief The negative reply the server sent instead of taking part in TLS. Nothing for bytes that are no
+         *        reply and for any other reply: a greeting in plaintext is a server without TLS on this port.
          */
-        std::optional<Reply> plaintextReply() const
+        std::optional<Reply> plaintextRefusal() const
         {
             ReplyFramer framer{};
             if (!framer.feed(received_))
                 return std::nullopt;
-            return framer.next();
+            auto reply = framer.next();
+            if (!reply)
+                return std::nullopt;
+            const auto replyClass = classifyReply(reply->code);
+            if (replyClass != ReplyClass::TransientNegative && replyClass != ReplyClass::PermanentNegative)
+                return std::nullopt;
+            return reply;
         }
 
         SSL* tlsHandle()
@@ -464,7 +471,7 @@ namespace FileTransferProtocol
             upgrading_ = true;
             auto secured = co_await handshake(std::move(*tlsHandle), deadline, true);
             upgrading_ = false;
-            if (!secured && transport_->plaintextReply())
+            if (!secured && transport_->plaintextRefusal())
                 co_return std::unexpected(std::move(secured).error());
             if (!secured)
                 co_return std::unexpected(asNoSecureConnection(std::move(secured).error()));
@@ -599,7 +606,7 @@ namespace FileTransferProtocol
         {
             untrustedCertificate_ = refusedCertificate(transport->tlsHandle());
             auto failure = handshakeError(transport->tlsHandle(), error, error == asio::error::operation_aborted);
-            if (const auto refusal = plaintextRefusal ? transport->plaintextReply() : std::nullopt)
+            if (const auto refusal = plaintextRefusal ? transport->plaintextRefusal() : std::nullopt)
             {
                 Log::debug("FTP: The server answered TLS with a {} reply in plaintext", refusal->code);
                 failure = replyError(*refusal, std::nullopt);

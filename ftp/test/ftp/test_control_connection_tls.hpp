@@ -588,6 +588,17 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(commandsAfterDisconnect(connection).empty());
     }
 
+    TEST_F(ControlConnectionTlsTests, PlaintextGreetingOnAnImplicitTlsPortIsNoSecureConnection)
+    {
+        // A server without TLS on this port greets in plaintext, which refuses nothing.
+        server_->addConnection(Script{}.reply("220 ProFTPD Server ready.").stall());
+        const auto connection = makeConnection();
+        const auto greeting = connectWithImplicitTls(connection, settings());
+        expectError(greeting, RemoteIo::RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+        EXPECT_TRUE(commandsAfterDisconnect(connection).empty());
+    }
+
     TEST_F(ControlConnectionTlsTests, HandshakeWithoutAnAnswerTimesOut)
     {
         server_->addConnection(Script{}.reply("220 Ready").expect("AUTH", "TLS").reply("234 Proceed").stall());
