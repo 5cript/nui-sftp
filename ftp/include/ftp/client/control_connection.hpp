@@ -231,9 +231,13 @@ namespace FileTransferProtocol
         );
         /**
          * @brief The handshake of @p handle on the connected socket, the connection is Dead when it fails.
+         *
+         * @param plaintextRefusal A reply in plaintext instead of the handshake is the server's answer, the
+         *        replyError() of it is the failure. Only before the greeting of implicit TLS, behind AUTH TLS such
+         *        bytes could be injected.
          */
         boost::asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
-        handshake(SslHandle handle, std::chrono::steady_clock::time_point deadline);
+        handshake(SslHandle handle, std::chrono::steady_clock::time_point deadline, bool plaintextRefusal);
         /**
          * @brief Ends the connection after a failed start of TLS.
          *
