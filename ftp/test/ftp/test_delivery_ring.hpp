@@ -31,6 +31,9 @@ namespace FileTransferProtocol::Test
 {
     namespace
     {
+        /** @brief Set by a task while it waits in Engine::call(). */
+        thread_local bool insideACall{false};
+
         char patternAt(std::size_t index)
         {
             return static_cast<char>(index % 251u);
@@ -408,6 +411,86 @@ namespace FileTransferProtocol::Test
         ASSERT_FALSE(outcome);
         EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
         EXPECT_EQ(download->reads.load(), 1u);
+    }
+
+    TEST_P(DeliveryRingTests, NoDeliveryRunsInsideAnotherTasksCall)
+    {
+        /**
+         * @brief Tells the call on the session strand that the ring pushed a delivery behind it.
+         */
+        struct Handoff
+        {
+            explicit Handoff(asio::any_io_executor executor)
+                : timer{std::move(executor), asio::steady_timer::time_point::max()}
+            {}
+
+            asio::steady_timer timer;
+            bool pushed{false};
+        };
+
+        const auto engine = makeEngine();
+        const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
+        const auto download = std::make_shared<FakeDownload>();
+        download->size = 6u * options_.chunkSize;
+        download->piece = options_.chunkSize;
+        const auto handoff = std::make_shared<Handoff>(engine->strand());
+        download->beforeRead = [engine, handoff](std::size_t number)
+        {
+            // One read fills one slot, so before the second read the first delivery was pushed.
+            if (number != 1u)
+                return;
+            asio::post(
+                engine->strand(),
+                [handoff]()
+                {
+                    handoff->pushed = true;
+                    handoff->timer.cancel();
+                }
+            );
+        };
+        const auto entered = std::make_shared<std::promise<void>>();
+        auto inCall = entered->get_future();
+        auto task = thread_.pushPromiseTask(
+            [engine, handoff, entered]()
+            {
+                insideACall = true;
+                auto result = engine->call<int>(
+                    [handoff, entered](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                    {
+                        entered->set_value();
+                        while (!handoff->pushed)
+                            co_await handoff->timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                        co_return 1;
+                    },
+                    SyncLimits{.backstop = 10s, .drain = 1s}
+                );
+                insideACall = false;
+                return result;
+            }
+        );
+        valueOf(inCall);
+
+        const auto received = std::make_shared<Received>();
+        const auto sawACall = std::make_shared<bool>(false);
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                sourceOf(download),
+                [sawACall, sink = sinkInto(received)](std::span<char const> bytes)
+                {
+                    *sawACall = *sawACall || insideACall;
+                    return sink(bytes);
+                }
+            ),
+            asio::use_future
+        );
+        const auto called = valueOf(task);
+        ASSERT_TRUE(called) << called.error().toString();
+        const auto outcome = valueOf(ran);
+        ASSERT_TRUE(outcome) << outcome.error().toString();
+        flushTasks();
+        EXPECT_FALSE(*sawACall) << "a delivery ran inside the call of another task";
+        ASSERT_NO_FATAL_FAILURE(expectPattern(received->bytes, download->size));
     }
 
     INSTANTIATE_TEST_SUITE_P(
