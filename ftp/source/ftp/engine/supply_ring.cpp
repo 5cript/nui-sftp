@@ -165,11 +165,12 @@ namespace FileTransferProtocol
         auto& bytes = slots_[slot];
         std::size_t count{0u};
         std::optional<RemoteIo::RemoteError> failure{};
-        while (!closed_ && !sourceEnded_ && !failure && count < bytes.size())
+        while (!closed_ && !sourceEnded_ && !sourceFailed_ && count < bytes.size())
         {
             const auto got = source_(std::span<char>{bytes.data() + count, bytes.size() - count});
             if (!got)
             {
+                sourceFailed_ = true;
                 failure = got.error();
                 continue;
             }

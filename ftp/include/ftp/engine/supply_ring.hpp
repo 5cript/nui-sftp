@@ -138,5 +138,7 @@ namespace FileTransferProtocol
         bool closed_{false};
         /** @brief The source returned the end, later fills do not call it. The ProcessingThread's. */
         bool sourceEnded_{false};
+        /** @brief The source returned an error, later fills do not call it. The ProcessingThread's. */
+        bool sourceFailed_{false};
     };
 }

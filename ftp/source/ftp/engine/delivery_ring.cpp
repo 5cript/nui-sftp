@@ -113,6 +113,7 @@ namespace FileTransferProtocol
                     free_.push_back(slot);
                     co_return std::unexpected(received.error());
                 }
+                assert(*received <= bytes.size() - filled && "A source put more bytes into the buffer than it holds");
                 ended = *received == 0u;
                 filled += *received;
                 if (isCancelled(co_await asio::this_coro::cancellation_state))

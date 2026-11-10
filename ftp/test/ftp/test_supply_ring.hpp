@@ -329,6 +329,9 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(outcome.error().message, "The local file could not be read");
         EXPECT_LE(written->bytes.size(), 2u * options_.chunkSize);
         ASSERT_NO_FATAL_FAILURE(expectPattern(written->bytes, written->bytes.size()));
+        flushTasks();
+        // One read fills one slot: the two before the failed one, then none.
+        EXPECT_EQ(file->reads.load(), 3u) << "a fill read from the source after it failed";
     }
 
     TEST_P(SupplyRingTests, AFailedWriteEndsTheRingWithItsError)

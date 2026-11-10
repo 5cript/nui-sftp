@@ -7,6 +7,8 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -571,4 +573,42 @@ namespace FileTransferProtocol::Test
             return info.param == EngineExecutor::OneThread ? std::string{"OneThread"} : std::string{"ThreadPool"};
         }
     );
+
+    TEST(DeliveryRingDeathTests, ASourceThatReportsMoreThanItsBufferIsACodingError)
+    {
+#ifdef NDEBUG
+        GTEST_SKIP() << "Only the assert catches it, a release build has none";
+#else
+        EXPECT_DEATH(
+            {
+                asio::io_context context{};
+                RemoteIo::ProcessingThread thread{};
+                const auto engine = Engine::create(
+                    context.get_executor(), std::make_shared<Resolver>(), std::make_shared<TaskGate>(thread), {}
+                );
+                const auto strand = asio::make_strand(context.get_executor());
+                const auto ring = DeliveryRing::create(engine, strand, RingOptions{.slots = 2u, .chunkSize = 4u});
+                asio::co_spawn(
+                    strand,
+                    ring->run(
+                        // Claims one byte more than the first buffer holds, then ends, so a ring without the check
+                        // returns instead of dying.
+                        [reads = 0u](asio::mutable_buffer buffer) mutable
+                            -> asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
+                        {
+                            co_return reads++ == 0u ? buffer.size() + 1u : 0u;
+                        },
+                        [](std::span<char const>)
+                        {
+                            return true;
+                        }
+                    ),
+                    asio::detached
+                );
+                context.run();
+            },
+            "more bytes into the buffer"
+        );
+#endif
+    }
 }
