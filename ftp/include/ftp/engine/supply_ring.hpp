@@ -93,6 +93,11 @@ namespace FileTransferProtocol
             bool ended;
         };
 
+        /**
+         * @brief run() with @p self in the coroutine frame, which may start after its caller let go of the ring.
+         */
+        static boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+        runHolding(std::shared_ptr<SupplyRing> self, Source source, Sink sink, Paused paused);
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> writeSlots(Sink sink);
         /**
          * @brief Pushes a fill for every free slot while the data goes on and the ring is not paused.

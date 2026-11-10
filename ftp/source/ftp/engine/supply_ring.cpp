@@ -36,22 +36,28 @@ namespace FileTransferProtocol
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> SupplyRing::run(Source source, Sink sink, Paused paused)
     {
-        const auto self = shared_from_this();
-        assert(strand_.running_in_this_thread() && !running_ && "SupplyRing::run() runs once, on its strand");
-        running_ = true;
-        source_ = std::move(source);
-        paused_ = std::move(paused);
-        auto outcome = co_await writeSlots(std::move(sink));
+        return runHolding(shared_from_this(), std::move(source), std::move(sink), std::move(paused));
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    SupplyRing::runHolding(std::shared_ptr<SupplyRing> self, Source source, Sink sink, Paused paused)
+    {
+        assert(
+            self->strand_.running_in_this_thread() && !self->running_ && "SupplyRing::run() runs once, on its strand"
+        );
+        self->running_ = true;
+        self->source_ = std::move(source);
+        self->paused_ = std::move(paused);
+        auto outcome = co_await self->writeSlots(std::move(sink));
         // The source and the pause may hold what holds the ring.
-        finished_ = true;
-        paused_ = nullptr;
-        letGoOfTheSourceWhenIdle();
+        self->finished_ = true;
+        self->paused_ = nullptr;
+        self->letGoOfTheSourceWhenIdle();
         co_return outcome;
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> SupplyRing::writeSlots(Sink sink)
     {
-        const auto self = shared_from_this();
         auto ended = false;
         while (!ended)
         {

@@ -37,16 +37,23 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
     DeliveryRing::run(Source source, Sink sink, Paused paused)
     {
-        const auto self = shared_from_this();
-        assert(strand_.running_in_this_thread() && !running_ && "DeliveryRing::run() runs once, on its strand");
-        running_ = true;
-        sink_ = std::move(sink);
-        paused_ = std::move(paused);
-        auto outcome = co_await fillSlots(std::move(source));
+        return runHolding(shared_from_this(), std::move(source), std::move(sink), std::move(paused));
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    DeliveryRing::runHolding(std::shared_ptr<DeliveryRing> self, Source source, Sink sink, Paused paused)
+    {
+        assert(
+            self->strand_.running_in_this_thread() && !self->running_ && "DeliveryRing::run() runs once, on its strand"
+        );
+        self->running_ = true;
+        self->sink_ = std::move(sink);
+        self->paused_ = std::move(paused);
+        auto outcome = co_await self->fillSlots(std::move(source));
         // The sink and the pause may hold what holds the ring.
-        finished_ = true;
-        paused_ = nullptr;
-        letGoOfTheSinkWhenIdle();
+        self->finished_ = true;
+        self->paused_ = nullptr;
+        self->letGoOfTheSinkWhenIdle();
         co_return outcome;
     }
 

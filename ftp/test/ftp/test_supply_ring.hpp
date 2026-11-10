@@ -381,6 +381,26 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(written->writes.load(), 0u);
     }
 
+    TEST_P(SupplyRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)
+    {
+        const auto engine = makeEngine();
+        const auto file = std::make_shared<FakeFile>();
+        file->size = 3u * options_.chunkSize + 5u;
+        file->piece = options_.chunkSize;
+        const auto written = std::make_shared<Written>();
+        // The coroutine starts on the strand after the ring made here was let go of.
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            SupplyRing::create(engine, connectionStrand_, options_)
+                ->run(sourceOf(file, gate_), sinkInto(written, connectionStrand_)),
+            asio::use_future
+        );
+        const auto outcome = valueOf(ran);
+        ASSERT_TRUE(outcome) << outcome.error().toString();
+        flushTasks();
+        ASSERT_NO_FATAL_FAILURE(expectPattern(written->bytes, file->size));
+    }
+
     TEST_P(SupplyRingTests, ACleanupTaskMayCloseTheRingAfterTheSessionClosed)
     {
         const auto engine = makeEngine();

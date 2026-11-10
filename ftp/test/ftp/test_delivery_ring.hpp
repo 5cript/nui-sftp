@@ -493,6 +493,25 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(expectPattern(received->bytes, download->size));
     }
 
+    TEST_P(DeliveryRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)
+    {
+        const auto engine = makeEngine();
+        const auto download = std::make_shared<FakeDownload>();
+        download->size = 3u * options_.chunkSize + 5u;
+        download->piece = options_.chunkSize;
+        const auto received = std::make_shared<Received>();
+        // The coroutine starts on the strand after the ring made here was let go of.
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            DeliveryRing::create(engine, connectionStrand_, options_)->run(sourceOf(download), sinkInto(received)),
+            asio::use_future
+        );
+        const auto outcome = valueOf(ran);
+        ASSERT_TRUE(outcome) << outcome.error().toString();
+        flushTasks();
+        ASSERT_NO_FATAL_FAILURE(expectPattern(received->bytes, download->size));
+    }
+
     TEST_P(DeliveryRingTests, ACleanupTaskMayCloseTheRingAfterTheSessionClosed)
     {
         const auto engine = makeEngine();

@@ -83,6 +83,11 @@ namespace FileTransferProtocol
         void close();
 
       private:
+        /**
+         * @brief run() with @p self in the coroutine frame, which may start after its caller let go of the ring.
+         */
+        static boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+        runHolding(std::shared_ptr<DeliveryRing> self, Source source, Sink sink, Paused paused);
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> fillSlots(Source source);
         void deliver(std::size_t slot, std::size_t filled);
         void giveBack(std::size_t slot);
