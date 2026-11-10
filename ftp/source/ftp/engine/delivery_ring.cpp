@@ -4,7 +4,6 @@
 #include <boost/asio/this_coro.hpp>
 
 #include <cassert>
-#include <exception>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -25,53 +24,19 @@ namespace FileTransferProtocol
     }
 
     DeliveryRing::DeliveryRing(Private, std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options)
-        : engine_{std::move(engine)}
-        , strand_{std::move(connectionStrand)}
-        , slots_(options.slots, std::vector<char>(options.chunkSize))
-        , wakeTimer_{strand_, asio::steady_timer::time_point::max()}
-    {
-        assert(options.slots > 0u && options.chunkSize > 0u && "A delivery ring needs a slot of at least one byte");
-        for (std::size_t slot = 0u; slot < slots_.size(); ++slot)
-            free_.push_back(slot);
-    }
+        : Ring{std::move(engine), std::move(connectionStrand), options}
+    {}
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
     DeliveryRing::run(Source source, Sink sink, Paused paused)
     {
-        return runHolding(shared_from_this(), std::move(source), std::move(sink), std::move(paused));
+        return runHolding(shared_from_this(), std::move(paused), fillSlots(std::move(source), std::move(sink)));
     }
 
-    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
-    DeliveryRing::runHolding(std::shared_ptr<DeliveryRing> self, Source source, Sink sink, Paused paused)
+    asio::awaitable<Ring::Outcome> DeliveryRing::fillSlots(Source source, Sink sink)
     {
-        assert(
-            self->strand_.running_in_this_thread() && !self->running_ && "DeliveryRing::run() runs once, on its strand"
-        );
-        self->running_ = true;
-        self->sink_ = std::move(sink);
-        self->paused_ = std::move(paused);
-        std::expected<void, RemoteIo::RemoteError> outcome{};
-        std::exception_ptr thrown{};
-        try
-        {
-            outcome = co_await self->fillSlots(std::move(source));
-        }
-        catch (...)
-        {
-            thrown = std::current_exception();
-        }
-        // The sink and the pause may hold what holds the ring, also when the source threw.
-        self->finished_ = true;
-        self->paused_ = nullptr;
-        self->letGoOfTheSinkWhenIdle();
-        if (thrown)
-            std::rethrow_exception(thrown);
-        co_return outcome;
-    }
-
-    asio::awaitable<std::expected<void, RemoteIo::RemoteError>> DeliveryRing::fillSlots(Source source)
-    {
-        const auto self = shared_from_this();
+        const auto self = sharedAs<DeliveryRing>();
+        sink_ = std::move(sink);
         const auto stopped = []()
         {
             return errorOf(RemoteErrorKind::Cancelled, "The download was stopped");
@@ -146,38 +111,6 @@ namespace FileTransferProtocol
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
-    void DeliveryRing::wake()
-    {
-        engine_->postTo(
-            strand_,
-            [self = shared_from_this()]()
-            {
-                self->wakeTimer_.cancel();
-            }
-        );
-    }
-
-    void DeliveryRing::stop()
-    {
-        engine_->postTo(
-            strand_,
-            [self = shared_from_this()]()
-            {
-                self->stopped_ = true;
-                self->wakeTimer_.cancel();
-            }
-        );
-    }
-
-    void DeliveryRing::close()
-    {
-        assert(engine_->onProcessingThreadOrClosed() && "DeliveryRing::close() runs on the ProcessingThread");
-        if (closed_)
-            return;
-        closed_ = true;
-        stop();
-    }
-
     void DeliveryRing::deliver(std::size_t slot, std::size_t filled)
     {
         if (!closed_ && !sink_(std::span<char const>{slots_[slot].data(), filled}))
@@ -189,16 +122,16 @@ namespace FileTransferProtocol
     {
         engine_->postTo(
             strand_,
-            [self = shared_from_this(), slot]()
+            [self = sharedAs<DeliveryRing>(), slot]()
             {
                 self->free_.push_back(slot);
                 self->wakeTimer_.cancel();
-                self->letGoOfTheSinkWhenIdle();
+                self->letGoWhenIdle();
             }
         );
     }
 
-    void DeliveryRing::letGoOfTheSinkWhenIdle()
+    void DeliveryRing::letGoWhenIdle()
     {
         if (finished_ && free_.size() == slots_.size())
             sink_ = nullptr;
@@ -206,6 +139,6 @@ namespace FileTransferProtocol
 
     bool DeliveryRing::mayRead() const
     {
-        return !free_.empty() && !(paused_ && paused_());
+        return !free_.empty() && !isPaused();
     }
 }

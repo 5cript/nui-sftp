@@ -1,12 +1,12 @@
 #pragma once
 
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/ring.hpp>
 #include <ftp/engine/ring_options.hpp>
 #include <remote_io/remote_error.hpp>
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
-#include <boost/asio/steady_timer.hpp>
 
 #include <cstddef>
 #include <deque>
@@ -15,7 +15,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <vector>
 
 namespace FileTransferProtocol
 {
@@ -26,28 +25,26 @@ namespace FileTransferProtocol
      *        paused, no fill is outstanding.
      *
      * Fills keep the ring alive. The ring lets go of the source once it ended and every fill came back, so the source
-     * may hold what holds the ring. Stop the ring before the engine refuses posts.
+     * may hold what holds the ring. Stop the ring before the engine refuses posts. close() ends the source, a write
+     * under way ends before run() does.
      */
-    class SupplyRing : public std::enable_shared_from_this<SupplyRing>
+    class SupplyRing : public Ring
     {
         struct Private
         {};
 
       public:
-        using Strand = Engine::Strand;
         /** @brief Puts the next bytes into the span, 0 once the data ended. Called on the ProcessingThread. */
         using Source = std::function<std::expected<std::size_t, RemoteIo::RemoteError>(std::span<char>)>;
         /** @brief Writes all of the buffer, on the connection strand. */
         using Sink = std::function<
             boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>(boost::asio::const_buffer)>;
-        /** @brief Whether the transfer is paused, from the connection strand. */
-        using Paused = std::function<bool()>;
 
         static std::shared_ptr<SupplyRing>
         create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options = {});
 
         SupplyRing(Private, std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options);
-        ~SupplyRing() = default;
+        ~SupplyRing() override = default;
         SupplyRing(SupplyRing const&) = delete;
         SupplyRing& operator=(SupplyRing const&) = delete;
         SupplyRing(SupplyRing&&) = delete;
@@ -65,22 +62,6 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
         run(Source source, Sink sink, Paused paused = {});
 
-        /**
-         * @brief Wakes a ring that waits while paused. Any thread.
-         */
-        void wake();
-
-        /**
-         * @brief Ends run() at its next turn, a write under way ends first. Any thread.
-         */
-        void stop();
-
-        /**
-         * @brief The source is not called after this returned. Stops the ring. On the ProcessingThread, also inside
-         *        the source, or once the session closed.
-         */
-        void close();
-
       private:
         /**
          * @brief A slot back from the ProcessingThread.
@@ -93,12 +74,7 @@ namespace FileTransferProtocol
             bool ended;
         };
 
-        /**
-         * @brief run() with @p self in the coroutine frame, which may start after its caller let go of the ring.
-         */
-        static boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
-        runHolding(std::shared_ptr<SupplyRing> self, Source source, Sink sink, Paused paused);
-        boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> writeSlots(Sink sink);
+        boost::asio::awaitable<Outcome> writeSlots(Source source, Sink sink);
         /**
          * @brief Pushes a fill for every free slot while the data goes on and the ring is not paused.
          *
@@ -107,35 +83,22 @@ namespace FileTransferProtocol
         bool handOut();
         void fill(std::size_t slot);
         void takeFilled(std::size_t slot, std::expected<Filled, RemoteIo::RemoteError> filled);
-        bool isPaused() const;
         /**
-         * @brief Drops the source once run() ended and every fill came back, on the connection strand.
+         * @brief Drops the source once run() ended and every fill came back.
          */
-        void letGoOfTheSourceWhenIdle();
+        void letGoWhenIdle() override;
 
-        const std::shared_ptr<Engine> engine_;
-        const Strand strand_;
-        std::vector<std::vector<char>> slots_;
-        /** @brief The connection strand's. */
-        std::deque<std::size_t> free_{};
         /** @brief Filled slots in the order of the data, the connection strand's. */
         std::deque<Filled> filled_{};
         std::size_t fillsOut_{0u};
-        boost::asio::steady_timer wakeTimer_;
-        bool stopped_{false};
-        bool running_{false};
-        bool finished_{false};
         /** @brief A fill came back with the end of the data. */
         bool endSeen_{false};
         std::optional<RemoteIo::RemoteError> failure_{};
-        Paused paused_{};
         /**
          * @brief Used by the fills. Set on the connection strand before the first is pushed, dropped there after the
          *        last came back.
          */
         Source source_{};
-        /** @brief The ProcessingThread's. */
-        bool closed_{false};
         /** @brief The source returned the end, later fills do not call it. The ProcessingThread's. */
         bool sourceEnded_{false};
         /** @brief The source returned an error, later fills do not call it. The ProcessingThread's. */

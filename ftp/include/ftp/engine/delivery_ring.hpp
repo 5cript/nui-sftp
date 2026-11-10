@@ -1,22 +1,18 @@
 #pragma once
 
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/ring.hpp>
 #include <ftp/engine/ring_options.hpp>
 #include <remote_io/remote_error.hpp>
 
-#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/strand.hpp>
 
 #include <cstddef>
-#include <deque>
 #include <expected>
 #include <functional>
 #include <memory>
 #include <span>
-#include <vector>
 
 namespace FileTransferProtocol
 {
@@ -27,28 +23,26 @@ namespace FileTransferProtocol
      *
      * Deliveries keep the ring alive, and the end of run() is pushed after the last of them, so a completion task the
      * caller pushes then runs after every delivery. The ring lets go of the sink once it ended and every slot is back,
-     * so the sink may hold what holds the ring. Stop the ring before the engine refuses posts.
+     * so the sink may hold what holds the ring. Stop the ring before the engine refuses posts. close() ends the sink:
+     * later deliveries drop their bytes and give the slot back.
      */
-    class DeliveryRing : public std::enable_shared_from_this<DeliveryRing>
+    class DeliveryRing : public Ring
     {
         struct Private
         {};
 
       public:
-        using Strand = Engine::Strand;
         /** @brief Reads the next bytes into the buffer, 0 once the data ended. Called on the connection strand. */
         using Source = std::function<
             boost::asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>(boost::asio::mutable_buffer)>;
         /** @brief Takes the bytes of one slot on the ProcessingThread, false refuses them and stops the ring. */
         using Sink = std::function<bool(std::span<char const>)>;
-        /** @brief Whether the transfer is paused, from the connection strand. */
-        using Paused = std::function<bool()>;
 
         static std::shared_ptr<DeliveryRing>
         create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options = {});
 
         DeliveryRing(Private, std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options);
-        ~DeliveryRing() = default;
+        ~DeliveryRing() override = default;
         DeliveryRing(DeliveryRing const&) = delete;
         DeliveryRing& operator=(DeliveryRing const&) = delete;
         DeliveryRing(DeliveryRing&&) = delete;
@@ -66,53 +60,20 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
         run(Source source, Sink sink, Paused paused = {});
 
-        /**
-         * @brief Wakes a ring that waits while paused. Any thread.
-         */
-        void wake();
-
-        /**
-         * @brief Ends run() at its next turn, a read under way ends first. Any thread.
-         */
-        void stop();
-
-        /**
-         * @brief No sink runs after this returned, later deliveries drop their bytes and give the slot back. Stops the
-         *        ring. On the ProcessingThread, also inside a delivery, or once the session closed.
-         */
-        void close();
-
       private:
-        /**
-         * @brief run() with @p self in the coroutine frame, which may start after its caller let go of the ring.
-         */
-        static boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
-        runHolding(std::shared_ptr<DeliveryRing> self, Source source, Sink sink, Paused paused);
-        boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> fillSlots(Source source);
+        boost::asio::awaitable<Outcome> fillSlots(Source source, Sink sink);
         void deliver(std::size_t slot, std::size_t filled);
         void giveBack(std::size_t slot);
         bool mayRead() const;
         /**
-         * @brief Drops the sink once run() ended and every delivery gave its slot back, on the connection strand.
+         * @brief Drops the sink once run() ended and every delivery gave its slot back.
          */
-        void letGoOfTheSinkWhenIdle();
+        void letGoWhenIdle() override;
 
-        const std::shared_ptr<Engine> engine_;
-        const Strand strand_;
-        std::vector<std::vector<char>> slots_;
-        /** @brief The connection strand's. */
-        std::deque<std::size_t> free_{};
-        boost::asio::steady_timer wakeTimer_;
-        bool stopped_{false};
-        bool running_{false};
-        bool finished_{false};
-        Paused paused_{};
         /**
          * @brief Used by the deliveries. Set on the connection strand before the first is pushed, dropped there after
          *        the last gave its slot back.
          */
         Sink sink_{};
-        /** @brief The ProcessingThread's. */
-        bool closed_{false};
     };
 }
