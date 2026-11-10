@@ -5,6 +5,8 @@
 #include <boost/asio/co_spawn.hpp>
 #include <fmt/format.h>
 
+#include <cassert>
+#include <future>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -209,6 +211,71 @@ namespace FileTransferProtocol
         );
     }
 
+    bool Engine::close(RemoteIo::ProcessingThread& thread, TeardownOptions options)
+    {
+        assert(
+            !strand_.running_in_this_thread() && !onProcessingThread() &&
+            "Engine::close() runs on neither the session strand nor the ProcessingThread"
+        );
+        if (closing_.exchange(true))
+            return waitIdle(options.closeGrace);
+        Log::debug("FTP: Closing the session");
+
+        // The call running now ends at once, so the task that sends QUIT does not wait behind it.
+        post(
+            [self = shared_from_this()]()
+            {
+                self->failCalls(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session was closed"));
+            }
+        );
+        auto quit = thread.pushPromiseTask(
+            [self = shared_from_this(), limits = SyncLimits{.backstop = options.quitBackstop, .drain = options.drain}]()
+            {
+                return self->call<void>(
+                    [self](std::shared_ptr<CallScope>) -> asio::awaitable<Result<void>>
+                    {
+                        if (const auto pool = self->pool())
+                            co_await pool->close();
+                        co_return Result<void>{};
+                    },
+                    limits
+                );
+            }
+        );
+        if (quit.wait_for(options.quitBackstop + options.drain) != std::future_status::ready)
+            Log::warn("FTP: The QUIT of the session did not end in time");
+
+        setStopping();
+        post(
+            [self = shared_from_this()]()
+            {
+                self->endSession();
+            }
+        );
+        thread.stop();
+        tasks_->close();
+        refusePosts();
+        return waitIdle(options.closeGrace);
+    }
+
+    void Engine::failCalls(RemoteIo::RemoteError const& error)
+    {
+        const auto calls = std::exchange(calls_, {});
+        for (auto const& pending : calls | std::views::values)
+        {
+            pending->timer().cancel();
+            pending->cancel();
+            pending->fail(error);
+        }
+    }
+
+    void Engine::endSession()
+    {
+        // The owner's handle ends the pool: every connection closes, and no lost handler runs after it.
+        pool_.reset();
+        failCalls(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session was closed"));
+    }
+
     void Engine::handlerThrew(std::exception_ptr exception)
     {
         if (strand_.running_in_this_thread())
@@ -235,13 +302,7 @@ namespace FileTransferProtocol
         // The pool's end closes every connection, and ends the waits and the logins in the background.
         pool_.reset();
         const auto error = errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", what));
-        const auto calls = std::exchange(calls_, {});
-        for (auto const& pending : calls | std::views::values)
-        {
-            pending->timer().cancel();
-            pending->cancel();
-            pending->fail(error);
-        }
+        failCalls(error);
         reportLost(error);
     }
 

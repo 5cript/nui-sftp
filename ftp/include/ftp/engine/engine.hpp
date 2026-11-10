@@ -5,6 +5,7 @@
 #include <ftp/engine/task_gate.hpp>
 #include <ftp/engine/work_counter.hpp>
 #include <ftp/pool/pool.hpp>
+#include <remote_io/async/processing_thread.hpp>
 #include <remote_io/remote_error.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -34,6 +35,19 @@ namespace FileTransferProtocol
     struct EngineOptions
     {
         PoolOptions pool{};
+    };
+
+    /**
+     * @brief The bounds of Engine::close().
+     */
+    struct TeardownOptions
+    {
+        /** @brief The backstop of the call that sends QUIT on the connections. */
+        std::chrono::milliseconds quitBackstop{std::chrono::seconds{1}};
+        /** @brief The drain of that call, the closing thread waits for it at most quitBackstop plus this. */
+        std::chrono::milliseconds drain{std::chrono::seconds{1}};
+        /** @brief How long the close waits for the work of the session at its end. */
+        std::chrono::milliseconds closeGrace{std::chrono::seconds{1}};
     };
 
     /**
@@ -214,6 +228,19 @@ namespace FileTransferProtocol
          */
         bool waitIdle(std::chrono::milliseconds limit);
 
+        /**
+         * @brief Ends the session, on a thread that is neither an engine thread nor @p thread, and never stops the
+         *        executor: fails the operations running now, so a call does not hold up what follows; sends QUIT on
+         *        the connections in a final task through call(); sets stopping, ends the pool and fails what is left;
+         *        stops @p thread, whose leftover tasks find every call refused, and closes the task gate; refuses
+         *        posts and waits for the work of the session. A second close only waits.
+         *
+         * @param thread The ProcessingThread behind the TaskGate of the engine.
+         * @return Whether the work of the session ended within closeGrace. Work past it owns its state and ends on
+         *         an engine thread.
+         */
+        bool close(RemoteIo::ProcessingThread& thread, TeardownOptions options = {});
+
       private:
         /**
          * @brief @p function as a handler that holds the engine, counts as work and fails the session when it throws.
@@ -280,6 +307,14 @@ namespace FileTransferProtocol
         static RemoteIo::RemoteError wrongThread(std::string_view where);
         static RemoteIo::RemoteError timedOut(SyncLimits const& limits);
 
+        /**
+         * @brief Completes the operations in flight with @p error and cancels them, on the session strand.
+         */
+        void failCalls(RemoteIo::RemoteError const& error);
+        /**
+         * @brief Ends the pool and fails the operations in flight, on the session strand.
+         */
+        void endSession();
         void handlerThrew(std::exception_ptr exception);
         void fail(std::exception_ptr exception);
         void reportLost(RemoteIo::RemoteError error);
@@ -298,5 +333,6 @@ namespace FileTransferProtocol
         std::atomic<bool> stopping_{false};
         std::atomic<bool> failed_{false};
         std::atomic<bool> lostReported_{false};
+        std::atomic<bool> closing_{false};
     };
 }

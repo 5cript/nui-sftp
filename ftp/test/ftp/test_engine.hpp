@@ -132,6 +132,17 @@ namespace FileTransferProtocol::Test
                 throw std::runtime_error{"The wait did not end"};
             return future.get();
         }
+
+        /**
+         * @brief Waits until @p condition holds, at most 10 s.
+         */
+        bool waitUntil(std::function<bool()> const& condition)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + 10s;
+            while (!condition() && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(1ms);
+            return condition();
+        }
     }
 
     class EngineTests : public ::testing::TestWithParam<EngineExecutor>
@@ -177,6 +188,25 @@ namespace FileTransferProtocol::Test
             EXPECT_EQ(errors.front().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << errors.front().toString();
             EXPECT_NE(errors.front().message.find(text), std::string::npos) << errors.front().message;
             EXPECT_TRUE(reports_->onTaskThread.front()) << "the lost handler ran outside the ProcessingThread";
+        }
+
+        static EngineOptions optionsFor(ScriptedFtpServer const& server)
+        {
+            EngineOptions options{};
+            options.pool = PoolOptions{
+                .host = server.address(),
+                .port = server.port(),
+                .login = {.credentials = {.user = "user", .password = "password"}},
+                .control = {.connectTimeout = 10s, .commandTimeout = 10s},
+            };
+            return options;
+        }
+
+        static void expectNoFailures(ScriptedFtpServer& server)
+        {
+            ASSERT_TRUE(server.waitUntilDisconnected());
+            for (auto const& failure : server.failures())
+                ADD_FAILURE() << failure;
         }
 
         /**
@@ -401,14 +431,7 @@ namespace FileTransferProtocol::Test
                 .expect("PASS", "password")
                 .reply("530 Login incorrect.")
                 .expectDisconnect());
-        EngineOptions options{};
-        options.pool = PoolOptions{
-            .host = server->address(),
-            .port = server->port(),
-            .login = {.credentials = {.user = "user", .password = "password"}},
-            .control = {.connectTimeout = 10s, .commandTimeout = 10s},
-        };
-        const auto engine = makeEngine(std::move(options));
+        const auto engine = makeEngine(optionsFor(*server));
         const auto pool = engine->pool();
         auto start = asio::co_spawn(engine->strand(), pool->start(), asio::use_future);
         ASSERT_TRUE(valueOf(start));
@@ -578,14 +601,7 @@ namespace FileTransferProtocol::Test
         const auto server = std::move(started).value();
         server->addConnection(loginThenDisconnect());
         server->addConnection(loginThenDisconnect());
-        EngineOptions options{};
-        options.pool = PoolOptions{
-            .host = server->address(),
-            .port = server->port(),
-            .login = {.credentials = {.user = "user", .password = "password"}},
-            .control = {.connectTimeout = 10s, .commandTimeout = 10s},
-        };
-        const auto engine = makeEngine(std::move(options));
+        const auto engine = makeEngine(optionsFor(*server));
         const auto pool = engine->pool();
         auto start = asio::co_spawn(engine->strand(), pool->start(), asio::use_future);
         ASSERT_TRUE(valueOf(start));
@@ -693,6 +709,230 @@ namespace FileTransferProtocol::Test
         EXPECT_NE(outcome.error().message.find("the operation broke"), std::string::npos) << outcome.error().message;
         ASSERT_NO_FATAL_FAILURE(expectOneLossThatSays("the operation broke"));
         EXPECT_TRUE(poolGone(engine));
+    }
+
+    TEST_P(EngineTests, CloseSaysQuitAndEndsTheSession)
+    {
+        auto started = ScriptedFtpServer::start();
+        ASSERT_TRUE(started) << started.error();
+        const auto server = std::move(started).value();
+        Script metadata{};
+        server->addConnection(loggedIn(metadata).expect("QUIT").reply("221 Goodbye.").expectDisconnect());
+        const auto engine = makeEngine(optionsFor(*server));
+        auto start = asio::co_spawn(engine->strand(), engine->pool()->start(), asio::use_future);
+        ASSERT_TRUE(valueOf(start));
+
+        EXPECT_TRUE(engine->close(thread_));
+        EXPECT_TRUE(engine->stopping());
+        EXPECT_FALSE(engine->post([]() {}));
+        EXPECT_FALSE(engine->pushTask([]() {}));
+        EXPECT_FALSE(engine->failed());
+        ASSERT_NO_FATAL_FAILURE(expectNoFailures(*server));
+        EXPECT_TRUE(reports_->recorded().empty()) << "the close was reported as a loss";
+    }
+
+    TEST_P(EngineTests, AStuckCallDoesNotKeepTheCloseFromSayingQuit)
+    {
+        auto started = ScriptedFtpServer::start();
+        ASSERT_TRUE(started) << started.error();
+        const auto server = std::move(started).value();
+        Script metadata{};
+        server->addConnection(loggedIn(metadata).expect("QUIT").reply("221 Goodbye.").expectDisconnect());
+        const auto engine = makeEngine(optionsFor(*server));
+        auto start = asio::co_spawn(engine->strand(), engine->pool()->start(), asio::use_future);
+        ASSERT_TRUE(valueOf(start));
+        const auto entered = std::make_shared<std::promise<void>>();
+        auto waiting = entered->get_future();
+        auto stuck = callFromTask<int>(
+            engine,
+            [entered](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+            {
+                asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                entered->set_value();
+                co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                co_return 1;
+            },
+            SyncLimits{.backstop = 1h, .drain = 1h}
+        );
+        valueOf(waiting);
+
+        EXPECT_TRUE(engine->close(thread_));
+        const auto outcome = valueOf(stuck);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        ASSERT_NO_FATAL_FAILURE(expectNoFailures(*server));
+    }
+
+    TEST_P(EngineTests, ACloseWhoseQuitCannotRunEndsTheConnectionsAndTheLeftoverTasks)
+    {
+        auto started = ScriptedFtpServer::start();
+        ASSERT_TRUE(started) << started.error();
+        const auto server = std::move(started).value();
+        server->addConnection(loginThenDisconnect());
+        const auto engine = makeEngine(optionsFor(*server));
+        auto start = asio::co_spawn(engine->strand(), engine->pool()->start(), asio::use_future);
+        ASSERT_TRUE(valueOf(start));
+        ASSERT_TRUE(thread_.pushTask(
+            [engine]()
+            {
+                // Holds the thread until the close stops the session, the QUIT and the tasks behind it are left over.
+                EXPECT_TRUE(waitUntil(
+                    [&engine]()
+                    {
+                        return engine->stopping();
+                    }
+                ));
+            }
+        ));
+        const auto ran = std::make_shared<std::atomic<bool>>(false);
+        auto leftover = callFromTask<int>(
+            engine,
+            [ran](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+            {
+                *ran = true;
+                co_return 1;
+            },
+            SyncLimits{}
+        );
+
+        EXPECT_TRUE(engine->close(thread_, TeardownOptions{.quitBackstop = 50ms, .drain = 50ms}));
+        ASSERT_EQ(leftover.wait_for(0s), std::future_status::ready) << "the close returned before the leftover tasks";
+        const auto outcome = leftover.get();
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        EXPECT_FALSE(*ran);
+        ASSERT_NO_FATAL_FAILURE(expectNoFailures(*server));
+        EXPECT_TRUE(reports_->recorded().empty()) << "the close was reported as a loss";
+    }
+
+    TEST_P(EngineTests, AnOperationThatOutlivesTheCloseOwnsItsState)
+    {
+        const auto engine = makeEngine();
+        const auto blocker =
+            std::make_shared<asio::steady_timer>(engine->strand(), asio::steady_timer::time_point::max());
+        const auto entered = std::make_shared<std::promise<void>>();
+        auto waiting = entered->get_future();
+        const auto answer = std::make_shared<std::promise<Engine::Result<int>>>();
+        auto answered = answer->get_future();
+        engine->run<int>(
+            [blocker, entered](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+            {
+                entered->set_value();
+                co_await blocker->async_wait(
+                    asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::as_tuple(asio::use_awaitable))
+                );
+                co_return 7;
+            },
+            SyncLimits{.backstop = 1h, .drain = 1h},
+            [answer](Engine::Result<int> result)
+            {
+                answer->set_value(std::move(result));
+            }
+        );
+        valueOf(waiting);
+
+        EXPECT_FALSE(engine->close(thread_, TeardownOptions{.quitBackstop = 50ms, .drain = 50ms, .closeGrace = 50ms}))
+            << "the operation that still runs is not counted";
+        const auto outcome = valueOf(answered);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        asio::post(
+            engine->strand(),
+            [blocker]()
+            {
+                blocker->cancel();
+            }
+        );
+        EXPECT_TRUE(engine->waitIdle(5s));
+        EXPECT_FALSE(engine->failed()) << "the late result was not dropped";
+    }
+
+    TEST_P(EngineTests, TheEngineRunsOnWhileTheProcessingThreadIsHeld)
+    {
+        /**
+         * @brief Lets the holding task go at the end of a round, also when an assertion ends it early.
+         */
+        struct Hold
+        {
+            Hold() = default;
+            ~Hold()
+            {
+                *release = true;
+                unblock.set_value();
+            }
+            Hold(Hold const&) = delete;
+            Hold& operator=(Hold const&) = delete;
+            Hold(Hold&&) = delete;
+            Hold& operator=(Hold&&) = delete;
+
+            const std::shared_ptr<std::atomic<bool>> release = std::make_shared<std::atomic<bool>>(false);
+            std::promise<void> unblock{};
+        };
+
+        const auto engine = makeEngine();
+        for (const auto busy : {false, true})
+        {
+            SCOPED_TRACE(busy ? "a busy task" : "a blocked task");
+            Hold hold{};
+            const auto release = hold.release;
+            const auto unblocked = hold.unblock.get_future().share();
+            ASSERT_TRUE(thread_.pushTask(
+                [release, unblocked, busy]()
+                {
+                    if (!busy)
+                    {
+                        unblocked.wait();
+                        return;
+                    }
+                    while (!release->load())
+                    {}
+                }
+            ));
+
+            const auto timed = std::make_shared<std::promise<Engine::Result<int>>>();
+            auto timedAnswer = timed->get_future();
+            engine->run<int>(
+                [](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                {
+                    asio::steady_timer timer{co_await asio::this_coro::executor, 20ms};
+                    co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                    co_return 1;
+                },
+                SyncLimits{},
+                [timed](Engine::Result<int> result)
+                {
+                    timed->set_value(std::move(result));
+                }
+            );
+            const auto cut = std::make_shared<std::promise<Engine::Result<int>>>();
+            auto cutAnswer = cut->get_future();
+            engine->run<int>(
+                [](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                {
+                    asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                    co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                    co_return std::unexpected(
+                        RemoteIo::RemoteError{
+                            .kind = RemoteIo::RemoteErrorKind::Cancelled,
+                            .message = "The wait was cancelled",
+                        }
+                    );
+                },
+                SyncLimits{.backstop = 50ms, .drain = 5s},
+                [cut](Engine::Result<int> result)
+                {
+                    cut->set_value(std::move(result));
+                }
+            );
+
+            // Both answer while the task still holds the ProcessingThread.
+            const auto timedOutcome = valueOf(timedAnswer);
+            ASSERT_TRUE(timedOutcome) << timedOutcome.error().toString();
+            EXPECT_EQ(*timedOutcome, 1);
+            const auto cutOutcome = valueOf(cutAnswer);
+            ASSERT_FALSE(cutOutcome);
+            EXPECT_EQ(cutOutcome.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << cutOutcome.error().toString();
+        }
     }
 
     INSTANTIATE_TEST_SUITE_P(
