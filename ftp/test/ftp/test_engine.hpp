@@ -305,11 +305,13 @@ namespace FileTransferProtocol::Test
     TEST_P(EngineTests, ExceptionAfterRefusePostsStillFailsTheSession)
     {
         const auto engine = makeEngine();
+        const auto connectionStrand = asio::make_strand(host_.executor());
         std::promise<void> release{};
         const auto released = release.get_future().share();
         std::promise<void> entered{};
         auto running = entered.get_future();
-        ASSERT_TRUE(engine->post(
+        ASSERT_TRUE(engine->postTo(
+            connectionStrand,
             [&entered, released]()
             {
                 entered.set_value();
