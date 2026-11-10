@@ -726,6 +726,7 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(engine->stopping());
         EXPECT_FALSE(engine->post([]() {}));
         EXPECT_FALSE(engine->pushTask([]() {}));
+        EXPECT_FALSE(thread_.pushTask([]() {})) << "the ProcessingThread still runs";
         EXPECT_FALSE(engine->failed());
         ASSERT_NO_FATAL_FAILURE(expectNoFailures(*server));
         EXPECT_TRUE(reports_->recorded().empty()) << "the close was reported as a loss";
