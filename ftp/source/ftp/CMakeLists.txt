@@ -20,6 +20,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/delivery_ring.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/engine.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/resolver.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/supply_ring.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/task_gate.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/work_counter.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/pool/lease.cpp
