@@ -4,6 +4,7 @@
 #include <boost/asio/this_coro.hpp>
 
 #include <cassert>
+#include <exception>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -49,11 +50,22 @@ namespace FileTransferProtocol
         self->running_ = true;
         self->sink_ = std::move(sink);
         self->paused_ = std::move(paused);
-        auto outcome = co_await self->fillSlots(std::move(source));
-        // The sink and the pause may hold what holds the ring.
+        std::expected<void, RemoteIo::RemoteError> outcome{};
+        std::exception_ptr thrown{};
+        try
+        {
+            outcome = co_await self->fillSlots(std::move(source));
+        }
+        catch (...)
+        {
+            thrown = std::current_exception();
+        }
+        // The sink and the pause may hold what holds the ring, also when the source threw.
         self->finished_ = true;
         self->paused_ = nullptr;
         self->letGoOfTheSinkWhenIdle();
+        if (thrown)
+            std::rethrow_exception(thrown);
         co_return outcome;
     }
 
@@ -85,7 +97,17 @@ namespace FileTransferProtocol
             std::size_t filled{0u};
             while (!ended && filled < bytes.size())
             {
-                const auto received = co_await source(asio::buffer(bytes.data() + filled, bytes.size() - filled));
+                std::expected<std::size_t, RemoteIo::RemoteError> received{};
+                try
+                {
+                    received = co_await source(asio::buffer(bytes.data() + filled, bytes.size() - filled));
+                }
+                catch (...)
+                {
+                    // Every slot must come back before the ring lets go of the sink.
+                    free_.push_back(slot);
+                    throw;
+                }
                 if (!received)
                 {
                     free_.push_back(slot);

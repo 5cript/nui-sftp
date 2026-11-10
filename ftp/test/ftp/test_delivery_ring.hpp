@@ -24,7 +24,9 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace FileTransferProtocol::Test
@@ -491,6 +493,38 @@ namespace FileTransferProtocol::Test
         flushTasks();
         EXPECT_FALSE(*sawACall) << "a delivery ran inside the call of another task";
         ASSERT_NO_FATAL_FAILURE(expectPattern(received->bytes, download->size));
+    }
+
+    TEST_P(DeliveryRingTests, ASourceThatThrowsStillLetsGoOfTheSink)
+    {
+        const auto engine = makeEngine();
+        const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
+        const auto download = std::make_shared<FakeDownload>();
+        download->size = 10u * options_.chunkSize;
+        download->piece = options_.chunkSize;
+        download->beforeRead = [](std::size_t number)
+        {
+            if (number == 2u)
+                throw std::runtime_error{"The source broke"};
+        };
+        auto held = std::make_shared<int>(0);
+        const std::weak_ptr<int> sinkState = held;
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                sourceOf(download),
+                [held = std::move(held)](std::span<char const>)
+                {
+                    return true;
+                }
+            ),
+            asio::use_future
+        );
+        EXPECT_THROW(std::ignore = valueOf(ran), std::runtime_error);
+        flushTasks();
+        auto given = asio::post(connectionStrand_, asio::use_future);
+        valueOf(given);
+        EXPECT_TRUE(sinkState.expired()) << "the ring kept the sink after its source threw";
     }
 
     TEST_P(DeliveryRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)

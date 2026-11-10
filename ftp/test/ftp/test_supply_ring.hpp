@@ -27,7 +27,9 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace FileTransferProtocol::Test
@@ -379,6 +381,37 @@ namespace FileTransferProtocol::Test
         const auto outcome = valueOf(ran);
         ASSERT_TRUE(outcome) << outcome.error().toString();
         EXPECT_EQ(written->writes.load(), 0u);
+    }
+
+    TEST_P(SupplyRingTests, ASinkThatThrowsStillLetsGoOfTheSource)
+    {
+        const auto engine = makeEngine();
+        const auto ring = SupplyRing::create(engine, connectionStrand_, options_);
+        const auto file = std::make_shared<FakeFile>();
+        file->size = 10u * options_.chunkSize;
+        file->piece = options_.chunkSize;
+        auto held = std::make_shared<int>(0);
+        const std::weak_ptr<int> sourceState = held;
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                [held = std::move(held), read = sourceOf(file, gate_)](std::span<char> bytes)
+                {
+                    return read(bytes);
+                },
+                [](asio::const_buffer) -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+                    throw std::runtime_error{"The sink broke"};
+                }
+            ),
+            asio::use_future
+        );
+        EXPECT_THROW(std::ignore = valueOf(ran), std::runtime_error);
+        flushTasks();
+        auto takenBack = asio::post(connectionStrand_, asio::use_future);
+        valueOf(takenBack);
+        EXPECT_TRUE(sourceState.expired()) << "the ring kept the source after its sink threw";
     }
 
     TEST_P(SupplyRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)

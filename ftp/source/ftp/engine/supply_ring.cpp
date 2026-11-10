@@ -4,6 +4,7 @@
 #include <boost/asio/this_coro.hpp>
 
 #include <cassert>
+#include <exception>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -48,11 +49,22 @@ namespace FileTransferProtocol
         self->running_ = true;
         self->source_ = std::move(source);
         self->paused_ = std::move(paused);
-        auto outcome = co_await self->writeSlots(std::move(sink));
-        // The source and the pause may hold what holds the ring.
+        std::expected<void, RemoteIo::RemoteError> outcome{};
+        std::exception_ptr thrown{};
+        try
+        {
+            outcome = co_await self->writeSlots(std::move(sink));
+        }
+        catch (...)
+        {
+            thrown = std::current_exception();
+        }
+        // The source and the pause may hold what holds the ring, also when the sink threw.
         self->finished_ = true;
         self->paused_ = nullptr;
         self->letGoOfTheSourceWhenIdle();
+        if (thrown)
+            std::rethrow_exception(thrown);
         co_return outcome;
     }
 
