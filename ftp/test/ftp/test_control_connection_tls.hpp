@@ -575,6 +575,19 @@ namespace FileTransferProtocol::Test
         nameOfServerBytes
     );
 
+    namespace
+    {
+        /**
+         * @brief A server without implicit TLS reads the ClientHello as lines, a CRLF among its random bytes makes it
+         *        look like commands. None of them may be the client's login.
+         */
+        void expectNoPlaintextLogin(std::vector<std::string> const& lines)
+        {
+            for (auto const& line : lines)
+                EXPECT_FALSE(line.starts_with("USER ")) << "the client logged in without TLS";
+        }
+    }
+
     TEST_F(ControlConnectionTlsTests, PlaintextReplyOnAnImplicitTlsPortIsTheServersAnswer)
     {
         // vsftpd refuses a connection over its limit on its implicit TLS port in plaintext, before any TLS.
@@ -585,7 +598,7 @@ namespace FileTransferProtocol::Test
         const auto greeting = connectWithImplicitTls(connection, settings());
         expectError(greeting, RemoteIo::RemoteErrorKind::ConnectionLimit);
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
-        EXPECT_TRUE(commandsAfterDisconnect(connection).empty());
+        expectNoPlaintextLogin(commandsAfterDisconnect(connection));
     }
 
     TEST_F(ControlConnectionTlsTests, PlaintextGreetingOnAnImplicitTlsPortIsNoSecureConnection)
@@ -596,7 +609,7 @@ namespace FileTransferProtocol::Test
         const auto greeting = connectWithImplicitTls(connection, settings());
         expectError(greeting, RemoteIo::RemoteErrorKind::NoSecureConnection);
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
-        EXPECT_TRUE(commandsAfterDisconnect(connection).empty());
+        expectNoPlaintextLogin(commandsAfterDisconnect(connection));
     }
 
     TEST_F(ControlConnectionTlsTests, HandshakeWithoutAnAnswerTimesOut)
