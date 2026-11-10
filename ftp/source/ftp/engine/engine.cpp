@@ -234,7 +234,7 @@ namespace FileTransferProtocol
         Log::debug("FTP: Closing the session");
 
         // The calls running now end at once and later ones are refused, so the task that sends QUIT waits behind none.
-        post(
+        postAlways(
             [self = shared_from_this()]()
             {
                 self->failCalls(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session was closed"));
@@ -264,7 +264,7 @@ namespace FileTransferProtocol
             Log::warn("FTP: The QUIT of the session did not end in time");
 
         setStopping();
-        post(
+        postAlways(
             [self = shared_from_this()]()
             {
                 self->endSession();
@@ -300,10 +300,8 @@ namespace FileTransferProtocol
             fail(exception);
             return;
         }
-        // Also while posts are refused: the failure must reach the session strand.
-        asio::post(
-            strand_,
-            [self = shared_from_this(), token = work(), exception]()
+        postAlways(
+            [self = shared_from_this(), exception]()
             {
                 self->fail(exception);
             }

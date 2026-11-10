@@ -212,7 +212,8 @@ namespace FileTransferProtocol
          *        follows; sends QUIT on the connections in a final task through call(), the one operation it still
          *        starts; sets stopping, ends the pool and fails what is left; stops the ProcessingThread through the
          *        task gate, its leftover tasks find every call refused, and closes the gate; refuses posts and waits
-         *        for the work of the session. A second close waits for the first, then for the work.
+         *        for the work of the session. A second close waits for the first, then for the work. Once posts are
+         *        refused before it, no QUIT is sent, the rest holds.
          *
          * @return Whether the work of the session ended within closeGrace. Work past it owns its state and ends on
          *         an engine thread.
@@ -239,6 +240,15 @@ namespace FileTransferProtocol
                     self->handlerThrew(std::current_exception());
                 }
             };
+        }
+
+        /**
+         * @brief Runs @p function on the session strand also once posts are refused, for what ends the session.
+         */
+        template <typename FunctionT>
+        void postAlways(FunctionT&& function)
+        {
+            boost::asio::post(strand_, guarded(std::forward<FunctionT>(function)));
         }
 
         /**

@@ -879,6 +879,37 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(*ran);
     }
 
+    TEST_P(EngineTests, ACloseAfterPostsWereRefusedStillEndsTheSession)
+    {
+        const auto engine = makeEngine();
+        const auto entered = std::make_shared<std::promise<void>>();
+        auto waiting = entered->get_future();
+        const auto answer = std::make_shared<std::promise<Engine::Result<int>>>();
+        auto answered = answer->get_future();
+        engine->run<int>(
+            [entered](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+            {
+                entered->set_value();
+                asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                co_return 1;
+            },
+            SyncLimits{.backstop = 1h, .drain = 1h},
+            [answer](Engine::Result<int> result)
+            {
+                answer->set_value(std::move(result));
+            }
+        );
+        valueOf(waiting);
+        engine->refusePosts();
+
+        EXPECT_TRUE(engine->close()) << "the operation in flight was not ended";
+        const auto outcome = valueOf(answered);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        EXPECT_TRUE(poolGone(engine)) << "the pool outlived the close";
+    }
+
     TEST_P(EngineTests, ASecondCloseReturnsOnlyAfterTheFirst)
     {
         const auto engine = makeEngine();
