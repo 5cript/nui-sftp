@@ -15,6 +15,7 @@
 #include "test_reply_error.hpp"
 #include "test_reply_framer.hpp"
 #include "test_reply_parsers.hpp"
+#include "test_resolver.hpp"
 #include "test_scripted_ftp_server.hpp"
 #include "test_server_profiles.hpp"
 #include "test_server_smoke.hpp"
