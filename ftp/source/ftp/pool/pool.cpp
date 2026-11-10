@@ -210,8 +210,7 @@ namespace FileTransferProtocol
                 outcome = co_await leaseIfOpen(connection);
             else
             {
-                if (!metadata_ && !metadataConnecting_ && health_ == PoolHealth::Healthy)
-                    connectMetadata();
+                connectMetadataIfGone();
                 outcome = co_await waitForMetadata();
             }
         }
@@ -240,8 +239,8 @@ namespace FileTransferProtocol
                 outcome = co_await leaseIfOpen(metadata_);
             else
             {
-                if (transferCapacity() == 0u && !metadata_ && !metadataConnecting_ && health_ == PoolHealth::Healthy)
-                    connectMetadata();
+                if (transferCapacity() == 0u)
+                    connectMetadataIfGone();
                 if (wakeWhenFree)
                     wakes_.push_back(std::move(wakeWhenFree));
                 outcome.emplace(
@@ -717,8 +716,10 @@ namespace FileTransferProtocol
         fireWakes();
     }
 
-    void Pool::connectMetadata()
+    void Pool::connectMetadataIfGone()
     {
+        if (metadata_ || metadataConnecting_ || health_ != PoolHealth::Healthy)
+            return;
         metadataConnecting_ = true;
         spawn(logInMetadataOnce());
     }
@@ -866,6 +867,11 @@ namespace FileTransferProtocol
         drop(connection);
         if (metadata && inUse)
             degrade(error);
+        else if (metadata && !commandWaiters_.empty())
+        {
+            // The one whose check found the idle C0 ended may be gone, the commands behind it still wait for C0.
+            connectMetadataIfGone();
+        }
         if (transfer && metadataFromNextRelease_)
         {
             // A slot is free, C0 may log in.

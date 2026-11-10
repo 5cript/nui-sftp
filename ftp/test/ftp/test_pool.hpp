@@ -1023,4 +1023,34 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(pool->health(), PoolHealth::Healthy);
         EXPECT_EQ(connectionsAccepted(), 2u);
     }
+
+    TEST_F(PoolTests, CommandBehindACancelledCheckOfAnEndedC0StillGetsC0)
+    {
+        asio::cancellation_signal signal{};
+        server_->addConnection(idleTimeoutAfterLogin());
+        server_->addConnection(loginThenDisconnect());
+        const auto pool = startedPool();
+        std::future<Pool::LeaseResult> cancelledCheck{};
+        std::future<Pool::LeaseResult> waiting{};
+        {
+            // The first command checks C0, the second waits behind it, and the cancel reaches the first before the
+            // check came back.
+            const StrandHold hold{pool->strand()};
+            cancelledCheck = spawn(pool->acquireCommand(), signal.slot());
+            waiting = spawn(pool->acquireCommand());
+            asio::post(
+                pool->strand(),
+                [&signal]()
+                {
+                    signal.emit(asio::cancellation_type::terminal);
+                }
+            );
+            ASSERT_NO_FATAL_FAILURE(endIdleMetadata());
+        }
+        expectError(waitFor(cancelledCheck), RemoteErrorKind::Cancelled);
+
+        EXPECT_EQ(leaseFrom(waitFor(waiting)).name(), "C0");
+        EXPECT_EQ(pool->health(), PoolHealth::Healthy);
+        EXPECT_EQ(connectionsAccepted(), 2u);
+    }
 }

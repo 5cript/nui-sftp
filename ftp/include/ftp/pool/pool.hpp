@@ -207,7 +207,11 @@ namespace FileTransferProtocol
          * @brief The time of a lowered limit is over, transfers that wait may try another login.
          */
         void endLimit();
-        void connectMetadata();
+        /**
+         * @brief Logs in C0 for the commands that need it now, one attempt. Does nothing while C0 is there, a login
+         *        of it runs or the session is not Healthy.
+         */
+        void connectMetadataIfGone();
         void adoptMetadata(std::shared_ptr<PooledConnection> connection);
         void promote(std::shared_ptr<PooledConnection> const& connection);
         bool grantMetadata();
