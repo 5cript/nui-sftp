@@ -142,7 +142,7 @@ namespace FileTransferProtocol
          *        with its result. The operation is cancelled at the backstop of @p limits; an error it ends with after
          *        that is TimedOut. When it has not ended after the drain, the connections touched in its CallScope are
          *        closed and it completes as TimedOut, a later result is dropped. @p done runs on the session strand,
-         *        or at once on the calling thread while the session is stopping, failed or refuses posts. It must not
+         *        or at once on the calling thread while the session is closing, failed or refuses posts. It must not
          *        throw.
          *
          * @param body Called once, on the session strand, with the CallScope of the operation. Returns an
@@ -151,44 +151,17 @@ namespace FileTransferProtocol
         template <typename ValueT, typename BodyT>
         void run(BodyT body, SyncLimits limits, std::function<void(Result<ValueT>)> done)
         {
-            const auto pending = std::make_shared<Detail::Call<ValueT>>(strand_, limits, std::move(done));
-            if (stopping() || failed())
-            {
-                pending->fail(closedError());
-                return;
-            }
-            const auto posted = post(
-                [self = shared_from_this(), pending, body = std::move(body)]() mutable
-                {
-                    self->startCall(pending, std::move(body));
-                }
-            );
-            if (!posted)
-                pending->fail(closedError());
+            submitCall<ValueT>(std::move(body), limits, std::move(done), CallRole::Regular);
         }
 
         /**
          * @brief run() for a task on the ProcessingThread, which waits for the result. Refused on the session strand,
-         *        on any thread but the ProcessingThread, and while the session is stopping or failed.
+         *        on any thread but the ProcessingThread, and while the session is closing or failed.
          */
         template <typename ValueT, typename BodyT>
         Result<ValueT> call(BodyT body, SyncLimits limits)
         {
-            if (strand_.running_in_this_thread())
-                return std::unexpected(wrongThread("on the session strand"));
-            if (!onProcessingThread())
-                return std::unexpected(wrongThread("outside the processing thread"));
-            const auto promise = std::make_shared<std::promise<Result<ValueT>>>();
-            auto future = promise->get_future();
-            run<ValueT>(
-                std::move(body),
-                limits,
-                [promise](Result<ValueT> result)
-                {
-                    promise->set_value(std::move(result));
-                }
-            );
-            return future.get();
+            return awaitCall<ValueT>(std::move(body), limits, CallRole::Regular);
         }
 
         /**
@@ -230,8 +203,9 @@ namespace FileTransferProtocol
 
         /**
          * @brief Ends the session, on a thread that is neither an engine thread nor @p thread, and never stops the
-         *        executor: fails the operations running now, so a call does not hold up what follows; sends QUIT on
-         *        the connections in a final task through call(); sets stopping, ends the pool and fails what is left;
+         *        executor: fails the operations running now and refuses later ones, so no call holds up what follows;
+         *        sends QUIT on the connections in a final task through call(), the one operation it still starts;
+         *        sets stopping, ends the pool and fails what is left;
          *        stops @p thread, whose leftover tasks find every call refused, and closes the task gate; refuses
          *        posts and waits for the work of the session. A second close waits for the first, then for the work.
          *
@@ -263,10 +237,59 @@ namespace FileTransferProtocol
             };
         }
 
-        template <typename ValueT, typename BodyT>
-        void startCall(std::shared_ptr<Detail::Call<ValueT>> const& pending, BodyT body)
+        /**
+         * @brief Which operations a session that closes still starts: only the QUIT of close().
+         */
+        enum class CallRole
         {
-            if (!beginCall(pending))
+            Regular,
+            Quit,
+        };
+
+        template <typename ValueT, typename BodyT>
+        void submitCall(BodyT body, SyncLimits limits, std::function<void(Result<ValueT>)> done, CallRole role)
+        {
+            const auto pending = std::make_shared<Detail::Call<ValueT>>(strand_, limits, std::move(done));
+            if (refusesCalls(role))
+            {
+                pending->fail(closedError());
+                return;
+            }
+            const auto posted = post(
+                [self = shared_from_this(), pending, body = std::move(body), role]() mutable
+                {
+                    self->startCall(pending, std::move(body), role);
+                }
+            );
+            if (!posted)
+                pending->fail(closedError());
+        }
+
+        template <typename ValueT, typename BodyT>
+        Result<ValueT> awaitCall(BodyT body, SyncLimits limits, CallRole role)
+        {
+            if (strand_.running_in_this_thread())
+                return std::unexpected(wrongThread("on the session strand"));
+            if (!onProcessingThread())
+                return std::unexpected(wrongThread("outside the processing thread"));
+            const auto promise = std::make_shared<std::promise<Result<ValueT>>>();
+            auto future = promise->get_future();
+            submitCall<ValueT>(
+                std::move(body),
+                limits,
+                [promise](Result<ValueT> result)
+                {
+                    promise->set_value(std::move(result));
+                },
+                role
+            );
+            return future.get();
+        }
+
+        template <typename ValueT, typename BodyT>
+        void startCall(std::shared_ptr<Detail::Call<ValueT>> const& pending, BodyT body, CallRole role)
+        {
+            if (!beginCall(pending, role))
                 return;
             boost::asio::co_spawn(
                 strand_,
@@ -297,9 +320,13 @@ namespace FileTransferProtocol
         /**
          * @brief Registers @p pending and starts its backstop, on the session strand.
          *
-         * @return False when the session is stopping or failed, @p pending is completed then.
+         * @return False when the session refuses @p role, @p pending is completed then.
          */
-        bool beginCall(std::shared_ptr<Detail::CallState> const& pending);
+        bool beginCall(std::shared_ptr<Detail::CallState> const& pending, CallRole role);
+        /**
+         * @brief The session is stopping or failed, or closing and @p role is not its QUIT. Thread-safe.
+         */
+        bool refusesCalls(CallRole role) const;
         void armCallTimer(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds duration);
         void callTimeUp(std::shared_ptr<Detail::CallState> const& pending);
         void endCall(Detail::CallState& pending);

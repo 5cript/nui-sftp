@@ -764,6 +764,54 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(expectNoFailures(*server));
     }
 
+    TEST_P(EngineTests, ACallStartedWhileTheCloseRunsIsRefusedSoQuitStillGoesOut)
+    {
+        auto started = ScriptedFtpServer::start();
+        ASSERT_TRUE(started) << started.error();
+        const auto server = std::move(started).value();
+        Script metadata{};
+        server->addConnection(loggedIn(metadata).expect("QUIT").reply("221 Goodbye.").expectDisconnect());
+        const auto engine = makeEngine(optionsFor(*server));
+        auto start = asio::co_spawn(engine->strand(), engine->pool()->start(), asio::use_future);
+        ASSERT_TRUE(valueOf(start));
+        const auto entered = std::make_shared<std::promise<void>>();
+        auto waiting = entered->get_future();
+        const auto followUpRan = std::make_shared<std::atomic<bool>>(false);
+        auto followUp = thread_.pushPromiseTask(
+            [engine, entered, followUpRan]()
+            {
+                const auto stuck = [entered](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                {
+                    asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                    entered->set_value();
+                    co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                    co_return 1;
+                };
+                const auto first = engine->call<int>(stuck, SyncLimits{.backstop = 1h, .drain = 1h});
+                EXPECT_FALSE(first) << "the close did not fail the call running then";
+                // A task that goes on after its call failed, as a sequence of commands does.
+                return engine->call<int>(
+                    [followUpRan](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                    {
+                        *followUpRan = true;
+                        asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                        co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                        co_return 2;
+                    },
+                    SyncLimits{.backstop = 1h, .drain = 1h}
+                );
+            }
+        );
+        valueOf(waiting);
+
+        EXPECT_TRUE(engine->close(thread_));
+        const auto outcome = valueOf(followUp);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        EXPECT_FALSE(*followUpRan) << "an operation started while the close waited for QUIT";
+        ASSERT_NO_FATAL_FAILURE(expectNoFailures(*server));
+    }
+
     TEST_P(EngineTests, ACloseWhoseQuitCannotRunEndsTheConnectionsAndTheLeftoverTasks)
     {
         auto started = ScriptedFtpServer::start();

@@ -139,9 +139,9 @@ namespace FileTransferProtocol
         return work_->waitIdle(limit);
     }
 
-    bool Engine::beginCall(std::shared_ptr<Detail::CallState> const& pending)
+    bool Engine::beginCall(std::shared_ptr<Detail::CallState> const& pending, CallRole role)
     {
-        if (stopping() || failed())
+        if (refusesCalls(role))
         {
             pending->fail(closedError());
             return false;
@@ -150,6 +150,11 @@ namespace FileTransferProtocol
         calls_.emplace(pending->number, pending);
         armCallTimer(pending, pending->limits().backstop);
         return true;
+    }
+
+    bool Engine::refusesCalls(CallRole role) const
+    {
+        return stopping() || failed() || (closing_ && role != CallRole::Quit);
     }
 
     void Engine::armCallTimer(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds duration)
@@ -222,7 +227,7 @@ namespace FileTransferProtocol
             return waitIdle(options.closeGrace);
         Log::debug("FTP: Closing the session");
 
-        // The call running now ends at once, so the task that sends QUIT does not wait behind it.
+        // The calls running now end at once and later ones are refused, so the task that sends QUIT waits behind none.
         post(
             [self = shared_from_this()]()
             {
@@ -232,14 +237,15 @@ namespace FileTransferProtocol
         auto quit = thread.pushPromiseTask(
             [self = shared_from_this(), limits = SyncLimits{.backstop = options.quitBackstop, .drain = options.drain}]()
             {
-                return self->call<void>(
+                return self->awaitCall<void>(
                     [self](std::shared_ptr<CallScope>) -> asio::awaitable<Result<void>>
                     {
                         if (const auto pool = self->pool())
                             co_await pool->close();
                         co_return Result<void>{};
                     },
-                    limits
+                    limits,
+                    CallRole::Quit
                 );
             }
         );
