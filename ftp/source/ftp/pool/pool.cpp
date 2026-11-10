@@ -6,6 +6,7 @@
 #include <boost/asio/bind_executor.hpp>
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -98,9 +99,24 @@ namespace FileTransferProtocol
         LostHandler onLost
     )
     {
-        return std::make_shared<Pool>(
+        auto pool = std::make_shared<Pool>(
             Private{}, std::move(strand), std::move(resolver), std::move(options), std::move(onLost)
         );
+        // Work in the background keeps the pool, so the end of the owner's handle is what tells that the owner is gone.
+        const auto self = pool.get();
+        return std::shared_ptr<Pool>{
+            self,
+            [pool = std::move(pool)](Pool*)
+            {
+                asio::dispatch(
+                    pool->strand_,
+                    [pool]()
+                    {
+                        pool->abandon();
+                    }
+                );
+            }
+        };
     }
 
     Pool::Pool(
@@ -124,12 +140,7 @@ namespace FileTransferProtocol
 
     Pool::~Pool()
     {
-        for (auto const& connection : connecting_)
-            connection->control->close();
-        for (auto const& connection : transfers_)
-            connection->control->close();
-        if (metadata_)
-            metadata_->control->close();
+        closeConnections();
     }
 
     asio::strand<asio::any_io_executor> const& Pool::strand() const
@@ -506,7 +517,7 @@ namespace FileTransferProtocol
     asio::awaitable<void> Pool::logInMetadataInBackground(RemoteIo::RemoteError failure)
     {
         auto backoff = options_.reloginBackoff;
-        for (std::size_t attempt = 0u; attempt < options_.reloginAttempts; ++attempt)
+        for (std::size_t attempt = 0u; attempt < options_.reloginAttempts && !closed_; ++attempt)
         {
             if (attempt > 0u)
             {
@@ -754,8 +765,31 @@ namespace FileTransferProtocol
 
     void Pool::fireWakes()
     {
-        for (auto const& wake : std::exchange(wakes_, {}))
-            wake();
+        // A wake may be what lets go of the pool.
+        const auto wakes = std::exchange(wakes_, {});
+        for (auto wake = wakes.begin(); wake != wakes.end() && !abandoned_; ++wake)
+            (*wake)();
+    }
+
+    void Pool::abandon()
+    {
+        abandoned_ = true;
+        closed_ = true;
+        wakes_.clear();
+        reloginTimer_.cancel();
+        limitTimer_.cancel();
+        failCommandWaiters(closing());
+        closeConnections();
+    }
+
+    void Pool::closeConnections()
+    {
+        for (auto const& connection : connecting_)
+            connection->control->close();
+        for (auto const& connection : transfers_)
+            connection->control->close();
+        if (metadata_)
+            metadata_->control->close();
     }
 
     void Pool::degrade(RemoteIo::RemoteError const& error)
@@ -782,7 +816,7 @@ namespace FileTransferProtocol
         health_ = PoolHealth::Lost;
         failCommandWaiters(*refusal());
         fireWakes();
-        if (onLost_)
+        if (onLost_ && !abandoned_)
             onLost_(*lostReason_);
     }
 

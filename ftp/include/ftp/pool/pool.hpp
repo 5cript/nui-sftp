@@ -92,6 +92,10 @@ namespace FileTransferProtocol
 
         /**
          * @param strand The session strand, connections get strands of their own on its executor.
+         * @return The handle of the owner, a weak_ptr of it ends with it. Logins in the background keep the pool
+         *         itself while they run. Once the last copy of the handle is gone they end, the connections close
+         *         without QUIT, and neither the lost handler nor a kept wake is called any more: at once when the
+         *         handle goes on the pool's strand, else as soon as the strand gets to it.
          */
         static std::shared_ptr<Pool> create(
             boost::asio::strand<boost::asio::any_io_executor> strand,
@@ -209,6 +213,12 @@ namespace FileTransferProtocol
         bool grantMetadata();
         void failCommandWaiters(RemoteIo::RemoteError const& error);
         void fireWakes();
+        /**
+         * @brief The owner let go of its handle: ends the work in the background and calls nothing of the owner
+         *        any more.
+         */
+        void abandon();
+        void closeConnections();
         void degrade(RemoteIo::RemoteError const& error);
         void loseSession(RemoteIo::RemoteError error);
         void release(std::shared_ptr<PooledConnection> const& connection, bool open);
@@ -246,6 +256,8 @@ namespace FileTransferProtocol
         std::atomic<std::size_t> connectionLimit_;
         bool started_{false};
         bool closed_{false};
+        /** @brief The owner is gone, see abandon(). */
+        bool abandoned_{false};
         /** @brief A login of C0 runs, as part of a command or in the background. */
         bool metadataConnecting_{false};
         /** @brief The server refused C0 while transfer connections held its slots, the next one released becomes C0. */

@@ -162,6 +162,24 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief Tells when its last owner let go. A pool's lost handler that holds it tells when the pool is gone.
+         */
+        struct EndSignal
+        {
+            EndSignal() = default;
+            ~EndSignal()
+            {
+                ended.set_value();
+            }
+            EndSignal(EndSignal const&) = delete;
+            EndSignal& operator=(EndSignal const&) = delete;
+            EndSignal(EndSignal&&) = delete;
+            EndSignal& operator=(EndSignal&&) = delete;
+
+            std::promise<void> ended{};
+        };
+
+        /**
          * @brief What the lost handler of a pool got.
          */
         struct Losses
@@ -703,6 +721,40 @@ namespace FileTransferProtocol::Test
         expectError(run(pool->acquireCommand()), RemoteErrorKind::ConnectionLost);
         expectError(run(pool->acquireTransfer()), RemoteErrorKind::ConnectionLost);
         EXPECT_EQ(connectionsAccepted(), 3u);
+    }
+
+    TEST_F(PoolTests, PoolWithoutItsOwnerEndsItsLoginsInTheBackground)
+    {
+        server_->addConnection(loginThenResetOn("NOOP"));
+        Script refused{};
+        server_->addConnection(refused.checkpoint("refused")
+                .reply("421 Service not available, closing control connection.")
+                .expectDisconnect());
+        auto poolOptions = options();
+        // Nothing but the end of the pool ends the wait for the next login.
+        poolOptions.reloginBackoff = 60s;
+        auto signal = std::make_shared<EndSignal>();
+        auto poolEnded = signal->ended.get_future();
+        pool_ = Pool::create(
+            asio::make_strand(threads_.get_executor()),
+            resolver_,
+            std::move(poolOptions),
+            [losses = losses_, signal = std::move(signal)](RemoteIo::RemoteError const& error)
+            {
+                losses->record(error);
+            }
+        );
+        const auto login = run(pool_->start());
+        ASSERT_TRUE(login) << login.error().toString();
+        auto lease = leaseFrom(run(pool_->acquireCommand()));
+        ASSERT_FALSE(execute(lease, Verb::Noop));
+        giveBack(lease);
+        ASSERT_TRUE(server_->waitForCheckpoint("refused"));
+
+        pool_.reset();
+        ASSERT_EQ(poolEnded.wait_for(10s), std::future_status::ready) << "the pool went on without its owner";
+        EXPECT_TRUE(losses_->recorded().empty());
+        EXPECT_EQ(connectionsAccepted(), 2u);
     }
 
     TEST_F(PoolTests, RefusedLoginInTheBackgroundLosesTheSessionAtOnce)
