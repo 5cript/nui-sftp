@@ -806,6 +806,51 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(reports_->recorded().empty()) << "the close was reported as a loss";
     }
 
+    TEST_P(EngineTests, ASecondCloseReturnsOnlyAfterTheFirst)
+    {
+        const auto engine = makeEngine();
+        ASSERT_TRUE(thread_.pushTask(
+            [engine]()
+            {
+                // Holds the thread until the first close stops the session, so that close waits for its QUIT.
+                EXPECT_TRUE(waitUntil(
+                    [&engine]()
+                    {
+                        return engine->stopping();
+                    }
+                ));
+            }
+        ));
+        const auto failedByTheFirst = std::make_shared<std::promise<void>>();
+        auto firstRuns = failedByTheFirst->get_future();
+        engine->run<int>(
+            [](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+            {
+                asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                co_return 1;
+            },
+            SyncLimits{.backstop = 1h, .drain = 1h},
+            [failedByTheFirst](Engine::Result<int>)
+            {
+                failedByTheFirst->set_value();
+            }
+        );
+        const auto options = TeardownOptions{.quitBackstop = 50ms, .drain = 50ms};
+        auto first = std::async(
+            std::launch::async,
+            [this, engine, options]()
+            {
+                return engine->close(thread_, options);
+            }
+        );
+        valueOf(firstRuns);
+
+        EXPECT_TRUE(engine->close(thread_, options));
+        EXPECT_FALSE(engine->post([]() {})) << "the second close returned while the first still ran";
+        EXPECT_TRUE(valueOf(first));
+    }
+
     TEST_P(EngineTests, AnOperationThatOutlivesTheCloseOwnsItsState)
     {
         const auto engine = makeEngine();

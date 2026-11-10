@@ -217,6 +217,7 @@ namespace FileTransferProtocol
             !strand_.running_in_this_thread() && !onProcessingThread() &&
             "Engine::close() runs on neither the session strand nor the ProcessingThread"
         );
+        std::scoped_lock lock{closeMutex_};
         if (closing_.exchange(true))
             return waitIdle(options.closeGrace);
         Log::debug("FTP: Closing the session");

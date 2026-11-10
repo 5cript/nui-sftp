@@ -233,7 +233,7 @@ namespace FileTransferProtocol
          *        executor: fails the operations running now, so a call does not hold up what follows; sends QUIT on
          *        the connections in a final task through call(); sets stopping, ends the pool and fails what is left;
          *        stops @p thread, whose leftover tasks find every call refused, and closes the task gate; refuses
-         *        posts and waits for the work of the session. A second close only waits.
+         *        posts and waits for the work of the session. A second close waits for the first, then for the work.
          *
          * @param thread The ProcessingThread behind the TaskGate of the engine.
          * @return Whether the work of the session ended within closeGrace. Work past it owns its state and ends on
@@ -333,6 +333,8 @@ namespace FileTransferProtocol
         std::atomic<bool> stopping_{false};
         std::atomic<bool> failed_{false};
         std::atomic<bool> lostReported_{false};
+        /** @brief Held through close(), so a second close returns only after the first. */
+        std::mutex closeMutex_{};
         std::atomic<bool> closing_{false};
     };
 }
