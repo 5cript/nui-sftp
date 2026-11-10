@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <expected>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -438,6 +439,23 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(losses_->recorded().empty());
         expectError(run(pool->acquireCommand()), RemoteErrorKind::ConnectionLost);
         expectError(run(pool->acquireTransfer()), RemoteErrorKind::ConnectionLost);
+    }
+
+    TEST_F(PoolTests, CloseDuringTheLookupOfTheStartLogsInNothing)
+    {
+        const auto pool = makePool(options());
+        std::future<std::expected<LoginResult, RemoteIo::RemoteError>> started{};
+        {
+            // The lookup waits for this lock, so the close comes before its answer.
+            const std::scoped_lock held{lookupMutex_};
+            started = spawn(pool->start());
+            run(pool->close());
+        }
+        const auto login = waitFor(started);
+        ASSERT_FALSE(login) << "the start logged in after the close";
+        EXPECT_EQ(login.error().kind, RemoteErrorKind::ConnectionLost) << login.error().toString();
+        EXPECT_EQ(connectionsAccepted(), 0u);
+        EXPECT_TRUE(losses_->recorded().empty());
     }
 
     TEST_F(PoolTests, UntrustedCertificateAtTheStartIsKeptForThePrompt)

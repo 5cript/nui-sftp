@@ -180,6 +180,8 @@ namespace FileTransferProtocol
             co_return failStart(found.error());
         if (isCancelled(co_await asio::this_coro::cancellation_state))
             co_return failStart(cancelled("The start of the FTP session"));
+        if (closed_)
+            co_return failStart(closing());
         endpoints_ = std::move(*found);
 
         auto connection = co_await logInConnection(true);

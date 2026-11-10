@@ -125,8 +125,9 @@ namespace FileTransferProtocol
         /**
          * @brief Looks up the server and logs in C0, once.
          *
-         * @return What the login learned. The error of the lookup or of the login, after which the pool is Lost
-         *         without calling the lost handler. With TrustRequired untrustedCertificate() has the certificate.
+         * @return What the login learned. The error of the lookup or of the login, ConnectionLost after a close()
+         *         meanwhile, after which the pool is Lost without calling the lost handler. With TrustRequired
+         *         untrustedCertificate() has the certificate.
          */
         boost::asio::awaitable<std::expected<LoginResult, RemoteIo::RemoteError>> start();
 
