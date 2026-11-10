@@ -41,8 +41,11 @@ namespace FileTransferProtocol
      */
     struct TeardownOptions
     {
-        /** @brief The backstop of the call that sends QUIT on the connections. */
-        std::chrono::milliseconds quitBackstop{std::chrono::seconds{1}};
+        /**
+         * @brief The backstop of the call that sends QUIT on the connections. Longer than PoolOptions::quitTimeout,
+         *        which ends a QUIT without an answer, so the backstop only cuts a close of the pool that hangs.
+         */
+        std::chrono::milliseconds quitBackstop{std::chrono::seconds{2}};
         /** @brief The drain of that call, the closing thread waits for it at most quitBackstop plus this. */
         std::chrono::milliseconds drain{std::chrono::seconds{1}};
         /** @brief How long the close waits for the work of the session at its end. */

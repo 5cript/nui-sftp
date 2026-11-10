@@ -22,6 +22,11 @@ namespace FileTransferProtocol
         using RemoteIo::RemoteErrorKind;
         using Detail::errorOf;
 
+        static_assert(
+            TeardownOptions{}.quitBackstop > PoolOptions{}.quitTimeout,
+            "The pool ends a QUIT without an answer before the backstop of the close cancels it"
+        );
+
         std::string describe(std::exception_ptr exception)
         {
             try
