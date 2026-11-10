@@ -267,8 +267,8 @@ namespace FileTransferProtocol::Test
             ),
             asio::use_future
         );
-        // Only the clock tells a read that does not come.
-        std::this_thread::sleep_for(50ms);
+        // The ring looks at the pause in its first run on the strand, where a read would begin.
+        flushStrand();
         EXPECT_EQ(download->reads.load(), 0u);
         *paused = false;
         ring->wake();

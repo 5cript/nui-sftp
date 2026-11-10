@@ -211,8 +211,8 @@ namespace FileTransferProtocol::Test
             ),
             asio::use_future
         );
-        // Only the clock tells a fill that does not come.
-        std::this_thread::sleep_for(50ms);
+        // The ring looks at the pause in its first run on the strand, where it would push its fills.
+        flushStrand();
         flushTasks();
         EXPECT_EQ(file->reads.load(), 0u);
         *paused = false;
