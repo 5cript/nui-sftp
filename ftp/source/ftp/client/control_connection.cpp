@@ -6,6 +6,10 @@
 #include "client_support.hpp"
 
 #include <boost/asio/as_tuple.hpp>
+#include <boost/asio/associated_cancellation_slot.hpp>
+#include <boost/asio/associated_executor.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/dispatch.hpp>
@@ -18,6 +22,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -117,6 +123,80 @@ namespace FileTransferProtocol
             error.message = fmt::format("The server refused AUTH TLS: {}", error.message);
             return error;
         }
+
+        /** @brief Enough for the line a server refuses a connection with. */
+        constexpr std::size_t recordedBytes = 512u;
+
+        /**
+         * @brief The socket under the TLS stream, keeping the first bytes the server sent. A server that refuses an
+         *        implicit TLS connection answers in plaintext, vsftpd over its limit with a 421.
+         */
+        class RecordingSocket
+        {
+          public:
+            using executor_type = asio::ip::tcp::socket::executor_type;
+            using lowest_layer_type = asio::ip::tcp::socket::lowest_layer_type;
+
+            RecordingSocket(asio::ip::tcp::socket& socket, std::string& received)
+                : socket_{&socket}
+                , received_{&received}
+            {}
+
+            executor_type get_executor()
+            {
+                return socket_->get_executor();
+            }
+
+            lowest_layer_type& lowest_layer()
+            {
+                return socket_->lowest_layer();
+            }
+
+            lowest_layer_type const& lowest_layer() const
+            {
+                return socket_->lowest_layer();
+            }
+
+            template <typename BuffersT, typename HandlerT>
+            void async_read_some(BuffersT const& buffers, HandlerT&& handler)
+            {
+                if (received_->size() >= recordedBytes)
+                {
+                    socket_->async_read_some(buffers, std::forward<HandlerT>(handler));
+                    return;
+                }
+                auto slot = asio::get_associated_cancellation_slot(handler);
+                auto executor = asio::get_associated_executor(handler, socket_->get_executor());
+                socket_->async_read_some(
+                    buffers,
+                    asio::bind_cancellation_slot(
+                        slot,
+                        asio::bind_executor(
+                            executor,
+                            [received = received_, buffers, handler = std::forward<HandlerT>(handler)](
+                                boost::system::error_code error, std::size_t size
+                            ) mutable
+                            {
+                                std::string bytes(std::min(size, recordedBytes - received->size()), '\0');
+                                asio::buffer_copy(asio::buffer(bytes), buffers);
+                                received->append(bytes);
+                                std::move(handler)(error, size);
+                            }
+                        )
+                    )
+                );
+            }
+
+            template <typename BuffersT, typename HandlerT>
+            void async_write_some(BuffersT const& buffers, HandlerT&& handler)
+            {
+                socket_->async_write_some(buffers, std::forward<HandlerT>(handler));
+            }
+
+          private:
+            asio::ip::tcp::socket* socket_;
+            std::string* received_;
+        };
     }
 
     /**
@@ -144,12 +224,30 @@ namespace FileTransferProtocol
         void secure(SslHandle handle)
         {
             // The stream takes the handle over.
-            tls_.emplace(socket_, handle.release());
+            tls_.emplace(RecordingSocket{socket_, received_}, handle.release());
         }
 
-        asio::ssl::stream<asio::ip::tcp::socket&>& tls()
+        asio::ssl::stream<RecordingSocket>& tls()
         {
             return *tls_;
+        }
+
+        /**
+         * @brief The negative reply the server sent instead of taking part in TLS. Nothing for bytes that are no
+         *        reply and for any other reply: a greeting in plaintext is a server without TLS on this port.
+         */
+        std::optional<Reply> plaintextRefusal() const
+        {
+            ReplyFramer framer{};
+            if (!framer.feed(received_))
+                return std::nullopt;
+            auto reply = framer.next();
+            if (!reply)
+                return std::nullopt;
+            const auto replyClass = classifyReply(reply->code);
+            if (replyClass != ReplyClass::TransientNegative && replyClass != ReplyClass::PermanentNegative)
+                return std::nullopt;
+            return reply;
         }
 
         SSL* tlsHandle()
@@ -271,7 +369,9 @@ namespace FileTransferProtocol
 
       private:
         asio::ip::tcp::socket socket_;
-        std::optional<asio::ssl::stream<asio::ip::tcp::socket&>> tls_{};
+        /** @brief The first bytes the TLS stream read, see RecordingSocket. */
+        std::string received_{};
+        std::optional<asio::ssl::stream<RecordingSocket>> tls_{};
         /** @brief Bounds a close over TLS. */
         asio::steady_timer closeTimer_;
         /** @brief Takes what the server sends after the end of TLS, the drain holds the transport. */
@@ -369,8 +469,10 @@ namespace FileTransferProtocol
         {
             // Nothing goes out before the greeting, and nothing into the handshake.
             upgrading_ = true;
-            auto secured = co_await handshake(std::move(*tlsHandle), deadline);
+            auto secured = co_await handshake(std::move(*tlsHandle), deadline, true);
             upgrading_ = false;
+            if (!secured && transport_->plaintextRefusal())
+                co_return std::unexpected(std::move(secured).error());
             if (!secured)
                 co_return std::unexpected(asNoSecureConnection(std::move(secured).error()));
         }
@@ -469,7 +571,7 @@ namespace FileTransferProtocol
         if (framer_.inReply() || framer_.holdsPossibleEnd())
             co_return std::unexpected(endTls(injectedBytes()));
 
-        auto trusted = co_await handshake(std::move(*handle), Clock::now() + options_.commandTimeout);
+        auto trusted = co_await handshake(std::move(*handle), Clock::now() + options_.commandTimeout, false);
         if (!trusted)
             co_return std::unexpected(endTls(std::move(trusted).error()));
         upgrading_ = false;
@@ -479,7 +581,7 @@ namespace FileTransferProtocol
     }
 
     asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
-    ControlConnection::handshake(SslHandle handle, Clock::time_point deadline)
+    ControlConnection::handshake(SslHandle handle, Clock::time_point deadline, bool plaintextRefusal)
     {
         const auto transport = transport_;
         transport->secure(std::move(handle));
@@ -504,6 +606,11 @@ namespace FileTransferProtocol
         {
             untrustedCertificate_ = refusedCertificate(transport->tlsHandle());
             auto failure = handshakeError(transport->tlsHandle(), error, error == asio::error::operation_aborted);
+            if (const auto refusal = plaintextRefusal ? transport->plaintextRefusal() : std::nullopt)
+            {
+                Log::debug("FTP: The server answered TLS with a {} reply in plaintext", refusal->code);
+                failure = replyError(*refusal, std::nullopt);
+            }
             die(failure);
             co_return std::unexpected(std::move(failure));
         }

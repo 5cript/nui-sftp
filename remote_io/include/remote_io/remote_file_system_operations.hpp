@@ -210,8 +210,10 @@ namespace RemoteIo
         /** @brief The permissions of a file the open creates. */
         std::filesystem::perms permissions{std::filesystem::perms::owner_read | std::filesystem::perms::owner_write};
         /**
-         * @brief Called once, from any thread, after the open failed with Busy, when a connection became free. An
-         *        open that did not fail with Busy drops it.
+         * @brief Called once, from any thread, after the open failed with Busy, when a connection became free or the
+         *        protocol may open another one again, as after the wait that follows a refusal for too many
+         *        connections. The open that follows may fail with Busy again. An open that did not fail with Busy
+         *        drops it.
          */
         std::function<void()> wakeWhenFree{};
     };

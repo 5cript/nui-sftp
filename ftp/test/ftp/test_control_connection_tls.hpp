@@ -554,15 +554,63 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
     }
 
+    namespace
+    {
+        std::string nameOfServerBytes(::testing::TestParamInfo<std::string> const& info)
+        {
+            static const std::array<std::string, 3> names{"Alert", "Garbage", "PlaintextReply"};
+            return names.at(info.index);
+        }
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         ServerBytes,
         ControlConnectionHandshakeReplacedTests,
-        ::testing::Values(fatalAlert(), std::string(64u, '\x7f')),
-        [](::testing::TestParamInfo<std::string> const& info)
-        {
-            return info.index == 0u ? std::string{"Alert"} : std::string{"Garbage"};
-        }
+        // A reply in plaintext behind AUTH TLS could be injected, it never counts as the server's answer.
+        ::testing::Values(
+            fatalAlert(),
+            std::string(64u, '\x7f'),
+            std::string{"421 There are too many connections from your internet address.\r\n"}
+        ),
+        nameOfServerBytes
     );
+
+    namespace
+    {
+        /**
+         * @brief A server without implicit TLS reads the ClientHello as lines, a CRLF among its random bytes makes it
+         *        look like commands. None of them may be the client's login.
+         */
+        void expectNoPlaintextLogin(std::vector<std::string> const& lines)
+        {
+            for (auto const& line : lines)
+                EXPECT_FALSE(line.starts_with("USER ")) << "the client logged in without TLS";
+        }
+    }
+
+    TEST_F(ControlConnectionTlsTests, PlaintextReplyOnAnImplicitTlsPortIsTheServersAnswer)
+    {
+        // vsftpd refuses a connection over its limit on its implicit TLS port in plaintext, before any TLS.
+        server_->addConnection(
+            Script{}.reply("421 There are too many connections from your internet address.").stall()
+        );
+        const auto connection = makeConnection();
+        const auto greeting = connectWithImplicitTls(connection, settings());
+        expectError(greeting, RemoteIo::RemoteErrorKind::ConnectionLimit);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+        expectNoPlaintextLogin(commandsAfterDisconnect(connection));
+    }
+
+    TEST_F(ControlConnectionTlsTests, PlaintextGreetingOnAnImplicitTlsPortIsNoSecureConnection)
+    {
+        // A server without TLS on this port greets in plaintext, which refuses nothing.
+        server_->addConnection(Script{}.reply("220 ProFTPD Server ready.").stall());
+        const auto connection = makeConnection();
+        const auto greeting = connectWithImplicitTls(connection, settings());
+        expectError(greeting, RemoteIo::RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+        expectNoPlaintextLogin(commandsAfterDisconnect(connection));
+    }
 
     TEST_F(ControlConnectionTlsTests, HandshakeWithoutAnAnswerTimesOut)
     {

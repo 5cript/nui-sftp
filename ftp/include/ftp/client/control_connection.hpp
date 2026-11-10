@@ -117,8 +117,10 @@ namespace FileTransferProtocol
          * @param implicitTls Makes the TLS handshake before the greeting, within the connect timeout.
          * @return The 220 greeting. NoConnection when no endpoint accepted, TimedOut past the connect timeout,
          *         Cancelled by close(), also one before connect(), or a cancelled wait, the replyError() of any other
-         *         greeting. With implicitTls TrustRequired for a certificate to ask about and NoSecureConnection for
-         *         any other failure of the handshake. The connection is Dead after an error, Closed after close().
+         *         greeting. With implicitTls TrustRequired for a certificate to ask about, the replyError() of a
+         *         negative reply the server sent in plaintext instead, and NoSecureConnection for any other failure
+         *         of the handshake, a greeting in plaintext included. The connection is Dead after an error, Closed
+         *         after close().
          */
         boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>> connect(
             std::vector<boost::asio::ip::tcp::endpoint> endpoints,
@@ -231,9 +233,13 @@ namespace FileTransferProtocol
         );
         /**
          * @brief The handshake of @p handle on the connected socket, the connection is Dead when it fails.
+         *
+         * @param plaintextRefusal A negative reply in plaintext instead of the handshake is the server's answer, the
+         *        replyError() of it is the failure. Only before the greeting of implicit TLS, behind AUTH TLS such
+         *        bytes could be injected.
          */
         boost::asio::awaitable<std::expected<TrustedCertificate, RemoteIo::RemoteError>>
-        handshake(SslHandle handle, std::chrono::steady_clock::time_point deadline);
+        handshake(SslHandle handle, std::chrono::steady_clock::time_point deadline, bool plaintextRefusal);
         /**
          * @brief Ends the connection after a failed start of TLS.
          *
