@@ -15,7 +15,43 @@ namespace FileTransferProtocol
         using Detail::isCancelled;
         using Detail::useTuple;
         using RemoteIo::RemoteErrorKind;
+
+        RemoteIo::RemoteError lostFills()
+        {
+            return errorOf(RemoteErrorKind::ConnectionLost, "The session's thread takes no more fills");
+        }
     }
+
+    /**
+     * @brief One fill, owned by its task. Hands the slot back when the task ends, as lost unless the fill ended: when
+     *        the source threw, or the ProcessingThread dropped the task unrun, a refused push among them.
+     */
+    class SupplyRing::FillTask
+    {
+      public:
+        FillTask(std::shared_ptr<SupplyRing> ring, std::size_t slot)
+            : ring_{std::move(ring)}
+            , slot_{slot}
+        {}
+        ~FillTask()
+        {
+            ring_->handBack(slot_, std::move(outcome_));
+        }
+        FillTask(FillTask const&) = delete;
+        FillTask& operator=(FillTask const&) = delete;
+        FillTask(FillTask&&) = delete;
+        FillTask& operator=(FillTask&&) = delete;
+
+        void run()
+        {
+            outcome_ = ring_->fill(slot_);
+        }
+
+      private:
+        const std::shared_ptr<SupplyRing> ring_;
+        const std::size_t slot_;
+        FillOutcome outcome_{std::unexpected(lostFills())};
+    };
 
     std::shared_ptr<SupplyRing>
     SupplyRing::create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options)
@@ -46,11 +82,7 @@ namespace FileTransferProtocol
             if (failure_)
                 co_return std::unexpected(*failure_);
             if (!handOut())
-            {
-                co_return std::unexpected(
-                    errorOf(RemoteErrorKind::ConnectionLost, "The session's thread takes no more fills")
-                );
-            }
+                co_return std::unexpected(lostFills());
             if (filled_.empty() || isPaused())
             {
                 co_await wakeTimer_.async_wait(useTuple);
@@ -78,54 +110,62 @@ namespace FileTransferProtocol
             free_.pop_front();
             ++fillsOut_;
             const auto pushed = engine_->pushTask(
-                [self = sharedAs<SupplyRing>(), slot]()
+                [fill = std::make_shared<FillTask>(sharedAs<SupplyRing>(), slot)]() mutable
                 {
-                    self->fill(slot);
+                    // Ends with the fill, the thread keeps a task until its batch ran.
+                    const auto ending = std::move(fill);
+                    ending->run();
                 }
             );
+            // The refused task handed the slot back.
             if (!pushed)
-            {
-                --fillsOut_;
-                free_.push_back(slot);
                 return false;
-            }
         }
         return true;
     }
 
-    void SupplyRing::fill(std::size_t slot)
+    SupplyRing::FillOutcome SupplyRing::fill(std::size_t slot)
     {
         const auto bytes = bytesOf(slot);
         std::size_t count{0u};
-        std::optional<RemoteIo::RemoteError> failure{};
         while (!closed_ && !sourceEnded_ && !sourceFailed_ && count < bytes.size())
         {
-            const auto got = source_(std::span<char>{bytes.data() + count, bytes.size() - count});
+            std::expected<std::size_t, RemoteIo::RemoteError> got{};
+            try
+            {
+                got = source_(std::span<char>{bytes.data() + count, bytes.size() - count});
+            }
+            catch (...)
+            {
+                sourceFailed_ = true;
+                throw;
+            }
             if (!got)
             {
                 sourceFailed_ = true;
-                failure = got.error();
-                continue;
+                return std::unexpected(std::move(got).error());
             }
             assert(*got <= bytes.size() - count && "A source put more bytes into the span than it holds");
             sourceEnded_ = *got == 0u;
             count += *got;
         }
-        std::expected<Filled, RemoteIo::RemoteError> filled{
-            Filled{.slot = slot, .count = count, .ended = sourceEnded_}
-        };
-        if (failure)
-            filled = std::unexpected(std::move(*failure));
-        engine_->postTo(
-            strand_,
-            [self = sharedAs<SupplyRing>(), slot, filled = std::move(filled)]() mutable
-            {
-                self->takeFilled(slot, std::move(filled));
-            }
-        );
+        return Filled{.slot = slot, .count = count, .ended = sourceEnded_};
     }
 
-    void SupplyRing::takeFilled(std::size_t slot, std::expected<Filled, RemoteIo::RemoteError> filled)
+    void SupplyRing::handBack(std::size_t slot, FillOutcome filled)
+    {
+        auto take = [self = sharedAs<SupplyRing>(), slot, filled = std::move(filled)]() mutable
+        {
+            self->takeFilled(slot, std::move(filled));
+        };
+        // A refused push ends its task on the strand, where the engine may refuse posts already.
+        if (strand_.running_in_this_thread())
+            take();
+        else
+            engine_->postTo(strand_, std::move(take));
+    }
+
+    void SupplyRing::takeFilled(std::size_t slot, FillOutcome filled)
     {
         --fillsOut_;
         if (filled)

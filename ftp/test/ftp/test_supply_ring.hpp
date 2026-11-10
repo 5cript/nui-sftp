@@ -417,6 +417,73 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(sourceState.expired()) << "the ring kept the source after its sink threw";
     }
 
+    TEST_P(SupplyRingTests, FillsTheProcessingThreadDropsEndTheRingAsLost)
+    {
+        const auto engine = makeEngine();
+        const auto ring = SupplyRing::create(engine, connectionStrand_, options_);
+        const auto file = std::make_shared<FakeFile>();
+        file->size = 10u * options_.chunkSize;
+        file->piece = options_.chunkSize;
+        auto held = std::make_shared<int>(0);
+        const std::weak_ptr<int> sourceState = held;
+        std::promise<void> release{};
+        ASSERT_NO_FATAL_FAILURE(breakTheProcessingThreadAfter(release.get_future().share()));
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                [held = std::move(held), read = sourceOf(file, gate_)](std::span<char> bytes)
+                {
+                    return read(bytes);
+                },
+                sinkInto(std::make_shared<Written>(), connectionStrand_)
+            ),
+            asio::use_future
+        );
+        // The ring hands out its slots in its first run on the strand.
+        flushStrand();
+        release.set_value();
+
+        const auto outcome = valueOf(ran);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        settleTasks();
+        EXPECT_EQ(file->reads.load(), 0u);
+        EXPECT_TRUE(sourceState.expired()) << "the ring kept the source after its fills were dropped";
+    }
+
+    TEST_P(SupplyRingTests, ASourceThatThrowsIsNotReadAgainAndEndsTheRingAsLost)
+    {
+        const auto engine = makeEngine();
+        const auto ring = SupplyRing::create(engine, connectionStrand_, options_);
+        auto held = std::make_shared<int>(0);
+        const std::weak_ptr<int> sourceState = held;
+        const auto reads = std::make_shared<std::atomic<std::size_t>>(0u);
+        std::promise<void> release{};
+        ASSERT_NO_FATAL_FAILURE(holdTheProcessingThread(release.get_future().share()));
+        auto ran = asio::co_spawn(
+            connectionStrand_,
+            ring->run(
+                [held = std::move(held), reads](std::span<char>) -> std::expected<std::size_t, RemoteIo::RemoteError>
+                {
+                    ++*reads;
+                    throw std::runtime_error{"The source broke"};
+                },
+                sinkInto(std::make_shared<Written>(), connectionStrand_)
+            ),
+            asio::use_future
+        );
+        // The ring hands out its slots in its first run on the strand, so every fill waits behind the held task.
+        flushStrand();
+        release.set_value();
+
+        const auto outcome = valueOf(ran);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
+        settleTasks();
+        EXPECT_EQ(reads->load(), 1u) << "a fill read from the source after it threw";
+        EXPECT_TRUE(sourceState.expired()) << "the ring kept the source after it threw";
+    }
+
     TEST_P(SupplyRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)
     {
         const auto engine = makeEngine();

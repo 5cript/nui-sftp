@@ -26,7 +26,8 @@ namespace FileTransferProtocol
      *
      * Fills keep the ring alive. The ring lets go of the source once it ended and every fill came back, so the source
      * may hold what holds the ring. Stop the ring before the engine refuses posts. close() ends the source, a write
-     * under way ends before run() does.
+     * under way ends before run() does. A fill comes back also when its source throws or the ProcessingThread drops it
+     * unrun, which ends the ring as lost, and the source is not called again.
      */
     class SupplyRing : public Ring
     {
@@ -57,7 +58,8 @@ namespace FileTransferProtocol
          * @param paused Asked before each fill and write, the ring waits while it is true. Call wake() when it turns
          *        false.
          * @return Nothing once every byte of the source was written; the error of a failed fill or write; Cancelled
-         *         after stop() or close(); ConnectionLost when the ProcessingThread takes no more tasks.
+         *         after stop() or close(); ConnectionLost when the ProcessingThread takes no more tasks, dropped a
+         *         fill, or the source threw.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
         run(Source source, Sink sink, Paused paused = {});
@@ -74,6 +76,9 @@ namespace FileTransferProtocol
             bool ended;
         };
 
+        class FillTask;
+        using FillOutcome = std::expected<Filled, RemoteIo::RemoteError>;
+
         boost::asio::awaitable<Outcome> writeSlots(Source source, Sink sink);
         /**
          * @brief Pushes a fill for every free slot while the data goes on and the ring is not paused.
@@ -81,8 +86,15 @@ namespace FileTransferProtocol
          * @return False when the ProcessingThread refused one.
          */
         bool handOut();
-        void fill(std::size_t slot);
-        void takeFilled(std::size_t slot, std::expected<Filled, RemoteIo::RemoteError> filled);
+        /**
+         * @brief Fills @p slot from the source, on the ProcessingThread.
+         */
+        FillOutcome fill(std::size_t slot);
+        /**
+         * @brief Hands @p slot with what its fill came to back to the connection strand, from any thread.
+         */
+        void handBack(std::size_t slot, FillOutcome filled);
+        void takeFilled(std::size_t slot, FillOutcome filled);
         /**
          * @brief Drops the source once run() ended and every fill came back.
          */
@@ -101,7 +113,7 @@ namespace FileTransferProtocol
         Source source_{};
         /** @brief The source returned the end, later fills do not call it. The ProcessingThread's. */
         bool sourceEnded_{false};
-        /** @brief The source returned an error, later fills do not call it. The ProcessingThread's. */
+        /** @brief The source returned an error or threw, later fills do not call it. The ProcessingThread's. */
         bool sourceFailed_{false};
     };
 }
