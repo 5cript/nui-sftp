@@ -143,6 +143,8 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(written->sizes.back(), 123u);
         EXPECT_TRUE(written->allOnTheStrand);
         EXPECT_TRUE(file->allOnTheProcessingThread);
+        // Two reads fill a slot, the last fill reads the 123 bytes and the end; none reads after the end.
+        EXPECT_EQ(file->reads.load(), 10u * 2u + 2u);
     }
 
     TEST_P(SupplyRingTests, FillsAtMostItsSlotsAheadOfAStalledWrite)
