@@ -16,6 +16,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/socket_options.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/tls.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/transfer.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/call.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/engine.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/resolver.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/task_gate.cpp

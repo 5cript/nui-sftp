@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ftp/engine/call.hpp>
 #include <ftp/engine/resolver.hpp>
 #include <ftp/engine/task_gate.hpp>
 #include <ftp/engine/work_counter.hpp>
@@ -8,15 +9,24 @@
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/system/error_code.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <exception>
+#include <expected>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -34,7 +44,7 @@ namespace FileTransferProtocol
      * freed memory. Posts and spawns are counted for the teardown, which waits for them with a bound, and refused once
      * refusePosts() ran. An exception that escapes one of them fails the whole session: the pool closes its
      * connections and the lost handler runs. Engine handlers never run backend code, that goes to the ProcessingThread
-     * through pushTask().
+     * through pushTask(). Operations for callers run bounded through run() and call(), which always answer.
      */
     class Engine : public std::enable_shared_from_this<Engine>
     {
@@ -43,6 +53,8 @@ namespace FileTransferProtocol
 
       public:
         using Strand = boost::asio::strand<boost::asio::any_io_executor>;
+        template <typename ValueT>
+        using Result = std::expected<ValueT, RemoteIo::RemoteError>;
         /** @brief Runs once, as a task on the ProcessingThread, when the session is lost or failed. */
         using LostHandler = std::function<void(RemoteIo::RemoteError const&)>;
 
@@ -95,20 +107,7 @@ namespace FileTransferProtocol
             std::scoped_lock lock{postMutex_};
             if (postsRefused_)
                 return false;
-            boost::asio::post(
-                strand,
-                [self = shared_from_this(), token = work(), function = std::forward<FunctionT>(function)]() mutable
-                {
-                    try
-                    {
-                        function();
-                    }
-                    catch (...)
-                    {
-                        self->handlerThrew(std::current_exception());
-                    }
-                }
-            );
+            boost::asio::post(strand, guarded(std::forward<FunctionT>(function)));
             return true;
         }
 
@@ -123,6 +122,60 @@ namespace FileTransferProtocol
          * @brief Counts what holds it as work of the session, for a handler or coroutine started otherwise.
          */
         WorkCounter::Token work();
+
+        /**
+         * @brief Runs the operation @p body returns on the session strand, from any thread, and calls @p done once
+         *        with its result. The operation is cancelled at the backstop of @p limits; an error it ends with after
+         *        that is TimedOut. When it has not ended after the drain, the connections touched in its CallScope are
+         *        closed and it completes as TimedOut, a later result is dropped. @p done runs on the session strand,
+         *        or at once on the calling thread while the session is stopping, failed or refuses posts. It must not
+         *        throw.
+         *
+         * @param body Called once, on the session strand, with the CallScope of the operation. Returns an
+         *        awaitable<Result<ValueT>>, cancellation reaches it as an error, never as an exception.
+         */
+        template <typename ValueT, typename BodyT>
+        void run(BodyT body, SyncLimits limits, std::function<void(Result<ValueT>)> done)
+        {
+            const auto pending = std::make_shared<Detail::Call<ValueT>>(strand_, limits, std::move(done));
+            if (stopping() || failed())
+            {
+                pending->fail(closedError());
+                return;
+            }
+            const auto posted = post(
+                [self = shared_from_this(), pending, body = std::move(body)]() mutable
+                {
+                    self->startCall(pending, std::move(body));
+                }
+            );
+            if (!posted)
+                pending->fail(closedError());
+        }
+
+        /**
+         * @brief run() for a task on the ProcessingThread, which waits for the result. Refused on the session strand,
+         *        on any thread but the ProcessingThread, and while the session is stopping or failed.
+         */
+        template <typename ValueT, typename BodyT>
+        Result<ValueT> call(BodyT body, SyncLimits limits)
+        {
+            if (strand_.running_in_this_thread())
+                return std::unexpected(wrongThread("on the session strand"));
+            if (!onProcessingThread())
+                return std::unexpected(wrongThread("outside the processing thread"));
+            const auto promise = std::make_shared<std::promise<Result<ValueT>>>();
+            auto future = promise->get_future();
+            run<ValueT>(
+                std::move(body),
+                limits,
+                [promise](Result<ValueT> result)
+                {
+                    promise->set_value(std::move(result));
+                }
+            );
+            return future.get();
+        }
 
         /**
          * @brief Queues @p task on the ProcessingThread of the session, from any thread.
@@ -162,6 +215,71 @@ namespace FileTransferProtocol
         bool waitIdle(std::chrono::milliseconds limit);
 
       private:
+        /**
+         * @brief @p function as a handler that holds the engine, counts as work and fails the session when it throws.
+         */
+        template <typename FunctionT>
+        auto guarded(FunctionT&& function)
+        {
+            return [self = shared_from_this(),
+                       token = work(),
+                       function = std::forward<FunctionT>(function)](auto&&... arguments) mutable
+            {
+                try
+                {
+                    function(std::forward<decltype(arguments)>(arguments)...);
+                }
+                catch (...)
+                {
+                    self->handlerThrew(std::current_exception());
+                }
+            };
+        }
+
+        template <typename ValueT, typename BodyT>
+        void startCall(std::shared_ptr<Detail::Call<ValueT>> const& pending, BodyT body)
+        {
+            if (!beginCall(pending))
+                return;
+            boost::asio::co_spawn(
+                strand_,
+                [body = std::move(body), scope = pending->scope()]() mutable -> boost::asio::awaitable<Result<ValueT>>
+                {
+                    co_await boost::asio::this_coro::throw_if_cancelled(false);
+                    co_return co_await body(scope);
+                },
+                boost::asio::bind_cancellation_slot(
+                    pending->slot(),
+                    guarded(
+                        [self = shared_from_this(), pending](std::exception_ptr exception, Result<ValueT> result)
+                        {
+                            // Failing the session completes the operation.
+                            if (exception)
+                                std::rethrow_exception(exception);
+                            self->endCall(*pending);
+                            if (!result && pending->draining())
+                                pending->fail(timedOut(pending->limits()));
+                            else
+                                pending->complete(std::move(result));
+                        }
+                    )
+                )
+            );
+        }
+
+        /**
+         * @brief Registers @p pending and starts its backstop, on the session strand.
+         *
+         * @return False when the session is stopping or failed, @p pending is completed then.
+         */
+        bool beginCall(std::shared_ptr<Detail::CallState> const& pending);
+        void armCallTimer(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds duration);
+        void callTimeUp(std::shared_ptr<Detail::CallState> const& pending);
+        void endCall(Detail::CallState& pending);
+        RemoteIo::RemoteError closedError() const;
+        static RemoteIo::RemoteError wrongThread(std::string_view where);
+        static RemoteIo::RemoteError timedOut(SyncLimits const& limits);
+
         void handlerThrew(std::exception_ptr exception);
         void fail(std::exception_ptr exception);
         void reportLost(RemoteIo::RemoteError error);
@@ -174,6 +292,9 @@ namespace FileTransferProtocol
         std::shared_ptr<Pool> pool_{};
         std::mutex postMutex_{};
         bool postsRefused_{false};
+        /** @brief The operations of run() in flight, the session strand's alone. */
+        std::unordered_map<std::uint64_t, std::shared_ptr<Detail::CallState>> calls_{};
+        std::uint64_t callNumber_{0u};
         std::atomic<bool> stopping_{false};
         std::atomic<bool> failed_{false};
         std::atomic<bool> lostReported_{false};
