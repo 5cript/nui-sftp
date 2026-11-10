@@ -18,17 +18,12 @@ namespace FileTransferProtocol
     }
 
     std::shared_ptr<DeliveryRing>
-    DeliveryRing::create(std::shared_ptr<Engine> engine, Strand connectionStrand, DeliveryRingOptions options)
+    DeliveryRing::create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options)
     {
         return std::make_shared<DeliveryRing>(Private{}, std::move(engine), std::move(connectionStrand), options);
     }
 
-    DeliveryRing::DeliveryRing(
-        Private,
-        std::shared_ptr<Engine> engine,
-        Strand connectionStrand,
-        DeliveryRingOptions options
-    )
+    DeliveryRing::DeliveryRing(Private, std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options)
         : engine_{std::move(engine)}
         , strand_{std::move(connectionStrand)}
         , slots_(options.slots, std::vector<char>(options.chunkSize))

@@ -91,23 +91,14 @@ namespace FileTransferProtocol::Test
         };
     }
 
-    class DeliveryRingTests : public EngineTests
+    /**
+     * @brief What the tests of both rings share.
+     */
+    class RingTests : public EngineTests
     {
       protected:
-        DeliveryRing::Sink sinkInto(std::shared_ptr<Received> received)
-        {
-            return [received, gate = gate_](std::span<char const> bytes)
-            {
-                ++received->deliveries;
-                received->allOnTheProcessingThread = received->allOnTheProcessingThread && gate->onProcessingThread();
-                received->bytes.insert(received->bytes.end(), bytes.begin(), bytes.end());
-                received->sizes.push_back(bytes.size());
-                return true;
-            };
-        }
-
         /**
-         * @brief Waits until every task pushed so far ran, the deliveries of an ended ring among them.
+         * @brief Waits until every task pushed so far ran, the deliveries or fills of an ended ring among them.
          */
         void flushTasks()
         {
@@ -135,8 +126,24 @@ namespace FileTransferProtocol::Test
                 ASSERT_EQ(bytes[index], patternAt(index)) << "at byte " << index;
         }
 
-        const DeliveryRingOptions options_{.slots = 4u, .chunkSize = 1024u};
-        const DeliveryRing::Strand connectionStrand_ = asio::make_strand(host_.executor());
+        const RingOptions options_{.slots = 4u, .chunkSize = 1024u};
+        const Engine::Strand connectionStrand_ = asio::make_strand(host_.executor());
+    };
+
+    class DeliveryRingTests : public RingTests
+    {
+      protected:
+        DeliveryRing::Sink sinkInto(std::shared_ptr<Received> received)
+        {
+            return [received, gate = gate_](std::span<char const> bytes)
+            {
+                ++received->deliveries;
+                received->allOnTheProcessingThread = received->allOnTheProcessingThread && gate->onProcessingThread();
+                received->bytes.insert(received->bytes.end(), bytes.begin(), bytes.end());
+                received->sizes.push_back(bytes.size());
+                return true;
+            };
+        }
     };
 
     TEST_P(DeliveryRingTests, DeliversEverySlotInOrderOnTheProcessingThread)

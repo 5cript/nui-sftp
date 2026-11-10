@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/ring_options.hpp>
 #include <remote_io/remote_error.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
@@ -19,14 +20,6 @@
 
 namespace FileTransferProtocol
 {
-    struct DeliveryRingOptions
-    {
-        /** @brief How many chunks the connection reads ahead of the ProcessingThread at most. */
-        std::size_t slots{4u};
-        /** @brief The bytes of one slot, every delivery but the last hands over a full one. */
-        std::size_t chunkSize{256u * 1024u};
-    };
-
     /**
      * @brief Carries one asynchronous download from its connection strand to the ProcessingThread. The strand reads
      *        into a free slot until it is full and hands it over as a task, the task gives it back with a post. Without
@@ -52,9 +45,9 @@ namespace FileTransferProtocol
         using Paused = std::function<bool()>;
 
         static std::shared_ptr<DeliveryRing>
-        create(std::shared_ptr<Engine> engine, Strand connectionStrand, DeliveryRingOptions options = {});
+        create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options = {});
 
-        DeliveryRing(Private, std::shared_ptr<Engine> engine, Strand connectionStrand, DeliveryRingOptions options);
+        DeliveryRing(Private, std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options);
         ~DeliveryRing() = default;
         DeliveryRing(DeliveryRing const&) = delete;
         DeliveryRing& operator=(DeliveryRing const&) = delete;
