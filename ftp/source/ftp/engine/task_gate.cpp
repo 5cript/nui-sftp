@@ -28,4 +28,10 @@ namespace FileTransferProtocol
         std::unique_lock lock{mutex_};
         thread_ = nullptr;
     }
+
+    bool TaskGate::closed() const
+    {
+        std::shared_lock lock{mutex_};
+        return thread_ == nullptr;
+    }
 }

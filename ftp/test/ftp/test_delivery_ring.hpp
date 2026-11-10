@@ -493,6 +493,22 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(expectPattern(received->bytes, download->size));
     }
 
+    TEST_P(DeliveryRingTests, ACleanupTaskMayCloseTheRingAfterTheSessionClosed)
+    {
+        const auto engine = makeEngine();
+        const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
+        EXPECT_TRUE(engine->close(thread_));
+        auto closed = false;
+        thread_.pushCleanupTask(
+            [&closed, ring]()
+            {
+                ring->close();
+                closed = true;
+            }
+        );
+        EXPECT_TRUE(closed) << "the cleanup task did not run on the closing thread";
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         Executors,
         DeliveryRingTests,

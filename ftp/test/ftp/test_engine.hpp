@@ -854,6 +854,31 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(reports_->recorded().empty()) << "the close was reported as a loss";
     }
 
+    TEST_P(EngineTests, ACallOfACleanupTaskAfterTheCloseIsRefusedAsClosed)
+    {
+        const auto engine = makeEngine();
+        EXPECT_TRUE(engine->close(thread_));
+        const auto ran = std::make_shared<std::atomic<bool>>(false);
+        std::optional<Engine::Result<int>> answer{};
+        thread_.pushCleanupTask(
+            [&answer, engine, ran]()
+            {
+                answer = engine->call<int>(
+                    [ran](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                    {
+                        *ran = true;
+                        co_return 1;
+                    },
+                    SyncLimits{}
+                );
+            }
+        );
+        ASSERT_TRUE(answer) << "the cleanup task did not run on the closing thread";
+        ASSERT_FALSE(*answer);
+        EXPECT_EQ(answer->error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << answer->error().toString();
+        EXPECT_FALSE(*ran);
+    }
+
     TEST_P(EngineTests, ASecondCloseReturnsOnlyAfterTheFirst)
     {
         const auto engine = makeEngine();

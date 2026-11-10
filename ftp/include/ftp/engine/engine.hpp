@@ -177,6 +177,12 @@ namespace FileTransferProtocol
         bool onProcessingThread() const;
 
         /**
+         * @brief onProcessingThread(), or the task gate is closed, which close() does once the thread stopped, so no
+         *        task of the session runs beside the caller: a cleanup task after the close, say.
+         */
+        bool onProcessingThreadOrClosed() const;
+
+        /**
          * @brief The session ends, synchronous calls are refused from now on. Thread-safe.
          */
         void setStopping();
@@ -270,7 +276,7 @@ namespace FileTransferProtocol
         {
             if (strand_.running_in_this_thread())
                 return std::unexpected(wrongThread("on the session strand"));
-            if (!onProcessingThread())
+            if (!onProcessingThreadOrClosed())
                 return std::unexpected(wrongThread("outside the processing thread"));
             const auto promise = std::make_shared<std::promise<Result<ValueT>>>();
             auto future = promise->get_future();

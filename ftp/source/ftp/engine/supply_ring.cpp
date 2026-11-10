@@ -112,7 +112,7 @@ namespace FileTransferProtocol
 
     void SupplyRing::close()
     {
-        assert(engine_->onProcessingThread() && "SupplyRing::close() runs on the ProcessingThread");
+        assert(engine_->onProcessingThreadOrClosed() && "SupplyRing::close() runs on the ProcessingThread");
         if (closed_)
             return;
         closed_ = true;

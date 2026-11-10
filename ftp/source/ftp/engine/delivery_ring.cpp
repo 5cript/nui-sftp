@@ -141,7 +141,7 @@ namespace FileTransferProtocol
 
     void DeliveryRing::close()
     {
-        assert(engine_->onProcessingThread() && "DeliveryRing::close() runs on the ProcessingThread");
+        assert(engine_->onProcessingThreadOrClosed() && "DeliveryRing::close() runs on the ProcessingThread");
         if (closed_)
             return;
         closed_ = true;

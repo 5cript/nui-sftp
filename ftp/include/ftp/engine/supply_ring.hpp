@@ -77,7 +77,7 @@ namespace FileTransferProtocol
 
         /**
          * @brief The source is not called after this returned. Stops the ring. On the ProcessingThread, also inside
-         *        the source.
+         *        the source, or once the session closed.
          */
         void close();
 

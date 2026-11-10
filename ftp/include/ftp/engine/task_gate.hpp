@@ -36,6 +36,7 @@ namespace FileTransferProtocol
          * @brief Waits for the pushes under way and refuses all later ones.
          */
         void close();
+        bool closed() const;
 
       private:
         mutable std::shared_mutex mutex_{};

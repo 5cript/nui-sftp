@@ -113,6 +113,11 @@ namespace FileTransferProtocol
         return tasks_->onProcessingThread();
     }
 
+    bool Engine::onProcessingThreadOrClosed() const
+    {
+        return tasks_->onProcessingThread() || tasks_->closed();
+    }
+
     void Engine::setStopping()
     {
         stopping_ = true;

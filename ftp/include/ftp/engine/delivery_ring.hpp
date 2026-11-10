@@ -78,7 +78,7 @@ namespace FileTransferProtocol
 
         /**
          * @brief No sink runs after this returned, later deliveries drop their bytes and give the slot back. Stops the
-         *        ring. On the ProcessingThread, also inside a delivery.
+         *        ring. On the ProcessingThread, also inside a delivery, or once the session closed.
          */
         void close();
 

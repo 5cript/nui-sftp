@@ -381,6 +381,22 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(written->writes.load(), 0u);
     }
 
+    TEST_P(SupplyRingTests, ACleanupTaskMayCloseTheRingAfterTheSessionClosed)
+    {
+        const auto engine = makeEngine();
+        const auto ring = SupplyRing::create(engine, connectionStrand_, options_);
+        EXPECT_TRUE(engine->close(thread_));
+        auto closed = false;
+        thread_.pushCleanupTask(
+            [&closed, ring]()
+            {
+                ring->close();
+                closed = true;
+            }
+        );
+        EXPECT_TRUE(closed) << "the cleanup task did not run on the closing thread";
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         Executors,
         SupplyRingTests,
