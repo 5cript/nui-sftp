@@ -572,6 +572,35 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(connectionsAccepted(), 4u);
     }
 
+    TEST_F(PoolTests, WaitingTransferIsWokenOnceTheLimitMayBeTriedAgain)
+    {
+        server_->addConnection(loginThenDisconnect());
+        server_->addConnection(refusedAtTheGreeting());
+        server_->addConnection(loginThenDisconnect());
+        auto poolOptions = options();
+        poolOptions.connectionLimitBackoff = 300ms;
+        const auto pool = startedPool(std::move(poolOptions));
+        const auto wakes = std::make_shared<WakeCount>();
+        // Both within the time of the limit, nothing but the pool's strand runs between them.
+        auto [held, waiting] = run(
+            [&pool, &wakes]() -> asio::awaitable<std::pair<Pool::LeaseResult, Pool::LeaseResult>>
+            {
+                auto first = co_await pool->acquireTransfer();
+                auto second = co_await pool->acquireTransfer(wakes->wake());
+                co_return std::pair{std::move(first), std::move(second)};
+            }
+        );
+        const auto transfer = leaseFrom(std::move(held));
+        EXPECT_EQ(transfer.name(), "C0");
+        expectError(waiting, RemoteErrorKind::Busy);
+
+        // C0 stays in use, only the end of the limit wakes the transfer.
+        ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready);
+        EXPECT_EQ(pool->connectionLimit(), 3u);
+        EXPECT_EQ(leaseFrom(run(pool->acquireTransfer())).name(), "C2");
+        EXPECT_EQ(connectionsAccepted(), 3u);
+    }
+
     TEST_F(PoolTests, TransfersTakeC0WhenTheLimitLeavesOnlyC0)
     {
         server_->addConnection(loginThenDisconnect());

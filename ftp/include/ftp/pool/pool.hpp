@@ -67,7 +67,8 @@ namespace FileTransferProtocol
      *        needed, with the endpoints the start looked up; they are looked up again once all of them failed.
      *
      * A refused login (ConnectionLimit) lowers the number of connections to those the session has, for
-     * connectionLimitBackoff. With only C0 left, transfers take C0 when it is idle.
+     * connectionLimitBackoff. With only C0 left, transfers take C0 when it is idle. Once that time is over the kept
+     * wakes run, a transfer that waited may try another login.
      *
      * C0 lost during use makes the session Degraded: it logs in again in the background, a few times with a growing
      * wait, and waits for commands up to the connect timeout meanwhile. If that fails, the session is Lost and the
@@ -139,7 +140,8 @@ namespace FileTransferProtocol
          * @brief A connection for one transfer: an idle transfer connection, a new login while the limit allows one,
          *        C0 when the limit leaves only C0 and C0 is free. Never waits for a release.
          *
-         * @param wakeWhenFree Kept when the result is Busy and called once a connection is free, then open again.
+         * @param wakeWhenFree Kept when the result is Busy and called once a connection is free or a lowered limit
+         *        may be tried again, then open again.
          * @return The lease. Busy when every connection is in use, the error of a failed login, ConnectionLost when
          *         the session is Lost or closing, Cancelled.
          */
@@ -197,6 +199,10 @@ namespace FileTransferProtocol
         bool metadataFree() const;
         std::size_t transferCapacity();
         void learnLimit();
+        /**
+         * @brief The time of a lowered limit is over, transfers that wait may try another login.
+         */
+        void endLimit();
         void connectMetadata();
         void adoptMetadata(std::shared_ptr<PooledConnection> connection);
         void promote(std::shared_ptr<PooledConnection> const& connection);
@@ -230,6 +236,8 @@ namespace FileTransferProtocol
         std::deque<std::shared_ptr<Waiter>> commandWaiters_{};
         std::vector<Wake> wakes_{};
         boost::asio::steady_timer reloginTimer_;
+        /** @brief Runs out with limitedUntil_. */
+        boost::asio::steady_timer limitTimer_;
         std::uint64_t transferNumber_{0u};
         std::optional<std::chrono::steady_clock::time_point> limitedUntil_{};
         std::optional<RemoteIo::RemoteError> lostReason_{};

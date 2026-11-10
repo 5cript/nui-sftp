@@ -116,6 +116,7 @@ namespace FileTransferProtocol
         , onLost_{std::move(onLost)}
         , passiveChoice_{std::make_shared<PassiveChoice>()}
         , reloginTimer_{strand_}
+        , limitTimer_{strand_}
         , connectionLimit_{options_.transferConnections + 1u}
     {
         assert(options_.transferConnections > 0u && "a pool needs a connection for transfers");
@@ -247,6 +248,7 @@ namespace FileTransferProtocol
             co_return;
         closed_ = true;
         reloginTimer_.cancel();
+        limitTimer_.cancel();
         failCommandWaiters(closing());
         fireWakes();
         for (auto const& connection : connecting_)
@@ -683,6 +685,25 @@ namespace FileTransferProtocol
         Log::info("FTP: The server refused another connection, the session keeps to {} for now", limit);
         connectionLimit_ = limit;
         limitedUntil_ = Clock::now() + options_.connectionLimitBackoff;
+        limitTimer_.expires_at(*limitedUntil_);
+        limitTimer_.async_wait(
+            [weakPool = weak_from_this()](boost::system::error_code error)
+            {
+                const auto pool = weakPool.lock();
+                if (error || !pool)
+                    return;
+                pool->endLimit();
+            }
+        );
+    }
+
+    void Pool::endLimit()
+    {
+        // A later refusal lowered the limit anew, its own wait follows.
+        if (closed_ || (limitedUntil_ && Clock::now() < *limitedUntil_))
+            return;
+        transferCapacity();
+        fireWakes();
     }
 
     void Pool::connectMetadata()
