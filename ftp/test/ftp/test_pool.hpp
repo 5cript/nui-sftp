@@ -634,7 +634,13 @@ namespace FileTransferProtocol::Test
         const auto wakes = std::make_shared<WakeCount>();
         expectError(run(pool->acquireTransfer(wakes->wake())), RemoteErrorKind::Busy);
         giveBack(transfer);
-        EXPECT_EQ(leaseFrom(waitFor(command)).name(), "C0");
+        auto granted = leaseFrom(waitFor(command));
+        EXPECT_EQ(granted.name(), "C0");
+        EXPECT_EQ(wakes->calls, 0u) << "the transfer was woken while the command that waited has C0";
+
+        giveBack(granted);
+        ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready);
+        EXPECT_EQ(leaseFrom(run(pool->acquireTransfer())).name(), "C0");
         EXPECT_EQ(connectionsAccepted(), 2u);
     }
 
