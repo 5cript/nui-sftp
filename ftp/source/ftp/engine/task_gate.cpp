@@ -28,4 +28,23 @@ namespace FileTransferProtocol
         std::unique_lock lock{mutex_};
         thread_ = nullptr;
     }
+
+    bool TaskGate::closed() const
+    {
+        std::shared_lock lock{mutex_};
+        return thread_ == nullptr;
+    }
+
+    void TaskGate::stopThreadAndClose()
+    {
+        RemoteIo::ProcessingThread* thread{nullptr};
+        {
+            std::shared_lock lock{mutex_};
+            thread = thread_;
+        }
+        // Outside the lock, a leftover task that pushes would wait for it on this very thread.
+        if (thread != nullptr)
+            thread->stop();
+        close();
+    }
 }
