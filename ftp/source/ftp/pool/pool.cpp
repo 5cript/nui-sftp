@@ -409,6 +409,10 @@ namespace FileTransferProtocol
         if (connection)
         {
             transfers_.push_back(*connection);
+            // A refusal of another login lowered the limit while this one was under way, the server took it all the
+            // same.
+            if (connectionLimit_ < transfers_.size() + 1u)
+                connectionLimit_ = transfers_.size() + 1u;
             co_return LeaseResult{lease(*connection)};
         }
         // The refusal lowered the limit, C0 or a wait may be the way now.

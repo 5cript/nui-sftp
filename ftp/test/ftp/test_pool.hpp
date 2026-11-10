@@ -590,6 +590,28 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(pool->connectionLimit(), 2u);
     }
 
+    TEST_F(PoolTests, LoginUnderWayAtARefusalCountsToTheLimitOnceItGotThrough)
+    {
+        server_->addConnection(loginThenDisconnect());
+        Script slow{};
+        slow.checkpoint("accepted");
+        server_->addConnection(afterLogin(slow.login().awaitRelease("login")).expectDisconnect());
+        server_->addConnection(refusedAtTheGreeting());
+        const auto pool = startedPool();
+        auto underWay = spawn(pool->acquireTransfer());
+        ASSERT_TRUE(server_->waitForCheckpoint("accepted"));
+
+        // The refusal counts the connections the session has, the login under way is none of them yet.
+        const auto refused = leaseFrom(run(pool->acquireTransfer()));
+        EXPECT_EQ(refused.name(), "C0");
+        EXPECT_EQ(pool->connectionLimit(), 1u);
+
+        server_->release("login");
+        EXPECT_EQ(leaseFrom(waitFor(underWay)).name(), "C1");
+        EXPECT_EQ(pool->connectionLimit(), 2u);
+        EXPECT_EQ(connectionsAccepted(), 3u);
+    }
+
     TEST_F(PoolTests, LimitIsTriedAgainAfterItsBackoff)
     {
         server_->addConnection(loginThenDisconnect());
