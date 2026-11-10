@@ -721,22 +721,24 @@ namespace FileTransferProtocol::Test
         auto started = ScriptedFtpServer::start();
         ASSERT_TRUE(started) << started.error();
         auto old = std::move(started).value();
-        old->addConnection(loginThenResetOn("NOOP"));
+        Script stays{};
+        old->addConnection(loggedIn(stays).stall());
         setEndpoints({endpointOf(*old)});
         Script moved{};
         server_->addConnection(loggedIn(moved).expect("NOOP").reply("200 NOOP ok.").expectDisconnect());
         const auto pool = startedPool();
-        auto lease = leaseFrom(run(pool->acquireCommand()));
-        ASSERT_FALSE(execute(lease, Verb::Noop));
-        ASSERT_TRUE(old->waitUntilDisconnected());
+
+        // C0 is in use when its server goes away, so the session logs in again in the background, where only a new
+        // lookup finds the server.
+        const auto held = leaseFrom(run(pool->acquireCommand()));
+        setEndpoints({endpointOf(*server_)});
         EXPECT_TRUE(old->failures().empty());
         old.reset();
-        setEndpoints({endpointOf(*server_)});
 
-        giveBack(lease);
         const auto again = leaseFrom(run(pool->acquireCommand()));
         const auto reply = execute(again, Verb::Noop);
         ASSERT_TRUE(reply) << reply.error().toString();
+        EXPECT_EQ(reply->code, 200);
         EXPECT_EQ(lookups_, 2u);
     }
 
