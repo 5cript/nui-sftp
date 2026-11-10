@@ -86,8 +86,16 @@ function(discover_ftp_tests name testPrefix environment)
         gtest_discover_tests(
             ${name}
             TEST_PREFIX "${testPrefix}"
-            TEST_FILTER "Conformance/*"
+            TEST_FILTER "Conformance/*:-Conformance/PoolLimitConformance.*"
             PROPERTIES ENVIRONMENT "${environment}" FIXTURES_REQUIRED FtpServerFleet
+            DISCOVERY_TIMEOUT 60
+        )
+        # The limits variant counts the connections of one address, so its cases run one at a time.
+        gtest_discover_tests(
+            ${name}
+            TEST_PREFIX "${testPrefix}"
+            TEST_FILTER "Conformance/PoolLimitConformance.*"
+            PROPERTIES ENVIRONMENT "${environment}" FIXTURES_REQUIRED FtpServerFleet RESOURCE_LOCK FtpLimitsVariant
             DISCOVERY_TIMEOUT 60
         )
     endif()

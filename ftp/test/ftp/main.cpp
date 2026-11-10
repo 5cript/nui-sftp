@@ -10,6 +10,7 @@
 #include "test_login.hpp"
 #include "test_login_conformance.hpp"
 #include "test_pool.hpp"
+#include "test_pool_conformance.hpp"
 #include "test_transfer_conformance.hpp"
 #include "test_printable.hpp"
 #include "test_reply_code.hpp"
