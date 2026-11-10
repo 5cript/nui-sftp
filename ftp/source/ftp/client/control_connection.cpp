@@ -897,17 +897,19 @@ namespace FileTransferProtocol
 
         std::vector<std::shared_ptr<PendingCommand>> written{*next};
         queued_.erase(next);
+        auto timeout = options_.commandTimeout;
         if (const auto transfer = runningTransfer(); transfer && written.front()->verb() == Verb::Abort)
         {
             drain_ = AbortDrain{.transfer = transfer, .abort = written.front(), .marker = makeMarker()};
             written.push_back(drain_->marker);
+            timeout = options_.drainTimeout;
         }
 
         std::vector<asio::const_buffer> buffers{};
         for (auto const& pending : written)
         {
             pending->stage_ = PendingCommand::Stage::Written;
-            pending->deadline_ = Clock::now() + options_.commandTimeout;
+            pending->deadline_ = Clock::now() + timeout;
             awaiting_.push_back(pending);
             buffers.push_back(asio::buffer(pending->bytes_));
             Log::debug("FTP: Sending {}", pending->command_->toLogString());

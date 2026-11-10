@@ -14,6 +14,7 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <fmt/format.h>
 
+#include <cassert>
 #include <exception>
 #include <string_view>
 #include <utility>
@@ -343,13 +344,11 @@ namespace FileTransferProtocol
 
     std::optional<std::uint64_t> Download::expectedBytes() const
     {
-        if (request_.expectedSize)
-        {
-            if (*request_.expectedSize < request_.offset)
-                return std::nullopt;
-            return *request_.expectedSize - request_.offset;
-        }
-        return announced_;
+        // Only a download that started at 0 reads the announcement, which names the whole file then.
+        const auto whole = request_.expectedSize ? request_.expectedSize : announced_;
+        if (!whole || *whole < request_.offset)
+            return std::nullopt;
+        return *whole - request_.offset;
     }
 
     asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> Download::checkSize(Reply finalReply)
@@ -395,7 +394,7 @@ namespace FileTransferProtocol
         retrieve_ = started->command;
         dropped_ = false;
         earlyFinalReply_ = finalReplyOf(std::move(started->first));
-        Log::debug("FTP: Continued a paused download with REST");
+        Log::debug("FTP: Started a dropped download again at its position");
         co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
@@ -441,9 +440,30 @@ namespace FileTransferProtocol
     void Download::dropForPause()
     {
         Log::debug("FTP: Dropped the data connection of a paused download");
+        drop("a paused download");
+    }
+
+    void Download::drop(std::string_view why)
+    {
         dropped_ = true;
         data_->close();
-        abortTransfer(*session_.control, *retrieve_, "a paused download");
+        abortTransfer(*session_.control, *retrieve_, why);
+    }
+
+    std::expected<void, RemoteIo::RemoteError> Download::seek(std::uint64_t position)
+    {
+        assert(!reading_ && "a seek during a read would end the read as a failure");
+        if (aborted_)
+            return std::unexpected(aborted());
+        if (position == request_.offset + bytes_)
+            return std::expected<void, RemoteIo::RemoteError>{};
+        if (!dropped_)
+            drop("a seek");
+        request_.offset = position;
+        bytes_ = 0u;
+        dataEnded_ = false;
+        earlyFinalReply_.reset();
+        return std::expected<void, RemoteIo::RemoteError>{};
     }
 
     void Download::abort()

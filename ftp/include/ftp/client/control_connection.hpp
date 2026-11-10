@@ -34,6 +34,11 @@ namespace FileTransferProtocol
          *        ControlConnection::limitFinalReply().
          */
         std::chrono::milliseconds commandTimeout{15'000};
+        /**
+         * @brief From writing ABOR into a transfer to the reply of its marker. A server that misses it ends the
+         *        connection as Dead.
+         */
+        std::chrono::milliseconds drainTimeout{5'000};
         /** @brief Quiet time after which a line with another code ends a multi-line reply, see ReplyFramer::settle().
          */
         std::chrono::milliseconds settleTime{200};
@@ -66,7 +71,7 @@ namespace FileTransferProtocol
      *
      * ABOR into a transfer is followed by PWD as a marker. Servers answer the two with two replies in either order,
      * with one, or with none; the final replies before the 257 of PWD go to the transfer and ABOR: the first to the
-     * transfer, the last to ABOR, a single one to both.
+     * transfer, the last to ABOR, a single one to both. The drain ends at the marker's reply within drainTimeout.
      *
      * TLS starts before the greeting (implicit) or after a 234 to AUTH TLS (explicit, RFC 4217), and stays to the end:
      * a close sends close_notify, CCC is never sent. The certificate is checked during the handshake, so no command

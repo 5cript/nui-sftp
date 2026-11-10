@@ -338,6 +338,39 @@ namespace FileTransferProtocol::Test
         );
     }
 
+    TEST_F(UploadTests, AbortedUploadIsNotCompleteEvenWithA226)
+    {
+        // vsftpd takes a cut upload for a complete one and keeps the partial file.
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.expectUpload(1024u), "150 Ok to send data.")
+            .beginData()
+            .abortSequence(AbortReplies::FinalOnly)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const auto finished =
+            run(connection,
+                [session]() -> asio::awaitable<UploadOutcome>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    if (auto written = co_await upload->write(asio::buffer(std::string_view{"partial"})); !written)
+                        co_return std::unexpected(std::move(written).error());
+                    upload->abort();
+                    co_return co_await upload->finish();
+                });
+        ASSERT_FALSE(finished);
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << finished.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(UploadTests, PathThatCannotBeSentSendsNoRest)
     {
         Script script{};

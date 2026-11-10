@@ -6,6 +6,7 @@
 #    include "test_upload.hpp"
 
 #    include <ftp/client/transfer.hpp>
+#    include <ftp/protocol/reply_parsers.hpp>
 
 #    include <gtest/gtest.h>
 
@@ -133,6 +134,66 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        std::expected<std::shared_ptr<Download>, RemoteIo::RemoteError>
+        startDownload(DownloadRequest request, TransferOptions options = transferOptions())
+        {
+            return onStrand(
+                connection_,
+                [session = session_, request = std::move(request), options]()
+                    -> boost::asio::awaitable<std::expected<std::shared_ptr<Download>, RemoteIo::RemoteError>>
+                {
+                    co_return co_await Download::start(session, request, options);
+                }
+            );
+        }
+
+        /**
+         * @brief Reads until @p size bytes came or the data ended.
+         */
+        DownloadResult readFrom(std::shared_ptr<Download> const& download, std::size_t size)
+        {
+            return onStrand(
+                connection_,
+                [download, size]() -> boost::asio::awaitable<DownloadResult>
+                {
+                    co_return co_await readPart(download, size);
+                }
+            );
+        }
+
+        std::expected<TransferResult, RemoteIo::RemoteError> finishDownload(std::shared_ptr<Download> const& download)
+        {
+            return onStrand(
+                connection_,
+                [download]() -> boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>>
+                {
+                    co_return co_await download->finish();
+                }
+            );
+        }
+
+        std::expected<Reply, RemoteIo::RemoteError> execute(Command command)
+        {
+            return onStrand(
+                connection_,
+                [connection = connection_, command = std::move(command)]()
+                    -> boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
+                {
+                    co_return co_await connection->execute(command);
+                }
+            );
+        }
+
+        /**
+         * @brief A command behind an abort waits for its drain, so its reply shows that the login stayed usable.
+         */
+        void expectUsableLogin()
+        {
+            const auto noop = execute(Command{.verb = Verb::Noop});
+            ASSERT_TRUE(noop) << noop.error().toString();
+            EXPECT_EQ(noop->code, 200);
+        }
+
         static TransferOptions transferOptions()
         {
             return TransferOptions{
@@ -188,54 +249,106 @@ namespace FileTransferProtocol::Test
         const auto whole = fixtureContent(10485760u);
         auto options = transferOptions();
         options.pauseDropAfter = 300ms;
-        auto started = onStrand(
-            connection_,
-            [session = session_, path = pathOf("large.bin"), size = whole.size(), options]()
-                -> boost::asio::awaitable<std::expected<std::shared_ptr<Download>, RemoteIo::RemoteError>>
-            {
-                co_return co_await Download::start(session, {.path = path, .expectedSize = size}, options);
-            }
-        );
+        auto started = startDownload({.path = pathOf("large.bin"), .expectedSize = whole.size()}, options);
         ASSERT_TRUE(started) << started.error().toString();
         auto const download = std::move(started).value();
-        const auto read = [this, &download](std::size_t size)
-        {
-            return onStrand(
-                connection_,
-                [download, size]() -> boost::asio::awaitable<DownloadResult>
-                {
-                    co_return co_await readPart(download, size);
-                }
-            );
-        };
-        const auto first = read(64u * 1024u);
+        const auto first = readFrom(download, 64u * 1024u);
         ASSERT_TRUE(first) << first.error().toString();
         // Nobody reads now. A command is written only once the transfer ended, so the reply to this one shows that
         // the drop aborted the RETR. It is through before the next read sends the commands that continue.
-        const auto noop = onStrand(
-            connection_,
-            [connection = connection_]() -> boost::asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
-            {
-                co_return co_await connection->execute(Command{.verb = Verb::Noop});
-            }
-        );
-        ASSERT_TRUE(noop) << noop.error().toString();
-        EXPECT_EQ(noop->code, 200);
-        const auto rest = read(whole.size());
+        ASSERT_NO_FATAL_FAILURE(expectUsableLogin());
+        const auto rest = readFrom(download, whole.size());
         ASSERT_TRUE(rest) << rest.error().toString();
         EXPECT_EQ(first->content.size() + rest->content.size(), whole.size());
         EXPECT_TRUE(first->content + rest->content == whole);
-        const auto finished = onStrand(
-            connection_,
-            [download]() -> boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>>
-            {
-                co_return co_await download->finish();
-            }
-        );
+        const auto finished = finishDownload(download);
         ASSERT_TRUE(finished) << finished.error().toString();
         EXPECT_EQ(finished->bytes, whole.size());
         ASSERT_TRUE(finished->finalReply);
         EXPECT_EQ(finished->finalReply->code / 100, 2);
+    }
+
+    TEST_P(TransferConformance, AbortedDownloadKeepsTheLogin)
+    {
+        auto started = startDownload({.path = pathOf("large.bin"), .expectedSize = 10485760u});
+        ASSERT_TRUE(started) << started.error().toString();
+        auto const download = std::move(started).value();
+        const auto first = readFrom(download, 64u * 1024u);
+        ASSERT_TRUE(first) << first.error().toString();
+        onStrand(
+            connection_,
+            [download]() -> boost::asio::awaitable<void>
+            {
+                download->abort();
+                co_return;
+            }
+        );
+        ASSERT_NO_FATAL_FAILURE(expectUsableLogin());
+        ASSERT_NO_FATAL_FAILURE(expectDownload({.path = pathOf("one.bin"), .expectedSize = 1u}, fixtureContent(1u)));
+    }
+
+    TEST_P(TransferConformance, SeekBackContinuesAtThePosition)
+    {
+        const auto whole = fixtureContent(10485760u);
+        auto started = startDownload({.path = pathOf("large.bin"), .expectedSize = whole.size()});
+        ASSERT_TRUE(started) << started.error().toString();
+        auto const download = std::move(started).value();
+        const auto first = readFrom(download, 64u * 1024u);
+        ASSERT_TRUE(first) << first.error().toString();
+        const auto sought = onStrand(
+            connection_,
+            [download]() -> boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+            {
+                co_return download->seek(1000u);
+            }
+        );
+        ASSERT_TRUE(sought) << sought.error().toString();
+        const auto rest = readFrom(download, whole.size());
+        ASSERT_TRUE(rest) << rest.error().toString();
+        EXPECT_EQ(rest->content.size(), whole.size() - 1000u);
+        EXPECT_TRUE(rest->content == std::string_view{whole}.substr(1000u));
+        const auto finished = finishDownload(download);
+        ASSERT_TRUE(finished) << finished.error().toString();
+        EXPECT_EQ(finished->bytes, whole.size() - 1000u);
+        ASSERT_TRUE(finished->finalReply);
+        EXPECT_EQ(finished->finalReply->code / 100, 2);
+    }
+
+    TEST_P(TransferConformance, AbortedUploadIsNotCompleteAndContinuesWithRest)
+    {
+        const auto content = uploadContent(10485760u);
+        const auto path = pathOf("aborted.bin");
+        constexpr std::size_t written = 1u << 20u;
+        const auto aborted = onStrand(
+            connection_,
+            [session = session_, path, content]() -> boost::asio::awaitable<UploadOutcome>
+            {
+                auto started = co_await Upload::start(session, {.path = path}, transferOptions());
+                if (!started)
+                    co_return std::unexpected(std::move(started).error());
+                auto const upload = std::move(started).value();
+                constexpr std::size_t chunkSize = 256u * 1024u;
+                for (std::size_t offset = 0u; offset < written; offset += chunkSize)
+                {
+                    if (auto sent = co_await upload->write(asio::buffer(content.data() + offset, chunkSize)); !sent)
+                        co_return std::unexpected(std::move(sent).error());
+                }
+                upload->abort();
+                co_return co_await upload->finish();
+            }
+        );
+        ASSERT_FALSE(aborted);
+        EXPECT_EQ(aborted.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << aborted.error().toString();
+        ASSERT_NO_FATAL_FAILURE(expectUsableLogin());
+        // Both servers keep the partial file, it holds at most what was written.
+        const auto sizeReply = execute(Command{.verb = Verb::Size, .argument = path});
+        ASSERT_TRUE(sizeReply) << sizeReply.error().toString();
+        const auto kept = parseSizeReply(*sizeReply);
+        ASSERT_TRUE(kept) << kept.error().toString();
+        EXPECT_LE(*kept, written);
+        const auto rest = upload({.path = path, .offset = *kept}, content.substr(*kept));
+        ASSERT_TRUE(rest) << rest.error().toString();
+        ASSERT_NO_FATAL_FAILURE(expectDownload({.path = path, .expectedSize = content.size()}, content));
     }
 
     TEST_P(TransferConformance, UploadsReadBackTheSame)
