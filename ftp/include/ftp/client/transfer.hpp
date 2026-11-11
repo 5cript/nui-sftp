@@ -3,6 +3,8 @@
 #include <ftp/client/control_connection.hpp>
 #include <ftp/client/data_connection.hpp>
 #include <ftp/client/tls.hpp>
+#include <ftp/protocol/command.hpp>
+#include <ftp/protocol/listing.hpp>
 #include <ftp/protocol/reply.hpp>
 #include <remote_io/remote_error.hpp>
 
@@ -308,4 +310,17 @@ namespace FileTransferProtocol
         bool dataEnded_{false};
         bool aborted_{false};
     };
+
+    /**
+     * @brief LIST, MLSD or NLST on its own data connection, on the strand of the control connection. The data goes
+     *        through @p parser as it arrives; its end and a positive final reply, in either order, complete the
+     *        listing.
+     *
+     * @param command The listing command, without an argument for the working directory.
+     * @return The listing. Errors as for Download::start(); the data connection's error, after which the transfer is
+     *         aborted with ABOR; the replyError() of a negative final reply; TimedOut when no final reply came, which
+     *         a listing without a size cannot prove complete; Truncated for TLS data that ended without close_notify.
+     */
+    boost::asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>
+    fetchListing(TransferSession session, Command command, ListingParser parser, TransferOptions options = {});
 }

@@ -18,6 +18,7 @@
 #include <exception>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace FileTransferProtocol
 {
@@ -30,6 +31,9 @@ namespace FileTransferProtocol
         using Detail::refused;
         using Detail::succeeded;
         using Detail::useTuple;
+
+        /** @brief The bytes of listing data read at once. */
+        constexpr std::size_t listingReadSize{64u * 1024u};
 
         RemoteIo::RemoteError cancelled()
         {
@@ -620,5 +624,51 @@ namespace FileTransferProtocol
         aborted_ = true;
         data_->reset();
         abortTransfer(*session_.control, *store_, "an aborted upload");
+    }
+
+    asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>
+    fetchListing(TransferSession session, Command command, ListingParser parser, TransferOptions options)
+    {
+        assert(
+            (command.verb == Verb::List || command.verb == Verb::MachineListDirectory ||
+                command.verb == Verb::NameList) &&
+            "fetchListing() sends LIST, MLSD or NLST"
+        );
+        const auto verb = command.verb;
+        auto started = co_await startTransfer(session, options, 0u, std::move(command));
+        if (!started)
+            co_return std::unexpected(std::move(started).error());
+        auto const& control = session.control;
+        auto const& data = started->data;
+        auto early = finalReplyOf(std::move(started->first));
+
+        std::vector<char> buffer(listingReadSize);
+        auto ended = false;
+        while (!ended)
+        {
+            const auto read = co_await data->readSome(asio::buffer(buffer));
+            if (!read)
+            {
+                data->close();
+                abortTransfer(*control, *started->command, "a failed listing");
+                co_return std::unexpected(read.error());
+            }
+            ended = *read == 0u;
+            parser.feed(std::string_view{buffer.data(), *read});
+        }
+        co_await data->finishDownload();
+
+        auto reply =
+            co_await finalReplyBehindData(*control, *started->command, std::move(early), options.finalReplyTimeout);
+        if (!reply)
+            co_return std::unexpected(std::move(reply).error());
+        if (!succeeded(*reply))
+            co_return std::unexpected(refusalOf(*reply, verb, *data, *control));
+        // A listing has no size that could show the cut data complete.
+        if (data->endedWithoutCloseNotify())
+            co_return std::unexpected(
+                errorOf(RemoteErrorKind::Truncated, "The TLS data of the listing ended without close_notify")
+            );
+        co_return parser.finish();
     }
 }
