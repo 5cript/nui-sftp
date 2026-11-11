@@ -6,9 +6,13 @@
 #include "client_support.hpp"
 
 #include <boost/asio/this_coro.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
+#include <cassert>
+#include <array>
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <set>
 #include <utility>
@@ -24,10 +28,11 @@ namespace FileTransferProtocol
         using SharedData::FileType;
         using RemoteIo::RemoteErrorKind;
 
-        void learnOnce(std::atomic<Support>& fact, Support support)
+        template <typename FactT>
+        void learnOnce(std::atomic<FactT>& fact, FactT value)
         {
-            auto unknown = Support::Unknown;
-            fact.compare_exchange_strong(unknown, support);
+            auto unknown = FactT::Unknown;
+            fact.compare_exchange_strong(unknown, value);
         }
 
         /**
@@ -100,18 +105,25 @@ namespace FileTransferProtocol
             // The first and the last line frame what was listed.
             if (reply->lines.size() != 3u)
                 co_return std::optional<ListingEntry>{};
-            std::string_view line = reply->lines[1];
+            std::string line = reply->lines[1];
             // proftpd indents the lines.
             if (line.starts_with(' '))
-                line.remove_prefix(1u);
+                line.erase(0u, 1u);
+            // proftpd names the entry by the whole path, which the parser refuses as a name of a child.
+            const auto name = lastSegmentOf(path);
+            if (const auto at = line.find(path); at != std::string::npos)
+            {
+                const auto after = std::string_view{line}.substr(at + path.size());
+                if (after.empty() || after.starts_with(" -> "))
+                    line.replace(at, path.size(), name);
+            }
             auto parser = ListingParser::list(today(), session.limits);
             parser.feed(line);
             auto listing = parser.finish();
-            const auto name = lastSegmentOf(path);
             if (listing.entries.size() != 1u)
                 co_return std::optional<ListingEntry>{};
             auto& entry = listing.entries.front();
-            if (entry.type == FileType::Directory || (entry.name != name && entry.name != path))
+            if (entry.type == FileType::Directory || entry.name != name)
                 co_return std::optional<ListingEntry>{};
             entry.name = std::string{name};
             co_return std::optional<ListingEntry>{std::move(entry)};
@@ -155,6 +167,72 @@ namespace FileTransferProtocol
             if (container->type == FileType::Symlink)
                 co_return std::unexpected(std::move(failure));
             co_return std::unexpected(missing());
+        }
+
+        /**
+         * @brief Sends @p command and waits for its final reply.
+         *
+         * @return The reply when it is positive, else its replyError().
+         */
+        asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
+        perform(std::shared_ptr<ControlConnection> control, Command command)
+        {
+            const auto verb = command.verb;
+            auto reply = co_await control->execute(std::move(command));
+            if (!reply)
+                co_return std::unexpected(std::move(reply).error());
+            if (!succeeded(*reply))
+                co_return std::unexpected(replyError(*reply, verb));
+            co_return std::move(*reply);
+        }
+
+        /** @brief The kind of a refusal on a path that exists, given its entry. */
+        using KindOfExisting = std::function<RemoteErrorKind(ListingEntry const&)>;
+
+        RemoteErrorKind denied(ListingEntry const&)
+        {
+            return RemoteErrorKind::PermissionDenied;
+        }
+
+        /**
+         * @brief Gives the refusal @p error of a command on @p path the kind its text did not tell, as vsftpd's never
+         *        does: NoSuchFile where @p path does not exist, else what @p kindOf says for its entry. An error that
+         *        is no refusal, or whose kind its text told, stays.
+         */
+        asio::awaitable<RemoteIo::RemoteError>
+        explain(MetadataSession session, std::string path, RemoteIo::RemoteError error, KindOfExisting kindOf)
+        {
+            if (error.protocolCode == 0 || error.kind != RemoteErrorKind::Failure)
+                co_return error;
+            const auto found = co_await lstatPath(std::move(session), std::move(path));
+            if (found)
+                error.kind = kindOf(*found);
+            else if (found.error().kind == RemoteErrorKind::NoSuchFile)
+                error.kind = RemoteErrorKind::NoSuchFile;
+            co_return error;
+        }
+
+        Command setterCommand(ModificationTimeSetter setter, std::string_view time, std::string_view path)
+        {
+            switch (setter)
+            {
+                case ModificationTimeSetter::ModifyFact:
+                    return Command{.verb = Verb::SetModificationTime, .argument = fmt::format("{} {}", time, path)};
+                case ModificationTimeSetter::ModificationTimeWithTime:
+                    return Command{.verb = Verb::ModificationTime, .argument = fmt::format("{} {}", time, path)};
+                case ModificationTimeSetter::SiteUtime:
+                    return Command{.verb = Verb::Site, .argument = fmt::format("UTIME {} {}", time, path)};
+                case ModificationTimeSetter::Unknown:
+                case ModificationTimeSetter::None:
+                    break;
+            }
+            assert(false && "only a command sets a modification time");
+            return Command{.verb = Verb::Noop};
+        }
+
+        RemoteIo::RemoteError noSetter()
+        {
+            return errorOf(RemoteErrorKind::Unsupported, "The server sets no modification times");
         }
 
         /**
@@ -221,6 +299,16 @@ namespace FileTransferProtocol
     void ServerDialect::learnStatus(Support support)
     {
         learnOnce(status_, support);
+    }
+
+    ModificationTimeSetter ServerDialect::modificationTimeSetter() const
+    {
+        return modificationTimeSetter_.load();
+    }
+
+    void ServerDialect::learnModificationTimeSetter(ModificationTimeSetter setter)
+    {
+        learnOnce(modificationTimeSetter_, setter);
     }
 
     Support ServerDialect::machineListing() const
@@ -326,6 +414,229 @@ namespace FileTransferProtocol
                 errorOf(RemoteErrorKind::NoSuchFile, "The target of the link does not exist or cannot be reached")
             );
         co_return found;
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>> makeDirectory(MetadataSession session, std::string path)
+    {
+        const auto made =
+            co_await perform(session.transfer.control, Command{.verb = Verb::MakeDirectory, .argument = path});
+        if (made)
+            co_return std::expected<void, RemoteIo::RemoteError>{};
+        co_return std::unexpected(
+            co_await explain(
+                std::move(session),
+                std::move(path),
+                made.error(),
+                [](ListingEntry const&)
+                {
+                    return RemoteErrorKind::AlreadyExists;
+                }
+            )
+        );
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>> removeFile(MetadataSession session, std::string path)
+    {
+        const auto removed =
+            co_await perform(session.transfer.control, Command{.verb = Verb::Delete, .argument = path});
+        if (removed)
+            co_return std::expected<void, RemoteIo::RemoteError>{};
+        co_return std::unexpected(
+            co_await explain(
+                std::move(session),
+                std::move(path),
+                removed.error(),
+                [](ListingEntry const& entry)
+                {
+                    if (entry.type == FileType::Directory)
+                        return RemoteErrorKind::Failure;
+                    return RemoteErrorKind::PermissionDenied;
+                }
+            )
+        );
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    removeDirectory(MetadataSession session, std::string path)
+    {
+        const auto removed =
+            co_await perform(session.transfer.control, Command{.verb = Verb::RemoveDirectory, .argument = path});
+        if (removed)
+            co_return std::expected<void, RemoteIo::RemoteError>{};
+        auto error = removed.error();
+        if (error.protocolCode == 0 || error.kind != RemoteErrorKind::Failure)
+            co_return std::unexpected(std::move(error));
+
+        // vsftpd refuses a missing path, a file, a directory with content and a denied one alike.
+        const auto found = co_await lstatPath(session, path);
+        if (!found)
+        {
+            if (found.error().kind == RemoteErrorKind::NoSuchFile)
+                error.kind = RemoteErrorKind::NoSuchFile;
+            co_return std::unexpected(std::move(error));
+        }
+        if (found->type != FileType::Directory)
+            co_return std::unexpected(std::move(error));
+        const auto content = co_await listDirectory(std::move(session), std::move(path));
+        if (content && !content->entries.empty())
+        {
+            error.message = "The directory is not empty";
+            co_return std::unexpected(std::move(error));
+        }
+        error.kind = RemoteErrorKind::PermissionDenied;
+        co_return std::unexpected(std::move(error));
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    renamePath(MetadataSession session, std::string from, std::string to)
+    {
+        auto const& control = session.transfer.control;
+        const auto source = co_await control->execute(Command{.verb = Verb::RenameFrom, .argument = from});
+        if (!source)
+            co_return std::unexpected(source.error());
+        // RNFR goes on with 350, anything else ends the rename (RFC 959 5.4).
+        if (source->code != 350)
+            co_return std::unexpected(
+                co_await explain(session, std::move(from), replyError(*source, Verb::RenameFrom), denied)
+            );
+        const auto renamed = co_await perform(control, Command{.verb = Verb::RenameTo, .argument = to});
+        if (renamed)
+            co_return std::expected<void, RemoteIo::RemoteError>{};
+        co_return std::unexpected(
+            co_await explain(
+                std::move(session),
+                std::move(to),
+                renamed.error(),
+                [](ListingEntry const&)
+                {
+                    return RemoteErrorKind::AlreadyExists;
+                }
+            )
+        );
+    }
+
+    asio::awaitable<std::expected<std::uint64_t, RemoteIo::RemoteError>>
+    sizeOf(MetadataSession session, std::string path)
+    {
+        const auto reply = co_await perform(session.transfer.control, Command{.verb = Verb::Size, .argument = path});
+        if (reply)
+            co_return parseSizeReply(*reply);
+        co_return std::unexpected(
+            co_await explain(
+                std::move(session),
+                std::move(path),
+                reply.error(),
+                [](ListingEntry const& entry)
+                {
+                    if (entry.type == FileType::Regular)
+                        return RemoteErrorKind::PermissionDenied;
+                    return RemoteErrorKind::Failure;
+                }
+            )
+        );
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    setModificationTime(MetadataSession session, std::string path, std::chrono::sys_seconds time)
+    {
+        const auto timeVal = formatTimeVal(time);
+        if (!timeVal)
+            co_return std::unexpected(
+                errorOf(RemoteErrorKind::Unsupported, "FTP carries no time before year 1000 or after 9999")
+            );
+        auto& dialect = *session.dialect;
+        const auto learned = dialect.modificationTimeSetter();
+        if (learned == ModificationTimeSetter::None)
+            co_return std::unexpected(noSetter());
+
+        constexpr std::array<ModificationTimeSetter, 3> setters{
+            ModificationTimeSetter::ModifyFact,
+            ModificationTimeSetter::ModificationTimeWithTime,
+            ModificationTimeSetter::SiteUtime,
+        };
+        for (const auto setter : setters)
+        {
+            if (learned != ModificationTimeSetter::Unknown && setter != learned)
+                continue;
+            const auto command = setterCommand(setter, *timeVal, path);
+            const auto reply = co_await session.transfer.control->execute(command);
+            if (!reply)
+                co_return std::unexpected(reply.error());
+            if (succeeded(*reply))
+            {
+                dialect.learnModificationTimeSetter(setter);
+                co_return std::expected<void, RemoteIo::RemoteError>{};
+            }
+            auto error = replyError(*reply, command.verb);
+            const auto probing = learned == ModificationTimeSetter::Unknown;
+            // 501: arguments in a form the server does not know.
+            if (probing && (lacksTheCommand(error) || reply->code == 501))
+                continue;
+            if (probing && setter == ModificationTimeSetter::ModificationTimeWithTime && reply->code == 550)
+            {
+                // A server without this form reads the time as part of a file name and finds none.
+                const auto found = co_await lstatPath(session, path);
+                if (found)
+                    continue;
+                co_return std::unexpected(found.error());
+            }
+            co_return std::unexpected(co_await explain(std::move(session), std::move(path), std::move(error), denied));
+        }
+        dialect.learnModificationTimeSetter(ModificationTimeSetter::None);
+        co_return std::unexpected(noSetter());
+    }
+
+    asio::awaitable<std::expected<std::string, RemoteIo::RemoteError>>
+    canonicalDirectory(MetadataSession session, std::string path)
+    {
+        auto const& control = session.transfer.control;
+        const auto entered = co_await changeDirectory(control, path);
+        if (!entered)
+            co_return std::unexpected(
+                co_await explain(
+                    std::move(session),
+                    std::move(path),
+                    entered.error(),
+                    [](ListingEntry const& entry)
+                    {
+                        if (entry.type == FileType::Directory)
+                            return RemoteErrorKind::PermissionDenied;
+                        return RemoteErrorKind::Failure;
+                    }
+                )
+            );
+        const auto reply = co_await perform(control, Command{.verb = Verb::PrintWorkingDirectory});
+        if (!reply)
+            co_return std::unexpected(reply.error());
+        co_return parsePathReply(*reply, Verb::PrintWorkingDirectory);
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    createEmptyFile(MetadataSession session, std::string path)
+    {
+        const auto found = co_await lstatPath(session, path);
+        if (found)
+            co_return std::expected<void, RemoteIo::RemoteError>{};
+        if (found.error().kind != RemoteErrorKind::NoSuchFile)
+            co_return std::unexpected(found.error());
+
+        auto upload = co_await Upload::start(session.transfer, UploadRequest{.path = path}, session.options);
+        if (!upload)
+        {
+            auto error = upload.error();
+            const auto parent = parentOf(path);
+            if (error.protocolCode == 0 || error.kind == RemoteErrorKind::NoSuchFile || !parent)
+                co_return std::unexpected(std::move(error));
+            // vsftpd refuses a STOR below a missing directory like a denied one, with 553.
+            const auto container = co_await lstatPath(std::move(session), *parent);
+            if (!container && container.error().kind == RemoteErrorKind::NoSuchFile)
+                error.kind = RemoteErrorKind::NoSuchFile;
+            co_return std::unexpected(std::move(error));
+        }
+        const auto finished = co_await (*upload)->finish();
+        if (!finished)
+            co_return std::unexpected(finished.error());
+        co_return std::expected<void, RemoteIo::RemoteError>{};
     }
 
     SharedData::DirectoryEntry toDirectoryEntry(ListingEntry const& entry)

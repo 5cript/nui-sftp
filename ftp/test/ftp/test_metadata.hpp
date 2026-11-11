@@ -91,6 +91,26 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        std::expected<void, RemoteIo::RemoteError>
+        setTimeIn(std::shared_ptr<ControlConnection> const& connection, std::string path, std::chrono::sys_seconds time)
+        {
+            return run(
+                connection,
+                [session = sessionOf(connection),
+                    path = std::move(path),
+                    time]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    co_return co_await setModificationTime(session, path, time);
+                }
+            );
+        }
+
+        static std::chrono::sys_seconds someTime()
+        {
+            using namespace std::chrono;
+            return sys_seconds{sys_days{2020y / January / 2} + 3h + 4min + 5s};
+        }
+
         const std::shared_ptr<ServerDialect> dialect_ = std::make_shared<ServerDialect>();
         const std::shared_ptr<PassiveChoice> passiveChoice_ = std::make_shared<PassiveChoice>();
     };
@@ -271,6 +291,88 @@ namespace FileTransferProtocol::Test
         const auto denied = lstatIn(connection, "/denied/a");
         ASSERT_FALSE(denied);
         EXPECT_EQ(denied.error().kind, RemoteIo::RemoteErrorKind::PermissionDenied) << denied.error().toString();
+    }
+
+    TEST_F(MetadataTests, LstatReadsTheStatusLinesOfVsftpdAndProftpdWithoutAListing)
+    {
+        Script script{};
+        script.reply("220 Ready")
+            .expect("STAT", "/dir/plain.txt")
+            .replyRaw(
+                "213-Status follows:\r\n"
+                "-rw-r--r--    1 1000     1000           11 Jan 02 03:04 plain.txt\r\n"
+                "213 End of status\r\n"
+            )
+            .expect("STAT", "/dir/link")
+            .replyRaw(
+                "213-Status of /dir/link:\r\n"
+                " lrwxrwxrwx   1 ftptest  ftptest         9 Jan 02 03:04 /dir/link -> plain.txt\r\n"
+                "213 End of status\r\n"
+            )
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto file = lstatIn(connection, "/dir/plain.txt");
+        ASSERT_TRUE(file) << file.error().toString();
+        EXPECT_EQ(file->name, "plain.txt");
+        EXPECT_EQ(file->size, std::optional<std::uint64_t>{11u});
+        const auto link = lstatIn(connection, "/dir/link");
+        ASSERT_TRUE(link) << link.error().toString();
+        EXPECT_EQ(link->name, "link");
+        EXPECT_EQ(link->type, SharedData::FileType::Symlink);
+        EXPECT_EQ(link->linkTarget, std::optional<std::string>{"plain.txt"});
+    }
+
+    TEST_F(MetadataTests, AnMdtmThatReadsTheTimeAsANameGivesWayToSiteUtime)
+    {
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MFMT", "20200102030405 /a")
+            .reply("502 Command not implemented.")
+            .expect("MDTM", "20200102030405 /a")
+            .reply("550 20200102030405 /a: No such file or directory")
+            .expect("STAT", "/a")
+            .replyRaw(
+                "213-Status of /a:\r\n -rw-r--r--   1 ftptest  ftptest         5 Jan 02 03:04 /a\r\n213 End of "
+                "status\r\n"
+            )
+            .expect("SITE", "UTIME 20200102030405 /a")
+            .reply("200 SITE UTIME command successful")
+            .expect("SITE", "UTIME 20200102030405 /b")
+            .reply("200 SITE UTIME command successful")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto first = setTimeIn(connection, "/a", someTime());
+        ASSERT_TRUE(first) << first.error().toString();
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::SiteUtime);
+        const auto second = setTimeIn(connection, "/b", someTime());
+        ASSERT_TRUE(second) << second.error().toString();
+    }
+
+    TEST_F(MetadataTests, AServerThatSetsNoTimeIsAskedOnce)
+    {
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MFMT")
+            .reply("500 Unknown command.")
+            .expect("MDTM")
+            .reply("501 Syntax error in parameters.")
+            .expect("SITE")
+            .reply("500 Unknown SITE command.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        for (auto const path : {"/a", "/b"})
+        {
+            const auto set = setTimeIn(connection, path, someTime());
+            ASSERT_FALSE(set);
+            EXPECT_EQ(set.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << set.error().toString();
+        }
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::None);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
     TEST(DirectoryEntryConversionTests, ANameThatIsNoUtf8IsShownAndMarked)

@@ -8,6 +8,7 @@
 #include <boost/asio/awaitable.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -24,6 +25,22 @@ namespace FileTransferProtocol
         Unknown,
         Works,
         Refused,
+    };
+
+    /**
+     * @brief How a server sets the modification time of a file, which RFC 3659 leaves out.
+     */
+    enum class ModificationTimeSetter : std::uint8_t
+    {
+        Unknown,
+        /** @brief MFMT of draft-somers-ftp-mfxx, proftpd among others. */
+        ModifyFact,
+        /** @brief MDTM with a time before the path, vsftpd. */
+        ModificationTimeWithTime,
+        /** @brief SITE UTIME with a time before the path, proftpd's mod_site_misc. */
+        SiteUtime,
+        /** @brief The server takes none of them. */
+        None,
     };
 
     /**
@@ -45,10 +62,14 @@ namespace FileTransferProtocol
         Support status() const;
         void learnStatus(Support support);
 
+        ModificationTimeSetter modificationTimeSetter() const;
+        void learnModificationTimeSetter(ModificationTimeSetter setter);
+
       private:
         std::atomic<Support> machineListing_{Support::Unknown};
         std::atomic<Support> listAll_{Support::Unknown};
         std::atomic<Support> status_{Support::Unknown};
+        std::atomic<ModificationTimeSetter> modificationTimeSetter_{ModificationTimeSetter::Unknown};
     };
 
     /**
@@ -101,6 +122,80 @@ namespace FileTransferProtocol
      */
     boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
     statPath(MetadataSession session, std::string path);
+
+    /**
+     * @brief Creates the directory @p path with MKD.
+     *
+     * @return AlreadyExists when something exists at @p path, which vsftpd's refusal does not tell; NoSuchFile when
+     *         its parent does not exist; else the replyError() of the refusal.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    makeDirectory(MetadataSession session, std::string path);
+
+    /**
+     * @brief Removes the file or the symlink @p path with DELE.
+     *
+     * @return NoSuchFile for a path that does not exist, Failure for a directory, else the refusal; where its text
+     *         does not tell, lstatPath() does.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    removeFile(MetadataSession session, std::string path);
+
+    /**
+     * @brief Removes the empty directory @p path with RMD.
+     *
+     * @return NoSuchFile for a path that does not exist, Failure for one that is no directory or not empty, else the
+     *         refusal; where its text does not tell, lstatPath() and a listing do.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    removeDirectory(MetadataSession session, std::string path);
+
+    /**
+     * @brief Renames @p from to @p to: RNFR, then RNTO on the same connection (RFC 959 4.1.3). vsftpd and proftpd
+     *        replace a file at @p to, other servers may refuse to.
+     *
+     * @return NoSuchFile when @p from does not exist or the parent of @p to does not; AlreadyExists when the server
+     *         refused to replace what exists at @p to; else the refusal.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    renamePath(MetadataSession session, std::string from, std::string to);
+
+    /**
+     * @brief The size of the file @p path with SIZE (RFC 3659 4), in TYPE I, which the login set.
+     *
+     * @return NoSuchFile for a path that does not exist, Failure for a directory, else the refusal.
+     */
+    boost::asio::awaitable<std::expected<std::uint64_t, RemoteIo::RemoteError>>
+    sizeOf(MetadataSession session, std::string path);
+
+    /**
+     * @brief Sets when @p path was last modified, with whichever of MFMT, MDTM with a time and SITE UTIME the server
+     *        takes, learned once. A positive reply is success, its text is not read.
+     *
+     * @return Unsupported when the server takes none of them or @p time has no time-val, before year 1000 or after
+     *         9999; NoSuchFile for a path that does not exist; else the refusal.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    setModificationTime(MetadataSession session, std::string path, std::chrono::sys_seconds time);
+
+    /**
+     * @brief The directory @p path as the server resolves it, links and dots resolved: CWD into it, then PWD.
+     *
+     * @return The path of the 257 reply. NoSuchFile for a path that does not exist, Failure for one that is no
+     *         directory, else the refusal.
+     */
+    boost::asio::awaitable<std::expected<std::string, RemoteIo::RemoteError>>
+    canonicalDirectory(MetadataSession session, std::string path);
+
+    /**
+     * @brief Creates the empty file @p path unless something exists there: lstatPath(), then a STOR of no bytes. FTP
+     *        has no exclusive create, a file that appears in between is truncated.
+     *
+     * @return Nothing also when @p path existed. NoSuchFile when its parent does not exist, else errors as for
+     *         Upload::start() and Upload::finish().
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    createEmptyFile(MetadataSession session, std::string path);
 
     /**
      * @brief @p entry as the rest of the application reads entries. A name that is no UTF-8 is shown with U+FFFD and

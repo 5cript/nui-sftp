@@ -130,6 +130,80 @@ namespace FileTransferProtocol::Test
                 << path << ": " << result.error().toString();
         }
 
+        using VoidResult = std::expected<void, RemoteIo::RemoteError>;
+
+        /**
+         * @brief Runs what @p operation returns for the metadata session, on the strand of the connection.
+         */
+        template <typename ResultT, typename OperationT>
+        ResultT perform(OperationT operation)
+        {
+            return onStrand(
+                connection_,
+                [session = metadataSession(), operation = std::move(operation)]() -> boost::asio::awaitable<ResultT>
+                {
+                    co_return co_await operation(session);
+                }
+            );
+        }
+
+        VoidResult makeDirectoryAt(std::string path)
+        {
+            return perform<VoidResult>(
+                [path](MetadataSession session)
+                {
+                    return makeDirectory(std::move(session), path);
+                }
+            );
+        }
+
+        VoidResult removeFileAt(std::string path)
+        {
+            return perform<VoidResult>(
+                [path](MetadataSession session)
+                {
+                    return removeFile(std::move(session), path);
+                }
+            );
+        }
+
+        VoidResult removeDirectoryAt(std::string path)
+        {
+            return perform<VoidResult>(
+                [path](MetadataSession session)
+                {
+                    return removeDirectory(std::move(session), path);
+                }
+            );
+        }
+
+        VoidResult rename(std::string from, std::string to)
+        {
+            return perform<VoidResult>(
+                [from, to](MetadataSession session)
+                {
+                    return renamePath(std::move(session), from, to);
+                }
+            );
+        }
+
+        template <typename ValueT>
+        static void expectValue(
+            std::expected<ValueT, RemoteIo::RemoteError> const& result,
+            ValueT const& value,
+            std::string_view what
+        )
+        {
+            ASSERT_TRUE(result) << what << ": " << result.error().toString();
+            EXPECT_EQ(*result, value) << what;
+        }
+
+        static void expectFailure(VoidResult const& result, RemoteIo::RemoteErrorKind kind, std::string_view what)
+        {
+            ASSERT_FALSE(result) << what << " succeeded";
+            EXPECT_EQ(result.error().kind, kind) << what << ": " << result.error().toString();
+        }
+
         const std::shared_ptr<ServerDialect> dialect_ = std::make_shared<ServerDialect>();
     };
 
@@ -265,6 +339,211 @@ namespace FileTransferProtocol::Test
             ASSERT_NO_FATAL_FAILURE(expectMissing(statOf(pathOf(name)), name));
         }
         ASSERT_NO_FATAL_FAILURE(expectUsableLogin());
+    }
+
+    TEST_P(MetadataConformance, MakesADirectoryOnceAndTellsWhyNot)
+    {
+        using RemoteIo::RemoteErrorKind;
+        const auto made = makeDirectoryAt(pathOf("made"));
+        ASSERT_TRUE(made) << made.error().toString();
+        ASSERT_NO_FATAL_FAILURE(expectEntry(lstatOf(pathOf("made")), "made", SharedData::FileType::Directory));
+        ASSERT_NO_FATAL_FAILURE(expectFailure(makeDirectoryAt(pathOf("made")), RemoteErrorKind::AlreadyExists, "made"));
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(makeDirectoryAt(pathOf("plain.txt")), RemoteErrorKind::AlreadyExists, "plain.txt")
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(makeDirectoryAt(pathOf("missing/child")), RemoteErrorKind::NoSuchFile, "missing/child")
+        );
+    }
+
+    TEST_P(MetadataConformance, RemovesFilesAndLinksAndTellsWhyNot)
+    {
+        using RemoteIo::RemoteErrorKind;
+        for (auto const name : {"plain.txt", "dangling-link", "link-to-directory"})
+        {
+            const auto removed = removeFileAt(pathOf(name));
+            ASSERT_TRUE(removed) << name << ": " << removed.error().toString();
+            ASSERT_NO_FATAL_FAILURE(expectMissing(lstatOf(pathOf(name)), name));
+        }
+        // The link went, not what it pointed to.
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(lstatOf(pathOf("directory")), "directory", SharedData::FileType::Directory)
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(removeFileAt(pathOf("does-not-exist")), RemoteErrorKind::NoSuchFile, "does-not-exist")
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(removeFileAt(pathOf("directory")), RemoteErrorKind::Failure, "directory")
+        );
+        ASSERT_NO_FATAL_FAILURE(expectFailure(
+            removeFileAt(pathOf("unwritable/file.txt")), RemoteErrorKind::PermissionDenied, "unwritable/file.txt"
+        ));
+    }
+
+    TEST_P(MetadataConformance, RemovesOnlyEmptyDirectoriesAndTellsWhyNot)
+    {
+        using RemoteIo::RemoteErrorKind;
+        const auto full = removeDirectoryAt(pathOf("directory"));
+        ASSERT_NO_FATAL_FAILURE(expectFailure(full, RemoteErrorKind::Failure, "directory"));
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(removeDirectoryAt(pathOf("plain.txt")), RemoteErrorKind::Failure, "plain.txt")
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(removeDirectoryAt(pathOf("does-not-exist")), RemoteErrorKind::NoSuchFile, "does-not-exist")
+        );
+        const auto emptied = removeFileAt(pathOf("directory/nested/inside.txt"));
+        ASSERT_TRUE(emptied) << emptied.error().toString();
+        for (auto const name : {"directory/nested", "directory"})
+        {
+            const auto removed = removeDirectoryAt(pathOf(name));
+            ASSERT_TRUE(removed) << name << ": " << removed.error().toString();
+            ASSERT_NO_FATAL_FAILURE(expectMissing(lstatOf(pathOf(name)), name));
+        }
+    }
+
+    TEST_P(MetadataConformance, RenamesReplacingAFileAndTellsWhyNot)
+    {
+        using RemoteIo::RemoteErrorKind;
+        const auto renamed = rename(pathOf("one.bin"), pathOf("renamed.bin"));
+        ASSERT_TRUE(renamed) << renamed.error().toString();
+        ASSERT_NO_FATAL_FAILURE(expectMissing(lstatOf(pathOf("one.bin")), "one.bin"));
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(lstatOf(pathOf("renamed.bin")), "renamed.bin", SharedData::FileType::Regular, 1u)
+        );
+        // Both servers replace a file, so their renameSemantics stays Unknown for the others.
+        const auto replaced = rename(pathOf("empty.bin"), pathOf("plain.txt"));
+        ASSERT_TRUE(replaced) << replaced.error().toString();
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(lstatOf(pathOf("plain.txt")), "plain.txt", SharedData::FileType::Regular, 0u)
+        );
+        ASSERT_NO_FATAL_FAILURE(expectFailure(
+            rename(pathOf("does-not-exist"), pathOf("anything")), RemoteErrorKind::NoSuchFile, "does-not-exist"
+        ));
+        ASSERT_NO_FATAL_FAILURE(expectFailure(
+            rename(pathOf("chunk.bin"), pathOf("missing/chunk.bin")), RemoteErrorKind::NoSuchFile, "missing/chunk.bin"
+        ));
+        EXPECT_FALSE(rename(pathOf("chunk.bin"), pathOf("directory"))) << "a file replaced a directory";
+        ASSERT_NO_FATAL_FAILURE(expectUsableLogin());
+    }
+
+    TEST_P(MetadataConformance, ReadsSizesThroughLinks)
+    {
+        using RemoteIo::RemoteErrorKind;
+        using SizeResult = std::expected<std::uint64_t, RemoteIo::RemoteError>;
+        const auto sizeAt = [this](std::string path)
+        {
+            return perform<SizeResult>(
+                [path](MetadataSession session)
+                {
+                    return sizeOf(std::move(session), path);
+                }
+            );
+        };
+        ASSERT_NO_FATAL_FAILURE(expectValue(sizeAt(pathOf("plain.txt")), std::uint64_t{11u}, "plain.txt"));
+        ASSERT_NO_FATAL_FAILURE(
+            expectValue(sizeAt(pathOf("link-to-plain.txt")), std::uint64_t{11u}, "link-to-plain.txt")
+        );
+        ASSERT_NO_FATAL_FAILURE(expectValue(sizeAt(pathOf("unreadable.txt")), std::uint64_t{7u}, "unreadable.txt"));
+        const auto missing = sizeAt(pathOf("does-not-exist"));
+        ASSERT_FALSE(missing);
+        EXPECT_EQ(missing.error().kind, RemoteErrorKind::NoSuchFile) << missing.error().toString();
+        EXPECT_FALSE(sizeAt(pathOf("directory")));
+    }
+
+    TEST_P(MetadataConformance, SetsTheModificationTimeWithWhatTheServerTakes)
+    {
+        using namespace std::chrono;
+        using RemoteIo::RemoteErrorKind;
+        const auto setAt = [this](std::string path, sys_seconds time)
+        {
+            return perform<VoidResult>(
+                [path, time](MetadataSession session)
+                {
+                    return setModificationTime(std::move(session), path, time);
+                }
+            );
+        };
+        const auto time = sys_seconds{sys_days{2020y / January / 2} + 3h + 4min + 5s};
+        const auto set = setAt(pathOf("plain.txt"), time);
+        ASSERT_TRUE(set) << set.error().toString();
+        const auto stated = statOf(pathOf("plain.txt"));
+        ASSERT_TRUE(stated) << stated.error().toString();
+        ASSERT_TRUE(stated->modified);
+        EXPECT_EQ(floor<seconds>(*stated->modified), time);
+
+        const auto expected = [this]()
+        {
+            switch (profile_.expectations.modificationTime)
+            {
+                case ModificationTimeCommand::Mfmt:
+                    return ModificationTimeSetter::ModifyFact;
+                case ModificationTimeCommand::Mdtm:
+                    return ModificationTimeSetter::ModificationTimeWithTime;
+                case ModificationTimeCommand::SiteUtime:
+                    return ModificationTimeSetter::SiteUtime;
+            }
+            return ModificationTimeSetter::Unknown;
+        }();
+        EXPECT_EQ(dialect_->modificationTimeSetter(), expected);
+
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(setAt(pathOf("does-not-exist"), time), RemoteErrorKind::NoSuchFile, "does-not-exist")
+        );
+        ASSERT_NO_FATAL_FAILURE(expectFailure(
+            setAt(pathOf("plain.txt"), sys_seconds{sys_days{999y / December / 31}}), RemoteErrorKind::Unsupported, "999"
+        ));
+    }
+
+    TEST_P(MetadataConformance, ResolvesDirectoriesAsTheServerDoes)
+    {
+        using RemoteIo::RemoteErrorKind;
+        using PathResult = std::expected<std::string, RemoteIo::RemoteError>;
+        const auto canonical = [this](std::string path)
+        {
+            return perform<PathResult>(
+                [path](MetadataSession session)
+                {
+                    return canonicalDirectory(std::move(session), path);
+                }
+            );
+        };
+        ASSERT_NO_FATAL_FAILURE(
+            expectValue(canonical(pathOf("link-to-directory")), pathOf("directory"), "link-to-directory")
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectValue(canonical(pathOf("directory/../directory")), pathOf("directory"), "directory/../directory")
+        );
+        const auto file = canonical(pathOf("plain.txt"));
+        ASSERT_FALSE(file);
+        EXPECT_EQ(file.error().kind, RemoteErrorKind::Failure) << file.error().toString();
+        const auto missing = canonical(pathOf("does-not-exist"));
+        ASSERT_FALSE(missing);
+        EXPECT_EQ(missing.error().kind, RemoteErrorKind::NoSuchFile) << missing.error().toString();
+    }
+
+    TEST_P(MetadataConformance, CreatesAnEmptyFileOnlyWhereNoneIs)
+    {
+        using RemoteIo::RemoteErrorKind;
+        const auto create = [this](std::string path)
+        {
+            return perform<VoidResult>(
+                [path](MetadataSession session)
+                {
+                    return createEmptyFile(std::move(session), path);
+                }
+            );
+        };
+        const auto created = create(pathOf("new.txt"));
+        ASSERT_TRUE(created) << created.error().toString();
+        ASSERT_NO_FATAL_FAILURE(expectEntry(lstatOf(pathOf("new.txt")), "new.txt", SharedData::FileType::Regular, 0u));
+        const auto kept = create(pathOf("plain.txt"));
+        ASSERT_TRUE(kept) << kept.error().toString();
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(lstatOf(pathOf("plain.txt")), "plain.txt", SharedData::FileType::Regular, 11u)
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(create(pathOf("missing/new.txt")), RemoteErrorKind::NoSuchFile, "missing/new.txt")
+        );
     }
 
     INSTANTIATE_TEST_SUITE_P(
