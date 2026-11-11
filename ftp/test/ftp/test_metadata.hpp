@@ -78,6 +78,19 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        using EntryResult = std::expected<FileTransferProtocol::ListingEntry, RemoteIo::RemoteError>;
+
+        EntryResult lstatIn(std::shared_ptr<ControlConnection> const& connection, std::string path)
+        {
+            return run(
+                connection,
+                [session = sessionOf(connection), path = std::move(path)]() -> asio::awaitable<EntryResult>
+                {
+                    co_return co_await lstatPath(session, path);
+                }
+            );
+        }
+
         const std::shared_ptr<ServerDialect> dialect_ = std::make_shared<ServerDialect>();
         const std::shared_ptr<PassiveChoice> passiveChoice_ = std::make_shared<PassiveChoice>();
     };
@@ -216,6 +229,48 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(listed) << listed.error().toString();
         EXPECT_EQ(listed->unreadableLines, 1u);
         EXPECT_EQ(dialect_->machineListing(), Support::Unknown);
+    }
+
+    TEST_F(MetadataTests, AStatTheServerLacksIsLearnedAndTheParentLists)
+    {
+        Script script{};
+        script.reply("220 Ready").expect("STAT", "/dir/a").reply("502 Command not implemented.");
+        listingOf(enters(script, "/dir"), "LIST", "", std::string{listedFile});
+        listingOf(script, "LIST", "-a", std::string{listedFile});
+        listingOf(enters(script, "/dir"), "LIST", "-a", std::string{listedFile});
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto first = lstatIn(connection, "/dir/a");
+        ASSERT_TRUE(first) << first.error().toString();
+        EXPECT_EQ(first->name, "a");
+        EXPECT_EQ(first->size, std::optional<std::uint64_t>{5u});
+        EXPECT_EQ(dialect_->status(), Support::Refused);
+        const auto second = lstatIn(connection, "/dir/a");
+        ASSERT_TRUE(second) << second.error().toString();
+    }
+
+    TEST_F(MetadataTests, BelowADirectoryThatCannotBeEnteredIsPermissionDenied)
+    {
+        // vsftpd's refusals say nothing, the directory's own entry tells that it exists.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("STAT", "/denied/a")
+            .replyRaw("213-Status follows:\r\n213 End of status\r\n")
+            .expect("CWD", "/denied")
+            .reply("550 Failed to change directory.")
+            .expect("STAT", "/denied")
+            .replyRaw("213-Status follows:\r\n213 End of status\r\n");
+        listingOf(
+            enters(script, "/"), "LIST", "", "drwx------    2 0        0            4096 Jan 02 03:04 denied\r\n"
+        );
+        listingOf(script, "LIST", "-a", "drwx------    2 0        0            4096 Jan 02 03:04 denied\r\n");
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto denied = lstatIn(connection, "/denied/a");
+        ASSERT_FALSE(denied);
+        EXPECT_EQ(denied.error().kind, RemoteIo::RemoteErrorKind::PermissionDenied) << denied.error().toString();
     }
 
     TEST(DirectoryEntryConversionTests, ANameThatIsNoUtf8IsShownAndMarked)

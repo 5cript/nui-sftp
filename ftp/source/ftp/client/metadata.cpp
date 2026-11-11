@@ -1,6 +1,7 @@
 #include <ftp/client/metadata.hpp>
 #include <ftp/protocol/command.hpp>
 #include <ftp/protocol/reply_error.hpp>
+#include <ftp/protocol/reply_parsers.hpp>
 #include <paths/utf8.hpp>
 #include "client_support.hpp"
 
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -16,8 +18,10 @@ namespace FileTransferProtocol
     namespace
     {
         namespace asio = boost::asio;
+        using Detail::errorOf;
         using Detail::isCancelled;
         using Detail::succeeded;
+        using SharedData::FileType;
         using RemoteIo::RemoteErrorKind;
 
         void learnOnce(std::atomic<Support>& fact, Support support)
@@ -49,6 +53,108 @@ namespace FileTransferProtocol
             if (!succeeded(*reply))
                 co_return std::unexpected(replyError(*reply, Verb::ChangeWorkingDirectory));
             co_return std::expected<void, RemoteIo::RemoteError>{};
+        }
+
+        std::string_view lastSegmentOf(std::string_view path)
+        {
+            const auto slash = path.find_last_of('/');
+            if (slash == std::string_view::npos)
+                return path;
+            return path.substr(slash + 1u);
+        }
+
+        /**
+         * @brief The directory that holds the absolute @p path, nothing for the root.
+         */
+        std::optional<std::string> parentOf(std::string_view path)
+        {
+            const auto slash = path.find_last_of('/');
+            if (slash == std::string_view::npos || path == "/")
+                return std::nullopt;
+            if (slash == 0u)
+                return std::string{"/"};
+            return std::string{path.substr(0u, slash)};
+        }
+
+        RemoteIo::RemoteError missing()
+        {
+            return errorOf(RemoteErrorKind::NoSuchFile, "The path does not exist");
+        }
+
+        /**
+         * @brief The line STAT lists for @p path, when that is one line for @p path and no directory: STAT lists the
+         *        content of a directory. vsftpd names the entry by its last segment, proftpd by the whole path.
+         *
+         * @return Nothing for a directory, a path the server listed nothing for, or lines that tell no single entry.
+         *         The replyError() of a refusal.
+         */
+        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
+        statusLineOf(MetadataSession session, std::string path)
+        {
+            const auto reply =
+                co_await session.transfer.control->execute(Command{.verb = Verb::Status, .argument = path});
+            if (!reply)
+                co_return std::unexpected(reply.error());
+            if (!succeeded(*reply))
+                co_return std::unexpected(replyError(*reply, Verb::Status));
+            // The first and the last line frame what was listed.
+            if (reply->lines.size() != 3u)
+                co_return std::optional<ListingEntry>{};
+            std::string_view line = reply->lines[1];
+            // proftpd indents the lines.
+            if (line.starts_with(' '))
+                line.remove_prefix(1u);
+            auto parser = ListingParser::list(today(), session.limits);
+            parser.feed(line);
+            auto listing = parser.finish();
+            const auto name = lastSegmentOf(path);
+            if (listing.entries.size() != 1u)
+                co_return std::optional<ListingEntry>{};
+            auto& entry = listing.entries.front();
+            if (entry.type == FileType::Directory || (entry.name != name && entry.name != path))
+                co_return std::optional<ListingEntry>{};
+            entry.name = std::string{name};
+            co_return std::optional<ListingEntry>{std::move(entry)};
+        }
+
+        /**
+         * @brief lstatPath() from the listing of the parent. Where the parent cannot be listed and the refusal does
+         *        not say why, the parent's own entry does.
+         */
+        asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+        lstatInParent(MetadataSession session, std::string path)
+        {
+            const auto parent = parentOf(path);
+            if (!parent)
+            {
+                if (auto entered = co_await changeDirectory(session.transfer.control, path); !entered)
+                    co_return std::unexpected(std::move(entered).error());
+                co_return ListingEntry{.name = path, .type = FileType::Directory};
+            }
+            auto listing = co_await listDirectory(session, *parent);
+            if (listing)
+            {
+                const auto found = std::ranges::find(listing->entries, lastSegmentOf(path), &ListingEntry::name);
+                if (found == listing->entries.end())
+                    co_return std::unexpected(missing());
+                co_return std::move(*found);
+            }
+            auto failure = std::move(listing).error();
+            if (failure.protocolCode == 0 || failure.kind != RemoteErrorKind::Failure)
+                co_return std::unexpected(std::move(failure));
+
+            const auto container = co_await lstatPath(session, *parent);
+            if (!container)
+                co_return std::unexpected(container.error());
+            if (container->type == FileType::Directory)
+            {
+                failure.kind = RemoteErrorKind::PermissionDenied;
+                co_return std::unexpected(std::move(failure));
+            }
+            // A link that leads nowhere it could be entered, which of both is unknown.
+            if (container->type == FileType::Symlink)
+                co_return std::unexpected(std::move(failure));
+            co_return std::unexpected(missing());
         }
 
         /**
@@ -107,6 +213,16 @@ namespace FileTransferProtocol
         }
     }
 
+    Support ServerDialect::status() const
+    {
+        return status_.load();
+    }
+
+    void ServerDialect::learnStatus(Support support)
+    {
+        learnOnce(status_, support);
+    }
+
     Support ServerDialect::machineListing() const
     {
         return machineListing_.load();
@@ -154,6 +270,62 @@ namespace FileTransferProtocol
         if (isCancelled(co_await asio::this_coro::cancellation_state))
             co_return machine;
         co_return listed;
+    }
+
+    asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    lstatPath(MetadataSession session, std::string path)
+    {
+        auto& dialect = *session.dialect;
+        if (dialect.status() != Support::Refused)
+        {
+            auto line = co_await statusLineOf(session, path);
+            if (line)
+                dialect.learnStatus(Support::Works);
+            else if (lacksTheCommand(line.error()))
+                dialect.learnStatus(Support::Refused);
+            // Not the server's answer: the connection broke or the call was cancelled.
+            else if (line.error().protocolCode == 0)
+                co_return std::unexpected(line.error());
+            if (line && *line)
+                co_return std::move(**line);
+        }
+        co_return co_await lstatInParent(std::move(session), std::move(path));
+    }
+
+    asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    statPath(MetadataSession session, std::string path)
+    {
+        auto const& control = session.transfer.control;
+        const auto name = std::string{lastSegmentOf(path)};
+        // Not MLST: proftpd's follows a link for its type but not for its size.
+        const auto size = co_await control->execute(Command{.verb = Verb::Size, .argument = path});
+        if (!size)
+            co_return std::unexpected(size.error());
+        if (succeeded(*size))
+        {
+            const auto bytes = parseSizeReply(*size);
+            if (!bytes)
+                co_return std::unexpected(bytes.error());
+            ListingEntry entry{.name = name, .type = FileType::Regular, .size = *bytes};
+            const auto modified = co_await control->execute(Command{.verb = Verb::ModificationTime, .argument = path});
+            if (!modified)
+                co_return std::unexpected(modified.error());
+            if (const auto time = parseModificationTimeReply(*modified))
+                entry.modified = *time;
+            co_return entry;
+        }
+        const auto entered = co_await changeDirectory(control, path);
+        if (entered)
+            co_return ListingEntry{.name = name, .type = FileType::Directory};
+        if (entered.error().protocolCode == 0)
+            co_return std::unexpected(entered.error());
+
+        auto found = co_await lstatPath(session, path);
+        if (found && found->type == FileType::Symlink)
+            co_return std::unexpected(
+                errorOf(RemoteErrorKind::NoSuchFile, "The target of the link does not exist or cannot be reached")
+            );
+        co_return found;
     }
 
     SharedData::DirectoryEntry toDirectoryEntry(ListingEntry const& entry)

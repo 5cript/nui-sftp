@@ -41,9 +41,14 @@ namespace FileTransferProtocol
         Support listAll() const;
         void learnListAll(Support support);
 
+        /** @brief STAT with a path, which lists it like ls -l on the control connection (RFC 959 4.1.3). */
+        Support status() const;
+        void learnStatus(Support support);
+
       private:
         std::atomic<Support> machineListing_{Support::Unknown};
         std::atomic<Support> listAll_{Support::Unknown};
+        std::atomic<Support> status_{Support::Unknown};
     };
 
     /**
@@ -70,6 +75,32 @@ namespace FileTransferProtocol
      */
     boost::asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>
     listDirectory(MetadataSession session, std::string path);
+
+    /**
+     * @brief What the absolute @p path is, itself when it is a symlink: the one line STAT lists for a file or a link,
+     *        else its entry in the LIST of its parent. STAT lists the content of a directory, and proftpd's STAT
+     *        follows links, so it misses dangling ones: only the parent tells that a path does not exist. Where the
+     *        parent cannot be entered and its refusal does not say why, as with vsftpd, the parent is looked up the
+     *        same way.
+     *
+     * @return The entry, named like the last segment of @p path. NoSuchFile for a path that does not exist, also below
+     *         a missing directory or a file; PermissionDenied below a directory that cannot be listed; the error of a
+     *         broken connection.
+     */
+    boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    lstatPath(MetadataSession session, std::string path);
+
+    /**
+     * @brief What the absolute @p path is, the end of the chain when it is a symlink: SIZE and MDTM for a file, then
+     *        CWD for a directory, which all follow links. Not MLST: proftpd's follows a link for its type but gives
+     *        the size of the link. When none of them answers, lstatPath() decides between a missing path and one that
+     *        cannot be entered.
+     *
+     * @return The entry, named like the last segment of @p path, a directory with no more than its type. NoSuchFile
+     *         also for a link whose target cannot be reached; else errors as for lstatPath().
+     */
+    boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    statPath(MetadataSession session, std::string path);
 
     /**
      * @brief @p entry as the rest of the application reads entries. A name that is no UTF-8 is shown with U+FFFD and
