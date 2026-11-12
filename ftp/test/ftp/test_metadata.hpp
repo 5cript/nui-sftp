@@ -205,12 +205,70 @@ namespace FileTransferProtocol::Test
         Script script{};
         script.reply("220 Ready");
         listingOf(enters(script, "/empty"), "LIST", "", "");
+        listingOf(script, "LIST", "-a", "");
         script.expectDisconnect();
         const auto connection = plainConnection(std::move(script));
 
         const auto listed = listIn(connection, "/empty");
         ASSERT_TRUE(listed) << listed.error().toString();
         EXPECT_TRUE(listed->entries.empty());
+        EXPECT_EQ(dialect_->listAll(), Support::Unknown);
+    }
+
+    TEST_F(MetadataTests, ADirectoryOfHiddenEntriesAloneIsListedWithThem)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        listingOf(enters(script, "/home"), "LIST", "", "");
+        listingOf(script, "LIST", "-a", std::string{listedHiddenFile});
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto listed = listIn(connection, "/home");
+        ASSERT_TRUE(listed) << listed.error().toString();
+        EXPECT_EQ(listedNames(*listed), (std::vector<std::string>{".hidden"}));
+        EXPECT_EQ(dialect_->listAll(), Support::Works);
+    }
+
+    TEST_F(MetadataTests, ARefusedDataConnectionDoesNotDecideTheListOption)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        listingOf(enters(script, "/one"), "LIST", "", std::string{listedFile});
+        script.expect("EPSV").passive(DataPlan{}).expect("LIST", "-a").reply("425 Can't open data connection.");
+        listingOf(enters(script, "/one"), "LIST", "", std::string{listedFile});
+        listingOf(script, "LIST", "-a", std::string{listedHiddenFile} + std::string{listedFile});
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto first = listIn(connection, "/one");
+        ASSERT_TRUE(first) << first.error().toString();
+        EXPECT_EQ(listedNames(*first), (std::vector<std::string>{"a"}));
+        EXPECT_EQ(dialect_->listAll(), Support::Unknown);
+        const auto second = listIn(connection, "/one");
+        ASSERT_TRUE(second) << second.error().toString();
+        EXPECT_EQ(listedNames(*second), (std::vector<std::string>{".hidden", "a"}));
+        EXPECT_EQ(dialect_->listAll(), Support::Works);
+    }
+
+    TEST_F(MetadataTests, ADirectoryThatChangedBetweenTheListingsDoesNotDecideTheListOption)
+    {
+        // Another client removed b in between.
+        Script script{};
+        script.reply("220 Ready");
+        listingOf(
+            enters(script, "/busy"),
+            "LIST",
+            "",
+            std::string{listedFile} + "-rw-r--r--    1 0        0               5 Jan 02 03:04 b\r\n"
+        );
+        listingOf(script, "LIST", "-a", std::string{listedHiddenFile} + std::string{listedFile});
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto listed = listIn(connection, "/busy");
+        ASSERT_TRUE(listed) << listed.error().toString();
+        EXPECT_EQ(listedNames(*listed), (std::vector<std::string>{"a", "b"}));
         EXPECT_EQ(dialect_->listAll(), Support::Unknown);
     }
 

@@ -279,20 +279,39 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Every name of @p other is in @p listing.
+         * @brief How many names of @p other are in @p listing.
          */
-        bool listsAtLeast(Listing const& listing, Listing const& other)
+        std::size_t sharedNames(Listing const& listing, Listing const& other)
         {
             std::set<std::string_view> names{};
             for (auto const& entry : listing.entries)
                 names.insert(entry.name);
-            return std::ranges::all_of(
+            return static_cast<std::size_t>(std::ranges::count_if(
                 other.entries,
                 [&names](ListingEntry const& entry)
                 {
                     return names.contains(entry.name);
                 }
-            );
+            ));
+        }
+
+        /**
+         * @brief The refusal @p error is about the connections of a transfer, not about what was asked for.
+         */
+        bool refusedTheTransfer(RemoteIo::RemoteError const& error)
+        {
+            switch (error.kind)
+            {
+                case RemoteErrorKind::NoConnection:
+                case RemoteErrorKind::ConnectionLost:
+                case RemoteErrorKind::ConnectionLimit:
+                case RemoteErrorKind::NoSecureConnection:
+                case RemoteErrorKind::TimedOut:
+                case RemoteErrorKind::Busy:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>
@@ -307,8 +326,10 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief LIST -a where the server reads the option, else LIST. The first listing with entries finds out: -a
-         *        counts when it lists at least what LIST does, a server that takes it for a path fails or lists less.
+         * @brief LIST -a where the server reads the option, else LIST. Both are asked until an answer tells: -a counts
+         *        when it lists entries and at least what LIST does, so also hidden entries in a directory LIST shows
+         *        empty. A server that takes it for a path refuses it or lists none of them. Some of them are a
+         *        directory that changed in between, which tells nothing, like two empty listings.
          */
         asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>> listWithList(MetadataSession session)
         {
@@ -316,20 +337,30 @@ namespace FileTransferProtocol
             if (dialect.listAll() == Support::Works)
                 co_return co_await list(session, "-a");
             auto plain = co_await list(session, "");
-            if (!plain || dialect.listAll() == Support::Refused || plain->entries.empty())
+            if (!plain || dialect.listAll() == Support::Refused)
+                co_return plain;
+            // Lines in no format the parser reads show no empty directory.
+            if (plain->entries.empty() && plain->unreadableLines != 0u)
                 co_return plain;
 
             auto all = co_await list(session, "-a");
-            if (all && listsAtLeast(*all, *plain))
+            if (!all)
+            {
+                if (isCancelled(co_await asio::this_coro::cancellation_state))
+                    co_return std::unexpected(all.error());
+                // Only a refusal of what was asked for tells, a broken or refused connection does not.
+                if (all.error().protocolCode != 0 && !refusedTheTransfer(all.error()))
+                    dialect.learnListAll(Support::Refused);
+                co_return plain;
+            }
+            const auto shared = sharedNames(*all, *plain);
+            if (shared == plain->entries.size() && !all->entries.empty())
             {
                 dialect.learnListAll(Support::Works);
                 co_return all;
             }
-            // Only the server's answer tells, a broken connection or a cancel does not.
-            if (all || all.error().protocolCode != 0)
+            if (shared == 0u && !plain->entries.empty())
                 dialect.learnListAll(Support::Refused);
-            if (!all && isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(all.error());
             co_return plain;
         }
     }
