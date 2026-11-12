@@ -109,7 +109,8 @@ namespace FileTransferProtocol
             const auto name = entry.nameSegment();
             if (!name)
                 co_return nullptr;
-            auto target = co_await statPath(std::move(session), (directory / *name).value());
+            // The listing told that it is a link, looking it up again would list its directory once per dead link.
+            auto target = co_await statLinkTarget(std::move(session), (directory / *name).value());
             if (target)
                 co_return std::make_shared<SharedData::DirectoryEntry>(informationOf(*target));
             if (aboutThePath(target.error()))

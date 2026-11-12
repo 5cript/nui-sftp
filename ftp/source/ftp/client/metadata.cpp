@@ -545,40 +545,74 @@ namespace FileTransferProtocol
         co_return co_await lstatInParent(std::move(session), std::move(path));
     }
 
+    namespace
+    {
+        RemoteIo::RemoteError unreachableTarget()
+        {
+            return errorOf(RemoteErrorKind::NoSuchFile, "The target of the link does not exist or cannot be reached");
+        }
+
+        /**
+         * @brief What SIZE and MDTM, then CWD tell of @p path, which all follow links.
+         *
+         * @return The entry, named like the last segment of @p path, nothing when none of them answers.
+         */
+        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
+        followedEntry(MetadataSession session, std::string path)
+        {
+            auto const& control = session.transfer.control;
+            const auto name = std::string{lastSegmentOf(path)};
+            // Not MLST: proftpd's follows a link for its type but not for its size.
+            const auto size = co_await control->execute(Command{.verb = Verb::Size, .argument = path});
+            if (!size)
+                co_return std::unexpected(size.error());
+            if (succeeded(*size))
+            {
+                const auto bytes = parseSizeReply(*size);
+                if (!bytes)
+                    co_return std::unexpected(bytes.error());
+                ListingEntry entry{.name = name, .type = FileType::Regular, .size = *bytes};
+                const auto modified =
+                    co_await control->execute(Command{.verb = Verb::ModificationTime, .argument = path});
+                if (!modified)
+                    co_return std::unexpected(modified.error());
+                if (const auto time = parseModificationTimeReply(*modified))
+                    entry.modified = *time;
+                co_return entry;
+            }
+            const auto entered = co_await changeDirectory(control, path);
+            if (entered)
+                co_return ListingEntry{.name = name, .type = FileType::Directory};
+            if (entered.error().protocolCode == 0)
+                co_return std::unexpected(entered.error());
+            co_return std::nullopt;
+        }
+    }
+
     asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
     statPath(MetadataSession session, std::string path)
     {
-        auto const& control = session.transfer.control;
-        const auto name = std::string{lastSegmentOf(path)};
-        // Not MLST: proftpd's follows a link for its type but not for its size.
-        const auto size = co_await control->execute(Command{.verb = Verb::Size, .argument = path});
-        if (!size)
-            co_return std::unexpected(size.error());
-        if (succeeded(*size))
-        {
-            const auto bytes = parseSizeReply(*size);
-            if (!bytes)
-                co_return std::unexpected(bytes.error());
-            ListingEntry entry{.name = name, .type = FileType::Regular, .size = *bytes};
-            const auto modified = co_await control->execute(Command{.verb = Verb::ModificationTime, .argument = path});
-            if (!modified)
-                co_return std::unexpected(modified.error());
-            if (const auto time = parseModificationTimeReply(*modified))
-                entry.modified = *time;
-            co_return entry;
-        }
-        const auto entered = co_await changeDirectory(control, path);
-        if (entered)
-            co_return ListingEntry{.name = name, .type = FileType::Directory};
-        if (entered.error().protocolCode == 0)
-            co_return std::unexpected(entered.error());
+        auto followed = co_await followedEntry(session, path);
+        if (!followed)
+            co_return std::unexpected(std::move(followed).error());
+        if (*followed)
+            co_return std::move(**followed);
 
         auto found = co_await lstatPath(session, path);
         if (found && found->type == FileType::Symlink)
-            co_return std::unexpected(
-                errorOf(RemoteErrorKind::NoSuchFile, "The target of the link does not exist or cannot be reached")
-            );
+            co_return std::unexpected(unreachableTarget());
         co_return found;
+    }
+
+    asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    statLinkTarget(MetadataSession session, std::string path)
+    {
+        auto followed = co_await followedEntry(std::move(session), std::move(path));
+        if (!followed)
+            co_return std::unexpected(std::move(followed).error());
+        if (*followed)
+            co_return std::move(**followed);
+        co_return std::unexpected(unreachableTarget());
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> makeDirectory(MetadataSession session, std::string path)

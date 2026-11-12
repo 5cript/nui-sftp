@@ -132,6 +132,17 @@ namespace FileTransferProtocol
     statPath(MetadataSession session, std::string path);
 
     /**
+     * @brief statPath() for a path that a listing showed as a symlink: when neither SIZE nor CWD answers, the target
+     *        cannot be reached, and the lookup of the path itself that statPath() ends with is left out.
+     *
+     * @return The entry at the end of the chain, named like the last segment of @p path, a directory with no more
+     *         than its type. NoSuchFile for a target that does not exist or cannot be reached; the error of a broken
+     *         connection.
+     */
+    boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    statLinkTarget(MetadataSession session, std::string path);
+
+    /**
      * @brief Creates the directory @p path with MKD.
      *
      * @return AlreadyExists when something exists at @p path, which vsftpd's refusal does not tell; NoSuchFile when

@@ -198,9 +198,8 @@ namespace FileTransferProtocol::Test
         script.expect("SIZE", "/dir/up").reply("550 Could not get file size.");
         enters(script, "/dir/up");
         script.expect("SIZE", "/dir/gone").reply("550 Could not get file size.");
-        script.expect("CWD", "/dir/gone").reply("550 Failed to change directory.");
-        listsIn(script, "/dir", std::string{listedLinkToDirectory} + std::string{listedDanglingLink})
-            .expectDisconnect();
+        // The listing told that it is a link: its directory is not listed again to look it up.
+        script.expect("CWD", "/dir/gone").reply("550 Failed to change directory.").expectDisconnect();
         connect(std::move(script));
 
         const auto listed = later(RemoteIo::ListDirectory{.path = remote("/dir"), .resolveLinks = true});
