@@ -22,12 +22,14 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
     add_library(
         ${name}-support
         STATIC
+            support/file_system_harness.cpp
             support/ftp_script.cpp
             support/scripted_ftp_server.cpp
             support/server_fleet.cpp
             support/server_profile.cpp
             support/test_ftp_client.cpp
             support/test_pki.cpp
+            support/tree_responder.cpp
     )
     target_include_directories(${name}-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
     target_link_libraries(
