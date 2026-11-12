@@ -97,8 +97,8 @@ namespace FileTransferProtocol
      * @brief The entries of the directory @p path: CWD into it, so a name is never read as an option or a pattern,
      *        then LIST -a where the server reads the option, else LIST. LIST shows every symlink with its target on
      *        every server, where MLSD leaves dangling links out on proftpd and pyftpdlib and gives links no target;
-     *        its times have minute precision. MLSD only lists a directory again whose LIST had lines the parser
-     *        cannot read. A server that lists a directory it cannot enter as empty cannot fool the CWD.
+     *        its times have minute precision. Where LIST had lines the parser cannot read, MLSD adds the entries LIST
+     *        lacks. A server that lists a directory it cannot enter as empty cannot fool the CWD.
      *
      * @return The listing. The replyError() of the CWD or of the listing, errors as for fetchListing().
      */

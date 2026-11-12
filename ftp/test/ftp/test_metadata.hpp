@@ -313,6 +313,46 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(dialect_->machineListing(), Support::Works);
     }
 
+    TEST_F(MetadataTests, MlsdAddsWhatAListLeftOutAndTheListKeepsItsLinks)
+    {
+        // MLSD names no target and, on proftpd, no dangling link.
+        const std::string listed =
+            "lrwxrwxrwx    1 0        0               6 Jan 02 03:04 link -> target\r\n"
+            "lrwxrwxrwx    1 0        0               7 Jan 02 03:04 dangling -> nowhere\r\n"
+            "an entry in no format the parser reads\r\n";
+        Script script{};
+        script.reply("220 Ready");
+        listingOf(enters(script, "/odd"), "LIST", "", listed);
+        listingOf(script, "LIST", "-a", listed);
+        listingOf(script, "MLSD", "", "type=file;size=6; link\r\ntype=file;size=1; odd\r\n");
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto merged = listIn(connection, "/odd");
+        ASSERT_TRUE(merged) << merged.error().toString();
+        EXPECT_EQ(listedNames(*merged), (std::vector<std::string>{"link", "dangling", "odd"}));
+        EXPECT_EQ(merged->entries.front().type, SharedData::FileType::Symlink);
+        EXPECT_EQ(merged->entries.front().linkTarget, std::optional<std::string>{"target"});
+        EXPECT_EQ(merged->unreadableLines, 0u);
+    }
+
+    TEST_F(MetadataTests, AnMlsdThatCannotBeReadEitherKeepsTheList)
+    {
+        const std::string listed = std::string{listedFile} + "an entry in no format the parser reads\r\n";
+        Script script{};
+        script.reply("220 Ready");
+        listingOf(enters(script, "/odd"), "LIST", "", listed);
+        listingOf(script, "LIST", "-a", listed);
+        listingOf(script, "MLSD", "", "no facts\r\nnone here\r\n");
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto kept = listIn(connection, "/odd");
+        ASSERT_TRUE(kept) << kept.error().toString();
+        EXPECT_EQ(listedNames(*kept), (std::vector<std::string>{"a"}));
+        EXPECT_EQ(kept->unreadableLines, 1u);
+    }
+
     TEST_F(MetadataTests, AListThatCannotBeReadStaysWhereMlsdIsMissing)
     {
         Script script{};

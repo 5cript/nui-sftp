@@ -17,6 +17,7 @@
 #include <optional>
 #include <set>
 #include <utility>
+#include <vector>
 
 namespace FileTransferProtocol
 {
@@ -350,6 +351,33 @@ namespace FileTransferProtocol
             }
         }
 
+        /**
+         * @brief Adds the entries of @p machine that @p listed lacks, up to @p limits. The entries LIST read stay:
+         *        only they name the target of a link. What is left unreadable is what neither listing read.
+         */
+        void addMissingEntries(Listing& listed, Listing machine, ListingLimits const& limits)
+        {
+            std::vector<ListingEntry> missing{};
+            {
+                std::set<std::string_view> names{};
+                for (auto const& entry : listed.entries)
+                    names.insert(entry.name);
+                for (auto& entry : machine.entries)
+                {
+                    if (!names.contains(entry.name))
+                        missing.push_back(std::move(entry));
+                }
+            }
+            for (auto& entry : missing)
+            {
+                if (listed.entries.size() >= limits.entryCount)
+                    ++listed.droppedEntries;
+                else
+                    listed.entries.push_back(std::move(entry));
+            }
+            listed.unreadableLines = std::min(listed.unreadableLines, machine.unreadableLines);
+        }
+
         asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>
         list(MetadataSession session, std::string argument)
         {
@@ -461,7 +489,7 @@ namespace FileTransferProtocol
         if (!listed || listed->unreadableLines == 0u || dialect.machineListing() == Support::Refused)
             co_return listed;
 
-        // A LIST format the parser cannot read, MLSD may list what it left out.
+        // A LIST format the parser cannot read, MLSD may list what it left out. Not more: it leaves out links.
         auto machine = co_await fetchListing(
             session.transfer,
             Command{.verb = Verb::MachineListDirectory},
@@ -471,7 +499,8 @@ namespace FileTransferProtocol
         if (machine)
         {
             dialect.learnMachineListing(Support::Works);
-            co_return machine;
+            addMissingEntries(*listed, std::move(*machine), session.limits);
+            co_return listed;
         }
         if (lacksTheCommand(machine.error()))
             dialect.learnMachineListing(Support::Refused);
