@@ -176,6 +176,7 @@ namespace FileTransferProtocol
         /**
          * @brief The final reply of the transfer: a download read to its end, an upload with what was written, an
          *        upload that wrote nothing stores an empty file. Its result is kept, the stream moves nothing more.
+         *        Refused while an asynchronous transfer runs, which finishes itself: its outcome is the result then.
          */
         std::expected<void, RemoteIo::RemoteError> finishInStrand() override;
 

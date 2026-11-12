@@ -470,6 +470,49 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(server_->waitForCheckpoint("drained"));
     }
 
+    TEST_P(FtpAsyncTransferTests, AFinishBesideAnAsynchronousUploadIsRefusedAndLeavesItRunning)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        completed(transferring(transfer, DataPlan{}.expectUpload(1024u), "STOR", "/dir/new")).expectDisconnect();
+        connectSmall(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/new", writeMode);
+        const auto state = std::make_shared<AsyncState>(3u);
+        state->content = std::string{sixteenBytes};
+        const auto context = writeAsync(
+            stream,
+            state,
+            [](RemoteIo::AsyncTransferContext& started)
+            {
+                started.pause(true);
+            }
+        );
+        ASSERT_TRUE(context) << context.error().toString();
+        const auto beside = onThread(
+            [stream]()
+            {
+                return stream->finishInStrand();
+            }
+        );
+        ASSERT_FALSE(beside) << "finished beside the asynchronous transfer";
+        EXPECT_EQ(beside.error().kind, RemoteIo::RemoteErrorKind::Failure) << beside.error().toString();
+
+        (*context)->pause(false);
+        expectEnd(state);
+        EXPECT_EQ((*context)->outcome(), Outcome::Completed);
+        const auto finished = onThread(
+            [stream]()
+            {
+                return stream->finishInStrand();
+            }
+        );
+        EXPECT_TRUE(finished) << finished.error().toString();
+        closeOnThread(stream);
+        EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{std::string{sixteenBytes}});
+    }
+
     TEST_P(FtpAsyncTransferTests, AnUploadWhoseLocalFileEndsEarlyFailsAndIsAborted)
     {
         auto metadata = loggedInScript();

@@ -282,6 +282,9 @@ namespace FileTransferProtocol
             return std::unexpected(closedError());
         if (broken_)
             return std::unexpected(*broken_);
+        // The asynchronous transfer finishes itself, a finish beside it would end the data under its ring.
+        if (ring_)
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "An asynchronous transfer of the stream runs"));
         if (direction_ == Direction::Download)
         {
             if (!started_)
