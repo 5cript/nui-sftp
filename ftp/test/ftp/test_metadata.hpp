@@ -105,6 +105,37 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        /**
+         * @brief Cancels @p operation once the server reached the checkpoint @p received, then lets the server go on
+         *        with @p answer.
+         */
+        template <typename ResultT>
+        ResultT cancelledAt(
+            std::shared_ptr<ControlConnection> const& connection,
+            asio::awaitable<ResultT> operation,
+            std::string const& received,
+            std::string answer
+        )
+        {
+            const auto signal = std::make_shared<asio::cancellation_signal>();
+            auto running = asio::co_spawn(
+                connection->strand(), std::move(operation), asio::bind_cancellation_slot(signal->slot(), asio::use_future)
+            );
+            if (!server_->waitForCheckpoint(received))
+                throw std::runtime_error{"The server did not reach " + received};
+            asio::post(
+                connection->strand(),
+                [signal]()
+                {
+                    signal->emit(asio::cancellation_type::terminal);
+                }
+            );
+            if (running.wait_for(20s) != std::future_status::ready)
+                throw std::runtime_error{"The cancelled operation did not end"};
+            server_->release(std::move(answer));
+            return running.get();
+        }
+
         static std::chrono::sys_seconds someTime()
         {
             using namespace std::chrono;
@@ -372,6 +403,59 @@ namespace FileTransferProtocol::Test
             EXPECT_EQ(set.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << set.error().toString();
         }
         EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::None);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(MetadataTests, ACancelledCommandEndsCancelledAndAsksNothingMore)
+    {
+        using VoidResult = std::expected<void, RemoteIo::RemoteError>;
+        Script script{};
+        script.reply("220 Ready");
+        const auto held = [&script](std::string verb, std::string argument, std::string const& name)
+        {
+            script.expect(std::move(verb), std::move(argument))
+                .checkpoint("received-" + name)
+                .awaitRelease("answer-" + name)
+                .reply("550 Refused without a reason.");
+        };
+        held("MKD", "/a", "make");
+        held("DELE", "/a", "remove");
+        held("SIZE", "/a", "size");
+        held("CWD", "/a", "canonical");
+        script.expect("RNFR", "/a").reply("350 Ready for RNTO.");
+        held("RNTO", "/b", "rename");
+        script.expect("NOOP").reply("200 Fine").expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const auto session = sessionOf(connection);
+
+        const auto expectCancelled = [](auto const& result, std::string_view what)
+        {
+            ASSERT_FALSE(result) << what << " succeeded";
+            EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::Cancelled)
+                << what << ": " << result.error().toString();
+        };
+        ASSERT_NO_FATAL_FAILURE(expectCancelled(
+            cancelledAt<VoidResult>(connection, makeDirectory(session, "/a"), "received-make", "answer-make"), "MKD"
+        ));
+        ASSERT_NO_FATAL_FAILURE(expectCancelled(
+            cancelledAt<VoidResult>(connection, removeFile(session, "/a"), "received-remove", "answer-remove"), "DELE"
+        ));
+        ASSERT_NO_FATAL_FAILURE(expectCancelled(
+            cancelledAt<std::expected<std::uint64_t, RemoteIo::RemoteError>>(
+                connection, sizeOf(session, "/a"), "received-size", "answer-size"
+            ),
+            "SIZE"
+        ));
+        ASSERT_NO_FATAL_FAILURE(expectCancelled(
+            cancelledAt<std::expected<std::string, RemoteIo::RemoteError>>(
+                connection, canonicalDirectory(session, "/a"), "received-canonical", "answer-canonical"
+            ),
+            "CWD"
+        ));
+        ASSERT_NO_FATAL_FAILURE(expectCancelled(
+            cancelledAt<VoidResult>(connection, renamePath(session, "/a", "/b"), "received-rename", "answer-rename"),
+            "RNTO"
+        ));
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 

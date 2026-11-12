@@ -43,6 +43,15 @@ namespace FileTransferProtocol
             return error.kind == RemoteErrorKind::Unsupported;
         }
 
+        /**
+         * @brief @p error is a refusal of the server whose text did not tell its kind, as vsftpd's never does. Only
+         *        such an error may be followed by more commands: a cancelled coroutine throws at its next co_await.
+         */
+        bool untold(RemoteIo::RemoteError const& error)
+        {
+            return error.protocolCode != 0 && error.kind == RemoteErrorKind::Failure;
+        }
+
         std::chrono::sys_days today()
         {
             return std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());
@@ -152,7 +161,7 @@ namespace FileTransferProtocol
                 co_return std::move(*found);
             }
             auto failure = std::move(listing).error();
-            if (failure.protocolCode == 0 || failure.kind != RemoteErrorKind::Failure)
+            if (!untold(failure))
                 co_return std::unexpected(std::move(failure));
 
             const auto container = co_await lstatPath(session, *parent);
@@ -195,15 +204,13 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Gives the refusal @p error of a command on @p path the kind its text did not tell, as vsftpd's never
-         *        does: NoSuchFile where @p path does not exist, else what @p kindOf says for its entry. An error that
-         *        is no refusal, or whose kind its text told, stays.
+         * @brief Gives the untold() refusal @p error of a command on @p path its kind: NoSuchFile where @p path does
+         *        not exist, else what @p kindOf says for its entry.
          */
         asio::awaitable<RemoteIo::RemoteError>
         explain(MetadataSession session, std::string path, RemoteIo::RemoteError error, KindOfExisting kindOf)
         {
-            if (error.protocolCode == 0 || error.kind != RemoteErrorKind::Failure)
-                co_return error;
+            assert(untold(error) && "only a refusal that tells no kind is explained");
             const auto found = co_await lstatPath(std::move(session), std::move(path));
             if (found)
                 error.kind = kindOf(*found);
@@ -422,6 +429,8 @@ namespace FileTransferProtocol
             co_await perform(session.transfer.control, Command{.verb = Verb::MakeDirectory, .argument = path});
         if (made)
             co_return std::expected<void, RemoteIo::RemoteError>{};
+        if (!untold(made.error()))
+            co_return std::unexpected(made.error());
         co_return std::unexpected(
             co_await explain(
                 std::move(session),
@@ -441,6 +450,8 @@ namespace FileTransferProtocol
             co_await perform(session.transfer.control, Command{.verb = Verb::Delete, .argument = path});
         if (removed)
             co_return std::expected<void, RemoteIo::RemoteError>{};
+        if (!untold(removed.error()))
+            co_return std::unexpected(removed.error());
         co_return std::unexpected(
             co_await explain(
                 std::move(session),
@@ -464,7 +475,7 @@ namespace FileTransferProtocol
         if (removed)
             co_return std::expected<void, RemoteIo::RemoteError>{};
         auto error = removed.error();
-        if (error.protocolCode == 0 || error.kind != RemoteErrorKind::Failure)
+        if (!untold(error))
             co_return std::unexpected(std::move(error));
 
         // vsftpd refuses a missing path, a file, a directory with content and a denied one alike.
@@ -496,12 +507,17 @@ namespace FileTransferProtocol
             co_return std::unexpected(source.error());
         // RNFR goes on with 350, anything else ends the rename (RFC 959 5.4).
         if (source->code != 350)
-            co_return std::unexpected(
-                co_await explain(session, std::move(from), replyError(*source, Verb::RenameFrom), denied)
-            );
+        {
+            auto refusal = replyError(*source, Verb::RenameFrom);
+            if (!untold(refusal))
+                co_return std::unexpected(std::move(refusal));
+            co_return std::unexpected(co_await explain(session, std::move(from), std::move(refusal), denied));
+        }
         const auto renamed = co_await perform(control, Command{.verb = Verb::RenameTo, .argument = to});
         if (renamed)
             co_return std::expected<void, RemoteIo::RemoteError>{};
+        if (!untold(renamed.error()))
+            co_return std::unexpected(renamed.error());
         co_return std::unexpected(
             co_await explain(
                 std::move(session),
@@ -521,6 +537,8 @@ namespace FileTransferProtocol
         const auto reply = co_await perform(session.transfer.control, Command{.verb = Verb::Size, .argument = path});
         if (reply)
             co_return parseSizeReply(*reply);
+        if (!untold(reply.error()))
+            co_return std::unexpected(reply.error());
         co_return std::unexpected(
             co_await explain(
                 std::move(session),
@@ -580,6 +598,8 @@ namespace FileTransferProtocol
                     continue;
                 co_return std::unexpected(found.error());
             }
+            if (!untold(error))
+                co_return std::unexpected(std::move(error));
             co_return std::unexpected(co_await explain(std::move(session), std::move(path), std::move(error), denied));
         }
         dialect.learnModificationTimeSetter(ModificationTimeSetter::None);
@@ -591,6 +611,8 @@ namespace FileTransferProtocol
     {
         auto const& control = session.transfer.control;
         const auto entered = co_await changeDirectory(control, path);
+        if (!entered && !untold(entered.error()))
+            co_return std::unexpected(entered.error());
         if (!entered)
             co_return std::unexpected(
                 co_await explain(
