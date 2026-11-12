@@ -145,7 +145,8 @@ namespace FileTransferProtocol
 
         /**
          * @brief Writes @p data: STOR at the start, REST and STOR after a seek where the server has REST STREAM, else
-         *        APPE, which continues at the end of the file.
+         *        APPE, which continues at the end of the file: Unsupported when SIZE shows that the file ends
+         *        elsewhere than the seek. A server without SIZE gets the APPE unchecked.
          */
         std::expected<void, RemoteIo::RemoteError> writeInStrand(std::string_view data) override;
 
@@ -199,10 +200,27 @@ namespace FileTransferProtocol
             Lease lease{};
             TransferSession session{};
             TransferOptions options{};
+            std::shared_ptr<ServerDialect> dialect{};
+            ListingLimits listing{};
             std::shared_ptr<Download> download{};
             std::shared_ptr<Upload> upload{};
             /** @brief Where reads land, copied out on the processing thread once a call returned. */
             std::vector<char> readBuffer{};
+
+            /**
+             * @brief What a metadata operation on the connection of the transfer runs on.
+             */
+            MetadataSession metadata() const;
+        };
+
+        /**
+         * @brief How the upload of the stream starts.
+         */
+        struct UploadStart
+        {
+            UploadRequest request{};
+            /** @brief Where the file has to end, for an APPE that stands in for a seek there. */
+            std::optional<std::uint64_t> appendsAt{};
         };
 
         using Error = RemoteIo::RemoteError;
@@ -259,7 +277,7 @@ namespace FileTransferProtocol
             std::shared_ptr<Transfer> transfer,
             std::shared_ptr<SupplyRing> ring,
             std::shared_ptr<Context> context,
-            UploadRequest request,
+            UploadStart start,
             SupplyRing::Source source
         );
         /**
@@ -283,18 +301,22 @@ namespace FileTransferProtocol
         static boost::asio::awaitable<Result<std::size_t>>
         readOn(std::shared_ptr<Transfer> transfer, DownloadRequest request, std::size_t limit);
         static boost::asio::awaitable<Result<void>> seekOn(std::shared_ptr<Transfer> transfer, std::uint64_t position);
+        /**
+         * @brief Starts the upload of @p transfer unless it runs. Before an APPE that stands in for a seek, SIZE has
+         *        to show the file ending there.
+         */
+        static boost::asio::awaitable<Result<void>> startUploadOn(std::shared_ptr<Transfer> transfer, UploadStart start);
         static boost::asio::awaitable<Result<void>>
-        writeOn(std::shared_ptr<Transfer> transfer, UploadRequest request, std::string data);
+        writeOn(std::shared_ptr<Transfer> transfer, UploadStart start, std::string data);
         static boost::asio::awaitable<Result<void>> finishDownloadOn(std::shared_ptr<Transfer> transfer);
-        static boost::asio::awaitable<Result<void>>
-        finishUploadOn(std::shared_ptr<Transfer> transfer, UploadRequest request);
+        static boost::asio::awaitable<Result<void>> finishUploadOn(std::shared_ptr<Transfer> transfer, UploadStart start);
 
         /**
          * @brief The attributes of @p path asked on the connection of @p transfer, nothing when that connection is not
          *        open: a transfer whose final reply never came left it out of step.
          */
         static boost::asio::awaitable<Result<std::optional<RemoteIo::FileInformation>>>
-        statOn(std::shared_ptr<Transfer> transfer, MetadataSession session, Paths::RemotePath path);
+        statOn(std::shared_ptr<Transfer> transfer, Paths::RemotePath path);
 
         /**
          * @brief Runs @p work on the connection's strand through Engine::call() within @p limits, on the processing
@@ -326,9 +348,10 @@ namespace FileTransferProtocol
          */
         Error broke(Error error);
         DownloadRequest downloadRequest() const;
-        UploadRequest uploadRequest() const;
+        UploadStart uploadStart() const;
         Result<std::size_t> readAllInStrand(std::function<bool(std::string_view data)> const& onRead);
-        static std::shared_ptr<Transfer> makeTransfer(Lease lease, TransferOptions options);
+        static std::shared_ptr<Transfer>
+        makeTransfer(Lease lease, FileSystemSession const& session, FtpFileSystemOptions const& options);
         /**
          * @brief Sends ABOR for a transfer that did not finish and lets go of the transfer, which gives the connection
          *        back behind the ABOR and what still runs on it. Never waits.

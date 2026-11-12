@@ -46,6 +46,24 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief A login as loggedIn() gives, of a server whose FEAT names no REST STREAM.
+         */
+        Script loggedInWithoutRestart()
+        {
+            Script script{};
+            script.login()
+                .expect("FEAT")
+                .reply("211-Features:\n EPSV\n MDTM\n SIZE\n211 End")
+                .expect("OPTS", "UTF8 ON")
+                .reply("200 Always in UTF8 mode.")
+                .expect("TYPE", "I")
+                .reply("200 Switching to Binary mode.")
+                .expect("PWD")
+                .reply("257 \"/home/user\" is the current directory");
+            return script;
+        }
+
+        /**
          * @brief The data runs to its end, then 226.
          */
         Script& completed(Script& script)
@@ -289,6 +307,53 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(written) << written.error().toString();
         closeOnThread(stream);
         EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{"def"});
+    }
+
+    TEST_P(FtpFileStreamTests, AContinuedUploadWithoutRestartAppendsWhereTheFileEnds)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInWithoutRestart();
+        sized(transfer, "/dir/part", "3");
+        completed(transferring(transfer, DataPlan{}.expectUpload(1024u), "APPE", "/dir/part")).expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/part", RemoteIo::OpenMode::Write);
+        const auto written = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto sought = stream->seekInStrand(3u); !sought)
+                    return sought;
+                if (auto rest = stream->writeInStrand("def"); !rest)
+                    return rest;
+                return stream->finishInStrand();
+            }
+        );
+        ASSERT_TRUE(written) << written.error().toString();
+        closeOnThread(stream);
+        EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{"def"});
+    }
+
+    TEST_P(FtpFileStreamTests, AContinuedUploadWithoutRestartIsRefusedWhereTheFileEndsElsewhere)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInWithoutRestart();
+        sized(transfer, "/dir/part", "9").expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/part", RemoteIo::OpenMode::Write);
+        const auto written = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto sought = stream->seekInStrand(3u); !sought)
+                    return sought;
+                return stream->writeInStrand("def");
+            }
+        );
+        ASSERT_FALSE(written) << "appended to a file that ends elsewhere than the seek";
+        EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << written.error().toString();
+        closeOnThread(stream);
     }
 
     TEST_P(FtpFileStreamTests, OpeningAMissingFileFailsAndTheConnectionServesTheNextOpen)

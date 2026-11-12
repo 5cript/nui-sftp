@@ -5,6 +5,7 @@
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <cstring>
@@ -94,7 +95,7 @@ namespace FileTransferProtocol
         , direction_{direction}
         , size_{size}
         , streams_{std::move(streams)}
-        , transfer_{makeTransfer(std::move(lease), options_.transfer)}
+        , transfer_{makeTransfer(std::move(lease), session_, options_)}
     {}
 
     FtpFileStream::~FtpFileStream()
@@ -135,17 +136,7 @@ namespace FileTransferProtocol
         if (connectionIsFree())
         {
             auto asked = callOnConnection<std::optional<RemoteIo::FileInformation>>(
-                statOn(
-                    transfer_,
-                    MetadataSession{
-                        .transfer = transfer_->session,
-                        .dialect = session_.dialect,
-                        .options = options_.transfer,
-                        .limits = options_.listing,
-                    },
-                    path_
-                ),
-                options_.operationLimits
+                statOn(transfer_, path_), options_.operationLimits
             );
             if (!asked)
                 return std::unexpected(std::move(asked).error());
@@ -197,7 +188,7 @@ namespace FileTransferProtocol
         if (data.empty())
             return {};
         started_ = true;
-        return callOnConnection<void>(writeOn(transfer_, uploadRequest(), std::string{data}), options_.transferCallLimits)
+        return callOnConnection<void>(writeOn(transfer_, uploadStart(), std::string{data}), options_.transferCallLimits)
             .transform_error(
                 [this](Error error)
                 {
@@ -272,7 +263,7 @@ namespace FileTransferProtocol
             session_.engine,
             control,
             context,
-            runUploadRing(transfer_, ring, context, uploadRequest(), std::move(source)),
+            runUploadRing(transfer_, ring, context, uploadStart(), std::move(source)),
             std::nullopt
         ));
         if (!spawned)
@@ -302,7 +293,7 @@ namespace FileTransferProtocol
         {
             started_ = true;
             finished_ =
-                callOnConnection<void>(finishUploadOn(transfer_, uploadRequest()), options_.transferCallLimits);
+                callOnConnection<void>(finishUploadOn(transfer_, uploadStart()), options_.transferCallLimits);
         }
         return *finished_;
     }
@@ -353,11 +344,11 @@ namespace FileTransferProtocol
     }
 
     asio::awaitable<FtpFileStream::Result<std::optional<RemoteIo::FileInformation>>>
-    FtpFileStream::statOn(std::shared_ptr<Transfer> transfer, MetadataSession session, Paths::RemotePath path)
+    FtpFileStream::statOn(std::shared_ptr<Transfer> transfer, Paths::RemotePath path)
     {
         if (transfer->session.control->state() != ControlState::Open)
             co_return std::nullopt;
-        co_return (co_await runOperation(std::move(session), RemoteIo::Stat{.path = std::move(path)}))
+        co_return (co_await runOperation(transfer->metadata(), RemoteIo::Stat{.path = std::move(path)}))
             .transform(
                 [](RemoteIo::FileInformation information)
                 {
@@ -390,15 +381,38 @@ namespace FileTransferProtocol
     }
 
     asio::awaitable<FtpFileStream::Result<void>>
-    FtpFileStream::writeOn(std::shared_ptr<Transfer> transfer, UploadRequest request, std::string data)
+    FtpFileStream::startUploadOn(std::shared_ptr<Transfer> transfer, UploadStart start)
     {
-        if (!transfer->upload)
+        if (transfer->upload)
+            co_return Result<void>{};
+        if (start.appendsAt)
         {
-            auto started = co_await Upload::start(transfer->session, std::move(request), transfer->options);
-            if (!started)
-                co_return std::unexpected(std::move(started).error());
-            transfer->upload = *std::move(started);
+            // APPE writes at the end of the file, wherever the seek pointed.
+            const auto size = co_await sizeOf(transfer->metadata(), start.request.path);
+            if (size && *size != *start.appendsAt)
+            {
+                co_return std::unexpected(errorOf(
+                    RemoteErrorKind::Unsupported,
+                    fmt::format(
+                        "The server has no REST STREAM and the file ends at {}, not at {}", *size, *start.appendsAt
+                    )
+                ));
+            }
+            if (!size && size.error().kind != RemoteErrorKind::Unsupported)
+                co_return std::unexpected(size.error());
         }
+        auto started = co_await Upload::start(transfer->session, std::move(start.request), transfer->options);
+        if (!started)
+            co_return std::unexpected(std::move(started).error());
+        transfer->upload = *std::move(started);
+        co_return Result<void>{};
+    }
+
+    asio::awaitable<FtpFileStream::Result<void>>
+    FtpFileStream::writeOn(std::shared_ptr<Transfer> transfer, UploadStart start, std::string data)
+    {
+        if (auto started = co_await startUploadOn(transfer, std::move(start)); !started)
+            co_return started;
         co_return co_await transfer->upload->write(asio::buffer(data));
     }
 
@@ -410,16 +424,11 @@ namespace FileTransferProtocol
     }
 
     asio::awaitable<FtpFileStream::Result<void>>
-    FtpFileStream::finishUploadOn(std::shared_ptr<Transfer> transfer, UploadRequest request)
+    FtpFileStream::finishUploadOn(std::shared_ptr<Transfer> transfer, UploadStart start)
     {
         // An upload that wrote nothing still stores its empty file.
-        if (!transfer->upload)
-        {
-            auto started = co_await Upload::start(transfer->session, std::move(request), transfer->options);
-            if (!started)
-                co_return std::unexpected(std::move(started).error());
-            transfer->upload = *std::move(started);
-        }
+        if (auto started = co_await startUploadOn(transfer, std::move(start)); !started)
+            co_return started;
         co_return (co_await transfer->upload->finish()).transform([](UploadResult const&) {});
     }
 
@@ -456,13 +465,13 @@ namespace FileTransferProtocol
         return DownloadRequest{.path = path_.value(), .offset = offset_, .expectedSize = size_};
     }
 
-    UploadRequest FtpFileStream::uploadRequest() const
+    FtpFileStream::UploadStart FtpFileStream::uploadStart() const
     {
         if (offset_ == 0u)
-            return UploadRequest{.path = path_.value()};
+            return UploadStart{.request = {.path = path_.value()}};
         if (transfer_->session.restartStream)
-            return UploadRequest{.path = path_.value(), .mode = UploadMode::Store, .offset = offset_};
-        return UploadRequest{.path = path_.value(), .mode = UploadMode::Append};
+            return UploadStart{.request = {.path = path_.value(), .mode = UploadMode::Store, .offset = offset_}};
+        return UploadStart{.request = {.path = path_.value(), .mode = UploadMode::Append}, .appendsAt = offset_};
     }
 
     FtpFileStream::Result<std::size_t>
@@ -489,11 +498,19 @@ namespace FileTransferProtocol
         );
     }
 
-    std::shared_ptr<FtpFileStream::Transfer> FtpFileStream::makeTransfer(Lease lease, TransferOptions options)
+    MetadataSession FtpFileStream::Transfer::metadata() const
+    {
+        return MetadataSession{.transfer = session, .dialect = dialect, .options = options, .limits = listing};
+    }
+
+    std::shared_ptr<FtpFileStream::Transfer>
+    FtpFileStream::makeTransfer(Lease lease, FileSystemSession const& session, FtpFileSystemOptions const& options)
     {
         auto transfer = std::make_shared<Transfer>();
         transfer->session = lease.transferSession();
-        transfer->options = std::move(options);
+        transfer->options = options.transfer;
+        transfer->dialect = session.dialect;
+        transfer->listing = options.listing;
         transfer->lease = std::move(lease);
         return transfer;
     }
@@ -664,17 +681,12 @@ namespace FileTransferProtocol
         std::shared_ptr<Transfer> transfer,
         std::shared_ptr<SupplyRing> ring,
         std::shared_ptr<Context> context,
-        UploadRequest request,
+        UploadStart start,
         SupplyRing::Source source
     )
     {
-        if (!transfer->upload)
-        {
-            auto started = co_await Upload::start(transfer->session, std::move(request), transfer->options);
-            if (!started)
-                co_return std::unexpected(std::move(started).error());
-            transfer->upload = *std::move(started);
-        }
+        if (auto started = co_await startUploadOn(transfer, std::move(start)); !started)
+            co_return started;
         const auto ran = co_await ring->run(
             std::move(source),
             [transfer](asio::const_buffer data)
