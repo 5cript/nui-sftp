@@ -538,6 +538,7 @@ namespace FileTransferProtocol::Test
                 : server_{server}
                 , connection_{connection}
                 , plan_{std::move(plan)}
+                , actions_{plan_.actions}
                 , controlPeer_{std::move(controlPeer)}
                 , acceptor_{server.executor()}
                 , begun_{server.executor()}
@@ -567,14 +568,14 @@ namespace FileTransferProtocol::Test
                     if (!stopped_ && co_await startTls())
                     {
                         bool goesOn = !stopped_;
-                        for (std::size_t action = 0u; goesOn && action < plan_.actions.size(); ++action)
+                        for (std::size_t action = 0u; goesOn && action < actions_.size(); ++action)
                         {
                             goesOn = co_await std::visit(
                                 [this](auto const& step)
                                 {
                                     return perform(step);
                                 },
-                                plan_.actions[action]
+                                actions_[action]
                             );
                         }
                     }
@@ -584,8 +585,13 @@ namespace FileTransferProtocol::Test
                 finished_.set();
             }
 
-            void begin()
+            /**
+             * @brief Starts the plan, with @p actions instead of its own where given.
+             */
+            void begin(std::optional<std::vector<DataPlan::Action>> actions)
             {
+                if (actions)
+                    actions_ = std::move(*actions);
                 begun_.set();
             }
 
@@ -747,6 +753,7 @@ namespace FileTransferProtocol::Test
             Server& server_;
             const std::size_t connection_;
             const DataPlan plan_;
+            std::vector<DataPlan::Action> actions_;
             const asio::ip::address controlPeer_;
             tcp::acceptor acceptor_;
             std::optional<Transport> transport_{};
@@ -1044,14 +1051,14 @@ namespace FileTransferProtocol::Test
                 co_return true;
             }
 
-            asio::awaitable<bool> perform(Script::BeginData const&)
+            asio::awaitable<bool> perform(Script::BeginData const& step)
             {
                 if (dataPlans_.empty())
                 {
                     server_.fail(diff("a passive() before beginData()", "none"));
                     co_return false;
                 }
-                dataPlans_.back()->begin();
+                dataPlans_.back()->begin(step.actions);
                 co_return true;
             }
 
@@ -1075,6 +1082,38 @@ namespace FileTransferProtocol::Test
                 }
                 dataPlans_.back()->stop();
                 co_return true;
+            }
+
+            asio::awaitable<bool> perform(Script::Serve const& step)
+            {
+                if (const auto behind = script_.steps.size() - step_ - 1u; behind > 0u)
+                {
+                    server_.fail(diff("serve() as the last step", fmt::format("{} steps behind it", behind)));
+                    co_return false;
+                }
+                while (const auto line = co_await readLine())
+                {
+                    lastVerb_ = line->substr(0u, line->find(' '));
+                    const auto answer = step.responder->answer(*line);
+                    for (auto const& answerStep : answer.steps)
+                    {
+                        if (std::holds_alternative<Script::Expect>(answerStep))
+                        {
+                            server_.fail(diff("an answer", "an expect() among the steps of an answer"));
+                            co_return false;
+                        }
+                        const auto goesOn = co_await std::visit(
+                            [this](auto const& nested)
+                            {
+                                return perform(nested);
+                            },
+                            answerStep
+                        );
+                        if (!goesOn || closed_ || silent_)
+                            co_return false;
+                    }
+                }
+                co_return false;
             }
 
           private:

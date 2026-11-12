@@ -4,11 +4,13 @@
 #include <ftp/support/test_ftp_client.hpp>
 #include <ftp/support/test_pki.hpp>
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace FileTransferProtocol::Test
@@ -459,6 +461,100 @@ namespace FileTransferProtocol::Test
         client_.close();
         expectNoFailures();
         EXPECT_TRUE(transcriptHas(TranscriptEntry::Kind::DataConnected, "127.0.0.1"));
+    }
+
+    TEST_F(ScriptedFtpServerDataTests, BeginDataWithAPlanSendsWhatThatPlanSays)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.login()
+            .expect("EPSV")
+            .passive(DataPlan{}.send("planned at the EPSV"))
+            .expect("RETR", "file.txt")
+            .reply("150 Here it comes")
+            .beginData(DataPlan{}.send("chosen at the RETR"))
+            .awaitData()
+            .reply("226 Done")
+            .expectDisconnect();
+        server_->addConnection(std::move(script));
+
+        openPassive("EPSV");
+        expectReply("RETR file.txt", 150);
+        const auto content = client_.readData();
+        ASSERT_TRUE(content.has_value()) << content.error();
+        EXPECT_EQ(*content, "chosen at the RETR");
+        client_.closeData();
+        ASSERT_TRUE(client_.readReply().has_value());
+        client_.close();
+        expectNoFailures();
+    }
+
+    namespace
+    {
+        /**
+         * @brief Logs in, echoes each other command in a 200, sends data for RETR and closes after QUIT.
+         */
+        class EchoResponder : public Responder
+        {
+          public:
+            Script answer(std::string_view line) override
+            {
+                Script script{};
+                if (line.starts_with("USER"))
+                    return script.reply("331 Password required");
+                if (line.starts_with("PASS"))
+                    return script.reply("230 Logged in");
+                if (line.starts_with("EPSV"))
+                    return script.passive(DataPlan{});
+                if (line.starts_with("RETR"))
+                    return script.reply("150 Here it comes")
+                        .beginData(DataPlan{}.send(std::string{line}))
+                        .awaitData()
+                        .reply("226 Done");
+                if (line == "QUIT")
+                    return script.reply("221 Goodbye.").closeControl();
+                return script.reply(fmt::format("200 {}", line));
+            }
+        };
+    }
+
+    TEST_F(ScriptedFtpServerDataTests, AResponderAnswersEveryCommandUntilTheClientGoes)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.reply("220 Ready").serve(std::make_shared<EchoResponder>());
+        server_->addConnection(std::move(script));
+
+        openPassive("EPSV");
+        expectReply("RETR some file", 150);
+        const auto content = client_.readData();
+        ASSERT_TRUE(content.has_value()) << content.error();
+        EXPECT_EQ(*content, "RETR some file");
+        client_.closeData();
+        ASSERT_TRUE(client_.readReply().has_value());
+        const auto echoed = client_.command("NOOP");
+        ASSERT_TRUE(echoed.has_value()) << echoed.error();
+        EXPECT_EQ(echoed->text, "200 NOOP");
+        expectReply("QUIT", 221);
+        client_.close();
+        expectNoFailures();
+        EXPECT_EQ(
+            server_->commands(),
+            (std::vector<std::string>{"USER user", "PASS password", "EPSV", "RETR some file", "NOOP", "QUIT"})
+        );
+    }
+
+    TEST_F(ScriptedFtpServerTests, StepsBehindServeFailTheScript)
+    {
+        ASSERT_NO_FATAL_FAILURE(startServer());
+        Script script{};
+        script.reply("220 Ready").serve(std::make_shared<EchoResponder>()).reply("200 Never");
+        server_->addConnection(std::move(script));
+        connectClient();
+        ASSERT_TRUE(client_.readReply().has_value());
+        client_.close();
+        EXPECT_TRUE(server_->waitUntilDisconnected());
+        EXPECT_EQ(server_->failures().size(), 1u);
     }
 
     TEST_F(ScriptedFtpServerDataTests, UploadsThroughPasv)

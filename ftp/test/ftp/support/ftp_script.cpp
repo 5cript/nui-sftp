@@ -205,6 +205,11 @@ namespace FileTransferProtocol::Test
         steps.emplace_back(BeginData{});
         return *this;
     }
+    Script& Script::beginData(DataPlan plan)
+    {
+        steps.emplace_back(BeginData{.actions = std::move(plan.actions)});
+        return *this;
+    }
     Script& Script::awaitData()
     {
         steps.emplace_back(AwaitData{});
@@ -213,6 +218,11 @@ namespace FileTransferProtocol::Test
     Script& Script::stopData()
     {
         steps.emplace_back(StopData{});
+        return *this;
+    }
+    Script& Script::serve(std::shared_ptr<Responder> responder)
+    {
+        steps.emplace_back(Serve{.responder = std::move(responder)});
         return *this;
     }
 
