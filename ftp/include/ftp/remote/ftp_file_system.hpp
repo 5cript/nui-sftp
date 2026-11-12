@@ -123,7 +123,8 @@ namespace FileTransferProtocol
         void open(RemoteIo::OpenFile operation, std::shared_ptr<TrackedCompletion<RemoteIo::OpenFile>> completion);
 
         /**
-         * @brief Takes a transfer connection for a stream, asks a file to read for its size, on the session strand.
+         * @brief Takes a transfer connection for a stream and asks a file to read for its size, which a server
+         *        without SIZE does not tell, on the session strand.
          */
         static boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::OpenFile>> openOn(
             FileSystemSession session,

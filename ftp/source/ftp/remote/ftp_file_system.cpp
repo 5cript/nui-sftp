@@ -179,9 +179,11 @@ namespace FileTransferProtocol
                     operation.path.value()
                 )
             );
-            if (!found)
+            if (found)
+                size = *found;
+            // Without SIZE the transfer tells a cut download by the size its first reply announces.
+            else if (found.error().kind != RemoteErrorKind::Unsupported)
                 co_return std::unexpected(std::move(found).error());
-            size = *found;
         }
         auto stream = FtpFileStream::create(
             std::move(session),

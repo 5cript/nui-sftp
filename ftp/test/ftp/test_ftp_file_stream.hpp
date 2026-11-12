@@ -309,6 +309,22 @@ namespace FileTransferProtocol::Test
         closeOnThread(stream);
     }
 
+    TEST_P(FtpFileStreamTests, AFileOpensForReadingOnAServerWithoutSize)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        transfer.expect("SIZE", "/dir/file").reply("502 Command not implemented.");
+        completed(transferring(transfer, DataPlan{}.send("file content"), "RETR", "/dir/file")).expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/file", readMode);
+        const auto content = readWhole(stream);
+        ASSERT_TRUE(content) << content.error().toString();
+        EXPECT_EQ(*content, "file content");
+        closeOnThread(stream);
+    }
+
     TEST_P(FtpFileStreamTests, AnOpenIsBusyWhileTheConnectionsTransferAndWakesWhenOneIsFree)
     {
         auto metadata = loggedInScript();
