@@ -198,6 +198,22 @@ namespace FileTransferProtocol::Test
             EXPECT_EQ(*result, value) << what;
         }
 
+        /**
+         * @brief @p result is a refusal in a directory that exists and takes no entries: never NoSuchFile, and
+         *        PermissionDenied where the server tells.
+         */
+        void expectRefusedInItsDirectory(VoidResult const& result, std::string_view what) const
+        {
+            using RemoteIo::RemoteErrorKind;
+            ASSERT_FALSE(result) << what << " succeeded";
+            EXPECT_NE(result.error().kind, RemoteErrorKind::NoSuchFile) << what << ": " << result.error().toString();
+            EXPECT_NE(result.error().kind, RemoteErrorKind::AlreadyExists)
+                << what << ": " << result.error().toString();
+            if (profile_.expectations.repliesTell550Causes)
+                EXPECT_EQ(result.error().kind, RemoteErrorKind::PermissionDenied)
+                    << what << ": " << result.error().toString();
+        }
+
         static void expectFailure(VoidResult const& result, RemoteIo::RemoteErrorKind kind, std::string_view what)
         {
             ASSERT_FALSE(result) << what << " succeeded";
@@ -354,6 +370,10 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(
             expectFailure(makeDirectoryAt(pathOf("missing/child")), RemoteErrorKind::NoSuchFile, "missing/child")
         );
+        ASSERT_NO_FATAL_FAILURE(
+            expectFailure(makeDirectoryAt(pathOf("plain.txt/child")), RemoteErrorKind::NoSuchFile, "plain.txt/child")
+        );
+        ASSERT_NO_FATAL_FAILURE(expectRefusedInItsDirectory(makeDirectoryAt(pathOf("unwritable/new")), "unwritable/new"));
     }
 
     TEST_P(MetadataConformance, RemovesFilesAndLinksAndTellsWhyNot)
@@ -421,6 +441,9 @@ namespace FileTransferProtocol::Test
         ));
         ASSERT_NO_FATAL_FAILURE(expectFailure(
             rename(pathOf("chunk.bin"), pathOf("missing/chunk.bin")), RemoteErrorKind::NoSuchFile, "missing/chunk.bin"
+        ));
+        ASSERT_NO_FATAL_FAILURE(expectRefusedInItsDirectory(
+            rename(pathOf("chunk.bin"), pathOf("unwritable/chunk.bin")), "unwritable/chunk.bin"
         ));
         EXPECT_FALSE(rename(pathOf("chunk.bin"), pathOf("directory"))) << "a file replaced a directory";
         ASSERT_NO_FATAL_FAILURE(expectUsableLogin());

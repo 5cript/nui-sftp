@@ -460,6 +460,33 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::None);
     }
 
+    TEST_F(MetadataTests, ADirectoryRefusedWhereItsParentExistsIsNotMissing)
+    {
+        // vsftpd's answer in a directory that takes no entries: nothing at the path, and its parent is entered.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MKD", "/dir/new")
+            .reply("550 Create directory operation failed.")
+            .expect("STAT", "/dir/new")
+            .replyRaw("213-Status follows:\r\n213 End of status\r\n");
+        listingOf(enters(script, "/dir"), "LIST", "", std::string{listedFile});
+        listingOf(script, "LIST", "-a", std::string{listedFile});
+        script.expect("SIZE", "/dir").reply("550 Could not get file size.");
+        enters(script, "/dir").expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto made = run(
+            connection,
+            [session = sessionOf(connection)]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+            {
+                co_return co_await makeDirectory(session, "/dir/new");
+            }
+        );
+        ASSERT_FALSE(made);
+        EXPECT_EQ(made.error().kind, RemoteIo::RemoteErrorKind::Failure) << made.error().toString();
+        EXPECT_EQ(made.error().protocolCode, 550);
+    }
+
     TEST_F(MetadataTests, ACancelledCommandEndsCancelledAndAsksNothingMore)
     {
         using VoidResult = std::expected<void, RemoteIo::RemoteError>;

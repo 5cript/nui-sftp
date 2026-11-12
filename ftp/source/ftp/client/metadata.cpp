@@ -219,6 +219,42 @@ namespace FileTransferProtocol
             co_return error;
         }
 
+        /**
+         * @brief Nothing can be made at @p path: its parent does not exist or is no directory.
+         */
+        asio::awaitable<bool> lacksItsDirectory(MetadataSession session, std::string_view path)
+        {
+            const auto parent = parentOf(path);
+            if (!parent)
+                co_return false;
+            const auto container = co_await statPath(std::move(session), *parent);
+            if (container)
+                co_return container->type != FileType::Directory;
+            co_return container.error().kind == RemoteErrorKind::NoSuchFile;
+        }
+
+        /**
+         * @brief Gives the untold() refusal @p error of a command that makes @p path its kind: AlreadyExists where
+         *        something is at @p path, NoSuchFile where its parent is no directory. That @p path does not exist
+         *        tells nothing here, a refusal in a directory that exists stays as the server gave it.
+         */
+        asio::awaitable<RemoteIo::RemoteError>
+        explainNew(MetadataSession session, std::string path, RemoteIo::RemoteError error)
+        {
+            assert(untold(error) && "only a refusal that tells no kind is explained");
+            const auto found = co_await lstatPath(session, path);
+            if (found)
+            {
+                error.kind = RemoteErrorKind::AlreadyExists;
+                co_return error;
+            }
+            if (found.error().kind != RemoteErrorKind::NoSuchFile)
+                co_return error;
+            if (co_await lacksItsDirectory(std::move(session), path))
+                error.kind = RemoteErrorKind::NoSuchFile;
+            co_return error;
+        }
+
         Command setterCommand(ModificationTimeSetter setter, std::string_view time, std::string_view path)
         {
             switch (setter)
@@ -431,17 +467,7 @@ namespace FileTransferProtocol
             co_return std::expected<void, RemoteIo::RemoteError>{};
         if (!untold(made.error()))
             co_return std::unexpected(made.error());
-        co_return std::unexpected(
-            co_await explain(
-                std::move(session),
-                std::move(path),
-                made.error(),
-                [](ListingEntry const&)
-                {
-                    return RemoteErrorKind::AlreadyExists;
-                }
-            )
-        );
+        co_return std::unexpected(co_await explainNew(std::move(session), std::move(path), made.error()));
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> removeFile(MetadataSession session, std::string path)
@@ -518,17 +544,7 @@ namespace FileTransferProtocol
             co_return std::expected<void, RemoteIo::RemoteError>{};
         if (!untold(renamed.error()))
             co_return std::unexpected(renamed.error());
-        co_return std::unexpected(
-            co_await explain(
-                std::move(session),
-                std::move(to),
-                renamed.error(),
-                [](ListingEntry const&)
-                {
-                    return RemoteErrorKind::AlreadyExists;
-                }
-            )
-        );
+        co_return std::unexpected(co_await explainNew(std::move(session), std::move(to), renamed.error()));
     }
 
     asio::awaitable<std::expected<std::uint64_t, RemoteIo::RemoteError>>
@@ -659,12 +675,10 @@ namespace FileTransferProtocol
         if (!upload)
         {
             auto error = upload.error();
-            const auto parent = parentOf(path);
-            if (error.protocolCode == 0 || error.kind == RemoteErrorKind::NoSuchFile || !parent)
+            if (error.protocolCode == 0 || error.kind == RemoteErrorKind::NoSuchFile)
                 co_return std::unexpected(std::move(error));
             // vsftpd refuses a STOR below a missing directory like a denied one, with 553.
-            const auto container = co_await lstatPath(std::move(session), *parent);
-            if (!container && container.error().kind == RemoteErrorKind::NoSuchFile)
+            if (co_await lacksItsDirectory(std::move(session), path))
                 error.kind = RemoteErrorKind::NoSuchFile;
             co_return std::unexpected(std::move(error));
         }
