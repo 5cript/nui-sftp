@@ -2,10 +2,12 @@
 #include <ftp/client/login.hpp>
 #include <ftp/client/metadata.hpp>
 #include <ftp/client/tls.hpp>
+#include <ftp/protocol/listing.hpp>
 #include <ftp/client/transfer.hpp>
 #include <ftp/support/scripted_ftp_server.hpp>
 #include <ftp/support/test_pki.hpp>
 
+#include <boost/asio/buffer.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/thread_pool.hpp>
@@ -13,6 +15,7 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <expected>
@@ -1425,25 +1428,420 @@ namespace FileTransferProtocol::Test
             return rows;
         }
 
+        /**
+         * @brief The first reply @p preliminary, the data of the plan begun before, then @p final.
+         */
+        Steps withData(std::string preliminary, Steps final)
+        {
+            return [preliminary = std::move(preliminary), final = std::move(final)](Script& script)
+            {
+                script.reply(preliminary).beginData().awaitData();
+                final(script);
+            };
+        }
+
+        Steps passiveWith(std::string verb, DataPlan plan)
+        {
+            return [verb = std::move(verb), plan = std::move(plan)](Script& script)
+            {
+                script.expect(verb).passive(plan);
+            };
+        }
+
+        asio::awaitable<Result> downloadWhole(Context context, DownloadRequest request)
+        {
+            auto started = co_await Download::start(context.session.transfer, std::move(request), context.session.options);
+            if (!started)
+                co_return std::unexpected(std::move(started).error());
+            auto const download = std::move(started).value();
+            std::array<char, 64u> buffer{};
+            std::expected<std::size_t, RemoteIo::RemoteError> read = std::size_t{1u};
+            while (read && *read != 0u)
+                read = co_await download->readSome(asio::buffer(buffer));
+            if (!read)
+                co_return std::unexpected(std::move(read).error());
+            co_return withoutValue(co_await download->finish());
+        }
+
+        asio::awaitable<Result> uploadWhole(Context context, UploadRequest request)
+        {
+            auto started = co_await Upload::start(context.session.transfer, std::move(request), context.session.options);
+            if (!started)
+                co_return std::unexpected(std::move(started).error());
+            auto const upload = std::move(started).value();
+            constexpr std::string_view content = "hello";
+            if (auto written = co_await upload->write(asio::buffer(content)); !written)
+                co_return std::unexpected(std::move(written).error());
+            co_return withoutValue(co_await upload->finish());
+        }
+
+        asio::awaitable<Result> listWith(Context context, Verb verb)
+        {
+            auto parser = verb == Verb::MachineListDirectory
+                ? ListingParser::machineListing()
+                : ListingParser::list(std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
+            co_return withoutValue(
+                co_await fetchListing(
+                    context.session.transfer, Command{.verb = verb}, std::move(parser), context.session.options
+                )
+            );
+        }
+
+        constexpr std::string_view downloadAnnounced = "150 Opening BINARY mode data connection for /dir/file (5 bytes).";
+        constexpr std::string_view listingAnnounced = "150 Here comes the directory listing.";
+        constexpr std::string_view uploadAnnounced = "150 Ok to send data.";
+        constexpr std::string_view machineListedFile = "type=file;size=5;modify=20260102030405; file\r\n";
+
+        Steps listingAfterPassive(std::string verb)
+        {
+            return followedBy(
+                expecting(std::move(verb), ""),
+                withData(std::string{listingAnnounced}, replying("226 Directory send OK."))
+            );
+        }
+
+        Route const& extendedPassiveRoute()
+        {
+            static const Route route{
+                .name = "Epsv",
+                .command = expecting("EPSV", ""),
+                .success =
+                    [](Script& script)
+                {
+                    script.passive(DataPlan{}.send(std::string{listedFile}));
+                },
+                .afterSuccess = listingAfterPassive("LIST"),
+                .fallback = followedBy(passiveWith("PASV", DataPlan{}.send(std::string{listedFile})), listingAfterPassive("LIST")),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await listWith(std::move(context), Verb::List);
+                },
+            };
+            return route;
+        }
+
+        Route const& passiveRoute()
+        {
+            static const Route route{
+                .name = "Pasv",
+                .before = followedBy(expecting("EPSV", ""), replying("502 Command not implemented.")),
+                .command = expecting("PASV", ""),
+                .success =
+                    [](Script& script)
+                {
+                    script.passive(DataPlan{}.send(std::string{listedFile}));
+                },
+                .afterSuccess = listingAfterPassive("LIST"),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await listWith(std::move(context), Verb::List);
+                },
+            };
+            return route;
+        }
+
+        Route const& restartRoute()
+        {
+            static const Route route{
+                .name = "Rest",
+                .before = passiveWith("EPSV", DataPlan{}.send("llo")),
+                .command = expecting("REST", "2"),
+                .success = replying("350 Restart position accepted (2)."),
+                .afterSuccess = followedBy(
+                    expecting("RETR", "/dir/file"),
+                    withData("150 Opening BINARY mode data connection for /dir/file (5 bytes).", replying("226 Transfer complete."))
+                ),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await downloadWhole(std::move(context), DownloadRequest{.path = "/dir/file", .offset = 2u});
+                },
+            };
+            return route;
+        }
+
+        Route const& retrieveRoute()
+        {
+            static const Route route{
+                .name = "Retr",
+                .before = passiveWith("EPSV", DataPlan{}.send("hello")),
+                .command = expecting("RETR", "/dir/file"),
+                .success = withData(std::string{downloadAnnounced}, replying("226 Transfer complete.")),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await downloadWhole(std::move(context), DownloadRequest{.path = "/dir/file"});
+                },
+            };
+            return route;
+        }
+
+        Route uploadRoute(std::string name, std::string verb, UploadMode mode)
+        {
+            return Route{
+                .name = std::move(name),
+                .before = passiveWith("EPSV", DataPlan{}.expectUpload(100u)),
+                .command = expecting(std::move(verb), "/dir/file"),
+                .success = withData(std::string{uploadAnnounced}, replying("226 Transfer complete.")),
+                .drive = [mode](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await uploadWhole(std::move(context), UploadRequest{.path = "/dir/file", .mode = mode});
+                },
+            };
+        }
+
+        Route const& storeRoute()
+        {
+            static const Route route = uploadRoute("Stor", "STOR", UploadMode::Store);
+            return route;
+        }
+
+        Route const& appendRoute()
+        {
+            static const Route route = uploadRoute("Appe", "APPE", UploadMode::Append);
+            return route;
+        }
+
+        Route listingRoute(std::string name, std::string verb, Verb sent, std::string_view data)
+        {
+            return Route{
+                .name = std::move(name),
+                .before = passiveWith("EPSV", DataPlan{}.send(std::string{data})),
+                .command = expecting(std::move(verb), ""),
+                .success = withData(std::string{listingAnnounced}, replying("226 Directory send OK.")),
+                .drive = [sent](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await listWith(std::move(context), sent);
+                },
+            };
+        }
+
+        Route const& listRoute()
+        {
+            static const Route route = listingRoute("List", "LIST", Verb::List, listedFile);
+            return route;
+        }
+
+        Route const& machineListRoute()
+        {
+            static const Route route = listingRoute("Mlsd", "MLSD", Verb::MachineListDirectory, machineListedFile);
+            return route;
+        }
+
+        /**
+         * @brief The outcomes of the reply that ends a transfer once its data ended, named Final....
+         */
+        std::vector<Row> finalReplies(Route const& route, std::string preliminary, bool sizeKnown)
+        {
+            const auto after = [&route, &preliminary](std::string name, Steps final)
+            {
+                return Row{
+                    .name = fmt::format("{}_Final{}", route.name, name),
+                    .route = &route,
+                    .outcome = withData(preliminary, std::move(final)),
+                };
+            };
+            auto refusedAfter = [&after](std::string reply, RemoteErrorKind kind)
+            {
+                const auto code = codeOf(reply);
+                auto row = after(fmt::format("Refused{}", code), replying(reply));
+                row.kind = kind;
+                row.code = code;
+                row.shown = textOf(reply);
+                return row;
+            };
+            auto closing = refusedAfter("421 Service not available, closing control connection.", RemoteErrorKind::ConnectionLost);
+            closing.name = fmt::format("{}_FinalServiceClosing", route.name);
+            closing.afterwards = Afterwards::Dead;
+            auto ended = after("EndOfStream", [](Script& script) { script.closeControl(); });
+            ended.serverEnds = true;
+            ended.kind = RemoteErrorKind::ConnectionLost;
+            ended.afterwards = Afterwards::Dead;
+            auto silent = after("Silence", [](Script& script) { script.stall(); });
+            silent.serverEnds = true;
+            silent.hurried = true;
+            silent.afterwards = Afterwards::Dead;
+            // All the data the server announced is proof enough without the final reply.
+            if (!sizeKnown)
+                silent.kind = RemoteErrorKind::TimedOut;
+            return {
+                after("Completion250", replying("250 Requested file action okay, completed.")),
+                refusedAfter("426 Connection closed; transfer aborted.", RemoteErrorKind::ConnectionLost),
+                refusedAfter("451 Requested action aborted: local error in processing.", RemoteErrorKind::Failure),
+                closing,
+                ended,
+                silent,
+            };
+        }
+
+        /**
+         * @brief The outcomes of the first reply to a transfer command that every one of them shares.
+         */
+        std::vector<Row> firstReplies(Route const& route, Steps data)
+        {
+            return {
+                succeeds(route),
+                Row{
+                    .name = fmt::format("{}_Preliminary125", route.name),
+                    .route = &route,
+                    .outcome = withData("125 Data connection already open; transfer starting.", replying("226 Transfer complete.")),
+                },
+                // RFC 959 5.4 lists no 2xx before the data, servers send the final reply early.
+                Row{
+                    .name = fmt::format("{}_OtherCompletion", route.name),
+                    .route = &route,
+                    .outcome = followedBy(replying("226 Transfer complete."), std::move(data)),
+                },
+                refused(route, "425 Can't open data connection.", RemoteErrorKind::NoConnection),
+                refused(route, "426 Connection closed; transfer aborted.", RemoteErrorKind::ConnectionLost),
+                refused(route, "450 Requested file action not taken.", RemoteErrorKind::Failure),
+                refused(route, "451 Requested action aborted: local error in processing.", RemoteErrorKind::Failure),
+                refused(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                refused(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                refused(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+            };
+        }
+
+        Steps dataOnly()
+        {
+            return [](Script& script)
+            {
+                script.beginData().awaitData();
+            };
+        }
+
+        std::vector<Row> transferRows()
+        {
+            std::vector<Row> rows{};
+            for (auto const* route : {&extendedPassiveRoute(), &passiveRoute()})
+            {
+                append(
+                    rows,
+                    {
+                        succeeds(*route),
+                        toleratesPreliminary(*route),
+                    }
+                );
+                append(rows, breakdowns(*route));
+            }
+            {
+                // A data connection EPSV cannot give, PASV may (RFC 2428 3).
+                auto const& route = extendedPassiveRoute();
+                append(
+                    rows,
+                    {
+                        named(refusedAndAvoided(route, "200 Command okay."), "OtherCompletion"),
+                        named(
+                            refusedAndAvoided(route, "350 Requested file action pending further information."),
+                            "Intermediate"
+                        ),
+                        refusedAndAvoided(route, "500 Syntax error, command unrecognized."),
+                        refusedAndAvoided(route, "501 Syntax error in parameters or arguments."),
+                        refusedAndAvoided(route, "502 Command not implemented."),
+                        refusedAndAvoided(route, "530 Not logged in."),
+                    }
+                );
+            }
+            {
+                auto const& route = passiveRoute();
+                append(
+                    rows,
+                    {
+                        completesWrongly(route, "200 Command okay.", RemoteErrorKind::ProtocolViolation),
+                        intermediate(route, "350 Requested file action pending further information."),
+                        refused(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refused(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refused(route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
+                        refused(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+                    }
+                );
+            }
+            {
+                auto const& route = restartRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        completesWrongly(route, "200 Command okay.", RemoteErrorKind::ProtocolViolation),
+                        toleratesPreliminary(route),
+                        intermediate(route, "331 User name okay, need password."),
+                        refused(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refused(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refused(route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
+                        refused(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+                        refused(route, "554 Requested action not taken: invalid REST parameter.", RemoteErrorKind::Failure),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            {
+                auto const& route = retrieveRoute();
+                append(rows, firstReplies(route, dataOnly()));
+                append(
+                    rows,
+                    {
+                        intermediate(route, "350 Requested file action pending further information."),
+                        refused(route, "550 /dir/file: No such file or directory", RemoteErrorKind::NoSuchFile),
+                    }
+                );
+                append(rows, finalReplies(route, std::string{downloadAnnounced}, true));
+                append(rows, breakdowns(route));
+            }
+            for (auto const* route : {&storeRoute(), &appendRoute()})
+            {
+                append(rows, firstReplies(*route, dataOnly()));
+                append(
+                    rows,
+                    {
+                        intermediate(*route, "350 Requested file action pending further information."),
+                        refused(*route, "452 Requested action not taken: insufficient storage space.", RemoteErrorKind::NoSpace),
+                        refused(*route, "532 Need account for storing files.", RemoteErrorKind::PermissionDenied),
+                        refused(*route, "551 Requested action aborted: page type unknown.", RemoteErrorKind::Failure),
+                        refused(*route, "552 Requested file action aborted: exceeded storage allocation.", RemoteErrorKind::QuotaExceeded),
+                        refused(*route, "553 Requested action not taken: file name not allowed.", RemoteErrorKind::PermissionDenied),
+                    }
+                );
+                append(rows, finalReplies(*route, std::string{uploadAnnounced}, false));
+                append(rows, breakdowns(*route));
+            }
+            for (auto const* route : {&listRoute(), &machineListRoute()})
+            {
+                append(rows, firstReplies(*route, dataOnly()));
+                append(
+                    rows,
+                    {
+                        intermediate(*route, "350 Requested file action pending further information."),
+                        refused(*route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
+                    }
+                );
+                append(rows, finalReplies(*route, std::string{listingAnnounced}, false));
+                append(rows, breakdowns(*route));
+            }
+            append(
+                rows,
+                {refused(machineListRoute(), "550 /dir: No such file or directory", RemoteErrorKind::NoSuchFile)}
+            );
+            return rows;
+        }
+
         std::vector<Row> allRows()
         {
             auto rows = metadataRows();
             append(rows, loginRows());
+            append(rows, transferRows());
             return rows;
         }
 
         ControlConnectionOptions optionsFor(Row const& row)
         {
             if (row.hurried)
-                return ControlConnectionOptions{.connectTimeout = 10s, .commandTimeout = 300ms};
+                return ControlConnectionOptions{.connectTimeout = 10s, .commandTimeout = 300ms, .drainTimeout = 300ms};
             return ControlConnectionOptions{.connectTimeout = 10s, .commandTimeout = 10s};
         }
 
-        TransferOptions transferOptions()
+        TransferOptions transferOptionsFor(Row const& row)
         {
             return TransferOptions{
                 .data = {.connectTimeout = 5s, .inactivityTimeout = 5s},
-                .finalReplyTimeout = 2s,
+                .finalReplyTimeout = row.hurried ? 300ms : 5s,
             };
         }
 
@@ -1512,10 +1910,10 @@ namespace FileTransferProtocol::Test
             return {asio::ip::tcp::endpoint{asio::ip::make_address(server_->address()), server_->port()}};
         }
 
-        Context contextOf(Route const& route) const
+        Context contextOf(Row const& row) const
         {
             auto dialect = std::make_shared<ServerDialect>();
-            route.learned(*dialect);
+            row.route->learned(*dialect);
             return Context{
                 .connection = connection_,
                 .endpoints = endpoints(),
@@ -1523,7 +1921,7 @@ namespace FileTransferProtocol::Test
                     MetadataSession{
                         .transfer = {.control = connection_, .passiveChoice = std::make_shared<PassiveChoice>()},
                         .dialect = std::move(dialect),
-                        .options = transferOptions(),
+                        .options = transferOptionsFor(row),
                     },
             };
         }
@@ -1545,7 +1943,7 @@ namespace FileTransferProtocol::Test
             ASSERT_TRUE(greeting) << greeting.error().toString();
         }
 
-        const auto result = run(route.drive(contextOf(route)));
+        const auto result = run(route.drive(contextOf(row)));
 
         if (!row.kind)
             ASSERT_TRUE(result) << result.error().toString();
