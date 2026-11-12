@@ -406,6 +406,60 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
+    TEST_F(MetadataTests, ARefusedMdtmOfAFileThatExistsKeepsTheSetter)
+    {
+        // vsftpd's answer for a file of another owner, the next file sets its time.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MFMT", "20200102030405 /a")
+            .reply("500 Unknown command.")
+            .expect("MDTM", "20200102030405 /a")
+            .reply("550 Could not set file modification time.")
+            .expect("STAT", "/a")
+            .replyRaw(
+                "213-Status of /a:\r\n -rw-r--r--   1 other    other           5 Jan 02 03:04 /a\r\n213 End of "
+                "status\r\n"
+            )
+            .expect("SITE", "UTIME 20200102030405 /a")
+            .reply("500 Unknown SITE command.")
+            .expect("MDTM", "20200102030405 /b")
+            .reply("213 File modification time set.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto refused = setTimeIn(connection, "/a", someTime());
+        ASSERT_FALSE(refused);
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::PermissionDenied) << refused.error().toString();
+        EXPECT_EQ(refused.error().protocolCode, 550);
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::ModificationTimeWithTime);
+        const auto set = setTimeIn(connection, "/b", someTime());
+        ASSERT_TRUE(set) << set.error().toString();
+    }
+
+    TEST_F(MetadataTests, AnMdtmThatReadsTheTimeAsANameWithNoOtherFormSetsNoTime)
+    {
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MFMT")
+            .reply("502 Command not implemented.")
+            .expect("MDTM", "20200102030405 /a")
+            .reply("550 20200102030405 /a: No such file or directory")
+            .expect("STAT", "/a")
+            .replyRaw(
+                "213-Status of /a:\r\n -rw-r--r--   1 ftptest  ftptest         5 Jan 02 03:04 /a\r\n213 End of "
+                "status\r\n"
+            )
+            .expect("SITE")
+            .reply("500 Unknown SITE command.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto set = setTimeIn(connection, "/a", someTime());
+        ASSERT_FALSE(set);
+        EXPECT_EQ(set.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << set.error().toString();
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::None);
+    }
+
     TEST_F(MetadataTests, ACancelledCommandEndsCancelledAndAsksNothingMore)
     {
         using VoidResult = std::expected<void, RemoteIo::RemoteError>;

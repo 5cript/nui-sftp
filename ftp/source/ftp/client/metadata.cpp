@@ -572,6 +572,8 @@ namespace FileTransferProtocol
             ModificationTimeSetter::ModificationTimeWithTime,
             ModificationTimeSetter::SiteUtime,
         };
+        // A 550 to MDTM with a time for a file that exists, which may have refused to set the time.
+        std::optional<RemoteIo::RemoteError> undecided{};
         for (const auto setter : setters)
         {
             if (learned != ModificationTimeSetter::Unknown && setter != learned)
@@ -592,15 +594,26 @@ namespace FileTransferProtocol
                 continue;
             if (probing && setter == ModificationTimeSetter::ModificationTimeWithTime && reply->code == 550)
             {
-                // A server without this form reads the time as part of a file name and finds none.
                 const auto found = co_await lstatPath(session, path);
-                if (found)
-                    continue;
-                co_return std::unexpected(found.error());
+                if (!found)
+                    co_return std::unexpected(found.error());
+                // A server without this form reads the time as part of a file name and finds none. Only a text that
+                // says so tells that from a server that knows the form and refused.
+                if (error.kind != RemoteErrorKind::NoSuchFile)
+                    undecided = std::move(error);
+                continue;
             }
             if (!untold(error))
                 co_return std::unexpected(std::move(error));
             co_return std::unexpected(co_await explain(std::move(session), std::move(path), std::move(error), denied));
+        }
+        if (undecided)
+        {
+            // The other forms are missing, so this is the one the server may take.
+            dialect.learnModificationTimeSetter(ModificationTimeSetter::ModificationTimeWithTime);
+            if (undecided->kind == RemoteErrorKind::Failure)
+                undecided->kind = RemoteErrorKind::PermissionDenied;
+            co_return std::unexpected(std::move(*undecided));
         }
         dialect.learnModificationTimeSetter(ModificationTimeSetter::None);
         co_return std::unexpected(noSetter());
