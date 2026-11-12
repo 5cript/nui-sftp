@@ -5,6 +5,7 @@
 #include <ftp/client/transfer.hpp>
 #include <ftp/engine/call.hpp>
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/ring_options.hpp>
 #include <ftp/protocol/listing.hpp>
 #include <ftp/remote/file_system_operations.hpp>
 #include <remote_io/remote_error.hpp>
@@ -38,6 +39,8 @@ namespace FileTransferProtocol
         ListingLimits listing{};
         /** @brief The most bytes one read or write of a stream moves. */
         std::size_t lengthLimit{256u * 1024u};
+        /** @brief The ring of each asynchronous read or write. */
+        RingOptions ring{};
     };
 
     /**

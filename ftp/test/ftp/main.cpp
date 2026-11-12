@@ -16,6 +16,7 @@
 #include "test_engine.hpp"
 #include "test_ftp_file_system.hpp"
 #include "test_ftp_file_stream.hpp"
+#include "test_ftp_async_transfers.hpp"
 #include "test_delivery_ring.hpp"
 #include "test_supply_ring.hpp"
 #include "test_transfer_conformance.hpp"

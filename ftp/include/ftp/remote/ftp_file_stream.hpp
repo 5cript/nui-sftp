@@ -1,7 +1,10 @@
 #pragma once
 
 #include <ftp/client/transfer.hpp>
+#include <ftp/engine/delivery_ring.hpp>
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/ring.hpp>
+#include <ftp/engine/supply_ring.hpp>
 #include <ftp/pool/lease.hpp>
 #include <ftp/remote/file_system_session.hpp>
 #include <paths/remote_path.hpp>
@@ -20,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,6 +69,11 @@ namespace FileTransferProtocol
      * into the caller's. Once a transfer failed the stream refuses more. closeInStrand() never waits for the server:
      * it ends a transfer that did not finish with ABOR, behind which the connection drains, and gives the connection
      * back.
+     *
+     * An asynchronous read or write carries the data through a ring between the connection's strand and the
+     * processing thread, see DeliveryRing and SupplyRing, and continues a transfer the synchronous calls started.
+     * Its context completes on the processing thread after the last delivery and the final reply. A pause stops the
+     * ring, a cancel or a failure of the context stops it and sends ABOR.
      */
     class FtpFileStream
         : public RemoteIo::IRemoteFileStream
@@ -138,6 +147,11 @@ namespace FileTransferProtocol
          */
         std::expected<void, RemoteIo::RemoteError> writeInStrand(std::string_view data) override;
 
+        /**
+         * @brief Reads the rest of the file asynchronously, @p buffer gets each slot of the ring in pieces of
+         *        @p bufferSize. Fewer bytes than @p totalFileSize fail the transfer as Truncated, also where the
+         *        download took them because the file changed meanwhile.
+         */
         std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError> readAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
@@ -145,6 +159,10 @@ namespace FileTransferProtocol
             std::function<bool(SignedSizeType)> onRead
         ) override;
 
+        /**
+         * @brief Writes @p totalFileSize bytes asynchronously, @p doRead fills the slots of the ring through
+         *        @p buffer. A @p doRead that gives nothing before the end fails the transfer.
+         */
         std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError> writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
@@ -183,6 +201,77 @@ namespace FileTransferProtocol
         using Error = RemoteIo::RemoteError;
         template <typename ValueT>
         using Result = std::expected<ValueT, Error>;
+        using Context = RemoteIo::AsyncTransferContext;
+
+        /**
+         * @brief What the wake of an asynchronous transfer's context reaches. Set before the context is handed out.
+         */
+        struct AsyncLinks
+        {
+            std::weak_ptr<Ring> ring{};
+            std::weak_ptr<Context> context{};
+            std::weak_ptr<Transfer> transfer{};
+            std::weak_ptr<Engine> engine{};
+
+            /**
+             * @brief A resume wakes the ring, the end of the context stops it and sends ABOR. Any thread.
+             */
+            void wake() const;
+        };
+
+        std::shared_ptr<Context> makeContext(std::shared_ptr<Ring> const& ring) const;
+        /**
+         * @brief Hands the bytes of one slot to @p onRead in pieces of @p bufferSize, on the processing thread.
+         */
+        static bool deliver(
+            Context& context,
+            char* buffer,
+            std::size_t bufferSize,
+            std::function<bool(SignedSizeType)> const& onRead,
+            std::span<char const> bytes
+        );
+        /**
+         * @brief Fills one slot with @p doRead through @p buffer, on the processing thread.
+         */
+        static Result<std::size_t> fill(
+            Context& context,
+            char* buffer,
+            SignedSizeType bufferSize,
+            std::function<SignedSizeType(SignedSizeType)> const& doRead,
+            SignedSizeType& remaining,
+            std::span<char> slot
+        );
+        static boost::asio::awaitable<Result<void>> runDownloadRing(
+            std::shared_ptr<Transfer> transfer,
+            std::shared_ptr<DeliveryRing> ring,
+            std::shared_ptr<Context> context,
+            DownloadRequest request,
+            DeliveryRing::Sink sink
+        );
+        static boost::asio::awaitable<Result<void>> runUploadRing(
+            std::shared_ptr<Transfer> transfer,
+            std::shared_ptr<SupplyRing> ring,
+            std::shared_ptr<Context> context,
+            UploadRequest request,
+            SupplyRing::Source source
+        );
+        /**
+         * @brief Runs @p ringSide on the connection's strand, then ends the context with its outcome in a task on the
+         *        processing thread, behind the last delivery. On the session strand.
+         */
+        static boost::asio::awaitable<void> runAsync(
+            std::weak_ptr<FtpFileStream> stream,
+            std::shared_ptr<Engine> engine,
+            std::shared_ptr<ControlConnection> control,
+            std::shared_ptr<Context> context,
+            boost::asio::awaitable<Result<void>> ringSide,
+            std::optional<SignedSizeType> expectedBytes
+        );
+        /**
+         * @brief Keeps the outcome of the asynchronous transfer, on the processing thread.
+         */
+        void asyncEnded(Result<void> outcome);
+        static void abortTransfer(Transfer& transfer);
 
         static boost::asio::awaitable<Result<std::size_t>>
         readOn(std::shared_ptr<Transfer> transfer, DownloadRequest request, std::size_t limit);
@@ -242,5 +331,8 @@ namespace FileTransferProtocol
         std::optional<Result<void>> finished_{};
         std::optional<Error> broken_{};
         bool closed_{false};
+        /** @brief The ring of the asynchronous transfer that runs. */
+        std::shared_ptr<Ring> ring_{};
+        std::shared_ptr<Context> context_{};
     };
 }

@@ -1,7 +1,10 @@
 #include <ftp/remote/ftp_file_stream.hpp>
 #include "../client/client_support.hpp"
 
+#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_awaitable.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -100,8 +103,13 @@ namespace FileTransferProtocol
 
     FtpFileStream::~FtpFileStream()
     {
-        if (!closed_)
-            endTransfer();
+        if (closed_)
+            return;
+        if (ring_)
+            ring_->stop();
+        if (context_)
+            context_->fail(closedError());
+        endTransfer();
     }
 
     std::expected<void, RemoteIo::RemoteError> FtpFileStream::seekInStrand(std::size_t position)
@@ -182,15 +190,80 @@ namespace FileTransferProtocol
     }
 
     std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>
-    FtpFileStream::readAsyncInStrand(SignedSizeType, char*, SignedSizeType, std::function<bool(SignedSizeType)>)
+    FtpFileStream::readAsyncInStrand(
+        SignedSizeType totalFileSize,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<bool(SignedSizeType)> onRead
+    )
     {
-        return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "FTP has no asynchronous reads yet"));
+        if (auto refused = usable(Direction::Download); !refused)
+            return std::unexpected(std::move(refused).error());
+        if (bufferSize <= 0)
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The buffer of an asynchronous read is empty"));
+        auto const& control = transfer_->session.control;
+        const auto ring = DeliveryRing::create(session_.engine, control->strand(), options_.ring);
+        auto context = makeContext(ring);
+        DeliveryRing::Sink sink = [context,
+                                      buffer,
+                                      size = static_cast<std::size_t>(bufferSize),
+                                      onRead = std::move(onRead)](std::span<char const> bytes)
+        {
+            return deliver(*context, buffer, size, onRead, bytes);
+        };
+        const auto spawned = session_.engine->spawn(runAsync(
+            weak_from_this(),
+            session_.engine,
+            control,
+            context,
+            runDownloadRing(transfer_, ring, context, downloadRequest(), std::move(sink)),
+            totalFileSize
+        ));
+        if (!spawned)
+            return std::unexpected(Detail::sessionEndedError());
+        started_ = true;
+        ring_ = ring;
+        context_ = context;
+        return context;
     }
 
     std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>
-    FtpFileStream::writeAsyncInStrand(SignedSizeType, char*, SignedSizeType, std::function<SignedSizeType(SignedSizeType)>)
+    FtpFileStream::writeAsyncInStrand(
+        SignedSizeType totalFileSize,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<SignedSizeType(SignedSizeType)> doRead
+    )
     {
-        return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "FTP has no asynchronous writes yet"));
+        if (auto refused = usable(Direction::Upload); !refused)
+            return std::unexpected(std::move(refused).error());
+        if (bufferSize <= 0)
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The buffer of an asynchronous write is empty"));
+        auto const& control = transfer_->session.control;
+        const auto ring = SupplyRing::create(session_.engine, control->strand(), options_.ring);
+        auto context = makeContext(ring);
+        SupplyRing::Source source = [context,
+                                        buffer,
+                                        bufferSize,
+                                        doRead = std::move(doRead),
+                                        remaining = totalFileSize](std::span<char> slot) mutable
+        {
+            return fill(*context, buffer, bufferSize, doRead, remaining, slot);
+        };
+        const auto spawned = session_.engine->spawn(runAsync(
+            weak_from_this(),
+            session_.engine,
+            control,
+            context,
+            runUploadRing(transfer_, ring, context, uploadRequest(), std::move(source)),
+            std::nullopt
+        ));
+        if (!spawned)
+            return std::unexpected(Detail::sessionEndedError());
+        started_ = true;
+        ring_ = ring;
+        context_ = context;
+        return context;
     }
 
     std::expected<void, RemoteIo::RemoteError> FtpFileStream::finishInStrand()
@@ -246,6 +319,11 @@ namespace FileTransferProtocol
         // Leaving the open streams may drop the last owner.
         const auto self = shared_from_this();
         closed_ = true;
+        // No delivery or fill reaches the caller's side after this, also from inside one.
+        if (ring_)
+            ring_->close();
+        if (context_)
+            context_->fail(closedError());
         endTransfer();
         if (const auto streams = streams_.lock())
             streams->remove(this);
@@ -321,6 +399,8 @@ namespace FileTransferProtocol
             return std::unexpected(errorOf(RemoteErrorKind::Failure, "The transfer of the stream finished"));
         if (broken_)
             return std::unexpected(*broken_);
+        if (ring_)
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "An asynchronous transfer of the stream runs"));
         if (direction == direction_)
             return {};
         if (direction_ == Direction::Download)
@@ -381,15 +461,245 @@ namespace FileTransferProtocol
                 transfer_->session.control->strand(),
                 [transfer = transfer_]()
                 {
-                    if (transfer->download)
-                        transfer->download->abort();
-                    if (transfer->upload)
-                        transfer->upload->abort();
+                    abortTransfer(*transfer);
                 }
             );
         }
         // Behind the ABOR on the connection's strand: the pool asks there whether the connection is still open.
         lease_.release();
+    }
+
+    void FtpFileStream::AsyncLinks::wake() const
+    {
+        const auto lockedRing = ring.lock();
+        if (!lockedRing)
+            return;
+        if (const auto lockedContext = context.lock(); lockedContext && !lockedContext->hasEnded())
+        {
+            lockedRing->wake();
+            return;
+        }
+        lockedRing->stop();
+        const auto lockedTransfer = transfer.lock();
+        const auto lockedEngine = engine.lock();
+        if (!lockedTransfer || !lockedEngine)
+            return;
+        lockedEngine->postTo(
+            lockedTransfer->session.control->strand(),
+            [lockedTransfer]()
+            {
+                abortTransfer(*lockedTransfer);
+            }
+        );
+    }
+
+    std::shared_ptr<FtpFileStream::Context> FtpFileStream::makeContext(std::shared_ptr<Ring> const& ring) const
+    {
+        const auto links = std::make_shared<AsyncLinks>(AsyncLinks{
+            .ring = ring,
+            .transfer = transfer_,
+            .engine = session_.engine,
+        });
+        auto context = std::make_shared<Context>(
+            [links]()
+            {
+                links->wake();
+            }
+        );
+        links->context = context;
+        return context;
+    }
+
+    bool FtpFileStream::deliver(
+        Context& context,
+        char* buffer,
+        std::size_t bufferSize,
+        std::function<bool(SignedSizeType)> const& onRead,
+        std::span<char const> bytes
+    )
+    {
+        for (std::size_t offset = 0u; offset < bytes.size(); offset += bufferSize)
+        {
+            // A close or cancel from inside onRead ends the context.
+            if (context.hasEnded())
+                return false;
+            const auto piece = std::min(bufferSize, bytes.size() - offset);
+            std::memcpy(buffer, bytes.data() + offset, piece);
+            if (!onRead(static_cast<SignedSizeType>(piece)))
+            {
+                context.fail(RemoteIo::RemoteError{
+                    .kind = RemoteErrorKind::Failure,
+                    .protocol = RemoteIo::Protocol::Ftp,
+                    .message = "Storing the received data failed",
+                    .wrapperError = RemoteIo::WrapperErrors::LocalIoFailure,
+                });
+                return false;
+            }
+            context.addBytesTransferred(static_cast<SignedSizeType>(piece));
+        }
+        context.calculateBytesPerSecond();
+        context.reportProgress();
+        return !context.hasEnded();
+    }
+
+    FtpFileStream::Result<std::size_t> FtpFileStream::fill(
+        Context& context,
+        char* buffer,
+        SignedSizeType bufferSize,
+        std::function<SignedSizeType(SignedSizeType)> const& doRead,
+        SignedSizeType& remaining,
+        std::span<char> slot
+    )
+    {
+        if (context.hasEnded())
+            return std::unexpected(errorOf(RemoteErrorKind::Cancelled, "The transfer ended"));
+        std::size_t filled = 0u;
+        while (filled < slot.size() && remaining > 0)
+        {
+            const auto wanted =
+                std::min({bufferSize, static_cast<SignedSizeType>(slot.size() - filled), remaining});
+            const auto got = doRead(wanted);
+            if (got <= 0 || got > wanted)
+            {
+                return std::unexpected(RemoteIo::RemoteError{
+                    .kind = RemoteErrorKind::Failure,
+                    .protocol = RemoteIo::Protocol::Ftp,
+                    .message = "Reading the data to send failed",
+                    .wrapperError = RemoteIo::WrapperErrors::LocalIoFailure,
+                });
+            }
+            std::memcpy(slot.data() + filled, buffer, static_cast<std::size_t>(got));
+            filled += static_cast<std::size_t>(got);
+            remaining -= got;
+            context.addBytesTransferred(got);
+        }
+        context.calculateBytesPerSecond();
+        context.reportProgress();
+        return filled;
+    }
+
+    asio::awaitable<FtpFileStream::Result<void>> FtpFileStream::runDownloadRing(
+        std::shared_ptr<Transfer> transfer,
+        std::shared_ptr<DeliveryRing> ring,
+        std::shared_ptr<Context> context,
+        DownloadRequest request,
+        DeliveryRing::Sink sink
+    )
+    {
+        if (!transfer->download)
+        {
+            auto started = co_await Download::start(transfer->session, std::move(request), transfer->options);
+            if (!started)
+                co_return std::unexpected(std::move(started).error());
+            transfer->download = *std::move(started);
+        }
+        const auto ran = co_await ring->run(
+            [transfer](asio::mutable_buffer buffer)
+            {
+                return transfer->download->readSome(buffer);
+            },
+            std::move(sink),
+            [context]()
+            {
+                return context->paused();
+            }
+        );
+        if (!ran)
+        {
+            transfer->download->abort();
+            co_return ran;
+        }
+        co_return (co_await transfer->download->finish()).transform([](TransferResult const&) {});
+    }
+
+    asio::awaitable<FtpFileStream::Result<void>> FtpFileStream::runUploadRing(
+        std::shared_ptr<Transfer> transfer,
+        std::shared_ptr<SupplyRing> ring,
+        std::shared_ptr<Context> context,
+        UploadRequest request,
+        SupplyRing::Source source
+    )
+    {
+        if (!transfer->upload)
+        {
+            auto started = co_await Upload::start(transfer->session, std::move(request), transfer->options);
+            if (!started)
+                co_return std::unexpected(std::move(started).error());
+            transfer->upload = *std::move(started);
+        }
+        const auto ran = co_await ring->run(
+            std::move(source),
+            [transfer](asio::const_buffer data)
+            {
+                return transfer->upload->write(data);
+            },
+            [context]()
+            {
+                return context->paused();
+            }
+        );
+        if (!ran)
+        {
+            transfer->upload->abort();
+            co_return ran;
+        }
+        co_return (co_await transfer->upload->finish()).transform([](UploadResult const&) {});
+    }
+
+    asio::awaitable<void> FtpFileStream::runAsync(
+        std::weak_ptr<FtpFileStream> stream,
+        std::shared_ptr<Engine> engine,
+        std::shared_ptr<ControlConnection> control,
+        std::shared_ptr<Context> context,
+        asio::awaitable<Result<void>> ringSide,
+        std::optional<SignedSizeType> expectedBytes
+    )
+    {
+        auto [exception, outcome] = co_await asio::co_spawn(
+            control->strand(),
+            Detail::withoutThrowing<void>(std::move(ringSide)),
+            asio::as_tuple(asio::use_awaitable)
+        );
+        // Fails the session, see Engine::spawn().
+        if (exception)
+            std::rethrow_exception(exception);
+        auto end = [stream, context, outcome = std::move(outcome), expectedBytes]() mutable
+        {
+            if (outcome && expectedBytes && context->bytesTransferred() < *expectedBytes)
+            {
+                outcome = std::unexpected(RemoteIo::RemoteError{
+                    .kind = RemoteErrorKind::Truncated,
+                    .protocol = RemoteIo::Protocol::Ftp,
+                    .message = "The remote file ended before the expected size was read",
+                    .wrapperError = RemoteIo::WrapperErrors::UnexpectedEndOfFile,
+                });
+            }
+            if (const auto locked = stream.lock())
+                locked->asyncEnded(outcome);
+            context->calculateBytesPerSecond();
+            if (outcome)
+                context->complete();
+            else
+                context->fail(std::move(outcome).error());
+        };
+        // Behind every delivery of the ring, which pushed them before its run ended.
+        if (!engine->pushTask(end))
+            end();
+    }
+
+    void FtpFileStream::asyncEnded(Result<void> outcome)
+    {
+        ring_.reset();
+        if (!finished_)
+            finished_ = std::move(outcome);
+    }
+
+    void FtpFileStream::abortTransfer(Transfer& transfer)
+    {
+        if (transfer.download)
+            transfer.download->abort();
+        if (transfer.upload)
+            transfer.upload->abort();
     }
 
     FtpFileStream::Error FtpFileStream::closedError()
