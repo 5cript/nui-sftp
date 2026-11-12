@@ -2,10 +2,13 @@
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
 
+#include <boost/asio/buffer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -258,6 +261,37 @@ namespace FileTransferProtocol
         if (!RemoteIo::isMissing(existing.error()))
             co_return std::unexpected(existing.error());
         co_return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "FTP has no hard links"));
+    }
+
+    asio::awaitable<RemoteIo::OperationResult<RemoteIo::ReadFile>>
+    runOperation(MetadataSession session, RemoteIo::ReadFile operation)
+    {
+        constexpr std::size_t pieceSize = 64u * 1024u;
+        auto started =
+            co_await Download::start(session.transfer, DownloadRequest{.path = operation.path.value()}, session.options);
+        if (!started)
+            co_return std::unexpected(std::move(started).error());
+        const auto download = *std::move(started);
+        std::string content{};
+        std::vector<char> piece(std::min(operation.maximumSize, pieceSize));
+        while (content.size() < operation.maximumSize)
+        {
+            const auto wanted = std::min(piece.size(), operation.maximumSize - content.size());
+            const auto read = co_await download->readSome(asio::buffer(piece.data(), wanted));
+            if (!read)
+                co_return std::unexpected(read.error());
+            if (*read == 0u)
+            {
+                const auto finished = co_await download->finish();
+                if (!finished)
+                    co_return std::unexpected(finished.error());
+                co_return content;
+            }
+            content.append(piece.data(), *read);
+        }
+        // The rest is not wanted, the connection drains behind the ABOR.
+        download->abort();
+        co_return content;
     }
 
     asio::awaitable<RemoteIo::OperationResult<RemoteIo::SetModificationTime>>

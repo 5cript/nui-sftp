@@ -108,7 +108,8 @@ namespace FileTransferProtocol::Test
         /**
          * @brief Starts a server whose C0 follows @p script after the login, logs in and makes a file system there.
          */
-        std::shared_ptr<FtpFileSystem> connect(Script script, FtpFileSystemOptions options = {})
+        std::shared_ptr<FtpFileSystem>
+        connect(Script script, FtpFileSystemOptions options = {}, std::size_t transferConnections = 3u)
         {
             auto started = ScriptedFtpServer::start();
             if (!started)
@@ -121,6 +122,7 @@ namespace FileTransferProtocol::Test
                 .port = server_->port(),
                 .login = {.credentials = {.user = "user", .password = "password"}},
                 .control = {.connectTimeout = 10s, .commandTimeout = 10s},
+                .transferConnections = transferConnections,
             };
             engine_ = Engine::create(host_.executor(), std::make_shared<Resolver>(), gate_, std::move(engineOptions));
             auto start = asio::co_spawn(engine_->strand(), engine_->pool()->start(), asio::use_future);
@@ -132,7 +134,7 @@ namespace FileTransferProtocol::Test
                     .engine = engine_,
                     .dialect = dialect_,
                     .homeDirectory = login->homeDirectory,
-                    .parallelTransfers = 3u,
+                    .parallelTransfers = transferConnections,
                 },
                 thread_.createStrand(),
                 std::move(options)

@@ -38,6 +38,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply_error.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/protocol/reply_parsers.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/remote/file_system_operations.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/remote/ftp_file_stream.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/remote/ftp_file_system.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/remote/running_operations.cpp
     )

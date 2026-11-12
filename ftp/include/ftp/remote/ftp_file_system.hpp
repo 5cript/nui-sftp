@@ -1,69 +1,33 @@
 #pragma once
 
-#include <ftp/client/metadata.hpp>
-#include <ftp/client/transfer.hpp>
 #include <ftp/engine/call.hpp>
 #include <ftp/engine/engine.hpp>
-#include <ftp/protocol/listing.hpp>
-#include <ftp/remote/file_system_operations.hpp>
+#include <ftp/remote/file_system_session.hpp>
+#include <ftp/remote/ftp_file_stream.hpp>
 #include <ftp/remote/running_operations.hpp>
 #include <remote_io/async/buffer_provider.hpp>
 #include <remote_io/async/processing_strand.hpp>
 #include <remote_io/remote_error.hpp>
 #include <remote_io/remote_file_system.hpp>
 
-#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
 
-#include <cstddef>
-#include <exception>
 #include <functional>
 #include <memory>
-#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace FileTransferProtocol
 {
-    struct FtpFileSystemOptions
-    {
-        /** @brief The bounds of each operation, see Engine::run(). */
-        SyncLimits operationLimits{};
-        TransferOptions transfer{};
-        ListingLimits listing{};
-    };
-
-    /**
-     * @brief What the file systems of one session share, fixed once its first login told it.
-     */
-    struct FileSystemSession
-    {
-        std::shared_ptr<Engine> engine{};
-        /** @brief What the session learned about the commands of its server. */
-        std::shared_ptr<ServerDialect> dialect = std::make_shared<ServerDialect>();
-        /** @brief The directory the first login started in, from PWD, empty when the server did not tell. */
-        std::string homeDirectory{};
-        /** @brief How many transfers run at once, the transfer connections of the pool. */
-        std::size_t parallelTransfers{1u};
-    };
-
-    /**
-     * @brief An operation FtpFileSystem runs with the commands of a connection of its pool.
-     */
-    template <typename OperationT>
-    concept RunsOnACommandConnection = requires(MetadataSession session, OperationT operation) {
-        runOperation(std::move(session), std::move(operation));
-    };
-
     /**
      * @brief The files of an FTP server as a RemoteIo file system, one channel of a session.
      *
      * Operations start at once on the engine of the session, from any thread, and each takes a connection for
-     * commands for as long as it runs: C0, an idle transfer connection, or C0 in turn. The engine bounds each one
-     * with the operation limits and completes it on the session strand, as TimedOut if need be, so inStrand() waits
-     * on the processing thread without driving anything. Operations that need no server answer at once.
+     * commands for as long as it runs: C0, an idle transfer connection, or C0 in turn. OpenFile takes a transfer
+     * connection for the stream instead, and fails with Busy while every one transfers. The engine bounds each
+     * operation with the operation limits and completes it on the session strand, as TimedOut if need be, so
+     * inStrand() waits on the processing thread without driving anything. Operations that need no server answer at
+     * once.
      */
     class FtpFileSystem : public RemoteIo::RemoteFileSystemImplementation<FtpFileSystem>
     {
@@ -102,8 +66,9 @@ namespace FileTransferProtocol
         RemoteIo::IBufferProvider& bufferProvider() override;
 
         /**
-         * @brief Fails the operations under way with ConnectionLost and refuses later ones, then finalizes the strand.
-         *        An operation that was failed still runs to its end on the engine, its result is dropped.
+         * @brief Fails the operations under way with ConnectionLost and refuses later ones, then closes the streams in
+         *        a final task, which finalizes the strand. An operation that was failed still runs to its end on the
+         *        engine, its result is dropped.
          *
          * @return False when it was closed already.
          */
@@ -126,7 +91,9 @@ namespace FileTransferProtocol
                 completion->fail(closedError());
                 return;
             }
-            if constexpr (RunsOnACommandConnection<OperationT>)
+            if constexpr (std::is_same_v<OperationT, RemoteIo::OpenFile>)
+                open(std::move(pending.operation), std::move(completion));
+            else if constexpr (RunsOnACommandConnection<OperationT>)
                 runOnServer(std::move(pending.operation), std::move(completion));
             else
                 completion->complete(answer(pending.operation));
@@ -141,7 +108,7 @@ namespace FileTransferProtocol
                     std::shared_ptr<CallScope> const& scope
                 ) mutable
                 {
-                    return onCommandConnection<ValueT>(
+                    return Detail::onCommandConnection(
                         std::move(session), std::move(options), scope, std::move(operation)
                     );
                 },
@@ -153,54 +120,20 @@ namespace FileTransferProtocol
             );
         }
 
+        void open(RemoteIo::OpenFile operation, std::shared_ptr<TrackedCompletion<RemoteIo::OpenFile>> completion);
+
         /**
-         * @brief Takes a connection for commands and runs @p operation on its strand, on the session strand.
+         * @brief Takes a transfer connection for a stream, asks a file to read for its size, on the session strand.
          */
-        template <typename ValueT, typename OperationT>
-        static boost::asio::awaitable<Engine::Result<ValueT>> onCommandConnection(
+        static boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::OpenFile>> openOn(
             FileSystemSession session,
             FtpFileSystemOptions options,
+            RemoteIo::ProcessingStrand* strand,
+            std::shared_ptr<OpenStreams> streams,
             std::shared_ptr<CallScope> scope,
-            OperationT operation
-        )
-        {
-            const auto pool = session.engine->pool();
-            if (!pool)
-                co_return std::unexpected(sessionEndedError());
-            auto lease = co_await pool->acquireCommand();
-            if (!lease)
-                co_return std::unexpected(std::move(lease).error());
-            const auto control = lease->control();
-            scope->touch(control);
-            auto [exception, result] = co_await boost::asio::co_spawn(
-                control->strand(),
-                runWithoutThrowing(
-                    MetadataSession{
-                        .transfer = lease->transferSession(),
-                        .dialect = std::move(session.dialect),
-                        .options = options.transfer,
-                        .limits = options.listing,
-                    },
-                    std::move(operation)
-                ),
-                boost::asio::as_tuple(boost::asio::use_awaitable)
-            );
-            // Fails the session, see Engine::run().
-            if (exception)
-                std::rethrow_exception(exception);
-            co_return std::move(result);
-        }
+            RemoteIo::OpenFile operation
+        );
 
-        template <typename OperationT>
-        static boost::asio::awaitable<RemoteIo::OperationResult<OperationT>>
-        runWithoutThrowing(MetadataSession session, OperationT operation)
-        {
-            co_await boost::asio::this_coro::throw_if_cancelled(false);
-            co_return co_await runOperation(std::move(session), std::move(operation));
-        }
-
-        RemoteIo::OperationResult<RemoteIo::OpenFile> answer(RemoteIo::OpenFile const& operation) const;
-        RemoteIo::OperationResult<RemoteIo::ReadFile> answer(RemoteIo::ReadFile const& operation) const;
         RemoteIo::OperationResult<RemoteIo::HomeDirectory> answer(RemoteIo::HomeDirectory const& operation) const;
         RemoteIo::OperationResult<RemoteIo::CanonicalHomeDirectory>
         answer(RemoteIo::CanonicalHomeDirectory const& operation) const;
@@ -209,12 +142,12 @@ namespace FileTransferProtocol
         RemoteIo::OperationResult<RemoteIo::CreateSymLink> answer(RemoteIo::CreateSymLink const& operation) const;
 
         static RemoteIo::RemoteError closedError();
-        static RemoteIo::RemoteError sessionEndedError();
 
         const FileSystemSession session_;
         const std::unique_ptr<RemoteIo::ProcessingStrand> strand_;
         const FtpFileSystemOptions options_;
         const std::shared_ptr<RunningOperations> running_ = std::make_shared<RunningOperations>();
+        const std::shared_ptr<OpenStreams> streams_ = std::make_shared<OpenStreams>();
         const std::shared_ptr<RemoteIo::IBufferProvider> bufferProvider_;
     };
 }

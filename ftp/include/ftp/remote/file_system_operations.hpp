@@ -70,6 +70,12 @@ namespace FileTransferProtocol
     runOperation(MetadataSession session, RemoteIo::LinkIntoPlace operation);
 
     /**
+     * @brief RETR on the connection for commands, ABOR once maximumSize bytes came.
+     */
+    boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::ReadFile>>
+    runOperation(MetadataSession session, RemoteIo::ReadFile operation);
+
+    /**
      * @brief setModificationTime() with the time in whole seconds.
      */
     boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::SetModificationTime>>

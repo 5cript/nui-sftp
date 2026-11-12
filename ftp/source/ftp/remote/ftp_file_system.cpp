@@ -3,11 +3,46 @@
 #include "../client/client_support.hpp"
 
 #include <algorithm>
+#include <optional>
 
 namespace FileTransferProtocol
 {
-    using Detail::errorOf;
-    using RemoteIo::RemoteErrorKind;
+    namespace
+    {
+        namespace asio = boost::asio;
+        using Detail::errorOf;
+        using RemoteIo::OpenMode;
+        using RemoteIo::RemoteErrorKind;
+
+        /**
+         * @brief Which way a stream opened with @p mode transfers: FTP moves a file one way per transfer and has no
+         *        exclusive create.
+         */
+        std::expected<FtpFileStream::Direction, RemoteIo::RemoteError> directionOf(OpenMode mode)
+        {
+            if (RemoteIo::contains(mode, OpenMode::Exclusive))
+                return std::unexpected(
+                    errorOf(RemoteErrorKind::Unsupported, "FTP cannot create a file only where none exists")
+                );
+            const auto reads = RemoteIo::contains(mode, OpenMode::Read);
+            const auto writes = RemoteIo::contains(mode, OpenMode::Write);
+            if (reads && writes)
+                return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "FTP transfers a file one way at a time"));
+            if (reads)
+                return FtpFileStream::Direction::Download;
+            if (writes)
+                return FtpFileStream::Direction::Upload;
+            return std::unexpected(errorOf(RemoteErrorKind::Failure, "The file is opened neither to read nor to write"));
+        }
+    }
+
+    namespace Detail
+    {
+        RemoteIo::RemoteError sessionEndedError()
+        {
+            return errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended");
+        }
+    }
 
     std::shared_ptr<FtpFileSystem> FtpFileSystem::create(
         FileSystemSession session,
@@ -63,15 +98,20 @@ namespace FileTransferProtocol
     {
         if (!running_->close(closedError()))
             return false;
-        if (strand_->isFinalized())
-            return true;
-        if (!strand_->withinProcessingThread())
+        const auto closeStreams = [streams = streams_]()
         {
-            // A refused or dropped final task leaves nothing to wait for.
-            strand_->pushFinalPromiseTask([]() {}).wait();
+            for (auto const& stream : streams->close())
+                stream->closeInStrand();
+            return true;
+        };
+        if (strand_->withinProcessingThread())
+        {
+            strand_->doFinalSync(closeStreams);
             return true;
         }
-        strand_->doFinalSync([]() {});
+        // A thread that stopped refuses the task, no task of the session runs beside this one then.
+        if (!strand_->pushFinalPromiseTask(closeStreams).get())
+            closeStreams();
         return true;
     }
 
@@ -80,14 +120,83 @@ namespace FileTransferProtocol
         start();
     }
 
-    RemoteIo::OperationResult<RemoteIo::OpenFile> FtpFileSystem::answer(RemoteIo::OpenFile const&) const
+    void FtpFileSystem::open(
+        RemoteIo::OpenFile operation,
+        std::shared_ptr<TrackedCompletion<RemoteIo::OpenFile>> completion
+    )
     {
-        return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "FTP file streams are not there yet"));
+        session_.engine->template run<RemoteIo::OpenFile::Result>(
+            [session = session_,
+                options = options_,
+                strand = strand_.get(),
+                streams = streams_,
+                operation = std::move(operation)](std::shared_ptr<CallScope> const& scope) mutable
+            {
+                return openOn(
+                    std::move(session), std::move(options), strand, std::move(streams), scope, std::move(operation)
+                );
+            },
+            options_.operationLimits,
+            [completion = std::move(completion)](RemoteIo::OperationResult<RemoteIo::OpenFile> result)
+            {
+                completion->complete(std::move(result));
+            }
+        );
     }
 
-    RemoteIo::OperationResult<RemoteIo::ReadFile> FtpFileSystem::answer(RemoteIo::ReadFile const&) const
+    asio::awaitable<RemoteIo::OperationResult<RemoteIo::OpenFile>> FtpFileSystem::openOn(
+        FileSystemSession session,
+        FtpFileSystemOptions options,
+        RemoteIo::ProcessingStrand* strand,
+        std::shared_ptr<OpenStreams> streams,
+        std::shared_ptr<CallScope> scope,
+        RemoteIo::OpenFile operation
+    )
     {
-        return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "FTP file streams are not there yet"));
+        const auto direction = directionOf(operation.mode);
+        if (!direction)
+            co_return std::unexpected(direction.error());
+        const auto pool = session.engine->pool();
+        if (!pool)
+            co_return std::unexpected(Detail::sessionEndedError());
+        auto lease = co_await pool->acquireTransfer(std::move(operation.wakeWhenFree));
+        if (!lease)
+            co_return std::unexpected(std::move(lease).error());
+
+        std::optional<std::uint64_t> size{};
+        if (*direction == FtpFileStream::Direction::Download)
+        {
+            auto found = co_await Detail::onConnection<std::uint64_t>(
+                lease->control(),
+                std::move(scope),
+                sizeOf(
+                    MetadataSession{
+                        .transfer = lease->transferSession(),
+                        .dialect = session.dialect,
+                        .options = options.transfer,
+                        .limits = options.listing,
+                    },
+                    operation.path.value()
+                )
+            );
+            if (!found)
+                co_return std::unexpected(std::move(found).error());
+            size = *found;
+        }
+        auto stream = FtpFileStream::create(
+            std::move(session),
+            std::move(options),
+            strand,
+            std::move(*lease),
+            std::move(operation.path),
+            *direction,
+            size,
+            streams
+        );
+        // Dropped, the stream gives its connection back.
+        if (!streams->add(stream))
+            co_return std::unexpected(closedError());
+        co_return std::weak_ptr<RemoteIo::IRemoteFileStream>{stream};
     }
 
     RemoteIo::OperationResult<RemoteIo::HomeDirectory> FtpFileSystem::answer(RemoteIo::HomeDirectory const&) const
@@ -122,10 +231,5 @@ namespace FileTransferProtocol
     RemoteIo::RemoteError FtpFileSystem::closedError()
     {
         return errorOf(RemoteErrorKind::ConnectionLost, "The FTP file system was closed");
-    }
-
-    RemoteIo::RemoteError FtpFileSystem::sessionEndedError()
-    {
-        return errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended");
     }
 }
