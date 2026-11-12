@@ -1822,11 +1822,192 @@ namespace FileTransferProtocol::Test
             return rows;
         }
 
+        /**
+         * @brief Reads at least @p count bytes of a download, then aborts it and sends NOOP behind the drain.
+         *
+         * @return The result of the NOOP: the error that ended the connection when the drain failed.
+         */
+        asio::awaitable<Result> abortAfter(Context context, std::size_t count)
+        {
+            auto started = co_await Download::start(
+                context.session.transfer, DownloadRequest{.path = "/dir/file"}, context.session.options
+            );
+            if (!started)
+                co_return std::unexpected(std::move(started).error());
+            auto const download = std::move(started).value();
+            std::array<char, 64u> buffer{};
+            std::size_t total{0u};
+            std::expected<std::size_t, RemoteIo::RemoteError> read = std::size_t{1u};
+            while (read && *read != 0u && total < count)
+            {
+                read = co_await download->readSome(asio::buffer(buffer));
+                if (read)
+                    total += *read;
+            }
+            if (!read)
+                co_return std::unexpected(std::move(read).error());
+            download->abort();
+            co_return withoutValue(co_await context.connection->execute(Command{.verb = Verb::Noop}));
+        }
+
+        constexpr std::string_view markerReply = "257 \"/dir\" is the current directory";
+
+        Route const& abortRoute()
+        {
+            // ABOR goes out with PWD behind it, the marker of the drain.
+            static const Route route{
+                .name = "Abor",
+                .before = followedBy(
+                    passiveWith("EPSV", DataPlan{}.stallAfter("abc")),
+                    [](Script& script)
+                    {
+                        script.expect("RETR", "/dir/file")
+                            .reply("150 Opening BINARY mode data connection for /dir/file (7 bytes).")
+                            .beginData();
+                    }
+                ),
+                .command =
+                    [](Script& script)
+                {
+                    script.expect("ABOR", "").expect("PWD", "");
+                },
+                .success = followedBy(
+                    followedBy(replying("426 Connection closed; transfer aborted."), replying("226 Abort successful.")),
+                    replying(std::string{markerReply})
+                ),
+                .afterSuccess = followedBy(expecting("NOOP", ""), replying("200 Command okay.")),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    co_return co_await abortAfter(std::move(context), 3u);
+                },
+            };
+            return route;
+        }
+
+        /**
+         * @brief The replies @p replies to ABOR, then the marker's, after which the drain ends and the login stays.
+         */
+        Row drainedBy(std::string outcome, std::vector<std::string> replies)
+        {
+            auto const& route = abortRoute();
+            return Row{
+                .name = fmt::format("{}_{}", route.name, outcome),
+                .route = &route,
+                .outcome =
+                    [replies = std::move(replies)](Script& script)
+                {
+                    for (auto const& reply : replies)
+                        script.reply(reply);
+                    script.reply(markerReply);
+                },
+                .then = Then::GoesOn,
+            };
+        }
+
+        Route const& noopRoute()
+        {
+            // The pool's NOOP keeps a connection alive, any reply in step will do.
+            static const Route route{
+                .name = "Noop",
+                .command = expecting("NOOP", ""),
+                .success = replying("200 Command okay."),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    co_return withoutValue(co_await context.connection->execute(Command{.verb = Verb::Noop}));
+                },
+            };
+            return route;
+        }
+
+        Route const& quitRoute()
+        {
+            // Like the pool: QUIT, then a close whatever came.
+            static const Route route{
+                .name = "Quit",
+                .command = expecting("QUIT", ""),
+                .success = replying("221 Goodbye."),
+                .drive = [](Context context) -> asio::awaitable<Result>
+                {
+                    [[maybe_unused]] const auto reply = co_await context.connection->execute(Command{.verb = Verb::Quit});
+                    context.connection->close();
+                    co_return Result{};
+                },
+            };
+            return route;
+        }
+
+        std::vector<Row> sessionRows()
+        {
+            std::vector<Row> rows{};
+            {
+                auto const& route = abortRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        drainedBy("FinalOnly", {"226 Transfer complete."}),
+                        drainedBy("FinalFirst", {"226 Abort successful.", "426 Connection closed; transfer aborted."}),
+                        drainedBy("OtherCompletion", {"426 Failure writing network stream.", "225 No transfer to ABOR."}),
+                        drainedBy("Refused451", {"426 Transfer aborted.", "451 Transfer aborted."}),
+                        drainedBy("Refused500", {"500 Syntax error, command unrecognized."}),
+                        drainedBy("Refused501", {"501 Syntax error in parameters or arguments."}),
+                        drainedBy("Refused502", {"502 Command not implemented."}),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            {
+                auto const& route = noopRoute();
+                auto closing = closesTheService(route);
+                // The 421 is the reply NOOP waited for, the connection ends behind it.
+                closing.kind.reset();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        completes(route, "250 Requested file action okay."),
+                        toleratesPreliminary(route),
+                        named(
+                            refusedAndIgnored(route, "350 Requested file action pending further information."),
+                            "Intermediate"
+                        ),
+                        refusedAndIgnored(route, "500 Syntax error, command unrecognized."),
+                        closing,
+                        malformed(route),
+                        endsTheStream(route),
+                        resets(route),
+                        endsInAReply(route),
+                        staysSilent(route),
+                    }
+                );
+            }
+            {
+                // Closing never fails, whatever the server does.
+                auto const& route = quitRoute();
+                auto quitting = leaving(
+                    {
+                        succeeds(route),
+                        completes(route, "200 Command okay."),
+                        toleratesPreliminary(route),
+                        refusedAndIgnored(route, "500 Syntax error, command unrecognized."),
+                    },
+                    Afterwards::Closed
+                );
+                auto failures = breakdowns(route);
+                for (auto& row : failures)
+                    row.kind.reset();
+                append(rows, std::move(quitting));
+                append(rows, std::move(failures));
+            }
+            return rows;
+        }
+
         std::vector<Row> allRows()
         {
             auto rows = metadataRows();
             append(rows, loginRows());
             append(rows, transferRows());
+            append(rows, sessionRows());
             return rows;
         }
 
