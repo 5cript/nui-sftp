@@ -675,6 +675,26 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(removed) << removed.error().toString();
     }
 
+    TEST_F(MetadataTests, ARefusedRmdOfADirectoryWithContentSaysSoWithoutItsStatus)
+    {
+        // vsftpd's refusal tells nothing. The parent tells the directory, its listing the content, no STAT lists it.
+        const std::string listedDirectory = "drwxr-xr-x    2 0        0            4096 Jan 02 03:04 sub\r\n";
+        Script script{};
+        script.reply("220 Ready");
+        enters(script, "/dir").expect("RMD", "/dir/sub").reply("550 Remove directory operation failed.");
+        listingOf(enters(script, "/dir"), "LIST", "", listedDirectory);
+        listingOf(script, "LIST", "-a", listedDirectory);
+        listingOf(enters(script, "/dir/sub"), "LIST", "-a", std::string{listedFile});
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto removed = removeDirectoryIn(connection, "/dir/sub");
+        ASSERT_FALSE(removed);
+        EXPECT_EQ(removed.error().kind, RemoteIo::RemoteErrorKind::Failure) << removed.error().toString();
+        EXPECT_EQ(removed.error().message, "The directory is not empty");
+        EXPECT_EQ(removed.error().protocolCode, 550);
+    }
+
     TEST_F(MetadataTests, ACancelledCommandEndsCancelledAndAsksNothingMore)
     {
         using VoidResult = std::expected<void, RemoteIo::RemoteError>;

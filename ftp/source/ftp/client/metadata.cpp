@@ -617,8 +617,9 @@ namespace FileTransferProtocol
         if (!untold(error))
             co_return std::unexpected(std::move(error));
 
-        // vsftpd refuses a missing path, a file, a directory with content and a denied one alike.
-        const auto found = co_await lstatPath(session, path);
+        // vsftpd refuses a missing path, a file, a directory with content and a denied one alike. Not STAT, which
+        // lists all the content of a directory.
+        const auto found = co_await lstatInParent(session, path);
         if (!found)
         {
             if (found.error().kind == RemoteErrorKind::NoSuchFile)

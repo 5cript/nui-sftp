@@ -154,7 +154,7 @@ namespace FileTransferProtocol
      *        directory in @p path, which a server may refuse to remove.
      *
      * @return NoSuchFile for a path that does not exist, Failure for one that is no directory or not empty, else the
-     *         refusal; where its text does not tell, lstatPath() and a listing do.
+     *         refusal; where its text does not tell, the listings of its parent and of @p path do.
      */
     boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
     removeDirectory(MetadataSession session, std::string path);
