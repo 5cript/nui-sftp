@@ -28,6 +28,8 @@ printf 'leading\n' > "$fixtures/ leading space.txt"
 printf 'arrow\n' > "$fixtures/a -> b.txt"
 printf 'utf8\n' > "$fixtures/$(printf '\303\274n\303\257c\303\266d\303\251-\345\220\215\345\211\215.txt')"
 printf 'long\n' > "$fixtures/$(printf '%0251d' 0 | tr 0 n).txt"
+# Listed only where the server shows hidden entries: MLSD, or LIST -a.
+printf 'hidden\n' > "$fixtures/.hidden"
 
 ln -s plain.txt "$fixtures/link-to-plain.txt"
 ln -s directory "$fixtures/link-to-directory"

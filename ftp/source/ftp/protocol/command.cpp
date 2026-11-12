@@ -28,7 +28,7 @@ namespace FileTransferProtocol
             std::pair{Verb::ChangeWorkingDirectory, std::string_view{"CWD"}},
             std::pair{Verb::ChangeToParentDirectory, std::string_view{"CDUP"}},
             std::pair{Verb::MakeDirectory, std::string_view{"MKD"}},
-            std::pair{Verb::RemoveDirectory, std::string_view{"RMD"}},
+            std::pair{Verb::RemoveEmptyDirectory, std::string_view{"RMD"}},
             std::pair{Verb::Delete, std::string_view{"DELE"}},
             std::pair{Verb::RenameFrom, std::string_view{"RNFR"}},
             std::pair{Verb::RenameTo, std::string_view{"RNTO"}},
