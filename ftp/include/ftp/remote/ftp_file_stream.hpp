@@ -67,8 +67,8 @@ namespace FileTransferProtocol
      * first write. Each synchronous call runs on the connection's strand through Engine::call() and blocks the
      * processing thread meanwhile, the bytes go through a buffer of the stream, so a call that timed out never writes
      * into the caller's. Once a transfer failed the stream refuses more. closeInStrand() never waits for the server:
-     * it ends a transfer that did not finish with ABOR, behind which the connection drains, and gives the connection
-     * back.
+     * it ends a transfer that did not finish with ABOR, behind which the connection drains. The connection goes back
+     * to the pool once nothing of the stream runs on it any more, a transfer that was still starting included.
      *
      * An asynchronous read or write carries the data through a ring between the connection's strand and the
      * processing thread, see DeliveryRing and SupplyRing, and continues a transfer the synchronous calls started.
@@ -190,6 +190,11 @@ namespace FileTransferProtocol
          */
         struct Transfer
         {
+            /**
+             * @brief The connection, given back when the transfer is gone: once the stream and every coroutine and
+             *        handler of it on the connection let go of it.
+             */
+            Lease lease{};
             TransferSession session{};
             TransferOptions options{};
             std::shared_ptr<Download> download{};
@@ -309,8 +314,10 @@ namespace FileTransferProtocol
         DownloadRequest downloadRequest() const;
         UploadRequest uploadRequest() const;
         Result<std::size_t> readAllInStrand(std::function<bool(std::string_view data)> const& onRead);
+        static std::shared_ptr<Transfer> makeTransfer(Lease lease, TransferOptions options);
         /**
-         * @brief Sends ABOR for a transfer that did not finish, then gives the connection back. Never waits.
+         * @brief Sends ABOR for a transfer that did not finish and lets go of the transfer, which gives the connection
+         *        back behind the ABOR and what still runs on it. Never waits.
          */
         void endTransfer();
         static Error closedError();
@@ -322,8 +329,8 @@ namespace FileTransferProtocol
         const Direction direction_;
         const std::optional<std::uint64_t> size_;
         const std::weak_ptr<OpenStreams> streams_;
-        const std::shared_ptr<Transfer> transfer_;
-        Lease lease_;
+        /** @brief Null once the stream closed. */
+        std::shared_ptr<Transfer> transfer_;
         /** @brief Where the transfer starts, set by a seek before the first read or write. */
         std::uint64_t offset_{0u};
         /** @brief A read or write asked for the transfer. */

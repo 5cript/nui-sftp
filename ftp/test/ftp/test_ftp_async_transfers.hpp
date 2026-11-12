@@ -498,6 +498,41 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(server_->waitForCheckpoint("drained"));
     }
 
+    TEST_P(FtpAsyncTransferTests, AStreamClosedWhileItsDownloadStartsKeepsTheConnectionUntilTheTransferEnded)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/a", "16");
+        transfer.expect("EPSV")
+            .passive(DataPlan{}.stallAfter("0123"))
+            .expect("RETR", "/dir/a")
+            .checkpoint("retrieving")
+            .awaitRelease("answered")
+            .reply("150 Opening BINARY mode data connection.")
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory);
+        sized(transfer, "/dir/b", "1").expectDisconnect();
+        connect(std::move(metadata), smallRing(), 1u);
+        server_->addConnection(std::move(transfer));
+
+        const auto stream = open("/dir/a", readMode);
+        const auto state = std::make_shared<AsyncState>(4u);
+        const auto context = readAsync(stream, 16, state);
+        ASSERT_TRUE(context) << context.error().toString();
+        ASSERT_TRUE(server_->waitForCheckpoint("retrieving"));
+        closeOnThread(stream);
+        // The RETR is out without its answer: a command of another holder would go between it and its ABOR.
+        const auto early = later(RemoteIo::OpenFile{.path = remote("/dir/b"), .mode = readMode});
+        ASSERT_FALSE(early) << "the connection of a transfer that was still starting was handed out";
+        EXPECT_EQ(early.error().kind, RemoteIo::RemoteErrorKind::Busy) << early.error().toString();
+        server_->release("answered");
+        const auto next = openWhenFree("/dir/b", readMode);
+        closeOnThread(next);
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         Executors,
         FtpAsyncTransferTests,

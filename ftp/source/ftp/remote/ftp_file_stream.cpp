@@ -94,11 +94,7 @@ namespace FileTransferProtocol
         , direction_{direction}
         , size_{size}
         , streams_{std::move(streams)}
-        , transfer_{std::make_shared<Transfer>(Transfer{
-              .session = lease.transferSession(),
-              .options = options_.transfer,
-          })}
-        , lease_{std::move(lease)}
+        , transfer_{makeTransfer(std::move(lease), options_.transfer)}
     {}
 
     FtpFileStream::~FtpFileStream()
@@ -452,21 +448,32 @@ namespace FileTransferProtocol
         );
     }
 
+    std::shared_ptr<FtpFileStream::Transfer> FtpFileStream::makeTransfer(Lease lease, TransferOptions options)
+    {
+        auto transfer = std::make_shared<Transfer>();
+        transfer->session = lease.transferSession();
+        transfer->options = std::move(options);
+        transfer->lease = std::move(lease);
+        return transfer;
+    }
+
     void FtpFileStream::endTransfer()
     {
+        // The last holder gives the connection back: the ABOR below, or a coroutine of the stream that still runs on
+        // the connection, a transfer that was starting included. Nothing else may send commands there before.
+        const auto transfer = std::exchange(transfer_, nullptr);
+        if (!transfer)
+            return;
         const auto finishedWell = finished_ && finished_->has_value();
-        if (started_ && !finishedWell)
-        {
-            session_.engine->postTo(
-                transfer_->session.control->strand(),
-                [transfer = transfer_]()
-                {
-                    abortTransfer(*transfer);
-                }
-            );
-        }
-        // Behind the ABOR on the connection's strand: the pool asks there whether the connection is still open.
-        lease_.release();
+        if (!started_ || finishedWell)
+            return;
+        session_.engine->postTo(
+            transfer->session.control->strand(),
+            [transfer]()
+            {
+                abortTransfer(*transfer);
+            }
+        );
     }
 
     void FtpFileStream::AsyncLinks::wake() const
