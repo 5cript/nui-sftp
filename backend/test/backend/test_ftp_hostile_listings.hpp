@@ -7,6 +7,7 @@
 #include <ftp/support/scripted_ftp_server.hpp>
 #include <ftp/support/tree_responder.hpp>
 #include <utility/temporary_directory.hpp>
+#include "operation_runs.hpp"
 #include "real_server_tests.hpp"
 
 #include <fmt/format.h>
@@ -19,7 +20,6 @@
 #include <iterator>
 #include <memory>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -77,23 +77,8 @@ namespace Test
             };
         }
 
-        /**
-         * @brief Runs @p operation until it completes or fails, at most 30 s.
-         */
-        template <typename OperationT>
-        std::expected<Operation::WorkStatus, Operation::Error> runToEnd(OperationT& operation)
-        {
-            const auto deadline = std::chrono::steady_clock::now() + 30s;
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                auto result = operation.work();
-                if (!result.has_value() || result.value() == Operation::WorkStatus::Complete)
-                    return result;
-                // Waiting work returns at once, polling it is how the queue drives it too.
-                std::this_thread::sleep_for(2ms);
-            }
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
-        }
+        /** @brief How long an operation on the hostile listing may take. */
+        constexpr auto operationLimit = 30s;
 
         std::string contentOf(std::filesystem::path const& path)
         {
@@ -156,7 +141,7 @@ namespace Test
         std::vector<SharedData::DirectoryEntry> scanTree(std::uint64_t& totalBytes)
         {
             ScanOperation scan{fileSystem(), {.remotePath = remote("/tree")}};
-            const auto scanned = runToEnd(scan);
+            const auto scanned = runToEnd(scan, operationLimit);
             EXPECT_TRUE(scanned.has_value()) << scanned.error().toString();
             totalBytes = scan.totalBytes();
             return scan.ejectEntries();
@@ -210,7 +195,7 @@ namespace Test
             fileSystem(), {.remotePath = remote("/tree"), .localPath = toLocal(destination)}
         };
         operation.setScanResult(std::move(entries), totalBytes);
-        const auto result = runToEnd(operation);
+        const auto result = runToEnd(operation, operationLimit);
         ASSERT_TRUE(result.has_value()) << result.error().toString();
 
         std::vector<std::filesystem::path> besideIt{};
@@ -238,7 +223,7 @@ namespace Test
         operation.addScanRoot(
             std::make_unique<ScanOperation>(fileSystem(), ScanOperation::ScanOperationOptions{.remotePath = remote("/tree")})
         );
-        const auto result = runToEnd(operation);
+        const auto result = runToEnd(operation, operationLimit);
         ASSERT_TRUE(result.has_value() || result.error().type != Operation::ErrorType::FutureTimeout)
             << "the delete did not end";
 
@@ -258,7 +243,7 @@ namespace Test
             "tree", {servedFile("twice", "file"), servedDirectory("twice", {servedFile("inner.txt", "inner")})}
         )});
         ScanOperation scan{fileSystem(), {.remotePath = remote("/tree")}};
-        const auto scanned = runToEnd(scan);
+        const auto scanned = runToEnd(scan, operationLimit);
         ASSERT_TRUE(scanned.has_value() || scanned.error().type != Operation::ErrorType::FutureTimeout)
             << "the scan did not end";
         expectListedOnlyTheTree();
