@@ -602,6 +602,13 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
     removeDirectory(MetadataSession session, std::string path)
     {
+        // A listing left the working directory in the path, which a server may refuse to remove.
+        if (const auto parent = parentOf(path))
+        {
+            const auto left = co_await changeDirectory(session.transfer.control, *parent);
+            if (!left && left.error().protocolCode == 0)
+                co_return std::unexpected(left.error());
+        }
         const auto removed =
             co_await perform(session.transfer.control, Command{.verb = Verb::RemoveDirectory, .argument = path});
         if (removed)

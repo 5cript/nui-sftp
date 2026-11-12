@@ -143,6 +143,19 @@ namespace FileTransferProtocol::Test
             return running.get();
         }
 
+        std::expected<void, RemoteIo::RemoteError>
+        removeDirectoryIn(std::shared_ptr<ControlConnection> const& connection, std::string path)
+        {
+            return run(
+                connection,
+                [session = sessionOf(connection),
+                    path = std::move(path)]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    co_return co_await removeDirectory(session, path);
+                }
+            );
+        }
+
         static std::chrono::sys_seconds someTime()
         {
             using namespace std::chrono;
@@ -644,6 +657,22 @@ namespace FileTransferProtocol::Test
         ASSERT_FALSE(made);
         EXPECT_EQ(made.error().kind, RemoteIo::RemoteErrorKind::Failure) << made.error().toString();
         EXPECT_EQ(made.error().protocolCode, 550);
+    }
+
+    TEST_F(MetadataTests, ADirectoryIsRemovedFromItsParent)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        listingOf(enters(script, "/dir/sub"), "LIST", "", "");
+        listingOf(script, "LIST", "-a", "");
+        enters(script, "/dir").expect("RMD", "/dir/sub").reply("250 Remove directory operation successful.");
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto listed = listIn(connection, "/dir/sub");
+        ASSERT_TRUE(listed) << listed.error().toString();
+        const auto removed = removeDirectoryIn(connection, "/dir/sub");
+        ASSERT_TRUE(removed) << removed.error().toString();
     }
 
     TEST_F(MetadataTests, ACancelledCommandEndsCancelledAndAsksNothingMore)
