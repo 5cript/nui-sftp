@@ -478,25 +478,63 @@ namespace FileTransferProtocol::Test
         closeOnThread(stream);
     }
 
-    TEST_P(FtpFileStreamTests, AStatOfAnOpenStreamAsksOnTheConnectionForCommands)
+    TEST_P(FtpFileStreamTests, AStatOfAStreamThatTransfersAsksOnTheConnectionForCommands)
     {
         auto metadata = loggedInScript();
-        sized(metadata, "/dir/a", "5");
+        sized(metadata, "/dir/a", "7");
         metadata.expect("MDTM", "/dir/a").reply("213 20200102030405").expectDisconnect();
         auto transfer = loggedInScript();
-        sized(transfer, "/dir/a", "5").expectDisconnect();
+        sized(transfer, "/dir/a", "7");
+        transferring(transfer, DataPlan{}.stallAfter("abc"), "RETR", "/dir/a")
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .checkpoint("drained")
+            .expectDisconnect();
         connectWith(std::move(metadata), std::move(transfer));
 
         const auto stream = open("/dir/a", readMode);
         const auto information = onThread(
-            [stream]()
+            [stream]() -> std::expected<RemoteIo::FileInformation, RemoteIo::RemoteError>
             {
+                std::array<char, 3u> buffer{};
+                if (const auto read = stream->readSomeInStrand(buffer.data(), buffer.size()); !read)
+                    return std::unexpected(read.error());
                 return stream->statInStrand();
             }
         );
         ASSERT_TRUE(information) << information.error().toString();
         EXPECT_TRUE(information->isRegularFile());
-        EXPECT_EQ(information->size, 5u);
+        EXPECT_EQ(information->size, 7u);
+        closeOnThread(stream);
+        EXPECT_TRUE(server_->waitForCheckpoint("drained"));
+    }
+
+    TEST_P(FtpFileStreamTests, AStatOfAStreamOnTheOnlyConnectionAsksThereBeforeAndAfterItsTransfer)
+    {
+        auto only = loggedInScript();
+        sized(only, "/dir/file", "12");
+        sized(only, "/dir/file", "12").expect("MDTM", "/dir/file").reply("213 20200102030405");
+        completed(transferring(only, DataPlan{}.send("file content"), "RETR", "/dir/file"));
+        sized(only, "/dir/file", "12").expect("MDTM", "/dir/file").reply("213 20200102030405").expectDisconnect();
+        connect(std::move(only), {}, 1u);
+        // The server allows one connection: the stream takes the connection for commands.
+        server_->addConnection(refusedAtTheGreeting());
+
+        const auto stream = open("/dir/file", readMode);
+        const auto stat = [stream]()
+        {
+            return stream->statInStrand();
+        };
+        const auto before = onThread(stat);
+        ASSERT_TRUE(before) << before.error().toString();
+        EXPECT_EQ(before->size, 12u);
+        const auto content = readWhole(stream);
+        ASSERT_TRUE(content) << content.error().toString();
+        const auto after = onThread(stat);
+        ASSERT_TRUE(after) << after.error().toString();
+        EXPECT_EQ(after->size, 12u);
         closeOnThread(stream);
     }
 

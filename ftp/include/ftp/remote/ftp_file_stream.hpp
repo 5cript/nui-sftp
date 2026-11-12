@@ -132,7 +132,9 @@ namespace FileTransferProtocol
         std::expected<void, RemoteIo::RemoteError> seekInStrand(std::size_t position) override;
 
         /**
-         * @brief The attributes of the path, asked on a connection for commands: the stream's own runs the transfer.
+         * @brief The attributes of the path. Asked on the stream's own connection while no transfer runs there, before
+         *        the first read or write and after a transfer that finished: it may be the only one of the session,
+         *        which a connection for commands would wait for. Else on a connection for commands.
          */
         std::expected<RemoteIo::FileInformation, RemoteIo::RemoteError> statInStrand() override;
 
@@ -288,10 +290,18 @@ namespace FileTransferProtocol
         finishUploadOn(std::shared_ptr<Transfer> transfer, UploadRequest request);
 
         /**
-         * @brief Runs @p work on the connection's strand through Engine::call(), on the processing thread.
+         * @brief The attributes of @p path asked on the connection of @p transfer, nothing when that connection is not
+         *        open: a transfer whose final reply never came left it out of step.
+         */
+        static boost::asio::awaitable<Result<std::optional<RemoteIo::FileInformation>>>
+        statOn(std::shared_ptr<Transfer> transfer, MetadataSession session, Paths::RemotePath path);
+
+        /**
+         * @brief Runs @p work on the connection's strand through Engine::call() within @p limits, on the processing
+         *        thread.
          */
         template <typename ValueT>
-        Result<ValueT> callOnConnection(boost::asio::awaitable<Result<ValueT>> work)
+        Result<ValueT> callOnConnection(boost::asio::awaitable<Result<ValueT>> work, SyncLimits limits)
         {
             return session_.engine->template call<ValueT>(
                 [control = transfer_->session.control,
@@ -299,10 +309,14 @@ namespace FileTransferProtocol
                 {
                     return Detail::onConnection<ValueT>(control, scope, std::move(work));
                 },
-                options_.transferCallLimits
+                limits
             );
         }
 
+        /**
+         * @brief No transfer of the stream runs on its connection: none started, or it finished with its final reply.
+         */
+        bool connectionIsFree() const;
         /**
          * @brief Whether the stream may still move bytes @p direction.
          */

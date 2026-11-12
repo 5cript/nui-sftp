@@ -119,7 +119,7 @@ namespace FileTransferProtocol
         }
         if (direction_ == Direction::Upload)
             return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "An upload cannot move once it started"));
-        return callOnConnection<void>(seekOn(transfer_, position))
+        return callOnConnection<void>(seekOn(transfer_, position), options_.transferCallLimits)
             .transform_error(
                 [this](Error error)
                 {
@@ -132,6 +132,26 @@ namespace FileTransferProtocol
     {
         if (closed_)
             return std::unexpected(closedError());
+        if (connectionIsFree())
+        {
+            auto asked = callOnConnection<std::optional<RemoteIo::FileInformation>>(
+                statOn(
+                    transfer_,
+                    MetadataSession{
+                        .transfer = transfer_->session,
+                        .dialect = session_.dialect,
+                        .options = options_.transfer,
+                        .limits = options_.listing,
+                    },
+                    path_
+                ),
+                options_.operationLimits
+            );
+            if (!asked)
+                return std::unexpected(std::move(asked).error());
+            if (*asked)
+                return std::move(**asked);
+        }
         return session_.engine->template call<RemoteIo::FileInformation>(
             [session = session_, options = options_, path = path_](std::shared_ptr<CallScope> const& scope) mutable
             {
@@ -151,7 +171,8 @@ namespace FileTransferProtocol
         if (limit == 0u)
             return 0u;
         started_ = true;
-        auto read = callOnConnection<std::size_t>(readOn(transfer_, downloadRequest(), limit));
+        auto read =
+            callOnConnection<std::size_t>(readOn(transfer_, downloadRequest(), limit), options_.transferCallLimits);
         if (!read)
             return std::unexpected(broke(std::move(read).error()));
         std::memcpy(buffer, transfer_->readBuffer.data(), *read);
@@ -176,7 +197,7 @@ namespace FileTransferProtocol
         if (data.empty())
             return {};
         started_ = true;
-        return callOnConnection<void>(writeOn(transfer_, uploadRequest(), std::string{data}))
+        return callOnConnection<void>(writeOn(transfer_, uploadRequest(), std::string{data}), options_.transferCallLimits)
             .transform_error(
                 [this](Error error)
                 {
@@ -275,12 +296,13 @@ namespace FileTransferProtocol
             if (!started_)
                 finished_.emplace();
             else
-                finished_ = callOnConnection<void>(finishDownloadOn(transfer_));
+                finished_ = callOnConnection<void>(finishDownloadOn(transfer_), options_.transferCallLimits);
         }
         else
         {
             started_ = true;
-            finished_ = callOnConnection<void>(finishUploadOn(transfer_, uploadRequest()));
+            finished_ =
+                callOnConnection<void>(finishUploadOn(transfer_, uploadRequest()), options_.transferCallLimits);
         }
         return *finished_;
     }
@@ -328,6 +350,20 @@ namespace FileTransferProtocol
     RemoteIo::ProcessingStrand* FtpFileStream::strand() const
     {
         return strand_;
+    }
+
+    asio::awaitable<FtpFileStream::Result<std::optional<RemoteIo::FileInformation>>>
+    FtpFileStream::statOn(std::shared_ptr<Transfer> transfer, MetadataSession session, Paths::RemotePath path)
+    {
+        if (transfer->session.control->state() != ControlState::Open)
+            co_return std::nullopt;
+        co_return (co_await runOperation(std::move(session), RemoteIo::Stat{.path = std::move(path)}))
+            .transform(
+                [](RemoteIo::FileInformation information)
+                {
+                    return std::optional<RemoteIo::FileInformation>{std::move(information)};
+                }
+            );
     }
 
     asio::awaitable<FtpFileStream::Result<std::size_t>>
@@ -385,6 +421,11 @@ namespace FileTransferProtocol
             transfer->upload = *std::move(started);
         }
         co_return (co_await transfer->upload->finish()).transform([](UploadResult const&) {});
+    }
+
+    bool FtpFileStream::connectionIsFree() const
+    {
+        return !started_ || (finished_ && finished_->has_value());
     }
 
     FtpFileStream::Result<void> FtpFileStream::usable(Direction direction) const
