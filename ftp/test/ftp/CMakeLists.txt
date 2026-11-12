@@ -52,7 +52,7 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
         target_link_libraries(${name}-support PUBLIC docker-control)
     endif()
 
-    add_executable(${name} main.cpp)
+    add_executable(${name} main.cpp compliance/non_happy_matrix.cpp)
 
     target_link_libraries(
         ${name}

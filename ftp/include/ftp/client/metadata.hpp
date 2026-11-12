@@ -179,7 +179,7 @@ namespace FileTransferProtocol
 
     /**
      * @brief Sets when @p path was last modified, with whichever of MFMT, MDTM with a time and SITE UTIME the server
-     *        takes, learned once. A positive reply is success, its text is not read.
+     *        takes, learned once. A positive reply other than 202 is success, its text is not read.
      *
      * @return Unsupported when the server takes none of them or @p time has no time-val, before year 1000 or after
      *         9999; NoSuchFile for a path that does not exist; else the refusal.

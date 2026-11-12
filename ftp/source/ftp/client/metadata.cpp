@@ -316,6 +316,22 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief The error of a reply to a setter: a 202 is a command not implemented (RFC 959 4.2), the time stays as
+         *        it was.
+         */
+        RemoteIo::RemoteError setterError(Reply const& reply, Verb verb)
+        {
+            if (reply.code != 202)
+                return replyError(reply, verb);
+            return RemoteIo::RemoteError{
+                .kind = RemoteErrorKind::Unsupported,
+                .protocol = RemoteIo::Protocol::Ftp,
+                .protocolCode = reply.code,
+                .message = reply.text(),
+            };
+        }
+
+        /**
          * @brief How many names of @p other are in @p listing.
          */
         std::size_t sharedNames(Listing const& listing, Listing const& other)
@@ -712,12 +728,12 @@ namespace FileTransferProtocol
             const auto reply = co_await session.transfer.control->execute(command);
             if (!reply)
                 co_return std::unexpected(reply.error());
-            if (succeeded(*reply))
+            if (succeeded(*reply) && reply->code != 202)
             {
                 dialect.learnModificationTimeSetter(setter);
                 co_return std::expected<void, RemoteIo::RemoteError>{};
             }
-            auto error = replyError(*reply, command.verb);
+            auto error = setterError(*reply, command.verb);
             const auto probing = learned == ModificationTimeSetter::Unknown;
             // 501: arguments in a form the server does not know.
             if (probing && (lacksTheCommand(error) || reply->code == 501))
