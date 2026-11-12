@@ -127,28 +127,26 @@ namespace FileTransferProtocol
         if (failure_)
             return std::unexpected(*failure_);
         telnetState_ = TelnetState::Data;
-        if (!line_.empty())
+        // A line without its end may be cut short, "213 12" of "213 1234" to SIZE: it completes no reply.
+        const auto cut = std::exchange(line_, {});
+        if (cut.empty())
+            settle();
+        else if (!open_ && !replyCodeOf(cut))
         {
-            const auto taken = takeLine(std::exchange(line_, {}));
-            if (!taken)
-            {
-                failure_ = taken.error();
-                return taken;
+            failure_ = protocolViolation(fmt::format("Not a reply: '{}'", excerpt(cut)));
+            return std::unexpected(*failure_);
+        }
+        if (!open_ && cut.empty())
+            return {};
+        const std::string_view opening = open_ ? std::string_view{open_->lines.front()} : std::string_view{cut};
+        return std::unexpected(
+            RemoteIo::RemoteError{
+                .kind = RemoteIo::RemoteErrorKind::ConnectionLost,
+                .protocol = RemoteIo::Protocol::Ftp,
+                .protocolCode = replyCodeOf(opening).value_or(0),
+                .message = "The server closed the connection in the middle of a reply",
             }
-        }
-        settle();
-        if (open_)
-        {
-            return std::unexpected(
-                RemoteIo::RemoteError{
-                    .kind = RemoteIo::RemoteErrorKind::ConnectionLost,
-                    .protocol = RemoteIo::Protocol::Ftp,
-                    .protocolCode = replyCodeOf(open_->lines.front()).value_or(0),
-                    .message = "The server closed the connection in the middle of a reply",
-                }
-            );
-        }
-        return {};
+        );
     }
 
     bool ReplyFramer::inReply() const
