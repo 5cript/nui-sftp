@@ -610,7 +610,7 @@ namespace FileTransferProtocol
                 co_return std::unexpected(left.error());
         }
         const auto removed =
-            co_await perform(session.transfer.control, Command{.verb = Verb::RemoveDirectory, .argument = path});
+            co_await perform(session.transfer.control, Command{.verb = Verb::RemoveEmptyDirectory, .argument = path});
         if (removed)
             co_return std::expected<void, RemoteIo::RemoteError>{};
         auto error = removed.error();
