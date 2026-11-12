@@ -3,6 +3,7 @@
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 #include <paths/utf8.hpp>
+#include "../protocol/listing_lines.hpp"
 #include "client_support.hpp"
 
 #include <boost/asio/this_coro.hpp>
@@ -96,8 +97,49 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief The entry a line of STAT lists, which proftpd indents.
+         */
+        std::optional<ListingEntry> statusEntryOf(std::string_view line)
+        {
+            if (line.starts_with(' '))
+                line.remove_prefix(1u);
+            auto read = Detail::readListLine(line, today());
+            if (!read)
+                return std::nullopt;
+            return std::move(read->entry);
+        }
+
+        /**
+         * @brief STAT lists "." for a directory, so a single line is the path itself and never the one entry of a
+         *        directory. Asked once, for the root.
+         */
+        asio::awaitable<std::expected<bool, RemoteIo::RemoteError>> statusListsDots(MetadataSession session)
+        {
+            auto& dialect = *session.dialect;
+            if (const auto learned = dialect.statusListsDots(); learned != Support::Unknown)
+                co_return learned == Support::Works;
+            const auto reply =
+                co_await session.transfer.control->execute(Command{.verb = Verb::Status, .argument = "/"});
+            if (!reply)
+                co_return std::unexpected(reply.error());
+            const auto listsDots = succeeded(*reply) &&
+                std::ranges::any_of(
+                    reply->lines,
+                    [](std::string const& line)
+                    {
+                        const auto entry = statusEntryOf(line);
+                        return entry && entry->name == ".";
+                    }
+                );
+            dialect.learnStatusListsDots(listsDots ? Support::Works : Support::Refused);
+            co_return listsDots;
+        }
+
+        /**
          * @brief The line STAT lists for @p path, when that is one line for @p path and no directory: STAT lists the
-         *        content of a directory. vsftpd names the entry by its last segment, proftpd by the whole path.
+         *        content of a directory. proftpd names the entry by the whole path, which no entry of a directory
+         *        has. vsftpd names it by its last segment, like the one entry of a directory of that name: such a line
+         *        counts where statusListsDots().
          *
          * @return Nothing for a directory, a path the server listed nothing for, or lines that tell no single entry.
          *         The replyError() of a refusal.
@@ -114,28 +156,22 @@ namespace FileTransferProtocol
             // The first and the last line frame what was listed.
             if (reply->lines.size() != 3u)
                 co_return std::optional<ListingEntry>{};
-            std::string line = reply->lines[1];
-            // proftpd indents the lines.
-            if (line.starts_with(' '))
-                line.erase(0u, 1u);
-            // proftpd names the entry by the whole path, which the parser refuses as a name of a child.
+            auto entry = statusEntryOf(reply->lines[1]);
+            if (!entry || entry->type == FileType::Directory)
+                co_return std::optional<ListingEntry>{};
             const auto name = lastSegmentOf(path);
-            if (const auto at = line.find(path); at != std::string::npos)
+            if (entry->name != path)
             {
-                const auto after = std::string_view{line}.substr(at + path.size());
-                if (after.empty() || after.starts_with(" -> "))
-                    line.replace(at, path.size(), name);
+                if (entry->name != name)
+                    co_return std::optional<ListingEntry>{};
+                const auto listsDots = co_await statusListsDots(session);
+                if (!listsDots)
+                    co_return std::unexpected(listsDots.error());
+                if (!*listsDots)
+                    co_return std::optional<ListingEntry>{};
             }
-            auto parser = ListingParser::list(today(), session.limits);
-            parser.feed(line);
-            auto listing = parser.finish();
-            if (listing.entries.size() != 1u)
-                co_return std::optional<ListingEntry>{};
-            auto& entry = listing.entries.front();
-            if (entry.type == FileType::Directory || entry.name != name)
-                co_return std::optional<ListingEntry>{};
-            entry.name = std::string{name};
-            co_return std::optional<ListingEntry>{std::move(entry)};
+            entry->name = std::string{name};
+            co_return entry;
         }
 
         /**
@@ -363,6 +399,16 @@ namespace FileTransferProtocol
                 dialect.learnListAll(Support::Refused);
             co_return plain;
         }
+    }
+
+    Support ServerDialect::statusListsDots() const
+    {
+        return statusListsDots_.load();
+    }
+
+    void ServerDialect::learnStatusListsDots(Support support)
+    {
+        learnOnce(statusListsDots_, support);
     }
 
     Support ServerDialect::status() const

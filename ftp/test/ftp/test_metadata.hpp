@@ -49,6 +49,13 @@ namespace FileTransferProtocol::Test
             return script.expect("EPSV").passive(DataPlan{}).expect(std::move(verb), "").reply(std::move(refusal));
         }
 
+        constexpr std::string_view statusOfARootWithDots =
+            "213-Status follows:\r\n"
+            "drwxr-xr-x    3 0        0            4096 Jan 02 03:04 .\r\n"
+            "drwxr-xr-x    3 0        0            4096 Jan 02 03:04 ..\r\n"
+            "drwxr-xr-x    2 0        0            4096 Jan 02 03:04 dir\r\n"
+            "213 End of status\r\n";
+
         Script& enters(Script& script, std::string directory)
         {
             return script.expect("CWD", std::move(directory)).reply("250 Directory successfully changed.");
@@ -392,6 +399,8 @@ namespace FileTransferProtocol::Test
                 "-rw-r--r--    1 1000     1000           11 Jan 02 03:04 plain.txt\r\n"
                 "213 End of status\r\n"
             )
+            .expect("STAT", "/")
+            .replyRaw(std::string{statusOfARootWithDots})
             .expect("STAT", "/dir/link")
             .replyRaw(
                 "213-Status of /dir/link:\r\n"
@@ -410,6 +419,58 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(link->name, "link");
         EXPECT_EQ(link->type, SharedData::FileType::Symlink);
         EXPECT_EQ(link->linkTarget, std::optional<std::string>{"plain.txt"});
+    }
+
+    TEST_F(MetadataTests, ALinkWhoseTargetEndsWithItsPathKeepsTheTarget)
+    {
+        Script script{};
+        script.reply("220 Ready")
+            .expect("STAT", "/data")
+            .replyRaw(
+                "213-Status follows:\r\n"
+                "lrwxrwxrwx    1 0        0               9 Jan 02 03:04 data -> /mnt/data\r\n"
+                "213 End of status\r\n"
+            )
+            .expect("STAT", "/")
+            .replyRaw(std::string{statusOfARootWithDots})
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto link = lstatIn(connection, "/data");
+        ASSERT_TRUE(link) << link.error().toString();
+        EXPECT_EQ(link->name, "data");
+        EXPECT_EQ(link->type, SharedData::FileType::Symlink);
+        EXPECT_EQ(link->linkTarget, std::optional<std::string>{"/mnt/data"});
+        EXPECT_EQ(dialect_->statusListsDots(), Support::Works);
+    }
+
+    TEST_F(MetadataTests, ADirectoryWithOneEntryOfItsOwnNameIsNotThatEntry)
+    {
+        // A server whose STAT lists a directory without "." answers the same for a file and for such a directory.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("STAT", "/backup/backup")
+            .replyRaw(
+                "213-Status follows:\r\n"
+                "-rw-r--r--    1 0        0               5 Jan 02 03:04 backup\r\n"
+                "213 End of status\r\n"
+            )
+            .expect("STAT", "/")
+            .replyRaw(
+                "213-Status follows:\r\n"
+                "drwxr-xr-x    2 0        0            4096 Jan 02 03:04 backup\r\n"
+                "213 End of status\r\n"
+            );
+        const std::string listedDirectory = "drwxr-xr-x    2 0        0            4096 Jan 02 03:04 backup\r\n";
+        listingOf(enters(script, "/backup"), "LIST", "", listedDirectory);
+        listingOf(script, "LIST", "-a", listedDirectory);
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto directory = lstatIn(connection, "/backup/backup");
+        ASSERT_TRUE(directory) << directory.error().toString();
+        EXPECT_EQ(directory->type, SharedData::FileType::Directory);
+        EXPECT_EQ(dialect_->statusListsDots(), Support::Refused);
     }
 
     TEST_F(MetadataTests, AnMdtmThatReadsTheTimeAsANameGivesWayToSiteUtime)

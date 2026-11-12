@@ -62,6 +62,13 @@ namespace FileTransferProtocol
         Support status() const;
         void learnStatus(Support support);
 
+        /**
+         * @brief STAT with a directory lists "." in it, as vsftpd and proftpd do. Only then a single line that names
+         *        the last segment of the path is the path, and not the one entry of a directory of that name.
+         */
+        Support statusListsDots() const;
+        void learnStatusListsDots(Support support);
+
         ModificationTimeSetter modificationTimeSetter() const;
         void learnModificationTimeSetter(ModificationTimeSetter setter);
 
@@ -69,6 +76,7 @@ namespace FileTransferProtocol
         std::atomic<Support> machineListing_{Support::Unknown};
         std::atomic<Support> listAll_{Support::Unknown};
         std::atomic<Support> status_{Support::Unknown};
+        std::atomic<Support> statusListsDots_{Support::Unknown};
         std::atomic<ModificationTimeSetter> modificationTimeSetter_{ModificationTimeSetter::Unknown};
     };
 

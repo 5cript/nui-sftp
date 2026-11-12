@@ -325,6 +325,7 @@ namespace FileTransferProtocol::Test
             EXPECT_EQ(link->linkTarget, std::optional<std::string>{std::string{target}}) << name;
         }
         ASSERT_NO_FATAL_FAILURE(expectEntry(lstatOf("/"), "/", FileType::Directory));
+        EXPECT_NE(dialect_->statusListsDots(), Support::Refused) << "STAT answers no lstat of a file";
     }
 
     TEST_P(MetadataConformance, StatFollowsLinks)
