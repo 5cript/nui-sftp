@@ -1,7 +1,10 @@
 #include <ftp/client/control_connection.hpp>
+#include <ftp/client/login.hpp>
 #include <ftp/client/metadata.hpp>
+#include <ftp/client/tls.hpp>
 #include <ftp/client/transfer.hpp>
 #include <ftp/support/scripted_ftp_server.hpp>
+#include <ftp/support/test_pki.hpp>
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -18,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -92,6 +96,8 @@ namespace FileTransferProtocol::Test
         {
             /** @brief The start of the names of its rows. */
             std::string name{};
+            /** @brief drive() connects, else the test connects and reads the greeting first. */
+            bool connectsItself{false};
             std::function<void(ServerDialect&)> learned{listsParents};
             /** @brief From the greeting up to the command. */
             Steps before{nothing};
@@ -274,6 +280,20 @@ namespace FileTransferProtocol::Test
             };
         }
 
+        /**
+         * @brief A refusal the operation goes on after as after a success.
+         */
+        Row refusedAndGoesOn(Route const& route, std::string reply)
+        {
+            const auto code = codeOf(reply);
+            return Row{
+                .name = fmt::format("{}_Refused{}", route.name, code),
+                .route = &route,
+                .outcome = replying(std::move(reply)),
+                .then = Then::GoesOn,
+            };
+        }
+
         Row closesTheService(Route const& route)
         {
             return Row{
@@ -383,6 +403,36 @@ namespace FileTransferProtocol::Test
                 endsInAReply(route),
                 staysSilent(route),
             };
+        }
+
+        /**
+         * @brief breakdowns() where every failure is reported as @p kind.
+         */
+        std::vector<Row> breakdowns(Route const& route, RemoteErrorKind kind)
+        {
+            auto rows = breakdowns(route);
+            for (auto& row : rows)
+                row.kind = kind;
+            return rows;
+        }
+
+        /**
+         * @brief @p row where the connection ends as @p afterwards.
+         */
+        Row leaving(Row row, Afterwards afterwards)
+        {
+            row.afterwards = afterwards;
+            return row;
+        }
+
+        /**
+         * @brief @p rows where the connection ends as @p afterwards.
+         */
+        std::vector<Row> leaving(std::vector<Row> rows, Afterwards afterwards)
+        {
+            for (auto& row : rows)
+                row.afterwards = afterwards;
+            return rows;
         }
 
         template <typename ValueT>
@@ -637,6 +687,192 @@ namespace FileTransferProtocol::Test
                     co_return withoutValue(co_await lstatPath(context.session, "/dir/file"));
                 },
             };
+            return route;
+        }
+
+        TlsConnectionSettings tlsSettings()
+        {
+            const auto pki = testPki();
+            if (!pki)
+                throw std::runtime_error{pki.error()};
+            auto context = TlsContext::create({.systemAuthorities = false, .authorities = {pki->get().authority}});
+            if (!context)
+                throw std::runtime_error{context.error().toString()};
+            return TlsConnectionSettings{.context = std::move(context).value(), .serverName = "127.0.0.1"};
+        }
+
+        /**
+         * @brief One command of a login, with the reply that lets the login go on.
+         */
+        struct LoginStep
+        {
+            std::string verb{};
+            std::string argument{};
+            Steps success{};
+        };
+
+        Steps afterAuthentication()
+        {
+            return [](Script& script)
+            {
+                script.featLike(ServerLike::Vsftpd)
+                    .expect("OPTS", "UTF8 ON")
+                    .reply("200 Always in UTF8 mode.")
+                    .expect("TYPE", "I")
+                    .reply("200 Switching to Binary mode.")
+                    .expect("PWD", "")
+                    .reply("257 \"/home/user\" is the current directory");
+            };
+        }
+
+        std::vector<LoginStep> loginSteps(bool secured, bool withAccount)
+        {
+            std::vector<LoginStep> steps{};
+            if (secured)
+            {
+                steps.push_back(
+                    {"AUTH",
+                        "TLS",
+                        [](Script& script)
+                        {
+                            script.reply("234 Proceed with negotiation.").startTls();
+                        }}
+                );
+            }
+            steps.push_back({"USER", "user", replying("331 Please specify the password.")});
+            if (withAccount)
+            {
+                steps.push_back({"PASS", "password", replying("332 Need account for login.")});
+                steps.push_back({"ACCT", "account", replying("230 Login successful.")});
+            }
+            else
+                steps.push_back({"PASS", "password", replying("230 Login successful.")});
+            if (secured)
+            {
+                steps.push_back({"PBSZ", "0", replying("200 PBSZ set to 0.")});
+                steps.push_back({"PROT", "P", replying("200 PROT now Private.")});
+            }
+            steps.push_back(
+                {"FEAT",
+                    "",
+                    [](Script& script)
+                    {
+                        script.reply(
+                            "211-Features:\n EPRT\n EPSV\n MDTM\n PASV\n PBSZ\n PROT\n REST STREAM\n SIZE\n TVFS\n211 End"
+                        );
+                    }}
+            );
+            steps.push_back({"OPTS", "UTF8 ON", replying("200 Always in UTF8 mode.")});
+            steps.push_back({"TYPE", "I", replying("200 Switching to Binary mode.")});
+            steps.push_back({"PWD", "", replying("257 \"/home/user\" is the current directory")});
+            return steps;
+        }
+
+        /**
+         * @brief The steps of @p steps from @p first up to @p last, without it.
+         */
+        Steps loginStepsBetween(std::vector<LoginStep> const& steps, std::size_t first, std::size_t last)
+        {
+            return [steps = std::vector<LoginStep>{steps.begin() + first, steps.begin() + last}](Script& script)
+            {
+                for (auto const& step : steps)
+                {
+                    script.expect(step.verb, step.argument);
+                    step.success(script);
+                }
+            };
+        }
+
+        /**
+         * @brief The route to @p verb in a login, plain or over explicit TLS, with an account where @p withAccount.
+         */
+        Route loginRoute(std::string name, std::string_view verb, bool secured, bool withAccount = false)
+        {
+            const auto steps = loginSteps(secured, withAccount);
+            std::size_t index{0u};
+            while (index < steps.size() && steps[index].verb != verb)
+                ++index;
+            if (index == steps.size())
+                throw std::logic_error{fmt::format("A login sends no {}", verb)};
+            return Route{
+                .name = std::move(name),
+                .connectsItself = true,
+                .before = loginStepsBetween(steps, 0u, index),
+                .command = expecting(steps[index].verb, steps[index].argument),
+                .success = steps[index].success,
+                .afterSuccess = loginStepsBetween(steps, index + 1u, steps.size()),
+                .drive = [secured, withAccount](Context context) -> asio::awaitable<Result>
+                {
+                    LoginOptions options{.credentials = {.user = "user", .password = "password"}};
+                    if (withAccount)
+                        options.credentials.account = "account";
+                    if (secured)
+                    {
+                        options.tlsMode = TlsMode::Explicit;
+                        options.tls = tlsSettings();
+                    }
+                    co_return withoutValue(co_await logIn(context.connection, context.endpoints, std::move(options)));
+                },
+            };
+        }
+
+        Route const& userRoute()
+        {
+            static const Route route = loginRoute("User", "USER", false);
+            return route;
+        }
+
+        Route const& passwordRoute()
+        {
+            static const Route route = loginRoute("Pass", "PASS", false);
+            return route;
+        }
+
+        Route const& accountRoute()
+        {
+            static const Route route = loginRoute("Acct", "ACCT", false, true);
+            return route;
+        }
+
+        Route const& authenticateRoute()
+        {
+            static const Route route = loginRoute("Auth", "AUTH", true);
+            return route;
+        }
+
+        Route const& protectionBufferSizeRoute()
+        {
+            static const Route route = loginRoute("Pbsz", "PBSZ", true);
+            return route;
+        }
+
+        Route const& dataProtectionRoute()
+        {
+            static const Route route = loginRoute("Prot", "PROT", true);
+            return route;
+        }
+
+        Route const& featuresRoute()
+        {
+            static const Route route = loginRoute("Feat", "FEAT", false);
+            return route;
+        }
+
+        Route const& optionsRoute()
+        {
+            static const Route route = loginRoute("Opts", "OPTS", false);
+            return route;
+        }
+
+        Route const& representationTypeRoute()
+        {
+            static const Route route = loginRoute("Type", "TYPE", false);
+            return route;
+        }
+
+        Route const& homeDirectoryRoute()
+        {
+            static const Route route = loginRoute("LoginPwd", "PWD", false);
             return route;
         }
 
@@ -909,9 +1145,291 @@ namespace FileTransferProtocol::Test
             return rows;
         }
 
+        /**
+         * @brief A login closes its connection after an error.
+         */
+        Row refusedAtLogin(Route const& route, std::string reply, RemoteErrorKind kind)
+        {
+            return leaving(refused(route, std::move(reply), kind), Afterwards::Closed);
+        }
+
+        std::vector<Row> loginRows()
+        {
+            std::vector<Row> rows{};
+            {
+                auto const& route = userRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        // A 230 needs no password.
+                        Row{
+                            .name = "User_OtherCompletion",
+                            .route = &route,
+                            .outcome = followedBy(replying("230 Login successful."), afterAuthentication()),
+                        },
+                        toleratesPreliminary(route),
+                        leaving(
+                            intermediate(route, "350 Requested file action pending further information."),
+                            Afterwards::Closed
+                        ),
+                        Row{
+                            .name = "User_NeedsAccount",
+                            .route = &route,
+                            .outcome = replying("332 Need account for login."),
+                            .kind = RemoteErrorKind::AuthenticationFailed,
+                            .afterwards = Afterwards::Closed,
+                            .shown = "none is set",
+                        },
+                        refusedAtLogin(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refusedAtLogin(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refusedAtLogin(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+                        named(
+                            refusedAtLogin(
+                                route,
+                                "530 Non-anonymous sessions must use encryption.",
+                                RemoteErrorKind::NoSecureConnection
+                            ),
+                            "Refused530DemandingTls"
+                        ),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            {
+                auto const& route = passwordRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        // RFC 959 5.4: no password was needed.
+                        completes(route, "202 Command not implemented, superfluous at this site."),
+                        toleratesPreliminary(route),
+                        leaving(
+                            intermediate(route, "350 Requested file action pending further information."),
+                            Afterwards::Closed
+                        ),
+                        Row{
+                            .name = "Pass_NeedsAccount",
+                            .route = &route,
+                            .outcome = replying("332 Need account for login."),
+                            .kind = RemoteErrorKind::AuthenticationFailed,
+                            .afterwards = Afterwards::Closed,
+                            .shown = "none is set",
+                        },
+                        refusedAtLogin(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refusedAtLogin(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refusedAtLogin(route, "503 Bad sequence of commands.", RemoteErrorKind::ProtocolViolation),
+                        refusedAtLogin(route, "530 Login incorrect.", RemoteErrorKind::AuthenticationFailed),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            {
+                auto const& route = accountRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        completes(route, "202 Command not implemented, superfluous at this site."),
+                        toleratesPreliminary(route),
+                        leaving(
+                            intermediate(route, "350 Requested file action pending further information."),
+                            Afterwards::Closed
+                        ),
+                        refusedAtLogin(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refusedAtLogin(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refusedAtLogin(route, "503 Bad sequence of commands.", RemoteErrorKind::ProtocolViolation),
+                        refusedAtLogin(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            {
+                // Whatever keeps TLS from starting ends the connection, it never goes on in plaintext.
+                auto const& route = authenticateRoute();
+                const auto refusedTls = [&route](std::string reply)
+                {
+                    return leaving(refused(route, std::move(reply), RemoteErrorKind::NoSecureConnection), Afterwards::Dead);
+                };
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        // RFC 2228 3: 334 asks for ADAT, curl and the client take it for a 234.
+                        Row{
+                            .name = "Auth_Intermediate334",
+                            .route = &route,
+                            .outcome =
+                                [](Script& script)
+                            {
+                                script.reply("334 ADAT=").startTls();
+                            },
+                            .then = Then::GoesOn,
+                        },
+                        leaving(
+                            completesWrongly(route, "200 Command okay.", RemoteErrorKind::NoSecureConnection),
+                            Afterwards::Dead
+                        ),
+                        toleratesPreliminary(route),
+                        refusedTls("421 Service not available, closing control connection."),
+                        refusedTls("431 Need some unavailable resource to process security."),
+                        refusedTls("500 Syntax error, command unrecognized."),
+                        refusedTls("501 Syntax error in parameters or arguments."),
+                        refusedTls("502 Command not implemented."),
+                        refusedTls("504 Command not implemented for that parameter."),
+                        refusedTls("534 Request denied for policy reasons."),
+                    }
+                );
+                auto failures = breakdowns(route, RemoteErrorKind::NoSecureConnection);
+                // The 421 is a refusal above.
+                failures.erase(failures.begin());
+                append(rows, std::move(failures));
+            }
+            for (auto const* route : {&protectionBufferSizeRoute(), &dataProtectionRoute()})
+            {
+                // Without protected data connections the session is not secure.
+                const auto refusedProtection = [route](std::string reply)
+                {
+                    return refusedAtLogin(*route, std::move(reply), RemoteErrorKind::NoSecureConnection);
+                };
+                append(
+                    rows,
+                    {
+                        succeeds(*route),
+                        completes(*route, "220 Command okay."),
+                        toleratesPreliminary(*route),
+                        leaving(
+                            intermediate(*route, "350 Requested file action pending further information."),
+                            Afterwards::Closed
+                        ),
+                        refusedProtection("500 Syntax error, command unrecognized."),
+                        refusedProtection("501 Syntax error in parameters or arguments."),
+                        refusedProtection("502 Command not implemented."),
+                        refusedProtection("503 Bad sequence of commands."),
+                        refusedProtection("530 Not logged in."),
+                    }
+                );
+                for (auto& row : rows)
+                {
+                    if (row.route == route && row.kind == RemoteErrorKind::ProtocolViolation)
+                        row.kind = RemoteErrorKind::NoSecureConnection;
+                }
+                append(rows, breakdowns(*route, RemoteErrorKind::NoSecureConnection));
+            }
+            append(
+                rows,
+                {
+                    refusedAtLogin(
+                        dataProtectionRoute(),
+                        "504 Command not implemented for that parameter.",
+                        RemoteErrorKind::NoSecureConnection
+                    ),
+                    refusedAtLogin(
+                        dataProtectionRoute(),
+                        "534 Request denied for policy reasons.",
+                        RemoteErrorKind::NoSecureConnection
+                    ),
+                    refusedAtLogin(
+                        dataProtectionRoute(),
+                        "536 Requested PROT level not supported by mechanism.",
+                        RemoteErrorKind::NoSecureConnection
+                    ),
+                    refusedAtLogin(
+                        dataProtectionRoute(),
+                        "431 Need some unavailable resource to process security.",
+                        RemoteErrorKind::NoSecureConnection
+                    ),
+                }
+            );
+            for (auto const* route : {&featuresRoute(), &optionsRoute()})
+            {
+                // A server without FEAT has no features (RFC 2389 3), one that refuses UTF8 may use it anyway.
+                append(
+                    rows,
+                    {
+                        succeeds(*route),
+                        toleratesPreliminary(*route),
+                        refusedAndGoesOn(*route, "500 Syntax error, command unrecognized."),
+                        refusedAndGoesOn(*route, "501 Syntax error in parameters or arguments."),
+                        refusedAndGoesOn(*route, "502 Command not implemented."),
+                    }
+                );
+                append(rows, breakdowns(*route));
+            }
+            append(
+                rows,
+                {
+                    // RFC 2389 3.2: FEAT is answered with 211 or refused.
+                    leaving(
+                        completesWrongly(featuresRoute(), "200 Command okay.", RemoteErrorKind::ProtocolViolation),
+                        Afterwards::Closed
+                    ),
+                    leaving(
+                        intermediate(featuresRoute(), "350 Requested file action pending further information."),
+                        Afterwards::Closed
+                    ),
+                    completes(optionsRoute(), "202 Command not implemented, superfluous at this site."),
+                    named(
+                        refusedAndGoesOn(optionsRoute(), "350 Requested file action pending further information."),
+                        "Intermediate"
+                    ),
+                    refusedAndGoesOn(optionsRoute(), "451 Requested action aborted. Local error in processing."),
+                }
+            );
+            {
+                auto const& route = representationTypeRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        completes(route, "250 Requested file action okay."),
+                        toleratesPreliminary(route),
+                        leaving(
+                            intermediate(route, "350 Requested file action pending further information."),
+                            Afterwards::Closed
+                        ),
+                        refusedAtLogin(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refusedAtLogin(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refusedAtLogin(
+                            route, "504 Command not implemented for that parameter.", RemoteErrorKind::Unsupported
+                        ),
+                        refusedAtLogin(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            {
+                auto const& route = homeDirectoryRoute();
+                append(
+                    rows,
+                    {
+                        succeeds(route),
+                        leaving(
+                            completesWrongly(route, "200 Command okay.", RemoteErrorKind::ProtocolViolation),
+                            Afterwards::Closed
+                        ),
+                        toleratesPreliminary(route),
+                        leaving(
+                            intermediate(route, "350 Requested file action pending further information."),
+                            Afterwards::Closed
+                        ),
+                        refusedAtLogin(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refusedAtLogin(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                        refusedAtLogin(route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
+                        refusedAtLogin(route, "550 Permission denied", RemoteErrorKind::PermissionDenied),
+                    }
+                );
+                append(rows, breakdowns(route));
+            }
+            return rows;
+        }
+
         std::vector<Row> allRows()
         {
-            return metadataRows();
+            auto rows = metadataRows();
+            append(rows, loginRows());
+            return rows;
         }
 
         ControlConnectionOptions optionsFor(Row const& row)
@@ -1021,8 +1539,11 @@ namespace FileTransferProtocol::Test
         auto const& route = *row.route;
         server_->addConnection(scriptOf(row));
         connection_ = ControlConnection::create(pool_.get_executor(), optionsFor(row));
-        const auto greeting = run(connection_->connect(endpoints()));
-        ASSERT_TRUE(greeting) << greeting.error().toString();
+        if (!route.connectsItself)
+        {
+            const auto greeting = run(connection_->connect(endpoints()));
+            ASSERT_TRUE(greeting) << greeting.error().toString();
+        }
 
         const auto result = run(route.drive(contextOf(route)));
 
