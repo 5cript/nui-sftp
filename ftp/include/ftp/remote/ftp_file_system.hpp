@@ -67,8 +67,9 @@ namespace FileTransferProtocol
 
         /**
          * @brief Fails the operations under way with ConnectionLost and refuses later ones, then closes the streams in
-         *        a final task, which finalizes the strand. An operation that was failed still runs to its end on the
-         *        engine, its result is dropped.
+         *        a final task, which finalizes the strand, and waits for that task. Not on the session strand, where
+         *        the completions of later() run: the streams close behind what the processing thread does then. An
+         *        operation that was failed still runs to its end on the engine, its result is dropped.
          *
          * @return False when it was closed already.
          */

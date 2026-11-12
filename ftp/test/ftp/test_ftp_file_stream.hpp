@@ -491,6 +491,50 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(server_->waitForCheckpoint("drained"));
     }
 
+    TEST_P(FtpFileStreamTests, ACloseFromACompletionDoesNotWaitForTheProcessingThread)
+    {
+        auto metadata = loggedInScript();
+        sized(metadata, "/dir/b", "5");
+        metadata.expect("MDTM", "/dir/b").reply("213 20200102030405").expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/a", "7").expectDisconnect();
+        const auto fileSystem = connectWith(std::move(metadata), std::move(transfer));
+        const auto stream = open("/dir/a", readMode);
+
+        // The processing thread is held, as it is inside a call of a stream, which waits for the session strand.
+        std::promise<void> release{};
+        auto held = thread_.pushPromiseTask(
+            [released = release.get_future().share()]()
+            {
+                released.wait();
+            }
+        );
+        const auto closed = std::make_shared<std::promise<bool>>();
+        auto closedFuture = closed->get_future();
+        fileSystem->later(
+            RemoteIo::Stat{.path = remote("/dir/b")},
+            [fileSystem, closed](RemoteIo::OperationResult<RemoteIo::Stat> const&)
+            {
+                closed->set_value(fileSystem->close());
+            }
+        );
+        const auto returned = closedFuture.wait_for(10s);
+        release.set_value();
+        ASSERT_EQ(returned, std::future_status::ready) << "the close waited for the processing thread";
+        EXPECT_TRUE(closedFuture.get());
+        valueOf(held);
+
+        const auto after = onThread(
+            [stream]()
+            {
+                std::array<char, 3u> buffer{};
+                return stream->readSomeInStrand(buffer.data(), buffer.size());
+            }
+        );
+        ASSERT_FALSE(after) << "read after the close";
+        EXPECT_EQ(after.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << after.error().toString();
+    }
+
     TEST_P(FtpFileStreamTests, ReadingAFileForCommandsStopsAtTheAskedSize)
     {
         auto metadata = loggedInScript();

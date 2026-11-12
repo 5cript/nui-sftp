@@ -109,6 +109,13 @@ namespace FileTransferProtocol
             strand_->doFinalSync(closeStreams);
             return true;
         }
+        // A completion of later() closes from the session strand, which a call of a stream on the processing thread
+        // waits for: waiting for that thread here would end neither.
+        if (session_.engine->strand().running_in_this_thread())
+        {
+            strand_->pushFinalTask(closeStreams);
+            return true;
+        }
         // A thread that stopped refuses the task, no task of the session runs beside this one then.
         if (!strand_->pushFinalPromiseTask(closeStreams).get())
             closeStreams();
