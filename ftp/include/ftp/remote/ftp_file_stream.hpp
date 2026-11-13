@@ -90,14 +90,15 @@ namespace FileTransferProtocol
         };
 
         /**
-         * @param strand The strand of the file system, on the ProcessingThread of the session.
+         * @param strand The strand of the file system, on the ProcessingThread of the session. The file system owns
+         *        it, the stream reaches it only while it is there.
          * @param lease The connection the transfer runs on.
          * @param size The size of a file to download, to tell a cut transfer from a complete one.
          */
         static std::shared_ptr<FtpFileStream> create(
             FileSystemSession session,
             FtpFileSystemOptions options,
-            RemoteIo::ProcessingStrand* strand,
+            std::weak_ptr<RemoteIo::ProcessingStrand> strand,
             Lease lease,
             Paths::RemotePath path,
             Direction direction,
@@ -109,7 +110,7 @@ namespace FileTransferProtocol
             Private,
             FileSystemSession session,
             FtpFileSystemOptions options,
-            RemoteIo::ProcessingStrand* strand,
+            std::weak_ptr<RemoteIo::ProcessingStrand> strand,
             Lease lease,
             Paths::RemotePath path,
             Direction direction,
@@ -183,9 +184,16 @@ namespace FileTransferProtocol
         std::size_t readLengthLimit() const override;
         std::size_t writeLengthLimit() const override;
 
+        /**
+         * @brief closeInStrand() on the strand of the file system. Does nothing once the file system is gone: its
+         *        close ended the stream, and without one the destructor ends the transfer.
+         */
         void close() override;
         void closeInStrand() override;
 
+        /**
+         * @return Null once the file system is gone.
+         */
         RemoteIo::ProcessingStrand* strand() const override;
 
       private:
@@ -362,7 +370,8 @@ namespace FileTransferProtocol
 
         const FileSystemSession session_;
         const FtpFileSystemOptions options_;
-        RemoteIo::ProcessingStrand* const strand_;
+        /** @brief The file system's, a stream that a caller still holds may outlive it. */
+        const std::weak_ptr<RemoteIo::ProcessingStrand> strand_;
         const Paths::RemotePath path_;
         const Direction direction_;
         const std::optional<std::uint64_t> size_;

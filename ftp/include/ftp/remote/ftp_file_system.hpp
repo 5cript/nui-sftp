@@ -130,7 +130,7 @@ namespace FileTransferProtocol
         static boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::OpenFile>> openOn(
             FileSystemSession session,
             FtpFileSystemOptions options,
-            RemoteIo::ProcessingStrand* strand,
+            std::weak_ptr<RemoteIo::ProcessingStrand> strand,
             std::shared_ptr<OpenStreams> streams,
             std::shared_ptr<CallScope> scope,
             RemoteIo::OpenFile operation
@@ -146,7 +146,8 @@ namespace FileTransferProtocol
         static RemoteIo::RemoteError closedError();
 
         const FileSystemSession session_;
-        const std::unique_ptr<RemoteIo::ProcessingStrand> strand_;
+        /** @brief Shared so that a stream finds out whether it is still there. */
+        const std::shared_ptr<RemoteIo::ProcessingStrand> strand_;
         const FtpFileSystemOptions options_;
         const std::shared_ptr<RunningOperations> running_ = std::make_shared<RunningOperations>();
         const std::shared_ptr<OpenStreams> streams_ = std::make_shared<OpenStreams>();

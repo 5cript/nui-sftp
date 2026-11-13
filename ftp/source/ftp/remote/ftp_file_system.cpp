@@ -133,12 +133,17 @@ namespace FileTransferProtocol
         session_.engine->template run<RemoteIo::OpenFile::Result>(
             [session = session_,
                 options = options_,
-                strand = strand_.get(),
+                strand = std::weak_ptr{strand_},
                 streams = streams_,
                 operation = std::move(operation)](std::shared_ptr<CallScope> const& scope) mutable
             {
                 return openOn(
-                    std::move(session), std::move(options), strand, std::move(streams), scope, std::move(operation)
+                    std::move(session),
+                    std::move(options),
+                    std::move(strand),
+                    std::move(streams),
+                    scope,
+                    std::move(operation)
                 );
             },
             options_.operationLimits,
@@ -152,7 +157,7 @@ namespace FileTransferProtocol
     asio::awaitable<RemoteIo::OperationResult<RemoteIo::OpenFile>> FtpFileSystem::openOn(
         FileSystemSession session,
         FtpFileSystemOptions options,
-        RemoteIo::ProcessingStrand* strand,
+        std::weak_ptr<RemoteIo::ProcessingStrand> strand,
         std::shared_ptr<OpenStreams> streams,
         std::shared_ptr<CallScope> scope,
         RemoteIo::OpenFile operation
@@ -193,7 +198,7 @@ namespace FileTransferProtocol
         auto stream = FtpFileStream::create(
             std::move(session),
             std::move(options),
-            strand,
+            std::move(strand),
             std::move(*lease),
             std::move(operation.path),
             *direction,

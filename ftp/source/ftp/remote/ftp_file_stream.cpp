@@ -56,7 +56,7 @@ namespace FileTransferProtocol
     std::shared_ptr<FtpFileStream> FtpFileStream::create(
         FileSystemSession session,
         FtpFileSystemOptions options,
-        RemoteIo::ProcessingStrand* strand,
+        std::weak_ptr<RemoteIo::ProcessingStrand> strand,
         Lease lease,
         Paths::RemotePath path,
         Direction direction,
@@ -68,7 +68,7 @@ namespace FileTransferProtocol
             Private{},
             std::move(session),
             std::move(options),
-            strand,
+            std::move(strand),
             std::move(lease),
             std::move(path),
             direction,
@@ -81,7 +81,7 @@ namespace FileTransferProtocol
         Private,
         FileSystemSession session,
         FtpFileSystemOptions options,
-        RemoteIo::ProcessingStrand* strand,
+        std::weak_ptr<RemoteIo::ProcessingStrand> strand,
         Lease lease,
         Paths::RemotePath path,
         Direction direction,
@@ -90,7 +90,7 @@ namespace FileTransferProtocol
     )
         : session_{std::move(session)}
         , options_{std::move(options)}
-        , strand_{strand}
+        , strand_{std::move(strand)}
         , path_{std::move(path)}
         , direction_{direction}
         , size_{size}
@@ -173,7 +173,14 @@ namespace FileTransferProtocol
     std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
     FtpFileStream::readAll(std::function<bool(std::string_view data)> onRead)
     {
-        return strand_->pushPromiseTask(
+        const auto strand = strand_.lock();
+        if (!strand)
+        {
+            std::promise<Result<std::size_t>> gone{};
+            gone.set_value(std::unexpected(closedError()));
+            return gone.get_future();
+        }
+        return strand->pushPromiseTask(
             [self = shared_from_this(), onRead = std::move(onRead)]()
             {
                 return self->readAllInStrand(onRead);
@@ -313,10 +320,13 @@ namespace FileTransferProtocol
 
     void FtpFileStream::close()
     {
-        if (strand_->withinProcessingThread())
+        const auto strand = strand_.lock();
+        if (!strand)
+            return;
+        if (strand->withinProcessingThread())
             return closeInStrand();
         // A strand that refuses the task was finalized, its close ended the streams already.
-        strand_->pushTask(
+        strand->pushTask(
             [self = shared_from_this()]()
             {
                 self->closeInStrand();
@@ -343,7 +353,7 @@ namespace FileTransferProtocol
 
     RemoteIo::ProcessingStrand* FtpFileStream::strand() const
     {
-        return strand_;
+        return strand_.lock().get();
     }
 
     asio::awaitable<FtpFileStream::Result<std::optional<RemoteIo::FileInformation>>>

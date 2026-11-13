@@ -521,6 +521,32 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(server_->waitForCheckpoint("drained"));
     }
 
+    TEST_P(FtpFileStreamTests, AStreamThatACallerStillHoldsOutlivesItsFileSystem)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/a", "7").expectDisconnect();
+        auto fileSystem = connectWith(std::move(metadata), std::move(transfer));
+        const auto stream = open("/dir/a", readMode);
+        EXPECT_TRUE(fileSystem->close());
+        fileSystem.reset();
+        fileSystem_.reset();
+
+        // The strand went with the file system, the stream must not reach for it.
+        EXPECT_EQ(stream->strand(), nullptr);
+        stream->close();
+        auto reading = stream->readAll(
+            [](std::string_view)
+            {
+                return true;
+            }
+        );
+        const auto read = valueOf(reading);
+        ASSERT_FALSE(read) << "read a stream whose file system is gone";
+        EXPECT_EQ(read.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << read.error().toString();
+    }
+
     TEST_P(FtpFileStreamTests, ACloseFromACompletionDoesNotWaitForTheProcessingThread)
     {
         auto metadata = loggedInScript();
