@@ -162,6 +162,11 @@ namespace FileTransferProtocol
         return true;
     }
 
+    bool FtpFileSystem::closed() const
+    {
+        return running_->closed();
+    }
+
     void FtpFileSystem::dispatch(std::function<void()> start)
     {
         start();

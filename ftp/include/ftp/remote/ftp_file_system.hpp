@@ -75,6 +75,11 @@ namespace FileTransferProtocol
          */
         bool close() override;
 
+        /**
+         * @brief close() ran.
+         */
+        bool closed() const;
+
       protected:
         /**
          * @brief Runs @p start at once: operations run on the engine, so browsing never waits behind the tasks of the
