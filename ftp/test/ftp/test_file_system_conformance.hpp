@@ -5,6 +5,7 @@
 #    include "test_metadata_conformance.hpp"
 
 #    include <ftp/remote/ftp_file_system.hpp>
+#    include <ftp/support/session_start.hpp>
 #    include <paths/remote_path.hpp>
 #    include <remote_io/async/processing_thread.hpp>
 #    include <remote_io/async/transfer_context.hpp>
@@ -51,28 +52,24 @@ namespace FileTransferProtocol::Test
                 ASSERT_TRUE(probe->untrustedCertificate());
                 loginOptions = options(probe->untrustedCertificate()->publicKeySha256);
             }
-            EngineOptions engineOptions{};
-            engineOptions.pool = PoolOptions{
-                .host = endpoint_.address,
-                .port = port(),
-                .login = std::move(loginOptions),
-                .transferConnections = 2u,
-            };
-            engine_ = Engine::create(
-                engineHost_.executor(), std::make_shared<Resolver>(), gate_, std::move(engineOptions)
+            auto started = startSession(
+                thread_,
+                SessionStart{
+                    .executor = engineHost_.executor(),
+                    .gate = gate_,
+                    .pool =
+                        PoolOptions{
+                            .host = endpoint_.address,
+                            .port = port(),
+                            .login = std::move(loginOptions),
+                            .transferConnections = 2u,
+                        },
+                    .loginLimit = 30s,
+                }
             );
-            auto start = boost::asio::co_spawn(engine_->strand(), engine_->pool()->start(), boost::asio::use_future);
-            ASSERT_EQ(start.wait_for(30s), std::future_status::ready) << "the login did not end";
-            const auto login = start.get();
-            ASSERT_TRUE(login) << login.error().toString();
-            fileSystem_ = FtpFileSystem::create(
-                FileSystemSession{
-                    .engine = engine_,
-                    .homeDirectory = login->homeDirectory,
-                    .parallelTransfers = 2u,
-                },
-                thread_.createStrand()
-            );
+            ASSERT_TRUE(started.has_value()) << started.error();
+            engine_ = std::move(started->engine);
+            fileSystem_ = std::move(started->fileSystem);
         }
 
         void TearDown() override

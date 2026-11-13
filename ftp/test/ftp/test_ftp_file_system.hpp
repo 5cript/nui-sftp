@@ -5,6 +5,7 @@
 
 #include <ftp/remote/ftp_file_system.hpp>
 #include <ftp/remote/running_operations.hpp>
+#include <ftp/support/session_start.hpp>
 #include <paths/remote_path.hpp>
 
 #include <gtest/gtest.h>
@@ -116,29 +117,27 @@ namespace FileTransferProtocol::Test
                 throw std::runtime_error{started.error()};
             server_ = std::move(started).value();
             server_->addConnection(std::move(script));
-            EngineOptions engineOptions{};
-            engineOptions.pool = PoolOptions{
-                .host = server_->address(),
-                .port = server_->port(),
-                .login = {.credentials = {.user = "user", .password = "password"}},
-                .control = {.connectTimeout = 10s, .commandTimeout = 10s},
-                .transferConnections = transferConnections,
-            };
-            engine_ = Engine::create(host_.executor(), std::make_shared<Resolver>(), gate_, std::move(engineOptions));
-            auto start = asio::co_spawn(engine_->strand(), engine_->pool()->start(), asio::use_future);
-            const auto login = valueOf(start);
-            if (!login)
-                throw std::runtime_error{fmt::format("The login failed: {}", login.error().toString())};
-            fileSystem_ = FtpFileSystem::create(
-                FileSystemSession{
-                    .engine = engine_,
+            auto session = startSession(
+                thread_,
+                SessionStart{
+                    .executor = host_.executor(),
+                    .gate = gate_,
+                    .pool =
+                        PoolOptions{
+                            .host = server_->address(),
+                            .port = server_->port(),
+                            .login = {.credentials = {.user = "user", .password = "password"}},
+                            .control = {.connectTimeout = 10s, .commandTimeout = 10s},
+                            .transferConnections = transferConnections,
+                        },
                     .dialect = dialect_,
-                    .homeDirectory = login->homeDirectory,
-                    .parallelTransfers = transferConnections,
-                },
-                thread_.createStrand(),
-                std::move(options)
+                    .fileSystem = std::move(options),
+                }
             );
+            if (!session)
+                throw std::runtime_error{session.error()};
+            engine_ = std::move(session->engine);
+            fileSystem_ = std::move(session->fileSystem);
             return fileSystem_;
         }
 

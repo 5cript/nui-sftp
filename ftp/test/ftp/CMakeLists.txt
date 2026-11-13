@@ -27,6 +27,7 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
             support/scripted_ftp_server.cpp
             support/server_fleet.cpp
             support/server_profile.cpp
+            support/session_start.cpp
             support/test_ftp_client.cpp
             support/test_pki.cpp
             support/tree_responder.cpp

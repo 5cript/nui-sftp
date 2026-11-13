@@ -1,17 +1,13 @@
 #include <ftp/support/file_system_harness.hpp>
+#include <ftp/support/session_start.hpp>
 #include <ftp/engine/engine.hpp>
-#include <ftp/engine/resolver.hpp>
 #include <ftp/engine/task_gate.hpp>
 #include <ftp/remote/ftp_file_system.hpp>
 #include <remote_io/async/processing_thread.hpp>
 
-#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/thread_pool.hpp>
-#include <boost/asio/use_future.hpp>
-#include <fmt/format.h>
 
 #include <chrono>
-#include <future>
 #include <utility>
 
 namespace FileTransferProtocol::Test
@@ -46,31 +42,25 @@ namespace FileTransferProtocol::Test
 
         std::expected<void, std::string> connect(Options const& options)
         {
-            EngineOptions engineOptions{};
-            engineOptions.pool = PoolOptions{
-                .host = options.host,
-                .port = options.port,
-                .login = {.credentials = {.user = "user", .password = "password"}},
-                .control = {.connectTimeout = 10s, .commandTimeout = 10s},
-                .transferConnections = options.transferConnections,
-            };
-            engine_ = Engine::create(
-                executor_.get_executor(), std::make_shared<Resolver>(), gate_, std::move(engineOptions)
+            auto started = startSession(
+                thread_,
+                SessionStart{
+                    .executor = executor_.get_executor(),
+                    .gate = gate_,
+                    .pool =
+                        PoolOptions{
+                            .host = options.host,
+                            .port = options.port,
+                            .login = {.credentials = {.user = "user", .password = "password"}},
+                            .control = {.connectTimeout = 10s, .commandTimeout = 10s},
+                            .transferConnections = options.transferConnections,
+                        },
+                }
             );
-            auto started = asio::co_spawn(engine_->strand(), engine_->pool()->start(), asio::use_future);
-            if (started.wait_for(20s) != std::future_status::ready)
-                return std::unexpected(std::string{"The login did not end"});
-            const auto login = started.get();
-            if (!login)
-                return std::unexpected(fmt::format("The login failed: {}", login.error().toString()));
-            fileSystem_ = FtpFileSystem::create(
-                FileSystemSession{
-                    .engine = engine_,
-                    .homeDirectory = login->homeDirectory,
-                    .parallelTransfers = options.transferConnections,
-                },
-                thread_.createStrand()
-            );
+            if (!started)
+                return std::unexpected(std::move(started).error());
+            engine_ = std::move(started->engine);
+            fileSystem_ = std::move(started->fileSystem);
             return {};
         }
 
