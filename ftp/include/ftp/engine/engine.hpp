@@ -145,7 +145,8 @@ namespace FileTransferProtocol
          *        that is TimedOut. When it has not ended after the drain, the connections touched in its CallScope are
          *        closed and it completes as TimedOut, a later result is dropped. @p done runs on the session strand,
          *        or at once on the calling thread while the session is closing, failed or refuses posts. It must not
-         *        throw.
+         *        throw. An operation that learns on its way how much it has to do moves its backstop with
+         *        CallScope::allowMore().
          *
          * @param body Called once, on the session strand, with the CallScope of the operation. Returns an
          *        awaitable<Result<ValueT>>, cancellation reaches it as an error, never as an exception.
@@ -345,6 +346,11 @@ namespace FileTransferProtocol
          */
         bool refusesCalls(CallRole role) const;
         void armCallTimer(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds duration);
+        void awaitCallTimer(std::shared_ptr<Detail::CallState> const& pending);
+        /**
+         * @brief Moves the backstop of @p pending later by @p more unless it was cancelled, on the session strand.
+         */
+        void extendCall(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds more);
         void callTimeUp(std::shared_ptr<Detail::CallState> const& pending);
         void endCall(Detail::CallState& pending);
         RemoteIo::RemoteError closedError() const;

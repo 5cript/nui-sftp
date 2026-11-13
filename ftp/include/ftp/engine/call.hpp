@@ -31,12 +31,14 @@ namespace FileTransferProtocol
     };
 
     /**
-     * @brief The control connections an operation used, closed when it does not end after its cancel. Used on the
-     *        session strand.
+     * @brief What an operation tells the engine that runs it: the control connections it used, closed when it does
+     *        not end after its cancel, and the time it needs beyond its backstop. Used on the session strand.
      */
     class CallScope
     {
       public:
+        using AllowMore = std::function<void(std::chrono::milliseconds more)>;
+
         void touch(std::shared_ptr<ControlConnection> const& connection);
 
         /**
@@ -44,8 +46,20 @@ namespace FileTransferProtocol
          */
         void closeTouched();
 
+        /**
+         * @brief Moves the backstop of the operation later by @p more, for one that learns on its way how much it has
+         *        to do. Nothing once the operation was cancelled or ended.
+         */
+        void allowMore(std::chrono::milliseconds more);
+
+        /**
+         * @brief What allowMore() calls: the engine that runs the operation sets it.
+         */
+        void onAllowMore(AllowMore allowMore);
+
       private:
         std::vector<std::weak_ptr<ControlConnection>> touched_{};
+        AllowMore allowMore_{};
     };
 
     namespace Detail
@@ -64,7 +78,11 @@ namespace FileTransferProtocol
             CallState(CallState&&) = delete;
             CallState& operator=(CallState&&) = delete;
 
+            /**
+             * @brief The bounds of the operation, the backstop with what extendBackstop() added.
+             */
             SyncLimits const& limits() const;
+            void extendBackstop(std::chrono::milliseconds more);
             std::shared_ptr<CallScope> const& scope() const;
             boost::asio::cancellation_slot slot();
             boost::asio::steady_timer& timer();
@@ -85,7 +103,7 @@ namespace FileTransferProtocol
             virtual bool completed() const = 0;
 
           private:
-            const SyncLimits limits_;
+            SyncLimits limits_;
             const std::shared_ptr<CallScope> scope_ = std::make_shared<CallScope>();
             boost::asio::cancellation_signal signal_{};
             boost::asio::steady_timer timer_;

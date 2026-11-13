@@ -159,6 +159,15 @@ namespace FileTransferProtocol
         }
         pending->number = ++callNumber_;
         calls_.emplace(pending->number, pending);
+        pending->scope()->onAllowMore(
+            [weakSelf = weak_from_this(), weakPending = std::weak_ptr{pending}](std::chrono::milliseconds more)
+            {
+                const auto self = weakSelf.lock();
+                const auto call = weakPending.lock();
+                if (self && call)
+                    self->extendCall(call, more);
+            }
+        );
         armCallTimer(pending, pending->limits().backstop);
         return true;
     }
@@ -171,13 +180,29 @@ namespace FileTransferProtocol
     void Engine::armCallTimer(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds duration)
     {
         pending->timer().expires_after(duration);
+        awaitCallTimer(pending);
+    }
+
+    void Engine::awaitCallTimer(std::shared_ptr<Detail::CallState> const& pending)
+    {
         pending->timer().async_wait(guarded(
             [self = shared_from_this(), pending](boost::system::error_code error)
             {
-                if (!error)
+                // A wait that ran out as the timer was moved later cannot be cancelled any more.
+                if (!error && pending->timer().expiry() <= std::chrono::steady_clock::now())
                     self->callTimeUp(pending);
             }
         ));
+    }
+
+    void Engine::extendCall(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds more)
+    {
+        assert(strand_.running_in_this_thread() && "the operations of the engine belong to the session strand");
+        if (pending->completed() || pending->draining())
+            return;
+        pending->extendBackstop(more);
+        pending->timer().expires_at(pending->timer().expiry() + more);
+        awaitCallTimer(pending);
     }
 
     void Engine::callTimeUp(std::shared_ptr<Detail::CallState> const& pending)
