@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <variant>
 
 namespace FileTransferProtocol
 {
@@ -206,6 +207,20 @@ namespace FileTransferProtocol
      */
     boost::asio::awaitable<std::expected<std::string, RemoteIo::RemoteError>>
     canonicalDirectory(MetadataSession session, std::string path);
+
+    /** @brief The path of a directory as the server resolves it, or the entry at a path that is no directory. */
+    using DirectoryOrEntry = std::variant<std::string, ListingEntry>;
+
+    /**
+     * @brief canonicalDirectory() for a caller that goes on with what is no directory: the lookup that explains the
+     *        refusal of the CWD found the entry, which spares a second one.
+     *
+     * @return The path of the 257 reply, or the entry at @p path when it is no directory, itself when it is a symlink
+     *         that leads to none. NoSuchFile for a path that does not exist, PermissionDenied for a directory that
+     *         cannot be entered, else the refusal.
+     */
+    boost::asio::awaitable<std::expected<DirectoryOrEntry, RemoteIo::RemoteError>>
+    canonicalDirectoryOrEntry(MetadataSession session, std::string path);
 
     /**
      * @brief Creates the empty file @p path unless something exists there: lstatPath(), then a STOR of no bytes. FTP

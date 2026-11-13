@@ -15,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace FileTransferProtocol
@@ -381,39 +382,35 @@ namespace FileTransferProtocol
         auto current = operation.path;
         for (int links = 0; links <= maximumLinks; ++links)
         {
-            const auto directory = co_await canonicalDirectory(session, current.value());
-            if (directory)
+            auto found = co_await canonicalDirectoryOrEntry(session, current.value());
+            if (!found)
+                co_return std::unexpected(std::move(found).error());
+            if (auto const* directory = std::get_if<std::string>(&*found))
                 co_return remotePathOf(*directory);
-            if (directory.error().kind != RemoteErrorKind::Failure || Detail::isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(directory.error());
+            if (Detail::isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return std::unexpected(cancelledError());
 
-            // No directory: a link is followed, anything else is named in its resolved parent.
-            const auto entry = co_await lstatPath(session, current.value());
-            if (!entry)
-                co_return std::unexpected(entry.error());
-            if (entry->type == FileType::Symlink)
-            {
-                auto target = targetOf(current, informationOf(*entry));
-                if (!target)
-                    co_return std::unexpected(std::move(target).error());
-                current = *std::move(target);
-                continue;
-            }
+            // No directory: named in its resolved parent, from where a link leads on.
             const auto parent = current.parent();
             const auto name = current.filename();
             if (!parent || !name)
                 co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The root is no directory"));
-            if (Detail::isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(cancelledError());
             const auto resolvedParent = co_await canonicalDirectory(session, parent->value());
             if (!resolvedParent)
                 co_return std::unexpected(resolvedParent.error());
-            co_return remotePathOf(*resolvedParent).transform(
-                [&name](Paths::RemotePath const& resolved)
+            auto resolved = remotePathOf(*resolvedParent).transform(
+                [&name](Paths::RemotePath const& directory)
                 {
-                    return resolved / *name;
+                    return directory / *name;
                 }
             );
+            auto const& entry = std::get<ListingEntry>(*found);
+            if (!resolved || entry.type != FileType::Symlink)
+                co_return resolved;
+            auto target = targetOf(*resolved, informationOf(entry));
+            if (!target)
+                co_return std::unexpected(std::move(target).error());
+            current = *std::move(target);
         }
         co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "Maximum symlink depth exceeded"));
     }

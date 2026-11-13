@@ -241,19 +241,41 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief A refusal with its kind, and the entry at its path where the lookup found one.
+         */
+        struct Explanation
+        {
+            RemoteIo::RemoteError error{};
+            std::optional<ListingEntry> entry{};
+        };
+
+        /**
          * @brief Gives the untold() refusal @p error of a command on @p path its kind: NoSuchFile where @p path does
-         *        not exist, else what @p kindOf says for its entry.
+         *        not exist, else what @p kindOf says for its entry, which the explanation keeps.
+         */
+        asio::awaitable<Explanation>
+        explained(MetadataSession session, std::string path, RemoteIo::RemoteError error, KindOfExisting kindOf)
+        {
+            assert(untold(error) && "only a refusal that tells no kind is explained");
+            auto found = co_await lstatPath(std::move(session), std::move(path));
+            if (found)
+            {
+                error.kind = kindOf(*found);
+                co_return Explanation{.error = std::move(error), .entry = std::move(*found)};
+            }
+            if (found.error().kind == RemoteErrorKind::NoSuchFile)
+                error.kind = RemoteErrorKind::NoSuchFile;
+            co_return Explanation{.error = std::move(error)};
+        }
+
+        /**
+         * @brief explained() for a caller that needs the refusal alone.
          */
         asio::awaitable<RemoteIo::RemoteError>
         explain(MetadataSession session, std::string path, RemoteIo::RemoteError error, KindOfExisting kindOf)
         {
-            assert(untold(error) && "only a refusal that tells no kind is explained");
-            const auto found = co_await lstatPath(std::move(session), std::move(path));
-            if (found)
-                error.kind = kindOf(*found);
-            else if (found.error().kind == RemoteErrorKind::NoSuchFile)
-                error.kind = RemoteErrorKind::NoSuchFile;
-            co_return error;
+            co_return (co_await explained(std::move(session), std::move(path), std::move(error), std::move(kindOf)))
+                .error;
         }
 
         /**
@@ -799,31 +821,67 @@ namespace FileTransferProtocol
         co_return std::unexpected(noSetter());
     }
 
+    namespace
+    {
+        /**
+         * @brief canonicalDirectory() with the entry that explained a refusal of the CWD.
+         */
+        asio::awaitable<std::expected<std::string, Explanation>>
+        enteredDirectory(MetadataSession session, std::string path)
+        {
+            const auto control = session.transfer.control;
+            const auto entered = co_await changeDirectory(control, path);
+            if (!entered && !untold(entered.error()))
+                co_return std::unexpected(Explanation{.error = entered.error()});
+            if (!entered)
+                co_return std::unexpected(
+                    co_await explained(
+                        std::move(session),
+                        std::move(path),
+                        entered.error(),
+                        [](ListingEntry const& entry)
+                        {
+                            if (entry.type == FileType::Directory)
+                                return RemoteErrorKind::PermissionDenied;
+                            return RemoteErrorKind::Failure;
+                        }
+                    )
+                );
+            const auto reply = co_await perform(control, Command{.verb = Verb::PrintWorkingDirectory});
+            if (!reply)
+                co_return std::unexpected(Explanation{.error = reply.error()});
+            co_return parsePathReply(*reply, Verb::PrintWorkingDirectory)
+                .transform_error(
+                    [](RemoteIo::RemoteError error)
+                    {
+                        return Explanation{.error = std::move(error)};
+                    }
+                );
+        }
+    }
+
     asio::awaitable<std::expected<std::string, RemoteIo::RemoteError>>
     canonicalDirectory(MetadataSession session, std::string path)
     {
-        auto const& control = session.transfer.control;
-        const auto entered = co_await changeDirectory(control, path);
-        if (!entered && !untold(entered.error()))
-            co_return std::unexpected(entered.error());
-        if (!entered)
-            co_return std::unexpected(
-                co_await explain(
-                    std::move(session),
-                    std::move(path),
-                    entered.error(),
-                    [](ListingEntry const& entry)
-                    {
-                        if (entry.type == FileType::Directory)
-                            return RemoteErrorKind::PermissionDenied;
-                        return RemoteErrorKind::Failure;
-                    }
-                )
+        co_return (co_await enteredDirectory(std::move(session), std::move(path)))
+            .transform_error(
+                [](Explanation refusal)
+                {
+                    return std::move(refusal.error);
+                }
             );
-        const auto reply = co_await perform(control, Command{.verb = Verb::PrintWorkingDirectory});
-        if (!reply)
-            co_return std::unexpected(reply.error());
-        co_return parsePathReply(*reply, Verb::PrintWorkingDirectory);
+    }
+
+    asio::awaitable<std::expected<DirectoryOrEntry, RemoteIo::RemoteError>>
+    canonicalDirectoryOrEntry(MetadataSession session, std::string path)
+    {
+        auto entered = co_await enteredDirectory(std::move(session), std::move(path));
+        if (entered)
+            co_return DirectoryOrEntry{std::move(*entered)};
+        auto& refusal = entered.error();
+        if (refusal.entry && refusal.entry->type != FileType::Directory)
+            co_return DirectoryOrEntry{std::move(*refusal.entry)};
+        co_return std::unexpected(std::move(refusal.error));
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>>

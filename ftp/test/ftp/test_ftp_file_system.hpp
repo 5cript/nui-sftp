@@ -435,7 +435,7 @@ namespace FileTransferProtocol::Test
     {
         auto script = loggedInScript();
         script.expect("CWD", "/dir/a").reply("550 Failed to change directory.");
-        listsIn(script, "/dir", std::string{listedFile});
+        // The lookup that explains the refusal tells that it is a file, it is not looked up again.
         listsIn(script, "/dir", std::string{listedFile});
         enters(script, "/dir");
         script.expect("PWD").reply("257 \"/srv/dir\" is the current directory").expectDisconnect();
@@ -444,6 +444,29 @@ namespace FileTransferProtocol::Test
         const auto canonical = later(RemoteIo::CanonicalPath{.path = remote("/dir/a")});
         ASSERT_TRUE(canonical) << canonical.error().toString();
         EXPECT_EQ(canonical->value(), "/srv/dir/a");
+    }
+
+    TEST_P(FtpFileSystemTests, ALinkIsCanonicalFromItsResolvedParent)
+    {
+        constexpr std::string_view linkUpwards =
+            "lrwxrwxrwx    1 0        0              14 Jan 02 03:04 conf -> ../shared/conf\r\n";
+        constexpr std::string_view listedTarget =
+            "-rw-r--r--    1 0        0               5 Jan 02 03:04 conf\r\n";
+        auto script = loggedInScript();
+        script.expect("CWD", "/current/conf").reply("550 Failed to change directory.");
+        listsIn(script, "/current", std::string{linkUpwards});
+        // /current is itself a link, ".." leaves the directory it leads to.
+        enters(script, "/current");
+        script.expect("PWD").reply("257 \"/srv/releases/v2\" is the current directory");
+        script.expect("CWD", "/srv/releases/shared/conf").reply("550 Failed to change directory.");
+        listsIn(script, "/srv/releases/shared", std::string{listedTarget});
+        enters(script, "/srv/releases/shared");
+        script.expect("PWD").reply("257 \"/srv/releases/shared\" is the current directory").expectDisconnect();
+        connect(std::move(script));
+
+        const auto canonical = later(RemoteIo::CanonicalPath{.path = remote("/current/conf")});
+        ASSERT_TRUE(canonical) << canonical.error().toString();
+        EXPECT_EQ(canonical->value(), "/srv/releases/shared/conf");
     }
 
     TEST_P(FtpFileSystemTests, LinkingIntoPlaceIsUnsupportedOnlyWhereTheDestinationIsFree)

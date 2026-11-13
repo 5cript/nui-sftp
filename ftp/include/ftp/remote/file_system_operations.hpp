@@ -86,7 +86,9 @@ namespace FileTransferProtocol
 
     /**
      * @brief A directory as canonicalDirectory() resolves it. Anything else is its parent resolved that way with its
-     *        name, a symlink is followed first, with ".." in its content resolved as RemotePath::resolveLink() does.
+     *        name. A symlink leads on from there, so ".." in its content starts at the resolved parent, and is
+     *        resolved as RemotePath::resolveLink() does. The lookup that tells a file from a link is the one that
+     *        explains the refused CWD, see canonicalDirectoryOrEntry().
      */
     boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::CanonicalPath>>
     runOperation(MetadataSession session, RemoteIo::CanonicalPath operation);
