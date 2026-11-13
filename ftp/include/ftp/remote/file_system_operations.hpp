@@ -13,6 +13,9 @@ namespace FileTransferProtocol
      *        until it ended, and ends as Cancelled after a cancel without asking the server more. Run them with
      *        throw_if_cancelled(false), as FtpFileSystem does: a cancel that no operation under way took must not
      *        throw at the next step.
+     *
+     * ListDirectory takes the end of a link that names an entry of the same listing from that listing, with the time
+     * as LIST printed it, and asks the server only for the other links.
      */
     boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>>
     runOperation(MetadataSession session, RemoteIo::ListDirectory operation);

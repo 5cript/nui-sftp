@@ -12,6 +12,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -23,6 +25,12 @@ namespace FileTransferProtocol
         using Detail::errorOf;
         using RemoteIo::RemoteErrorKind;
         using SharedData::FileType;
+
+        /** @brief The links one lookup follows before their chain counts as endless. */
+        constexpr int maximumLinks = 10;
+
+        /** @brief The entries of a listing by their names, of which a Listing keeps one each. */
+        using ListedNames = std::unordered_map<std::string_view, ListingEntry const*>;
 
         RemoteIo::RemoteError cancelledError()
         {
@@ -100,6 +108,60 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief The entries that can answer where a link of @p listing leads to. None where the server listed a name
+         *        more than once: the listing kept one of them, which need not be the one the link reaches.
+         */
+        ListedNames listedByName(Listing const& listing)
+        {
+            ListedNames names{};
+            if (listing.repeatedNames != 0u)
+                return names;
+            names.reserve(listing.entries.size());
+            for (auto const& entry : listing.entries)
+                names.emplace(entry.name, &entry);
+            return names;
+        }
+
+        /**
+         * @brief The entry that the symlink @p link ends at, where its listing tells: every link of the chain names
+         *        one entry of the same listing, and the last of them is a file or a directory. Costs no command.
+         *
+         * @return Nothing for a target that is a path, "." or "..", that @p names does not have, and for a chain that
+         *         does not end: the server has to follow those.
+         */
+        ListingEntry const* listedTargetOf(ListedNames const& names, ListingEntry const& link)
+        {
+            auto const* current = &link;
+            for (int links = 0; links < maximumLinks && current->linkTarget; ++links)
+            {
+                std::string_view const target{*current->linkTarget};
+                if (target.empty() || target == "." || target == ".." || target.contains('/'))
+                    return nullptr;
+                const auto found = names.find(target);
+                if (found == names.end())
+                    return nullptr;
+                current = found->second;
+                if (current->type == FileType::Regular || current->type == FileType::Directory)
+                    return current;
+                if (current->type != FileType::Symlink)
+                    return nullptr;
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief @p target as the end of the symlink @p link, named like the link, as statLinkTarget() names it.
+         */
+        std::shared_ptr<SharedData::DirectoryEntry>
+        resolvedAs(ListingEntry const& target, RemoteIo::FileInformation const& link)
+        {
+            auto resolved = std::make_shared<SharedData::DirectoryEntry>(informationOf(target));
+            resolved->name = link.name;
+            resolved->nameIsValidUtf8 = link.nameIsValidUtf8;
+            return resolved;
+        }
+
+        /**
          * @brief The end of the symlink @p entry of the listing of @p directory, nothing when it cannot be reached.
          */
         asio::awaitable<std::expected<std::shared_ptr<SharedData::DirectoryEntry>, RemoteIo::RemoteError>>
@@ -130,12 +192,20 @@ namespace FileTransferProtocol
         entries.reserve(listing->entries.size());
         for (auto const& listed : listing->entries)
             entries.push_back(informationOf(listed));
-        if (!operation.resolveLinks)
+        if (!operation.resolveLinks || std::ranges::none_of(entries, &RemoteIo::FileInformation::isSymlink))
             co_return entries;
-        for (auto& entry : entries)
+        const auto names = listedByName(*listing);
+        for (std::size_t index = 0u; index < entries.size(); ++index)
         {
+            auto& entry = entries[index];
             if (!entry.isSymlink())
                 continue;
+            // A link to an entry of this listing needs no lookup, each one costs commands within the same backstop.
+            if (auto const* target = listedTargetOf(names, listing->entries[index]))
+            {
+                entry.resolvedTarget = resolvedAs(*target, entry);
+                continue;
+            }
             if (Detail::isCancelled(co_await asio::this_coro::cancellation_state))
                 co_return std::unexpected(cancelledError());
             auto target = co_await resolvedTargetOf(session, operation.path, entry);
@@ -308,7 +378,6 @@ namespace FileTransferProtocol
     asio::awaitable<RemoteIo::OperationResult<RemoteIo::CanonicalPath>>
     runOperation(MetadataSession session, RemoteIo::CanonicalPath operation)
     {
-        constexpr int maximumLinks = 10;
         auto current = operation.path;
         for (int links = 0; links <= maximumLinks; ++links)
         {

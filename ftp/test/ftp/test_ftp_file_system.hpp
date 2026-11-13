@@ -211,6 +211,82 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(listed->at(1u).linkTarget, "none");
     }
 
+    TEST_P(FtpFileSystemTests, ALinkToAnEntryOfTheSameListingIsResolvedWithoutAskingTheServer)
+    {
+        constexpr std::string_view linkToFile = "lrwxrwxrwx    1 0        0               1 Jan 02 03:04 same -> a\r\n";
+        constexpr std::string_view linkToLink =
+            "lrwxrwxrwx    1 0        0               4 Jan 02 03:04 chain -> same\r\n";
+        auto script = loggedInScript();
+        listsIn(
+            script,
+            "/dir",
+            std::string{listedFile} + std::string{listedSubdirectory} + std::string{listedLinkToDirectory} +
+                std::string{linkToFile} + std::string{linkToLink}
+        ).expectDisconnect();
+        connect(std::move(script));
+
+        const auto listed = later(RemoteIo::ListDirectory{.path = remote("/dir"), .resolveLinks = true});
+        ASSERT_TRUE(listed) << listed.error().toString();
+        ASSERT_EQ(namesOf(*listed), (std::vector<std::string>{"a", "sub", "up", "same", "chain"}));
+        auto const& toDirectory = listed->at(2u);
+        ASSERT_NE(toDirectory.resolvedTarget, nullptr) << "a link to a listed directory got no target";
+        EXPECT_TRUE(toDirectory.resolvedTarget->isDirectory());
+        EXPECT_EQ(toDirectory.resolvedTarget->name, "up");
+        for (const auto index : {3u, 4u})
+        {
+            auto const& toFile = listed->at(index);
+            ASSERT_NE(toFile.resolvedTarget, nullptr) << toFile.name;
+            EXPECT_TRUE(toFile.resolvedTarget->isRegularFile()) << toFile.name;
+            EXPECT_EQ(toFile.resolvedTarget->size, 5u) << toFile.name;
+            EXPECT_EQ(toFile.resolvedTarget->name, toFile.name);
+            EXPECT_EQ(toFile.resolvedTarget->mtime, listed->at(0u).mtime) << toFile.name;
+        }
+    }
+
+    TEST_P(FtpFileSystemTests, LinksTheListingCannotFollowAreAskedOfTheServer)
+    {
+        constexpr std::string_view linkToPath =
+            "lrwxrwxrwx    1 0        0               3 Jan 02 03:04 path -> ./a\r\n";
+        constexpr std::string_view linkInACircle =
+            "lrwxrwxrwx    1 0        0               6 Jan 02 03:04 circle -> circle\r\n";
+        auto script = loggedInScript();
+        listsIn(script, "/dir", std::string{listedFile} + std::string{linkToPath} + std::string{linkInACircle});
+        script.expect("SIZE", "/dir/path").reply("213 5").expect("MDTM", "/dir/path").reply("213 20200102030405");
+        script.expect("SIZE", "/dir/circle").reply("550 Could not get file size.");
+        script.expect("CWD", "/dir/circle").reply("550 Failed to change directory.").expectDisconnect();
+        connect(std::move(script));
+
+        const auto listed = later(RemoteIo::ListDirectory{.path = remote("/dir"), .resolveLinks = true});
+        ASSERT_TRUE(listed) << listed.error().toString();
+        ASSERT_EQ(namesOf(*listed), (std::vector<std::string>{"a", "path", "circle"}));
+        ASSERT_NE(listed->at(1u).resolvedTarget, nullptr);
+        EXPECT_TRUE(listed->at(1u).resolvedTarget->isRegularFile());
+        EXPECT_EQ(listed->at(2u).resolvedTarget, nullptr) << "a link onto itself got a target";
+    }
+
+    TEST_P(FtpFileSystemTests, AListingThatRepeatsANameLeavesItsLinksToTheServer)
+    {
+        constexpr std::string_view listedFileNamedSub =
+            "-rw-r--r--    1 0        0               5 Jan 02 03:04 sub\r\n";
+        auto script = loggedInScript();
+        listsIn(
+            script,
+            "/dir",
+            std::string{listedFileNamedSub} + std::string{listedSubdirectory} + std::string{listedLinkToDirectory}
+        );
+        // The listing keeps the directory of the two, the server follows the link to the file.
+        script.expect("SIZE", "/dir/up").reply("213 5").expect("MDTM", "/dir/up").reply("213 20200102030405");
+        script.expectDisconnect();
+        connect(std::move(script));
+
+        const auto listed = later(RemoteIo::ListDirectory{.path = remote("/dir"), .resolveLinks = true});
+        ASSERT_TRUE(listed) << listed.error().toString();
+        ASSERT_EQ(namesOf(*listed), (std::vector<std::string>{"sub", "up"}));
+        EXPECT_TRUE(listed->at(0u).isDirectory());
+        ASSERT_NE(listed->at(1u).resolvedTarget, nullptr);
+        EXPECT_TRUE(listed->at(1u).resolvedTarget->isRegularFile()) << "the listing answered for a repeated name";
+    }
+
     TEST_P(FtpFileSystemTests, RunsInStrandOnTheProcessingThread)
     {
         auto script = loggedInScript();
