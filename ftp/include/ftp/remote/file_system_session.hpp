@@ -47,6 +47,11 @@ namespace FileTransferProtocol
          *        commands have their own timeout, this only keeps the backstop behind them.
          */
         std::chrono::milliseconds linkLookupAllowance{std::chrono::seconds{1}};
+        /**
+         * @brief How long the close of the file system waits for the processing thread to close its streams. The
+         *        thread is shared: past this the streams close behind what holds it.
+         */
+        std::chrono::milliseconds closeWait{std::chrono::seconds{2}};
     };
 
     /**

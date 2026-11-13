@@ -5,6 +5,8 @@
 #include <boost/asio/awaitable.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -26,12 +28,35 @@ namespace FileTransferProtocol
             return promise.get_future();
         }
 
-        asio::awaitable<Engine::Result<LoginResult>> logInWith(std::shared_ptr<Pool> pool)
+        /**
+         * @brief What a login waits for with the command timeout at most: the greeting, AUTH TLS and its handshake,
+         *        USER, PASS, ACCT, PBSZ, PROT, FEAT, OPTS, TYPE and PWD.
+         */
+        constexpr auto loginReplies = 12;
+
+        /**
+         * @brief A strand of @p thread that keeps it, for a file system held past its connection.
+         */
+        std::shared_ptr<RemoteIo::ProcessingStrand> strandKeeping(std::shared_ptr<RemoteIo::ProcessingThread> thread)
         {
-            if (!pool)
-                co_return std::unexpected(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended"));
-            co_return co_await pool->start();
+            struct KeptStrand
+            {
+                std::shared_ptr<RemoteIo::ProcessingThread> thread;
+                std::unique_ptr<RemoteIo::ProcessingStrand> strand;
+            };
+            auto strand = thread->createStrand();
+            const auto kept = std::make_shared<KeptStrand>(std::move(thread), std::move(strand));
+            return std::shared_ptr<RemoteIo::ProcessingStrand>{kept, kept->strand.get()};
         }
+    }
+
+    SyncLimits loginLimitsFor(PoolOptions const& pool)
+    {
+        return SyncLimits{
+            .backstop =
+                2 * (pool.resolveTimeout + pool.control.connectTimeout) + loginReplies * pool.control.commandTimeout,
+            .drain = std::chrono::seconds{1},
+        };
     }
 
     struct FtpConnection::Shared
@@ -95,6 +120,32 @@ namespace FileTransferProtocol
             return homeDirectory;
         }
 
+        void refused(std::optional<CertificateInfo> certificate)
+        {
+            std::scoped_lock lock{mutex};
+            refusedCertificate = std::move(certificate);
+        }
+
+        std::optional<CertificateInfo> refusedByLogin() const
+        {
+            std::scoped_lock lock{mutex};
+            return refusedCertificate;
+        }
+
+        /**
+         * @brief The login of the session on its strand, which keeps the certificate a TrustRequired one refused.
+         */
+        static asio::awaitable<Engine::Result<LoginResult>>
+        logInWith(std::shared_ptr<Shared> shared, std::shared_ptr<Pool> pool)
+        {
+            if (!pool)
+                co_return std::unexpected(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended"));
+            auto loggedIn = co_await pool->start();
+            if (!loggedIn && loggedIn.error().kind == RemoteErrorKind::TrustRequired)
+                shared->refused(pool->untrustedCertificate());
+            co_return loggedIn;
+        }
+
         mutable std::mutex mutex{};
         const LostHandler onLost;
         bool started{false};
@@ -104,6 +155,7 @@ namespace FileTransferProtocol
         std::optional<RemoteError> pendingLoss{};
         /** @brief Set once the login succeeded, empty when the server told no directory. */
         std::optional<std::string> homeDirectory{};
+        std::optional<CertificateInfo> refusedCertificate{};
     };
 
     FtpConnection::FtpConnection(
@@ -113,7 +165,7 @@ namespace FileTransferProtocol
         LostHandler onLost
     )
         : options_{std::move(options)}
-        , gate_{std::make_shared<TaskGate>(thread_)}
+        , gate_{std::make_shared<TaskGate>(*thread_)}
         , dialect_{std::make_shared<ServerDialect>()}
         , shared_{std::make_shared<Shared>(std::move(onLost))}
         , engine_{Engine::create(
@@ -127,7 +179,7 @@ namespace FileTransferProtocol
               }
           )}
     {
-        thread_.start();
+        thread_->start();
     }
 
     FtpConnection::~FtpConnection()
@@ -138,34 +190,41 @@ namespace FileTransferProtocol
             Log::warn("FTP: Work of the session ran on past its close");
         for (auto const& fileSystem : takeFileSystems())
             fileSystem->close();
-        thread_.stop();
     }
 
-    std::future<std::expected<void, RemoteError>> FtpConnection::logIn()
+    std::future<std::expected<LoginResult, LoginFailure>> FtpConnection::logIn()
     {
-        const auto promise = std::make_shared<std::promise<std::expected<void, RemoteError>>>();
+        const auto promise = std::make_shared<std::promise<std::expected<LoginResult, LoginFailure>>>();
         auto future = promise->get_future();
         if (!shared_->beginLogin())
         {
-            promise->set_value(std::unexpected(errorOf(RemoteErrorKind::Failure, "The FTP session logs in only once")));
+            promise->set_value(
+                std::unexpected(
+                    LoginFailure{.error = errorOf(RemoteErrorKind::Failure, "The FTP session logs in only once")}
+                )
+            );
             return future;
         }
         engine_->run<LoginResult>(
-            [weak = std::weak_ptr{engine_}](std::shared_ptr<CallScope> const&)
+            [shared = shared_, weak = std::weak_ptr{engine_}](std::shared_ptr<CallScope> const&)
             {
                 const auto engine = weak.lock();
-                return logInWith(engine ? engine->pool() : nullptr);
+                return Shared::logInWith(shared, engine ? engine->pool() : nullptr);
             },
-            options_.loginLimits,
+            options_.loginLimits.value_or(loginLimitsFor(options_.pool)),
             [shared = shared_, promise](Engine::Result<LoginResult> result)
             {
                 if (!result)
                 {
-                    promise->set_value(std::unexpected(std::move(result).error()));
+                    auto failure = LoginFailure{.error = std::move(result).error()};
+                    // Only the refusal itself has a certificate to ask about, a login cut short has none.
+                    if (failure.error.kind == RemoteErrorKind::TrustRequired)
+                        failure.untrustedCertificate = shared->refusedByLogin();
+                    promise->set_value(std::unexpected(std::move(failure)));
                     return;
                 }
-                shared->loggedIn(std::move(result->homeDirectory));
-                promise->set_value({});
+                shared->loggedIn(result->homeDirectory);
+                promise->set_value(std::move(*result));
             }
         );
         return future;
@@ -180,12 +239,18 @@ namespace FileTransferProtocol
     FtpConnection::createFileSystem()
     {
         using Result = std::expected<std::weak_ptr<RemoteIo::IRemoteFileSystem>, RemoteError>;
-        if (engine_->stopping() || engine_->failed() || !engine_->pool())
-            return readyFuture<Result>(std::unexpected(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended")));
+        if (engine_->stopping() || engine_->failed())
+            return readyFuture<Result>(
+                std::unexpected(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended"))
+            );
         auto homeDirectory = shared_->loggedInHome();
         if (!homeDirectory)
             return readyFuture<Result>(
                 std::unexpected(errorOf(RemoteErrorKind::NoConnection, "The FTP session is not logged in"))
+            );
+        if (engine_->lost())
+            return readyFuture<Result>(
+                std::unexpected(errorOf(RemoteErrorKind::ConnectionLost, "The FTP session was lost"))
             );
         auto fileSystem = FtpFileSystem::create(
             FileSystemSession{
@@ -194,7 +259,7 @@ namespace FileTransferProtocol
                 .homeDirectory = std::move(*homeDirectory),
                 .parallelTransfers = options_.pool.transferConnections,
             },
-            thread_.createStrand(),
+            strandKeeping(thread_),
             options_.fileSystem
         );
         std::weak_ptr<RemoteIo::IRemoteFileSystem> handle = fileSystem;

@@ -1,8 +1,10 @@
 #include <ftp/remote/ftp_file_system.hpp>
+#include <log/log.hpp>
 #include <paths/remote_path.hpp>
 #include "../client/client_support.hpp"
 
 #include <algorithm>
+#include <future>
 #include <optional>
 
 namespace FileTransferProtocol
@@ -88,7 +90,7 @@ namespace FileTransferProtocol
 
     std::shared_ptr<FtpFileSystem> FtpFileSystem::create(
         FileSystemSession session,
-        std::unique_ptr<RemoteIo::ProcessingStrand> strand,
+        std::shared_ptr<RemoteIo::ProcessingStrand> strand,
         FtpFileSystemOptions options
     )
     {
@@ -98,7 +100,7 @@ namespace FileTransferProtocol
     FtpFileSystem::FtpFileSystem(
         Private,
         FileSystemSession session,
-        std::unique_ptr<RemoteIo::ProcessingStrand> strand,
+        std::shared_ptr<RemoteIo::ProcessingStrand> strand,
         FtpFileSystemOptions options
     )
         : session_{std::move(session)}
@@ -160,7 +162,10 @@ namespace FileTransferProtocol
             return true;
         }
         // Once the thread stopped the final task runs here, no task of the session runs beside it then.
-        strand_->pushFinalPromiseTask(closeStreams).get();
+        const auto streamsClosed = strand_->pushFinalPromiseTask(closeStreams);
+        // The calls of the other file systems go on, one that waits for a silent server holds the thread.
+        if (streamsClosed.wait_for(options_.closeWait) != std::future_status::ready)
+            Log::warn("FTP: The processing thread is held, the streams of a closed file system close behind it");
         return true;
     }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "test_control_connection_tls.hpp"
 #include "test_engine.hpp"
 #include "test_metadata.hpp"
 
@@ -121,7 +122,47 @@ namespace FileTransferProtocol::Test
             return refused;
         }
 
+        /**
+         * @brief The greeting and AUTH TLS, answered with a certificate no authority of the tests vouches for.
+         */
+        Script& selfSignedTls(Script& script)
+        {
+            return script.reply("220 Ready")
+                .expect("AUTH", "TLS")
+                .reply("234 Proceed")
+                .startTls({.certificate = tlsTestPki().selfSigned});
+        }
+
+        Script& protectedLogin(Script& script)
+        {
+            return script.expect("USER", "user")
+                .reply("331 Password required")
+                .expect("PASS", "password")
+                .reply("230 Logged in")
+                .expect("PBSZ", "0")
+                .reply("200 PBSZ set to 0.")
+                .expect("PROT", "P")
+                .reply("200 PROT now Private.");
+        }
+
         using StreamPointer = std::shared_ptr<RemoteIo::IRemoteFileStream>;
+
+        /**
+         * @brief Reads until the stream ends or fails, on the processing thread, and tells once bytes arrived.
+         */
+        std::expected<void, RemoteIo::RemoteError>
+        readToTheEnd(StreamPointer const& stream, std::shared_ptr<std::promise<void>> const& firstBytes)
+        {
+            std::vector<char> buffer(1024u);
+            auto read = stream->readSomeInStrand(buffer.data(), buffer.size());
+            if (read && *read > 0u)
+                firstBytes->set_value();
+            while (read && *read > 0u)
+                read = stream->readSomeInStrand(buffer.data(), buffer.size());
+            if (!read)
+                return std::unexpected(read.error());
+            return {};
+        }
 
         /**
          * @brief Reads one piece and closes the stream in the middle of its transfer, on the processing thread.
@@ -263,10 +304,27 @@ namespace FileTransferProtocol::Test
 
         void connectAndLogIn(std::size_t transferConnections = 2u, FtpConnection::LostHandler onLost = {})
         {
-            connect(options(transferConnections), std::move(onLost));
+            connectAndLogIn(options(transferConnections), std::move(onLost));
+        }
+
+        void connectAndLogIn(FtpConnectionOptions connectionOptions, FtpConnection::LostHandler onLost = {})
+        {
+            connect(std::move(connectionOptions), std::move(onLost));
             auto login = connection_->logIn();
             const auto loggedIn = valueOf(login);
-            ASSERT_TRUE(loggedIn) << loggedIn.error().toString();
+            ASSERT_TRUE(loggedIn) << loggedIn.error().error.toString();
+        }
+
+        /**
+         * @brief The error createFileSystem() answers with, nothing when it made a file system.
+         */
+        std::optional<RemoteIo::RemoteError> refusalOfAFileSystem()
+        {
+            auto created = connection_->createFileSystem();
+            const auto fileSystem = valueOf(created);
+            if (fileSystem)
+                return std::nullopt;
+            return fileSystem.error();
         }
 
         FileSystemPointer openFileSystem()
@@ -399,11 +457,12 @@ namespace FileTransferProtocol::Test
 
         auto login = connection_->logIn();
         const auto loggedIn = valueOf(login);
-        ASSERT_TRUE(loggedIn) << loggedIn.error().toString();
+        ASSERT_TRUE(loggedIn) << loggedIn.error().error.toString();
+        EXPECT_EQ(loggedIn->homeDirectory, "/");
         auto again = connection_->logIn();
         const auto second = valueOf(again);
         ASSERT_FALSE(second);
-        EXPECT_EQ(second.error().kind, RemoteErrorKind::Failure) << second.error().toString();
+        EXPECT_EQ(second.error().error.kind, RemoteErrorKind::Failure) << second.error().error.toString();
         EXPECT_TRUE(list(openFileSystem(), "/dir"));
     }
 
@@ -415,10 +474,62 @@ namespace FileTransferProtocol::Test
         auto login = connection_->logIn();
         const auto loggedIn = valueOf(login);
         ASSERT_FALSE(loggedIn);
-        auto created = connection_->createFileSystem();
-        const auto fileSystem = valueOf(created);
-        ASSERT_FALSE(fileSystem);
-        EXPECT_EQ(fileSystem.error().kind, RemoteErrorKind::NoConnection) << fileSystem.error().toString();
+        EXPECT_FALSE(loggedIn.error().untrustedCertificate);
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal);
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::NoConnection) << refusal->toString();
+    }
+
+    TEST_P(FtpConnectionTests, ARefusedCertificateComesWithTheFailureAndItsPinLogsInANewConnection)
+    {
+        startServer();
+        Script refusing{};
+        addConnection(selfSignedTls(refusing).expectDisconnect());
+        Script pinned{};
+        addConnection(
+            afterLogin(protectedLogin(selfSignedTls(pinned))).expect("QUIT").reply("221 Goodbye.").expectDisconnect()
+        );
+        auto context = TlsContext::create({.systemAuthorities = false, .authorities = {tlsTestPki().authority}});
+        ASSERT_TRUE(context) << context.error().toString();
+        auto connectionOptions = options();
+        connectionOptions.pool.login.tlsMode = TlsMode::Explicit;
+        connectionOptions.pool.login.tls =
+            TlsConnectionSettings{.context = std::move(context).value(), .serverName = "127.0.0.1"};
+
+        connect(connectionOptions);
+        auto untrustedLogin = connection_->logIn();
+        const auto untrusted = valueOf(untrustedLogin);
+        ASSERT_FALSE(untrusted) << "trusted a self-signed certificate";
+        EXPECT_EQ(untrusted.error().error.kind, RemoteErrorKind::TrustRequired) << untrusted.error().error.toString();
+        ASSERT_TRUE(untrusted.error().untrustedCertificate) << "nothing to show in a trust prompt";
+        const auto certificate = *untrusted.error().untrustedCertificate;
+        EXPECT_EQ(certificate.publicKeySha256, publicKeyDigestOf(tlsTestPki().selfSigned));
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal);
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::NoConnection) << refusal->toString();
+
+        connectionOptions.pool.login.tls->pinnedPublicKey = certificate.publicKeySha256;
+        connect(connectionOptions);
+        auto pinnedLogin = connection_->logIn();
+        const auto loggedIn = valueOf(pinnedLogin);
+        ASSERT_TRUE(loggedIn) << loggedIn.error().error.toString();
+        ASSERT_TRUE(loggedIn->certificate);
+        EXPECT_EQ(loggedIn->certificate->source, TrustSource::Pin);
+        EXPECT_EQ(loggedIn->homeDirectory, "/home/user");
+    }
+
+    TEST(FtpConnectionLimitsTests, TheLoginBoundsLieBehindTheTimeoutsOfItsSteps)
+    {
+        PoolOptions pool{};
+        const auto beforeTheCommands = [](PoolOptions const& options)
+        {
+            return 2 * (options.resolveTimeout + options.control.connectTimeout);
+        };
+        EXPECT_GT(loginLimitsFor(pool).backstop, beforeTheCommands(pool) + pool.control.commandTimeout);
+        pool.resolveTimeout = 2min;
+        pool.control.connectTimeout = 5min;
+        pool.control.commandTimeout = 3min;
+        EXPECT_GT(loginLimitsFor(pool).backstop, beforeTheCommands(pool) + pool.control.commandTimeout);
     }
 
     TEST_P(FtpConnectionTests, ALossAfterTheStartRunsTheHandlerOnceOnTheProcessingThread)
@@ -446,8 +557,13 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(lost.error().kind, RemoteErrorKind::ConnectionLost) << lost.error().toString();
         const auto processingThread = processingThreadOf(fileSystem);
         ASSERT_EQ(losses->recorded().size(), 1u);
-        std::scoped_lock lock{losses->mutex};
-        EXPECT_EQ(losses->threads.front(), processingThread);
+        {
+            std::scoped_lock lock{losses->mutex};
+            EXPECT_EQ(losses->threads.front(), processingThread);
+        }
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal) << "a lost session opened a file system";
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
     }
 
     TEST_P(FtpConnectionTests, ALossBeforeTheStartIsReportedByTheStart)
@@ -518,17 +634,9 @@ namespace FileTransferProtocol::Test
         auto firstBytes = std::make_shared<std::promise<void>>();
         auto arrived = firstBytes->get_future();
         auto readEnded = transferring->performPromise(
-            [stream, firstBytes]() -> std::expected<void, RemoteIo::RemoteError>
+            [stream, firstBytes]()
             {
-                std::vector<char> buffer(1024u);
-                auto read = stream->readSomeInStrand(buffer.data(), buffer.size());
-                if (read && *read > 0u)
-                    firstBytes->set_value();
-                while (read && *read > 0u)
-                    read = stream->readSomeInStrand(buffer.data(), buffer.size());
-                if (!read)
-                    return std::unexpected(read.error());
-                return {};
+                return readToTheEnd(stream, firstBytes);
             }
         );
         ASSERT_EQ(arrived.wait_for(10s), std::future_status::ready);
@@ -543,6 +651,66 @@ namespace FileTransferProtocol::Test
         const auto listed = list(other, "/dir");
         ASSERT_TRUE(listed) << listed.error().toString();
         EXPECT_EQ(listed->size(), 2u);
+    }
+
+    TEST_P(FtpConnectionTests, ClosingAFileSystemLeavesAStalledReadOfAnotherAloneAndDoesNotWaitForIt)
+    {
+        serve();
+        auto connectionOptions = options();
+        connectionOptions.fileSystem.closeWait = 100ms;
+        connectAndLogIn(std::move(connectionOptions));
+        connection_->start();
+        const auto transferring = openFileSystem();
+        const auto closing = openFileSystem();
+        const auto stream = openForReading(transferring, "/slow/big");
+        auto firstBytes = std::make_shared<std::promise<void>>();
+        auto arrived = firstBytes->get_future();
+        auto readEnded = transferring->performPromise(
+            [stream, firstBytes]()
+            {
+                return readToTheEnd(stream, firstBytes);
+            }
+        );
+        ASSERT_EQ(arrived.wait_for(10s), std::future_status::ready);
+
+        const auto start = std::chrono::steady_clock::now();
+        EXPECT_TRUE(closing->close());
+        // The read holds the processing thread for its inactivity timeout of 60 s.
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 30s);
+        EXPECT_NE(readEnded.wait_for(0s), std::future_status::ready) << "the close ended a read of another file system";
+        const auto afterwards = list(closing, "/dir");
+        ASSERT_FALSE(afterwards);
+        EXPECT_EQ(afterwards.error().kind, RemoteErrorKind::ConnectionLost) << afterwards.error().toString();
+        EXPECT_FALSE(closing->close());
+
+        closeConnection();
+        ASSERT_EQ(readEnded.wait_for(0s), std::future_status::ready) << "the read outlived the connection";
+        EXPECT_FALSE(readEnded.get());
+    }
+
+    TEST_P(FtpConnectionTests, AFileSystemAndAStreamKeptPastTheConnectionAreClosedAndSafeToUse)
+    {
+        serve();
+        connectAndLogIn();
+        connection_->start();
+        const auto fileSystem = openFileSystem();
+        const auto stream = openForReading(fileSystem, "/dir/a.txt");
+
+        closeConnection();
+        // Both ask the strand of the file system, whose thread the connection owned.
+        stream->close();
+        EXPECT_FALSE(fileSystem->strand()->withinProcessingThread());
+        EXPECT_FALSE(fileSystem->close());
+        auto read = stream->readAll(
+            [](std::string_view)
+            {
+                return true;
+            }
+        );
+        EXPECT_FALSE(valueOf(read)) << "a stream read after its connection was gone";
+        const auto afterwards = list(fileSystem, "/dir");
+        ASSERT_FALSE(afterwards);
+        EXPECT_EQ(afterwards.error().kind, RemoteErrorKind::ConnectionLost) << afterwards.error().toString();
     }
 
     TEST_P(FtpConnectionTests, ACloseWhileTheLookupHangsFailsTheLogin)

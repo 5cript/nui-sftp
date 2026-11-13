@@ -1,6 +1,8 @@
 #pragma once
 
+#include <ftp/client/login.hpp>
 #include <ftp/client/metadata.hpp>
+#include <ftp/client/tls.hpp>
 #include <ftp/engine/call.hpp>
 #include <ftp/engine/engine.hpp>
 #include <ftp/engine/resolver.hpp>
@@ -21,6 +23,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace FileTransferProtocol
@@ -31,9 +34,32 @@ namespace FileTransferProtocol
         PoolOptions pool{};
         /** @brief The options of every file system of the session. */
         FtpFileSystemOptions fileSystem{};
-        /** @brief The bounds of the first login, beyond the timeouts of its connect and commands. */
-        SyncLimits loginLimits{.backstop = std::chrono::seconds{60}, .drain = std::chrono::seconds{1}};
+        /**
+         * @brief The bounds of the first login, loginLimitsFor() of the pool when unset. A backstop below the
+         *        timeouts of the login's steps ends a slow login as TimedOut in place of the error of its step.
+         */
+        std::optional<SyncLimits> loginLimits{};
         TeardownOptions teardown{};
+    };
+
+    /**
+     * @brief Bounds that lie behind every timeout of a login's steps, so the backstop only ends a login that hangs:
+     *        the lookup and the connect, both twice for a server whose addresses did not answer, and its commands.
+     */
+    SyncLimits loginLimitsFor(PoolOptions const& pool);
+
+    /**
+     * @brief Why the login of a session failed.
+     */
+    struct LoginFailure
+    {
+        RemoteIo::RemoteError error{};
+        /**
+         * @brief With TrustRequired the certificate the login refused, what a trust prompt shows. Nothing of the
+         *        credentials was sent, and this session logs in no more: a user who trusts the certificate gets a
+         *        new connection whose TlsConnectionSettings::pinnedPublicKey is its publicKeySha256.
+         */
+        std::optional<CertificateInfo> untrustedCertificate{};
     };
 
     /**
@@ -42,7 +68,8 @@ namespace FileTransferProtocol
      *
      * Nothing is sent before logIn(). The destructor ends the session on the calling thread, which must be neither an
      * engine thread nor the processing thread: it fails what runs, sends QUIT within its bounds, stops the thread and
-     * closes the file systems, so a caller that still holds one finds it closed.
+     * closes the file systems, so a caller that still holds one finds it closed. A file system and its streams keep
+     * the stopped ProcessingThread while they exist.
      */
     class FtpConnection : public RemoteIo::IConnection
     {
@@ -71,10 +98,10 @@ namespace FileTransferProtocol
          * @brief Looks up the server and logs in the first connection, once, from any thread. The destructor fails a
          *        login that still runs.
          *
-         * @return Completes with the error of the lookup or the login, TimedOut past the login limits, Failure for a
-         *         second call.
+         * @return Completes with what the login learned, or with the error of the lookup or the login, TimedOut past
+         *         the login limits, Failure for a second call.
          */
-        std::future<std::expected<void, RemoteIo::RemoteError>> logIn();
+        std::future<std::expected<LoginResult, LoginFailure>> logIn();
 
         /**
          * @brief Reports the losses from now on, one that came before at once.
@@ -83,7 +110,7 @@ namespace FileTransferProtocol
 
         /**
          * @brief A file system on the session, ready at once. NoConnection before the login succeeded,
-         *        ConnectionLost once the session ends or failed.
+         *        ConnectionLost once the session ends, failed or was lost.
          */
         std::future<std::expected<std::weak_ptr<RemoteIo::IRemoteFileSystem>, RemoteIo::RemoteError>>
         createFileSystem() override;
@@ -95,7 +122,8 @@ namespace FileTransferProtocol
 
       private:
         const FtpConnectionOptions options_;
-        RemoteIo::ProcessingThread thread_{};
+        /** @brief Shared with the strands of the file systems, which may outlive the connection. */
+        const std::shared_ptr<RemoteIo::ProcessingThread> thread_ = std::make_shared<RemoteIo::ProcessingThread>();
         std::shared_ptr<TaskGate> gate_;
         std::shared_ptr<ServerDialect> dialect_;
         std::shared_ptr<Shared> shared_;
