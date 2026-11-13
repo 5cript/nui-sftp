@@ -31,6 +31,19 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief @p line may be the start of a reply that the end of the connection cut inside its code or right
+         *        behind it.
+         */
+        bool startsAReply(std::string_view line)
+        {
+            if (line.size() >= 3u)
+                return replyCodeOf(line).has_value();
+            if (line.empty() || line[0] < '1' || line[0] > '5')
+                return false;
+            return line.size() == 1u || (line[1] >= '0' && line[1] <= '9');
+        }
+
+        /**
          * @brief The start of a line that is no reply, for an error message.
          */
         std::string excerpt(std::string_view line)
@@ -131,7 +144,7 @@ namespace FileTransferProtocol
         const auto cut = std::exchange(line_, {});
         if (cut.empty())
             settle();
-        else if (!open_ && !replyCodeOf(cut))
+        else if (!open_ && !startsAReply(cut))
         {
             failure_ = protocolViolation(fmt::format("Not a reply: '{}'", excerpt(cut)));
             return std::unexpected(*failure_);

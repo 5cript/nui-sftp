@@ -466,6 +466,21 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(framer.next());
     }
 
+    TEST(ReplyFramerTests, ALastLineCutInsideItsCodeIsALostConnection)
+    {
+        // Maybe the start of "226 Transfer complete".
+        for (const std::string_view cut : {"2", "22"})
+        {
+            ReplyFramer framer{};
+            ASSERT_TRUE(framer.feed(cut));
+            const auto finished = framer.finish();
+            ASSERT_FALSE(finished) << cut;
+            EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << cut;
+            EXPECT_EQ(finished.error().protocolCode, 0) << cut;
+            EXPECT_FALSE(framer.next()) << cut;
+        }
+    }
+
     TEST(ReplyFramerTests, ALastLineWithoutLineEndCompletesNoOpenReply)
     {
         ReplyFramer framer{};
