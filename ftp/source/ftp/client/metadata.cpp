@@ -648,27 +648,55 @@ namespace FileTransferProtocol
         co_return std::unexpected(co_await explainNew(std::move(session), std::move(path), made.error()));
     }
 
+    namespace
+    {
+        /**
+         * @brief removeFile() with the entry that explained a refusal of the DELE.
+         */
+        asio::awaitable<std::expected<void, Explanation>> deletedFile(MetadataSession session, std::string path)
+        {
+            const auto removed =
+                co_await perform(session.transfer.control, Command{.verb = Verb::Delete, .argument = path});
+            if (removed)
+                co_return std::expected<void, Explanation>{};
+            if (!untold(removed.error()))
+                co_return std::unexpected(Explanation{.error = removed.error()});
+            co_return std::unexpected(
+                co_await explained(
+                    std::move(session),
+                    std::move(path),
+                    removed.error(),
+                    [](ListingEntry const& entry)
+                    {
+                        if (entry.type == FileType::Directory)
+                            return RemoteErrorKind::Failure;
+                        return RemoteErrorKind::PermissionDenied;
+                    }
+                )
+            );
+        }
+    }
+
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> removeFile(MetadataSession session, std::string path)
     {
-        const auto removed =
-            co_await perform(session.transfer.control, Command{.verb = Verb::Delete, .argument = path});
+        co_return (co_await deletedFile(std::move(session), std::move(path)))
+            .transform_error(
+                [](Explanation refusal)
+                {
+                    return std::move(refusal.error);
+                }
+            );
+    }
+
+    asio::awaitable<std::expected<void, RemoteIo::RemoteError>> removeEntry(MetadataSession session, std::string path)
+    {
+        auto removed = co_await deletedFile(session, path);
         if (removed)
             co_return std::expected<void, RemoteIo::RemoteError>{};
-        if (!untold(removed.error()))
-            co_return std::unexpected(removed.error());
-        co_return std::unexpected(
-            co_await explain(
-                std::move(session),
-                std::move(path),
-                removed.error(),
-                [](ListingEntry const& entry)
-                {
-                    if (entry.type == FileType::Directory)
-                        return RemoteErrorKind::Failure;
-                    return RemoteErrorKind::PermissionDenied;
-                }
-            )
-        );
+        auto& refusal = removed.error();
+        if (refusal.entry && refusal.entry->type == FileType::Directory)
+            co_return co_await removeDirectory(std::move(session), std::move(path));
+        co_return std::unexpected(std::move(refusal.error));
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>>

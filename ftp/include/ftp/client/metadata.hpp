@@ -172,6 +172,16 @@ namespace FileTransferProtocol
     removeDirectory(MetadataSession session, std::string path);
 
     /**
+     * @brief Removes what is at @p path without recursing: removeFile(), then removeDirectory() where the lookup
+     *        behind the refused DELE found a directory. A refusal that the lookup could not explain stays the
+     *        refusal, no RMD follows it.
+     *
+     * @return Errors as for removeFile() for what is no directory, as for removeDirectory() for a directory.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    removeEntry(MetadataSession session, std::string path);
+
+    /**
      * @brief Renames @p from to @p to: RNFR, then RNTO on the same connection (RFC 959 4.1.3). vsftpd and proftpd
      *        replace a file at @p to, other servers may refuse to.
      *

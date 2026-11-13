@@ -51,7 +51,7 @@ namespace FileTransferProtocol
     runOperation(MetadataSession session, RemoteIo::RemoveEmptyDirectory operation);
 
     /**
-     * @brief DELE for each path, RMD where DELE found a directory.
+     * @brief removeEntry() for each path: DELE, RMD where the lookup behind its refusal found a directory.
      */
     boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::RemoveAll>>
     runOperation(MetadataSession session, RemoteIo::RemoveAll operation);

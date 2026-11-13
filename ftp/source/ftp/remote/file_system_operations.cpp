@@ -276,16 +276,8 @@ namespace FileTransferProtocol
         {
             if (Detail::isCancelled(co_await asio::this_coro::cancellation_state))
                 co_return std::unexpected(cancelledError());
-            const auto removed = co_await removeFile(session, path.value());
-            if (removed)
-                continue;
-            // removeFile() tells a directory as Failure.
-            if (removed.error().kind != RemoteErrorKind::Failure)
+            if (auto removed = co_await removeEntry(session, path.value()); !removed)
                 co_return removed;
-            if (Detail::isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(cancelledError());
-            if (auto directory = co_await removeDirectory(session, path.value()); !directory)
-                co_return directory;
         }
         co_return RemoteIo::OperationResult<RemoteIo::RemoveAll>{};
     }

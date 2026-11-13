@@ -390,6 +390,20 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(removed.error().kind, RemoteIo::RemoteErrorKind::PermissionDenied) << removed.error().toString();
     }
 
+    TEST_P(FtpFileSystemTests, ARefusedDeleteThatNoLookupExplainsIsNotTakenForADirectory)
+    {
+        auto script = loggedInScript();
+        script.expect("DELE", "/dir/a").reply("550 Delete operation failed.");
+        // The lookup cannot tell what /dir/a is: no RMD follows.
+        script.expect("CWD", "/dir").reply("550 Permission denied.").expectDisconnect();
+        connect(std::move(script));
+
+        const auto removed = later(RemoteIo::RemoveAll{.paths = {remote("/dir/a")}});
+        ASSERT_FALSE(removed) << "removed what the server refused to delete";
+        EXPECT_EQ(removed.error().protocolCode, 550) << removed.error().toString();
+        EXPECT_EQ(removed.error().message, "Delete operation failed.") << removed.error().toString();
+    }
+
     TEST_P(FtpFileSystemTests, FiltersOutEmptyDirectoriesAndWhatIsNoDirectory)
     {
         auto script = loggedInScript();
