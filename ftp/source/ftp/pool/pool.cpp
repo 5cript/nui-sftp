@@ -197,7 +197,7 @@ namespace FileTransferProtocol
         co_return login;
     }
 
-    asio::awaitable<Pool::LeaseResult> Pool::acquireCommand()
+    asio::awaitable<Pool::LeaseResult> Pool::acquireCommand(std::shared_ptr<ControlConnection> held)
     {
         assert(strand_.running_in_this_thread() && "the pool runs on its strand");
         // Each round hands out a connection, waits, or drops a connection that ended, so the rounds run out.
@@ -210,6 +210,12 @@ namespace FileTransferProtocol
                 outcome = co_await leaseIfOpen(metadata_);
             else if (const auto connection = idleTransfer())
                 outcome = co_await leaseIfOpen(connection);
+            else if (held && metadata_ && metadata_->control == held)
+            {
+                outcome.emplace(
+                    std::unexpected(errorOf(RemoteErrorKind::Busy, "Every connection of the FTP session is in use"))
+                );
+            }
             else
             {
                 connectMetadataIfGone();

@@ -144,10 +144,16 @@ namespace FileTransferProtocol
                 return std::move(**asked);
         }
         return session_.engine->template call<RemoteIo::FileInformation>(
-            [session = session_, options = options_, path = path_](std::shared_ptr<CallScope> const& scope) mutable
+            [session = session_, options = options_, path = path_, held = transfer_->session.control](
+                std::shared_ptr<CallScope> const& scope
+            ) mutable
             {
                 return Detail::onCommandConnection(
-                    std::move(session), std::move(options), scope, RemoteIo::Stat{.path = std::move(path)}
+                    std::move(session),
+                    std::move(options),
+                    scope,
+                    RemoteIo::Stat{.path = std::move(path)},
+                    std::move(held)
                 );
             },
             options_.operationLimits

@@ -547,6 +547,41 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(read.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << read.error().toString();
     }
 
+    TEST_P(FtpFileStreamTests, TheStatOfATransferOnTheOnlyConnectionIsBusyAtOnce)
+    {
+        auto metadata = loggedInScript();
+        sized(metadata, "/dir/a", "7");
+        transferring(metadata, DataPlan{}.stallAfter("abc"), "RETR", "/dir/a")
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expectDisconnect();
+        connect(std::move(metadata), {}, 1u);
+        // The server takes one connection: the stream gets C0.
+        server_->addConnection(refusedAtTheGreeting());
+
+        const auto stream = open("/dir/a", readMode);
+        const auto read = onThread(
+            [stream]()
+            {
+                std::array<char, 3u> buffer{};
+                return stream->readSomeInStrand(buffer.data(), buffer.size());
+            }
+        );
+        ASSERT_TRUE(read) << read.error().toString();
+        // A wait for a connection for commands would be for the one the transfer holds, until the backstop.
+        const auto stat = onThread(
+            [stream]()
+            {
+                return stream->statInStrand();
+            }
+        );
+        ASSERT_FALSE(stat) << "asked beside a transfer on the only connection";
+        EXPECT_EQ(stat.error().kind, RemoteIo::RemoteErrorKind::Busy) << stat.error().toString();
+        closeOnThread(stream);
+    }
+
     TEST_P(FtpFileStreamTests, ACloseFromACompletionDoesNotWaitForTheProcessingThread)
     {
         auto metadata = loggedInScript();

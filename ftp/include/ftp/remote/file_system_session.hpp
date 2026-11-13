@@ -105,19 +105,22 @@ namespace FileTransferProtocol
 
         /**
          * @brief Takes a connection for commands of the pool and runs @p operation there, on the session strand.
+         *
+         * @param held A connection the caller holds itself, see Pool::acquireCommand().
          */
         template <RunsOnACommandConnection OperationT>
         boost::asio::awaitable<RemoteIo::OperationResult<OperationT>> onCommandConnection(
             FileSystemSession session,
             FtpFileSystemOptions options,
             std::shared_ptr<CallScope> scope,
-            OperationT operation
+            OperationT operation,
+            std::shared_ptr<ControlConnection> held = nullptr
         )
         {
             const auto pool = session.engine->pool();
             if (!pool)
                 co_return std::unexpected(sessionEndedError());
-            auto lease = co_await pool->acquireCommand();
+            auto lease = co_await pool->acquireCommand(std::move(held));
             if (!lease)
                 co_return std::unexpected(std::move(lease).error());
             co_return co_await onConnection<typename OperationT::Result>(

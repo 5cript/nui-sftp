@@ -135,7 +135,8 @@ namespace FileTransferProtocol
         /**
          * @brief The attributes of the path. Asked on the stream's own connection while no transfer runs there, before
          *        the first read or write and after a transfer that finished: it may be the only one of the session,
-         *        which a connection for commands would wait for. Else on a connection for commands.
+         *        which a connection for commands would wait for. Else on a connection for commands, and Busy at once
+         *        where the only one is the stream's own, which its transfer holds.
          */
         std::expected<RemoteIo::FileInformation, RemoteIo::RemoteError> statInStrand() override;
 
