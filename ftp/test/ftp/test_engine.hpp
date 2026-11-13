@@ -535,6 +535,69 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(*ran);
     }
 
+    TEST_P(EngineTests, TheEndOfItsGroupEndsAWaitingCallAtOnceAndCancelsItsOperation)
+    {
+        const auto engine = makeEngine();
+        const auto group = std::make_shared<CallGroup>();
+        const auto started = std::make_shared<std::promise<void>>();
+        const auto ended = std::make_shared<std::promise<bool>>();
+        auto operationEnded = ended->get_future();
+        const auto body = [started, ended](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+        {
+            started->set_value();
+            asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+            const auto [error] = co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+            ended->set_value(error == asio::error::operation_aborted);
+            co_return std::unexpected(
+                RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::Cancelled, .message = "The wait was cancelled"}
+            );
+        };
+        auto result = thread_.pushPromiseTask(
+            [engine, body, group]()
+            {
+                return engine->call<int>(body, SyncLimits{.backstop = 1h, .drain = 5s}, group);
+            }
+        );
+        ASSERT_EQ(started->get_future().wait_for(10s), std::future_status::ready);
+
+        group->end(RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::ConnectionLost, .message = "closed"});
+        const auto outcome = valueOf(result);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().message, "closed") << outcome.error().toString();
+        ASSERT_EQ(operationEnded.wait_for(10s), std::future_status::ready) << "the operation ran on";
+        EXPECT_TRUE(operationEnded.get()) << "the operation was not cancelled";
+        EXPECT_TRUE(engine->waitIdle(5s));
+        EXPECT_FALSE(engine->failed());
+    }
+
+    TEST_P(EngineTests, ACallOfAnEndedGroupIsRefusedBeforeItsOperationStarts)
+    {
+        const auto engine = makeEngine();
+        const auto group = std::make_shared<CallGroup>();
+        group->end(RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::ConnectionLost, .message = "closed"});
+        group->end(RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::Failure, .message = "later"});
+        const auto ran = std::make_shared<std::atomic<bool>>(false);
+        auto result = thread_.pushPromiseTask(
+            [engine, group, ran]()
+            {
+                return engine->call<int>(
+                    [ran](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                    {
+                        *ran = true;
+                        co_return 1;
+                    },
+                    SyncLimits{},
+                    group
+                );
+            }
+        );
+        const auto outcome = valueOf(result);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().message, "closed") << outcome.error().toString();
+        EXPECT_TRUE(engine->waitIdle(5s));
+        EXPECT_FALSE(*ran);
+    }
+
     TEST_P(EngineTests, RunCompletesOnTheCallingThreadWhenPostsAreRefused)
     {
         const auto engine = makeEngine();

@@ -54,10 +54,16 @@ namespace FileTransferProtocol
 
         std::size_t size() const;
 
+        /**
+         * @brief The synchronous calls of the streams, which the close of their file system ends at once.
+         */
+        std::shared_ptr<CallGroup> const& calls() const;
+
       private:
         mutable std::mutex mutex_{};
         std::vector<std::shared_ptr<FtpFileStream>> streams_{};
         bool closed_{false};
+        const std::shared_ptr<CallGroup> calls_ = std::make_shared<CallGroup>();
     };
 
     /**
@@ -103,7 +109,7 @@ namespace FileTransferProtocol
             Paths::RemotePath path,
             Direction direction,
             std::optional<std::uint64_t> size,
-            std::weak_ptr<OpenStreams> streams
+            std::shared_ptr<OpenStreams> const& streams
         );
 
         FtpFileStream(
@@ -115,7 +121,7 @@ namespace FileTransferProtocol
             Paths::RemotePath path,
             Direction direction,
             std::optional<std::uint64_t> size,
-            std::weak_ptr<OpenStreams> streams
+            std::shared_ptr<OpenStreams> const& streams
         );
         /**
          * @brief Ends a transfer that did not finish, as closeInStrand() does.
@@ -341,7 +347,8 @@ namespace FileTransferProtocol
                 {
                     return Detail::onConnection<ValueT>(control, scope, std::move(work));
                 },
-                limits
+                limits,
+                calls_
             );
         }
 
@@ -377,6 +384,8 @@ namespace FileTransferProtocol
         const Direction direction_;
         const std::optional<std::uint64_t> size_;
         const std::weak_ptr<OpenStreams> streams_;
+        /** @brief The calls of the streams of the file system, which its close ends. */
+        const std::shared_ptr<CallGroup> calls_;
         /** @brief Null once the stream closed. */
         std::shared_ptr<Transfer> transfer_;
         /** @brief Where the transfer starts, set by a seek before the first read or write. */

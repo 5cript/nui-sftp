@@ -227,6 +227,21 @@ namespace FileTransferProtocol
         pending->fail(timedOut(pending->limits()));
     }
 
+    void Engine::cutShort(std::weak_ptr<Detail::CallState> pending)
+    {
+        // Once posts are refused the close failed every operation already.
+        post(
+            [self = shared_from_this(), pending = std::move(pending)]()
+            {
+                const auto call = pending.lock();
+                if (!call || call->completed() || call->draining())
+                    return;
+                call->cancel();
+                self->armCallTimer(call, call->limits().drain);
+            }
+        );
+    }
+
     void Engine::endCall(Detail::CallState& pending)
     {
         calls_.erase(pending.number);
@@ -285,7 +300,8 @@ namespace FileTransferProtocol
                         co_return Result<void>{};
                     },
                     limits,
-                    CallRole::Quit
+                    CallRole::Quit,
+                    nullptr
                 );
                 quitEnded->set_value();
             }

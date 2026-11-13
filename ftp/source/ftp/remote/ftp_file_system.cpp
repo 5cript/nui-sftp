@@ -140,6 +140,8 @@ namespace FileTransferProtocol
     {
         if (!running_->close(closedError()))
             return false;
+        // A stream's call ends now, so the final task does not wait behind a server that went silent.
+        streams_->calls()->end(closedError());
         const auto closeStreams = [streams = streams_]()
         {
             for (auto const& stream : streams->close())

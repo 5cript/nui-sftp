@@ -507,6 +507,44 @@ namespace FileTransferProtocol::Test
         }
     }
 
+    TEST_P(FtpConnectionTests, ClosingAFileSystemDuringItsTransferLeavesTheOthersWorking)
+    {
+        serve();
+        connectAndLogIn();
+        connection_->start();
+        const auto transferring = openFileSystem();
+        const auto other = openFileSystem();
+        const auto stream = openForReading(transferring, "/slow/big");
+        auto firstBytes = std::make_shared<std::promise<void>>();
+        auto arrived = firstBytes->get_future();
+        auto readEnded = transferring->performPromise(
+            [stream, firstBytes]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                std::vector<char> buffer(1024u);
+                auto read = stream->readSomeInStrand(buffer.data(), buffer.size());
+                if (read && *read > 0u)
+                    firstBytes->set_value();
+                while (read && *read > 0u)
+                    read = stream->readSomeInStrand(buffer.data(), buffer.size());
+                if (!read)
+                    return std::unexpected(read.error());
+                return {};
+            }
+        );
+        ASSERT_EQ(arrived.wait_for(10s), std::future_status::ready);
+
+        const auto start = std::chrono::steady_clock::now();
+        EXPECT_TRUE(transferring->close());
+        // The data stalls for good and its inactivity timeout is 60 s: a close that waited for the read took that.
+        EXPECT_LT(std::chrono::steady_clock::now() - start, 30s);
+        ASSERT_EQ(readEnded.wait_for(0s), std::future_status::ready) << "the read outlived the close";
+        EXPECT_FALSE(readEnded.get()) << "a read that stalled ended as if complete";
+
+        const auto listed = list(other, "/dir");
+        ASSERT_TRUE(listed) << listed.error().toString();
+        EXPECT_EQ(listed->size(), 2u);
+    }
+
     TEST_P(FtpConnectionTests, ACloseWhileTheLookupHangsFailsTheLogin)
     {
         startServer();

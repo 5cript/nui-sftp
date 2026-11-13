@@ -164,7 +164,17 @@ namespace FileTransferProtocol
         template <typename ValueT, typename BodyT>
         Result<ValueT> call(BodyT body, SyncLimits limits)
         {
-            return awaitCall<ValueT>(std::move(body), limits, CallRole::Regular);
+            return awaitCall<ValueT>(std::move(body), limits, CallRole::Regular, nullptr);
+        }
+
+        /**
+         * @brief call() that @p group can end before its time, from any thread: the wait ends at once with the
+         *        group's error and the operation is cancelled, then drains as at its backstop.
+         */
+        template <typename ValueT, typename BodyT>
+        Result<ValueT> call(BodyT body, SyncLimits limits, std::shared_ptr<CallGroup> const& group)
+        {
+            return awaitCall<ValueT>(std::move(body), limits, CallRole::Regular, group);
         }
 
         /**
@@ -264,14 +274,18 @@ namespace FileTransferProtocol
             Quit,
         };
 
+        /**
+         * @return The operation, which holds itself while it runs.
+         */
         template <typename ValueT, typename BodyT>
-        void submitCall(BodyT body, SyncLimits limits, std::function<void(Result<ValueT>)> done, CallRole role)
+        std::weak_ptr<Detail::CallState>
+        submitCall(BodyT body, SyncLimits limits, std::function<void(Result<ValueT>)> done, CallRole role)
         {
             const auto pending = std::make_shared<Detail::Call<ValueT>>(strand_, limits, std::move(done));
             if (refusesCalls(role))
             {
                 pending->fail(closedError());
-                return;
+                return {};
             }
             const auto posted = post(
                 [self = shared_from_this(), pending, body = std::move(body), role]() mutable
@@ -281,27 +295,45 @@ namespace FileTransferProtocol
             );
             if (!posted)
                 pending->fail(closedError());
+            return pending;
         }
 
         template <typename ValueT, typename BodyT>
-        Result<ValueT> awaitCall(BodyT body, SyncLimits limits, CallRole role)
+        Result<ValueT>
+        awaitCall(BodyT body, SyncLimits limits, CallRole role, std::shared_ptr<CallGroup> const& group)
         {
             if (strand_.running_in_this_thread())
                 return std::unexpected(wrongThread("on the session strand"));
             if (!onProcessingThreadOrClosed())
                 return std::unexpected(wrongThread("outside the processing thread"));
-            const auto promise = std::make_shared<std::promise<Result<ValueT>>>();
-            auto future = promise->get_future();
-            submitCall<ValueT>(
+            if (auto ended = group ? group->endedWith() : std::nullopt)
+                return std::unexpected(std::move(*ended));
+            const auto outcome = std::make_shared<Detail::SyncOutcome<ValueT>>();
+            auto future = outcome->future();
+            const auto pending = submitCall<ValueT>(
                 std::move(body),
                 limits,
-                [promise](Result<ValueT> result)
+                [outcome](Result<ValueT> result)
                 {
-                    promise->set_value(std::move(result));
+                    outcome->set(std::move(result));
                 },
                 role
             );
-            return future.get();
+            if (!group)
+                return future.get();
+            const auto ender = [outcome, weakSelf = weak_from_this(), pending](RemoteIo::RemoteError const& error)
+            {
+                outcome->set(std::unexpected(error));
+                if (const auto self = weakSelf.lock())
+                    self->cutShort(pending);
+            };
+            const auto member = group->join(ender);
+            if (!member)
+                ender(group->endedWith().value_or(closedError()));
+            auto result = future.get();
+            if (member)
+                group->leave(*member);
+            return result;
         }
 
         template <typename ValueT, typename BodyT>
@@ -352,6 +384,10 @@ namespace FileTransferProtocol
          */
         void extendCall(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds more);
         void callTimeUp(std::shared_ptr<Detail::CallState> const& pending);
+        /**
+         * @brief Cancels @p pending as at its backstop, from any thread. Nothing once it ended or drains.
+         */
+        void cutShort(std::weak_ptr<Detail::CallState> pending);
         void endCall(Detail::CallState& pending);
         RemoteIo::RemoteError closedError() const;
         static RemoteIo::RemoteError wrongThread(std::string_view where);
