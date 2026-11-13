@@ -61,6 +61,7 @@
 #include "test_rpc_answers.hpp"
 #include "test_file_system_answers.hpp"
 #include "test_ftp_hostile_listings.hpp"
+#include "test_ftp_downloads.hpp"
 #include "test_rpc_path_parameters.hpp"
 #include "test_logger.hpp"
 
