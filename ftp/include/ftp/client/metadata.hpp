@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <variant>
 
 namespace FileTransferProtocol
 {
@@ -132,6 +133,17 @@ namespace FileTransferProtocol
     statPath(MetadataSession session, std::string path);
 
     /**
+     * @brief statPath() for a path that a listing showed as a symlink: when neither SIZE nor CWD answers, the target
+     *        cannot be reached, and the lookup of the path itself that statPath() ends with is left out.
+     *
+     * @return The entry at the end of the chain, named like the last segment of @p path, a directory with no more
+     *         than its type. NoSuchFile for a target that does not exist or cannot be reached; the error of a broken
+     *         connection.
+     */
+    boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    statLinkTarget(MetadataSession session, std::string path);
+
+    /**
      * @brief Creates the directory @p path with MKD.
      *
      * @return AlreadyExists when something exists at @p path, which vsftpd's refusal does not tell; NoSuchFile when
@@ -160,6 +172,16 @@ namespace FileTransferProtocol
     removeDirectory(MetadataSession session, std::string path);
 
     /**
+     * @brief Removes what is at @p path without recursing: removeFile(), then removeDirectory() where the lookup
+     *        behind the refused DELE found a directory. A refusal that the lookup could not explain stays the
+     *        refusal, no RMD follows it.
+     *
+     * @return Errors as for removeFile() for what is no directory, as for removeDirectory() for a directory.
+     */
+    boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+    removeEntry(MetadataSession session, std::string path);
+
+    /**
      * @brief Renames @p from to @p to: RNFR, then RNTO on the same connection (RFC 959 4.1.3). vsftpd and proftpd
      *        replace a file at @p to, other servers may refuse to.
      *
@@ -179,7 +201,7 @@ namespace FileTransferProtocol
 
     /**
      * @brief Sets when @p path was last modified, with whichever of MFMT, MDTM with a time and SITE UTIME the server
-     *        takes, learned once. A positive reply is success, its text is not read.
+     *        takes, learned once. A positive reply other than 202 is success, its text is not read.
      *
      * @return Unsupported when the server takes none of them or @p time has no time-val, before year 1000 or after
      *         9999; NoSuchFile for a path that does not exist; else the refusal.
@@ -195,6 +217,20 @@ namespace FileTransferProtocol
      */
     boost::asio::awaitable<std::expected<std::string, RemoteIo::RemoteError>>
     canonicalDirectory(MetadataSession session, std::string path);
+
+    /** @brief The path of a directory as the server resolves it, or the entry at a path that is no directory. */
+    using DirectoryOrEntry = std::variant<std::string, ListingEntry>;
+
+    /**
+     * @brief canonicalDirectory() for a caller that goes on with what is no directory: the lookup that explains the
+     *        refusal of the CWD found the entry, which spares a second one.
+     *
+     * @return The path of the 257 reply, or the entry at @p path when it is no directory, itself when it is a symlink
+     *         that leads to none. NoSuchFile for a path that does not exist, PermissionDenied for a directory that
+     *         cannot be entered, else the refusal.
+     */
+    boost::asio::awaitable<std::expected<DirectoryOrEntry, RemoteIo::RemoteError>>
+    canonicalDirectoryOrEntry(MetadataSession session, std::string path);
 
     /**
      * @brief Creates the empty file @p path unless something exists there: lstatPath(), then a STOR of no bytes. FTP

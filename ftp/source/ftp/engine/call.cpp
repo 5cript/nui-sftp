@@ -3,6 +3,8 @@
 
 #include <boost/asio/cancellation_type.hpp>
 
+#include <utility>
+
 namespace FileTransferProtocol
 {
     void CallScope::touch(std::shared_ptr<ControlConnection> const& connection)
@@ -19,6 +21,17 @@ namespace FileTransferProtocol
         }
     }
 
+    void CallScope::allowMore(std::chrono::milliseconds more)
+    {
+        if (allowMore_)
+            allowMore_(more);
+    }
+
+    void CallScope::onAllowMore(AllowMore allowMore)
+    {
+        allowMore_ = std::move(allowMore);
+    }
+
     namespace Detail
     {
         CallState::CallState(boost::asio::any_io_executor const& sessionStrand, SyncLimits limits)
@@ -29,6 +42,11 @@ namespace FileTransferProtocol
         SyncLimits const& CallState::limits() const
         {
             return limits_;
+        }
+
+        void CallState::extendBackstop(std::chrono::milliseconds more)
+        {
+            limits_.backstop += more;
         }
 
         std::shared_ptr<CallScope> const& CallState::scope() const

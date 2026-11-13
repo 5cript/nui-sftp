@@ -1046,8 +1046,11 @@ std::expected<std::filesystem::perms, DownloadOperation::Error> DownloadOperatio
         Log::error("DownloadOperation: Failed to stat file.");
         return std::unexpected(Error{.type = ErrorType::FileStatFailed, .remoteError = fileInfo.error()});
     }
+    // A protocol whose stat tells no permissions leaves those the listing showed.
+    const auto permissions = fileInfo->permissions != std::filesystem::perms::unknown ? fileInfo->permissions
+                                                                                   : options_.entry->permissions;
     // Special bits never travel and the umask applies, like for a file created locally.
-    return Utility::inheritablePermissions(fileInfo->permissions).value_or(Utility::newFilePermissions());
+    return Utility::inheritablePermissions(permissions).value_or(Utility::newFilePermissions());
 }
 
 void DownloadOperation::applyModificationTime(std::filesystem::path const& path) const

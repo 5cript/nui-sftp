@@ -684,6 +684,20 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(connectionsAccepted(), 2u);
     }
 
+    TEST_F(PoolTests, ACommandBesideTheOnlyConnectionItsCallerHoldsIsBusyAtOnce)
+    {
+        server_->addConnection(loginThenDisconnect());
+        server_->addConnection(refusedAtTheGreeting());
+        const auto pool = startedPool();
+        auto transfer = leaseFrom(run(pool->acquireTransfer()));
+        ASSERT_EQ(transfer.name(), "C0");
+
+        // Only the caller could end a wait for C0.
+        expectError(run(pool->acquireCommand(transfer.control())), RemoteErrorKind::Busy);
+        giveBack(transfer);
+        EXPECT_EQ(leaseFrom(run(pool->acquireCommand())).name(), "C0");
+    }
+
     TEST_F(PoolTests, C0ThatEndedWhileIdleLogsInAtItsNextUse)
     {
         server_->addConnection(idleTimeoutAfterLogin());

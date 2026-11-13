@@ -136,10 +136,12 @@ namespace FileTransferProtocol
          *        C0 that ended while idle logs in again first, one attempt; while Degraded the wait for C0 ends after
          *        the connect timeout.
          *
+         * @param held A connection the caller holds a lease of itself. Where the turn would be for that one, only
+         *        the caller could end the wait, so the result is Busy at once.
          * @return The lease. ConnectionLost when the session is Lost or closing, the error of a failed login of C0,
-         *         TimedOut after the wait while Degraded, Cancelled.
+         *         TimedOut after the wait while Degraded, Busy as for @p held, Cancelled.
          */
-        boost::asio::awaitable<LeaseResult> acquireCommand();
+        boost::asio::awaitable<LeaseResult> acquireCommand(std::shared_ptr<ControlConnection> held = nullptr);
 
         /**
          * @brief A connection for one transfer: an idle transfer connection, a new login while the limit allows one,

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -144,6 +145,8 @@ namespace FileTransferProtocol::Test
      */
     std::string listing(ListingFormat format, std::vector<ListingEntry> const& entries);
 
+    class Responder;
+
     /**
      * @brief What one control connection of the ScriptedFtpServer does, step by step. A script ends silently: the
      *        server keeps the connection open and any further command fails it.
@@ -195,11 +198,18 @@ namespace FileTransferProtocol::Test
             DataPlan plan{};
         };
         struct BeginData
-        {};
+        {
+            /** @brief Replaces the actions of the plan. */
+            std::optional<std::vector<DataPlan::Action>> actions{};
+        };
         struct AwaitData
         {};
         struct StopData
         {};
+        struct Serve
+        {
+            std::shared_ptr<Responder> responder{};
+        };
         using Step = std::variant<
             Expect,
             Send,
@@ -216,7 +226,8 @@ namespace FileTransferProtocol::Test
             Passive,
             BeginData,
             AwaitData,
-            StopData>;
+            StopData,
+            Serve>;
 
         /** @brief Waits for the next command, which must be @p verb with any argument. */
         Script& expect(std::string verb);
@@ -253,10 +264,20 @@ namespace FileTransferProtocol::Test
         Script& passive(DataPlan plan);
         /** @brief Starts the plan of the last passive() once the client connected. */
         Script& beginData();
+        /**
+         * @brief Starts the plan of the last passive() with the actions of @p plan instead of its own, for a server
+         *        that learns what to send only from the command behind the PASV or EPSV.
+         */
+        Script& beginData(DataPlan plan);
         /** @brief Waits until that plan ended. */
         Script& awaitData();
         /** @brief Ends that plan and its connection, the way out of a sendForever() or a stallAfter(). */
         Script& stopData();
+        /**
+         * @brief Answers every further command with @p responder until the client goes away, the script ends there.
+         *        Steps behind it fail the script.
+         */
+        Script& serve(std::shared_ptr<Responder> responder);
 
         /** @brief Greets, then accepts a USER and PASS login. */
         Script& login(std::string user = "user", std::string password = "password");
@@ -266,5 +287,26 @@ namespace FileTransferProtocol::Test
         Script& abortSequence(AbortReplies replies);
 
         std::vector<Step> steps{};
+    };
+
+    /**
+     * @brief Answers the commands of Script::serve() from what it holds instead of from a script, on the thread of the
+     *        server.
+     */
+    class Responder
+    {
+      public:
+        Responder() = default;
+        virtual ~Responder() = default;
+        Responder(Responder const&) = delete;
+        Responder& operator=(Responder const&) = delete;
+        Responder(Responder&&) = delete;
+        Responder& operator=(Responder&&) = delete;
+
+        /**
+         * @brief The steps that answer @p line, a command without its CRLF. They run like the steps of a script, an
+         *        expect() among them fails it.
+         */
+        virtual Script answer(std::string_view line) = 0;
     };
 }

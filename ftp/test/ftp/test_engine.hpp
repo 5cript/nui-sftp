@@ -594,6 +594,64 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(engine->failed());
     }
 
+    TEST_P(EngineTests, AnOperationThatAllowsItselfMoreRunsPastItsBackstop)
+    {
+        const auto engine = makeEngine();
+        const auto limits = SyncLimits{.backstop = 100ms, .drain = 5s};
+        const auto begin = std::chrono::steady_clock::now();
+        auto result = callFromTask<int>(
+            engine,
+            [](std::shared_ptr<CallScope> scope) -> asio::awaitable<Engine::Result<int>>
+            {
+                scope->allowMore(1h);
+                asio::steady_timer timer{co_await asio::this_coro::executor, 300ms};
+                const auto [error] = co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                if (error)
+                {
+                    co_return std::unexpected(
+                        RemoteIo::RemoteError{
+                            .kind = RemoteIo::RemoteErrorKind::Cancelled,
+                            .message = "The wait was cancelled",
+                        }
+                    );
+                }
+                co_return 7;
+            },
+            limits
+        );
+        const auto outcome = valueOf(result);
+        ASSERT_TRUE(outcome) << outcome.error().toString();
+        EXPECT_EQ(*outcome, 7);
+        EXPECT_GE(std::chrono::steady_clock::now() - begin, 300ms);
+    }
+
+    TEST_P(EngineTests, AnOperationThatAllowedItselfMoreEndsAtTheLaterBackstop)
+    {
+        const auto engine = makeEngine();
+        const auto limits = SyncLimits{.backstop = 100ms, .drain = 5s};
+        const auto begin = std::chrono::steady_clock::now();
+        auto result = callFromTask<int>(
+            engine,
+            [](std::shared_ptr<CallScope> scope) -> asio::awaitable<Engine::Result<int>>
+            {
+                scope->allowMore(200ms);
+                asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                co_return std::unexpected(
+                    RemoteIo::RemoteError{
+                        .kind = RemoteIo::RemoteErrorKind::Cancelled,
+                        .message = "The wait was cancelled",
+                    }
+                );
+            },
+            limits
+        );
+        const auto outcome = valueOf(result);
+        ASSERT_FALSE(outcome) << "an operation ran past the backstop it had moved";
+        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << outcome.error().toString();
+        EXPECT_GE(std::chrono::steady_clock::now() - begin, 300ms);
+    }
+
     TEST_P(EngineTests, AnUncancellableBodyIsGivenUpAfterTheDrainAndItsConnectionsClose)
     {
         auto started = ScriptedFtpServer::start();

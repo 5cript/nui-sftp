@@ -86,9 +86,11 @@ namespace FileTransferProtocol
         void settle();
 
         /**
-         * @brief The connection ended: completes a last line that had no line end and settles.
+         * @brief The connection ended: settles. A last line without its line end may be cut short and completes no
+         *        reply.
          *
-         * @return ConnectionLost when a reply was left open, a ProtocolViolation for a last line that starts none.
+         * @return ConnectionLost when a reply was left open or a last line had no end, also one cut inside its code,
+         *         a ProtocolViolation for a last line that cannot start a reply.
          */
         std::expected<void, RemoteIo::RemoteError> finish();
 

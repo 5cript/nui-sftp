@@ -5,12 +5,12 @@
 #include <backend/sftp/rename_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <utility/permissions.hpp>
+#include "operation_runs.hpp"
 #include "real_server_tests.hpp"
 
 #include <expected>
 #include <fstream>
 #include <string>
-#include <thread>
 
 extern std::filesystem::path temporaryRoot;
 
@@ -60,24 +60,6 @@ namespace Test
             if (readFuture.wait_for(10s) != std::future_status::ready || !readFuture.get().has_value())
                 return "<read failed>";
             return data;
-        }
-
-        /**
-         * @brief Works an operation until it completes or fails. Async transfers run on the strand,
-         *        so MoreWork is retried with a short pause.
-         */
-        template <typename OperationT>
-        static std::expected<Operation::WorkStatus, Operation::Error> runToEnd(OperationT& operation)
-        {
-            const auto deadline = std::chrono::steady_clock::now() + 20s;
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                auto result = operation.work();
-                if (!result.has_value() || result.value() == Operation::WorkStatus::Complete)
-                    return result;
-                std::this_thread::sleep_for(2ms);
-            }
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
         }
 
       protected:

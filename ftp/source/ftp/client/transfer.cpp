@@ -84,13 +84,22 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The first reply to a transfer command. A refusal closes the data side, a handshake under way included.
+         * @brief A 3yz asks for more than a transfer command can give (RFC 959 5.4), the transfer does not start.
+         */
+        bool asksForMore(Reply const& reply)
+        {
+            return classifyReply(reply.code) == ReplyClass::PositiveIntermediate;
+        }
+
+        /**
+         * @brief The first reply to a transfer command. A refusal or a 3yz closes the data side, a handshake under way
+         *        included.
          */
         asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
         firstReply(std::shared_ptr<PendingCommand> pending, std::shared_ptr<DataConnection> data)
         {
             auto reply = co_await pending->nextReply();
-            if (!reply || refused(*reply))
+            if (!reply || refused(*reply) || asksForMore(*reply))
                 data->close();
             co_return reply;
         }
@@ -229,6 +238,8 @@ namespace FileTransferProtocol
             }
             if (refused(*first))
                 co_return std::unexpected(refusalOf(*first, verb, *data, *control));
+            if (asksForMore(*first))
+                co_return std::unexpected(replyError(*first, verb));
             if (!secured)
             {
                 // The server went on, the data must not flow unprotected.

@@ -453,15 +453,43 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(framer.inReply());
     }
 
-    TEST(ReplyFramerTests, FinishCompletesALastLineWithoutLineEnd)
+    TEST(ReplyFramerTests, ALastLineWithoutLineEndIsALostConnection)
+    {
+        // Maybe the start of "213 1234".
+        ReplyFramer framer{};
+        ASSERT_TRUE(framer.feed("213 12"));
+        EXPECT_TRUE(framer.inReply());
+        const auto finished = framer.finish();
+        ASSERT_FALSE(finished);
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(finished.error().protocolCode, 213);
+        EXPECT_FALSE(framer.next());
+    }
+
+    TEST(ReplyFramerTests, ALastLineCutInsideItsCodeIsALostConnection)
+    {
+        // Maybe the start of "226 Transfer complete".
+        for (const std::string_view cut : {"2", "22"})
+        {
+            ReplyFramer framer{};
+            ASSERT_TRUE(framer.feed(cut));
+            const auto finished = framer.finish();
+            ASSERT_FALSE(finished) << cut;
+            EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << cut;
+            EXPECT_EQ(finished.error().protocolCode, 0) << cut;
+            EXPECT_FALSE(framer.next()) << cut;
+        }
+    }
+
+    TEST(ReplyFramerTests, ALastLineWithoutLineEndCompletesNoOpenReply)
     {
         ReplyFramer framer{};
-        ASSERT_TRUE(framer.feed("421 Timeout."));
-        EXPECT_TRUE(framer.inReply());
-        ASSERT_TRUE(framer.finish());
-        const auto reply = framer.next();
-        ASSERT_TRUE(reply);
-        EXPECT_EQ(reply->code, 421);
+        ASSERT_TRUE(framer.feed("211-Features:\r\n MDTM\r\n211 End"));
+        const auto finished = framer.finish();
+        ASSERT_FALSE(finished);
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost);
+        EXPECT_EQ(finished.error().protocolCode, 211);
+        EXPECT_FALSE(framer.next());
     }
 
     TEST(ReplyFramerTests, FinishSettlesAPossibleEnd)
