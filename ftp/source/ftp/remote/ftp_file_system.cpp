@@ -102,7 +102,6 @@ namespace FileTransferProtocol
         {
             for (auto const& stream : streams->close())
                 stream->closeInStrand();
-            return true;
         };
         if (strand_->withinProcessingThread())
         {
@@ -116,9 +115,8 @@ namespace FileTransferProtocol
             strand_->pushFinalTask(closeStreams);
             return true;
         }
-        // A thread that stopped refuses the task, no task of the session runs beside this one then.
-        if (!strand_->pushFinalPromiseTask(closeStreams).get())
-            closeStreams();
+        // Once the thread stopped the final task runs here, no task of the session runs beside it then.
+        strand_->pushFinalPromiseTask(closeStreams).get();
         return true;
     }
 

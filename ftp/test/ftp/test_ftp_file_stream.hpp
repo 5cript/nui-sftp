@@ -491,6 +491,36 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(server_->waitForCheckpoint("drained"));
     }
 
+    TEST_P(FtpFileStreamTests, TheCloseOfTheFileSystemEndsItsStreamsOnceTheProcessingThreadStopped)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/a", "7");
+        transferring(transfer, DataPlan{}.stallAfter("abc"), "RETR", "/dir/a")
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .checkpoint("drained")
+            .expectDisconnect();
+        const auto fileSystem = connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/a", readMode);
+        const auto read = onThread(
+            [stream]()
+            {
+                std::array<char, 3u> buffer{};
+                return stream->readSomeInStrand(buffer.data(), buffer.size());
+            }
+        );
+        ASSERT_TRUE(read) << read.error().toString();
+        thread_.stop();
+        // The thread takes no task any more: the close ends the stream itself, which aborts the download.
+        EXPECT_TRUE(fileSystem->close());
+        EXPECT_TRUE(server_->waitForCheckpoint("drained"));
+    }
+
     TEST_P(FtpFileStreamTests, ACloseFromACompletionDoesNotWaitForTheProcessingThread)
     {
         auto metadata = loggedInScript();
