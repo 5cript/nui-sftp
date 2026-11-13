@@ -598,6 +598,109 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(*ran);
     }
 
+    TEST_P(EngineTests, AGroupThatEndsAsItsCallStartsEndsTheCallAndLeavesNoOperation)
+    {
+        const auto engine = makeEngine();
+        const auto closed =
+            RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::ConnectionLost, .message = "closed"};
+        // The end meets the call before it looked at its group, before it joined or while it waits.
+        for (auto round = 0; round < 200; ++round)
+        {
+            const auto group = std::make_shared<CallGroup>();
+            const auto calling = std::make_shared<std::promise<void>>();
+            auto aboutToCall = calling->get_future();
+            auto result = thread_.pushPromiseTask(
+                [engine, group, calling]()
+                {
+                    calling->set_value();
+                    return engine->call<int>(
+                        [](std::shared_ptr<CallScope>) -> asio::awaitable<Engine::Result<int>>
+                        {
+                            asio::steady_timer timer{co_await asio::this_coro::executor, 1h};
+                            co_await timer.async_wait(asio::as_tuple(asio::use_awaitable));
+                            co_return std::unexpected(
+                                RemoteIo::RemoteError{
+                                    .kind = RemoteIo::RemoteErrorKind::Cancelled,
+                                    .message = "The wait was cancelled",
+                                }
+                            );
+                        },
+                        // A call the end missed returns at this backstop, so a failure ends the test.
+                        SyncLimits{.backstop = 15s, .drain = 5s},
+                        group
+                    );
+                }
+            );
+            ASSERT_EQ(aboutToCall.wait_for(10s), std::future_status::ready);
+            group->end(closed);
+            ASSERT_EQ(result.wait_for(10s), std::future_status::ready) << "round " << round << ": the call waits on";
+            const auto outcome = result.get();
+            ASSERT_FALSE(outcome);
+            EXPECT_EQ(outcome.error().message, "closed") << outcome.error().toString();
+        }
+        EXPECT_TRUE(engine->waitIdle(10s)) << "an operation of an ended group ran on";
+        EXPECT_FALSE(engine->failed());
+    }
+
+    TEST_P(EngineTests, AnOperationThatIgnoresTheEndOfItsGroupIsGivenUpAfterTheDrainAndItsConnectionsClose)
+    {
+        auto started = ScriptedFtpServer::start();
+        ASSERT_TRUE(started) << started.error();
+        const auto server = std::move(started).value();
+        server->addConnection(loginThenDisconnect());
+        Script transfer{};
+        server->addConnection(loggedIn(transfer).expectDisconnect().checkpoint("given up"));
+        const auto engine = makeEngine(optionsFor(*server));
+        const auto pool = engine->pool();
+        auto start = asio::co_spawn(engine->strand(), pool->start(), asio::use_future);
+        ASSERT_TRUE(valueOf(start));
+
+        const auto group = std::make_shared<CallGroup>();
+        const auto blocker =
+            std::make_shared<asio::steady_timer>(engine->strand(), asio::steady_timer::time_point::max());
+        const auto touched = std::make_shared<std::promise<void>>();
+        auto result = thread_.pushPromiseTask(
+            [engine, pool, blocker, touched, group]()
+            {
+                return engine->call<int>(
+                    [pool, blocker, touched](std::shared_ptr<CallScope> scope) -> asio::awaitable<Engine::Result<int>>
+                    {
+                        auto lease = co_await pool->acquireTransfer();
+                        if (!lease)
+                            co_return std::unexpected(lease.error());
+                        scope->touch(lease->control());
+                        touched->set_value();
+                        // The cancel does not reach this wait, as with an operation that ignores it.
+                        co_await blocker->async_wait(
+                            asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::as_tuple(asio::use_awaitable))
+                        );
+                        co_return 7;
+                    },
+                    SyncLimits{.backstop = 1h, .drain = 100ms},
+                    group
+                );
+            }
+        );
+        ASSERT_EQ(touched->get_future().wait_for(10s), std::future_status::ready);
+
+        group->end(RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::ConnectionLost, .message = "closed"});
+        const auto outcome = valueOf(result);
+        ASSERT_FALSE(outcome);
+        EXPECT_EQ(outcome.error().message, "closed") << outcome.error().toString();
+        // The backstop is an hour away: only the drain after the group's end closes the connection.
+        EXPECT_TRUE(server->waitForCheckpoint("given up")) << "the connection of the operation stayed open";
+
+        asio::post(
+            engine->strand(),
+            [blocker]()
+            {
+                blocker->cancel();
+            }
+        );
+        EXPECT_TRUE(engine->waitIdle(5s));
+        EXPECT_FALSE(engine->failed()) << "the late result was not dropped";
+    }
+
     TEST_P(EngineTests, RunCompletesOnTheCallingThreadWhenPostsAreRefused)
     {
         const auto engine = makeEngine();

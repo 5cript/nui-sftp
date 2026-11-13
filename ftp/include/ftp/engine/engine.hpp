@@ -207,6 +207,11 @@ namespace FileTransferProtocol
         bool failed() const;
 
         /**
+         * @brief The pool gave the session up or the session failed: nothing runs on it any more. Thread-safe.
+         */
+        bool lost() const;
+
+        /**
          * @brief Refuses later posts and spawns, from any thread. Handlers already posted still run.
          */
         void refusePosts();
@@ -385,6 +390,10 @@ namespace FileTransferProtocol
         void extendCall(std::shared_ptr<Detail::CallState> const& pending, std::chrono::milliseconds more);
         void callTimeUp(std::shared_ptr<Detail::CallState> const& pending);
         /**
+         * @brief Cancels @p pending and gives it the drain to end, on the session strand.
+         */
+        void beginDrain(std::shared_ptr<Detail::CallState> const& pending);
+        /**
          * @brief Cancels @p pending as at its backstop, from any thread. Nothing once it ended or drains.
          */
         void cutShort(std::weak_ptr<Detail::CallState> pending);
@@ -418,7 +427,7 @@ namespace FileTransferProtocol
         std::uint64_t callNumber_{0u};
         std::atomic<bool> stopping_{false};
         std::atomic<bool> failed_{false};
-        std::atomic<bool> lostReported_{false};
+        std::atomic<bool> lost_{false};
         /** @brief Held through close(), so a second close returns only after the first. */
         std::mutex closeMutex_{};
         std::atomic<bool> closing_{false};

@@ -139,6 +139,11 @@ namespace FileTransferProtocol
         return failed_;
     }
 
+    bool Engine::lost() const
+    {
+        return lost_;
+    }
+
     void Engine::refusePosts()
     {
         std::scoped_lock lock{postMutex_};
@@ -214,8 +219,7 @@ namespace FileTransferProtocol
             Log::warn(
                 "FTP: An operation ran past its backstop of {} ms, it is cancelled", pending->limits().backstop.count()
             );
-            pending->cancel();
-            armCallTimer(pending, pending->limits().drain);
+            beginDrain(pending);
             return;
         }
         Log::warn(
@@ -227,6 +231,12 @@ namespace FileTransferProtocol
         pending->fail(timedOut(pending->limits()));
     }
 
+    void Engine::beginDrain(std::shared_ptr<Detail::CallState> const& pending)
+    {
+        pending->cancel();
+        armCallTimer(pending, pending->limits().drain);
+    }
+
     void Engine::cutShort(std::weak_ptr<Detail::CallState> pending)
     {
         // Once posts are refused the close failed every operation already.
@@ -236,8 +246,7 @@ namespace FileTransferProtocol
                 const auto call = pending.lock();
                 if (!call || call->completed() || call->draining())
                     return;
-                call->cancel();
-                self->armCallTimer(call, call->limits().drain);
+                self->beginDrain(call);
             }
         );
     }
@@ -369,7 +378,7 @@ namespace FileTransferProtocol
 
     void Engine::reportLost(RemoteIo::RemoteError error)
     {
-        if (!onLost_ || lostReported_.exchange(true))
+        if (lost_.exchange(true) || !onLost_)
             return;
         pushTask(
             [handler = onLost_, error = std::move(error)]()
