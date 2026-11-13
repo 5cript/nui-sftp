@@ -28,6 +28,8 @@ namespace FileTransferProtocol::Test
         std::string name{};
         Type type{Type::File};
         std::string content{};
+        /** @brief The permissions LIST shows for a file. */
+        std::string permissions{"rw-r--r--"};
         /** @brief Where a link leads, absolute or from the directory that holds it. */
         std::string target{};
         std::vector<ServedEntry> children{};

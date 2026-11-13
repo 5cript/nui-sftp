@@ -3,10 +3,9 @@
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <backend/sftp/delete_operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
-#include <ftp/support/file_system_harness.hpp>
-#include <ftp/support/scripted_ftp_server.hpp>
 #include <ftp/support/tree_responder.hpp>
 #include <utility/temporary_directory.hpp>
+#include "ftp_served_tree_tests.hpp"
 #include "operation_runs.hpp"
 #include "real_server_tests.hpp"
 
@@ -29,10 +28,7 @@ namespace Test
 {
     namespace
     {
-        using FileTransferProtocol::Test::FileSystemHarness;
-        using FileTransferProtocol::Test::ScriptedFtpServer;
         using FileTransferProtocol::Test::ServedEntry;
-        using FileTransferProtocol::Test::ServedTree;
         using FileTransferProtocol::Test::servedDirectory;
         using FileTransferProtocol::Test::servedFile;
         using FileTransferProtocol::Test::servedLink;
@@ -77,9 +73,6 @@ namespace Test
             };
         }
 
-        /** @brief How long an operation on the hostile listing may take. */
-        constexpr auto operationLimit = 30s;
-
         std::string contentOf(std::filesystem::path const& path)
         {
             std::ifstream file{path, std::ios::binary};
@@ -92,52 +85,9 @@ namespace Test
         }
     }
 
-    class FtpHostileListingTests : public ::testing::Test
+    class FtpHostileListingTests : public FtpServedTreeTests
     {
       protected:
-        /**
-         * @brief Serves @p root and opens a file system there.
-         */
-        void serve(std::vector<ServedEntry> root)
-        {
-            tree_ = std::make_shared<ServedTree>(std::move(root));
-            auto started = ScriptedFtpServer::start();
-            ASSERT_TRUE(started) << started.error();
-            server_ = std::move(started).value();
-            // C0, the transfer connection and spares for connections the pool replaces.
-            for (std::size_t connection = 0u; connection < servedConnections; ++connection)
-                server_->addConnection(FileTransferProtocol::Test::serving(tree_));
-            auto connected = FileSystemHarness::connect(
-                FileSystemHarness::Options{.host = server_->address(), .port = server_->port()}
-            );
-            ASSERT_TRUE(connected) << connected.error();
-            harness_ = std::move(connected).value();
-        }
-
-        void TearDown() override
-        {
-            harness_.reset();
-            if (!server_)
-                return;
-            EXPECT_TRUE(server_->waitUntilDisconnected());
-            for (auto const& failure : server_->failures())
-                ADD_FAILURE() << failure;
-            if (!HasFailure())
-                return;
-            for (std::size_t connection = 0u; connection < servedConnections; ++connection)
-            {
-                std::string commands{};
-                for (auto const& command : server_->commands(connection))
-                    commands += fmt::format("\n  {}", command);
-                std::cout << fmt::format("Commands of connection {}:{}\n", connection, commands);
-            }
-        }
-
-        std::shared_ptr<RemoteIo::IRemoteFileSystem> fileSystem() const
-        {
-            return harness_->fileSystem();
-        }
-
         std::vector<SharedData::DirectoryEntry> scanTree(std::uint64_t& totalBytes)
         {
             ScanOperation scan{fileSystem(), {.remotePath = remote("/tree")}};
@@ -154,12 +104,6 @@ namespace Test
             for (auto const& directory : listed)
                 EXPECT_TRUE(liesInTheTree(directory)) << "listed " << directory;
         }
-
-        static constexpr std::size_t servedConnections{4u};
-
-        std::shared_ptr<ServedTree> tree_{};
-        std::unique_ptr<ScriptedFtpServer> server_{};
-        std::unique_ptr<FileSystemHarness> harness_{};
     };
 
     TEST_F(FtpHostileListingTests, AScanKeepsToTheTreeAndEnds)

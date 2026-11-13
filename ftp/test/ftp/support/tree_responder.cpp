@@ -96,7 +96,10 @@ namespace FileTransferProtocol::Test
             {
                 case ServedEntry::Type::File:
                     return fmt::format(
-                        "-rw-r--r--    1 0        0        {:>8} Jan 02 03:04 {}\r\n", entry.content.size(), entry.name
+                        "-{}    1 0        0        {:>8} Jan 02 03:04 {}\r\n",
+                        entry.permissions,
+                        entry.content.size(),
+                        entry.name
                     );
                 case ServedEntry::Type::Directory:
                     return fmt::format("drwxr-xr-x    2 0        0            4096 Jan 02 03:04 {}\r\n", entry.name);
