@@ -582,13 +582,45 @@ namespace FileTransferProtocol::Test
         script.reply("550 Could not get file size.").expectDisconnect();
         connect(
             std::move(script),
-            FtpFileSystemOptions{.operationLimits = SyncLimits{.backstop = 300ms, .drain = 5s}}
+            FtpFileSystemOptions{
+                .operationLimits = SyncLimits{.backstop = 300ms, .drain = 5s},
+                .linkLookupAllowance = 50ms,
+            }
         );
 
         const auto listed = later(RemoteIo::ListDirectory{.path = remote("/dir"), .resolveLinks = true});
         ASSERT_FALSE(listed) << "listed past the backstop";
         EXPECT_EQ(listed.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << listed.error().toString();
         server_->release("answer");
+    }
+
+    TEST_P(FtpFileSystemTests, EachLinkAListingAsksTheServerAboutMovesItsBackstop)
+    {
+        auto script = loggedInScript();
+        listsIn(script, "/dir", std::string{listedLinkToDirectory} + std::string{listedDanglingLink});
+        script.expect("SIZE", "/dir/up").checkpoint("asked").awaitRelease("answer");
+        script.reply("550 Could not get file size.");
+        enters(script, "/dir/up");
+        script.expect("SIZE", "/dir/gone").reply("550 Could not get file size.");
+        script.expect("CWD", "/dir/gone").reply("550 Failed to change directory.").expectDisconnect();
+        connect(
+            std::move(script),
+            FtpFileSystemOptions{
+                .operationLimits = SyncLimits{.backstop = 200ms, .drain = 5s},
+                .linkLookupAllowance = 1h,
+            }
+        );
+
+        auto pending = fileSystem_->later(RemoteIo::ListDirectory{.path = remote("/dir"), .resolveLinks = true});
+        ASSERT_TRUE(server_->waitForCheckpoint("asked"));
+        // The listing itself took none of its backstop, which its lookups would run into.
+        EXPECT_EQ(pending.wait_for(400ms), std::future_status::timeout) << "ended at the backstop of the listing alone";
+        server_->release("answer");
+        const auto listed = valueOf(pending);
+        ASSERT_TRUE(listed) << listed.error().toString();
+        ASSERT_EQ(namesOf(*listed), (std::vector<std::string>{"up", "gone"}));
+        EXPECT_TRUE(listed->at(0u).isDirectoryLike());
+        EXPECT_EQ(listed->at(1u).resolvedTarget, nullptr);
     }
 
     INSTANTIATE_TEST_SUITE_P(

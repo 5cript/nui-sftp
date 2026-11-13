@@ -42,6 +42,48 @@ namespace FileTransferProtocol
         {
             return errorOf(RemoteErrorKind::ConnectionLost, "The FTP session ended");
         }
+
+        MetadataSession
+        metadataSessionOf(Lease const& lease, FileSystemSession const& session, FtpFileSystemOptions const& options)
+        {
+            return MetadataSession{
+                .transfer = lease.transferSession(),
+                .dialect = session.dialect,
+                .options = options.transfer,
+                .limits = options.listing,
+            };
+        }
+
+        asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>> onCommandConnection(
+            FileSystemSession session,
+            FtpFileSystemOptions options,
+            std::shared_ptr<CallScope> scope,
+            RemoteIo::ListDirectory operation,
+            std::shared_ptr<ControlConnection> held
+        )
+        {
+            const auto pool = session.engine->pool();
+            if (!pool)
+                co_return std::unexpected(sessionEndedError());
+            auto lease = co_await pool->acquireCommand(std::move(held));
+            if (!lease)
+                co_return std::unexpected(std::move(lease).error());
+            const auto metadata = metadataSessionOf(*lease, session, options);
+            const auto directory = operation.path;
+            auto listed = co_await onConnection<ListedDirectory>(
+                lease->control(), scope, listEntries(metadata, std::move(operation))
+            );
+            if (!listed)
+                co_return std::unexpected(std::move(listed).error());
+            if (listed->linksToAsk.empty())
+                co_return std::move(listed->entries);
+            // The backstop was set before the listing told how many lookups follow it.
+            const auto lookups = static_cast<std::chrono::milliseconds::rep>(listed->linksToAsk.size());
+            scope->allowMore(options.linkLookupAllowance * lookups);
+            co_return co_await onConnection<RemoteIo::ListDirectory::Result>(
+                lease->control(), scope, resolveListedLinks(metadata, directory, *std::move(listed))
+            );
+        }
     }
 
     std::shared_ptr<FtpFileSystem> FtpFileSystem::create(
@@ -179,15 +221,7 @@ namespace FileTransferProtocol
             auto found = co_await Detail::onConnection<std::uint64_t>(
                 lease->control(),
                 std::move(scope),
-                sizeOf(
-                    MetadataSession{
-                        .transfer = lease->transferSession(),
-                        .dialect = session.dialect,
-                        .options = options.transfer,
-                        .limits = options.listing,
-                    },
-                    operation.path.value()
-                )
+                sizeOf(Detail::metadataSessionOf(*lease, session, options), operation.path.value())
             );
             if (found)
                 size = *found;

@@ -182,39 +182,57 @@ namespace FileTransferProtocol
         }
     }
 
-    asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>>
-    runOperation(MetadataSession session, RemoteIo::ListDirectory operation)
+    asio::awaitable<std::expected<ListedDirectory, RemoteIo::RemoteError>>
+    listEntries(MetadataSession session, RemoteIo::ListDirectory operation)
     {
-        auto listing = co_await listDirectory(session, operation.path.value());
+        auto listing = co_await listDirectory(std::move(session), operation.path.value());
         if (!listing)
             co_return std::unexpected(std::move(listing).error());
         reportLeftOut(*listing);
-        std::vector<RemoteIo::FileInformation> entries{};
-        entries.reserve(listing->entries.size());
-        for (auto const& listed : listing->entries)
-            entries.push_back(informationOf(listed));
-        if (!operation.resolveLinks || std::ranges::none_of(entries, &RemoteIo::FileInformation::isSymlink))
-            co_return entries;
+        ListedDirectory listed{};
+        listed.entries.reserve(listing->entries.size());
+        for (auto const& entry : listing->entries)
+            listed.entries.push_back(informationOf(entry));
+        if (!operation.resolveLinks || std::ranges::none_of(listed.entries, &RemoteIo::FileInformation::isSymlink))
+            co_return listed;
         const auto names = listedByName(*listing);
-        for (std::size_t index = 0u; index < entries.size(); ++index)
+        for (std::size_t index = 0u; index < listed.entries.size(); ++index)
         {
-            auto& entry = entries[index];
+            auto& entry = listed.entries[index];
             if (!entry.isSymlink())
                 continue;
-            // A link to an entry of this listing needs no lookup, each one costs commands within the same backstop.
+            // A link to an entry of this listing needs no lookup.
             if (auto const* target = listedTargetOf(names, listing->entries[index]))
-            {
                 entry.resolvedTarget = resolvedAs(*target, entry);
-                continue;
-            }
+            else
+                listed.linksToAsk.push_back(index);
+        }
+        co_return listed;
+    }
+
+    asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>>
+    resolveListedLinks(MetadataSession session, Paths::RemotePath directory, ListedDirectory listed)
+    {
+        for (const auto index : listed.linksToAsk)
+        {
             if (Detail::isCancelled(co_await asio::this_coro::cancellation_state))
                 co_return std::unexpected(cancelledError());
-            auto target = co_await resolvedTargetOf(session, operation.path, entry);
+            auto target = co_await resolvedTargetOf(session, directory, listed.entries[index]);
             if (!target)
                 co_return std::unexpected(std::move(target).error());
-            entry.resolvedTarget = *std::move(target);
+            listed.entries[index].resolvedTarget = *std::move(target);
         }
-        co_return entries;
+        co_return std::move(listed.entries);
+    }
+
+    asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>>
+    runOperation(MetadataSession session, RemoteIo::ListDirectory operation)
+    {
+        const auto directory = operation.path;
+        auto listed = co_await listEntries(session, std::move(operation));
+        if (!listed)
+            co_return std::unexpected(std::move(listed).error());
+        co_return co_await resolveListedLinks(std::move(session), directory, *std::move(listed));
     }
 
     asio::awaitable<RemoteIo::OperationResult<RemoteIo::Stat>>

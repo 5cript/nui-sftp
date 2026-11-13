@@ -5,6 +5,10 @@
 
 #include <boost/asio/awaitable.hpp>
 
+#include <cstddef>
+#include <expected>
+#include <vector>
+
 namespace FileTransferProtocol
 {
     /**
@@ -19,6 +23,31 @@ namespace FileTransferProtocol
      */
     boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>>
     runOperation(MetadataSession session, RemoteIo::ListDirectory operation);
+
+    /**
+     * @brief The entries of a directory, and which of its links the server still has to follow.
+     */
+    struct ListedDirectory
+    {
+        std::vector<RemoteIo::FileInformation> entries{};
+        /** @brief Where in entries the links are that their listing could not follow itself. */
+        std::vector<std::size_t> linksToAsk{};
+    };
+
+    /**
+     * @brief The first part of ListDirectory: the listing, with the links followed that it can follow itself.
+     */
+    boost::asio::awaitable<std::expected<ListedDirectory, RemoteIo::RemoteError>>
+    listEntries(MetadataSession session, RemoteIo::ListDirectory operation);
+
+    /**
+     * @brief The second part of ListDirectory: asks the server where each link of ListedDirectory::linksToAsk leads,
+     *        one after the other with up to two commands each. A caller that bounds the listing counts them in.
+     *
+     * @param directory The directory @p listed is the listing of.
+     */
+    boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>>
+    resolveListedLinks(MetadataSession session, Paths::RemotePath directory, ListedDirectory listed);
 
     /**
      * @brief statPath(): the attributes of the end of a chain of symlinks.

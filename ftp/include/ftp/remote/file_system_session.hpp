@@ -6,6 +6,7 @@
 #include <ftp/engine/call.hpp>
 #include <ftp/engine/engine.hpp>
 #include <ftp/engine/ring_options.hpp>
+#include <ftp/pool/lease.hpp>
 #include <ftp/protocol/listing.hpp>
 #include <ftp/remote/file_system_operations.hpp>
 #include <remote_io/remote_error.hpp>
@@ -41,6 +42,11 @@ namespace FileTransferProtocol
         std::size_t lengthLimit{256u * 1024u};
         /** @brief The ring of each asynchronous read or write. */
         RingOptions ring{};
+        /**
+         * @brief What each link that a listing asks the server about adds to the backstop of that listing. Its
+         *        commands have their own timeout, this only keeps the backstop behind them.
+         */
+        std::chrono::milliseconds linkLookupAllowance{std::chrono::seconds{1}};
     };
 
     /**
@@ -104,6 +110,12 @@ namespace FileTransferProtocol
         RemoteIo::RemoteError sessionEndedError();
 
         /**
+         * @brief What a metadata operation of @p session runs on with the connection of @p lease.
+         */
+        MetadataSession
+        metadataSessionOf(Lease const& lease, FileSystemSession const& session, FtpFileSystemOptions const& options);
+
+        /**
          * @brief Takes a connection for commands of the pool and runs @p operation there, on the session strand.
          *
          * @param held A connection the caller holds itself, see Pool::acquireCommand().
@@ -126,16 +138,20 @@ namespace FileTransferProtocol
             co_return co_await onConnection<typename OperationT::Result>(
                 lease->control(),
                 std::move(scope),
-                runOperation(
-                    MetadataSession{
-                        .transfer = lease->transferSession(),
-                        .dialect = std::move(session.dialect),
-                        .options = options.transfer,
-                        .limits = options.listing,
-                    },
-                    std::move(operation)
-                )
+                runOperation(metadataSessionOf(*lease, session, options), std::move(operation))
             );
         }
+
+        /**
+         * @brief onCommandConnection() for a listing, which learns from the listing how many links it has to ask the
+         *        server about: FtpFileSystemOptions::linkLookupAllowance for each moves its backstop.
+         */
+        boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::ListDirectory>> onCommandConnection(
+            FileSystemSession session,
+            FtpFileSystemOptions options,
+            std::shared_ptr<CallScope> scope,
+            RemoteIo::ListDirectory operation,
+            std::shared_ptr<ControlConnection> held = nullptr
+        );
     }
 }
