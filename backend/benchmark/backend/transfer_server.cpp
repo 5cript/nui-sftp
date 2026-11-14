@@ -151,7 +151,8 @@ namespace Benchmark
                         .image = std::string{image},
                         .namePrefix = "nui-sftp-benchmark",
                         .runArguments =
-                            {"--tmpfs",
+                            {"--init",
+                             "--tmpfs",
                              fmt::format(
                                  "{}:rw,size={},mode=0755,uid=1000,gid=1000", dataDirectory, options.tmpfsBytes
                              )},
@@ -176,6 +177,9 @@ namespace Benchmark
                         return std::unexpected{answering.error()};
 
                     server.version_ = trimmed(server.container_.execute("sshd -V 2>&1 | head -n 1").output);
+                    // vsftpd writes its version to standard input.
+                    server.ftpVersion_ =
+                        trimmed(server.container_.execute("vsftpd -v 0>&1 | sed 's/: version//'").output);
 
                     if (const auto key = createClientKey(options.keyDirectory); !key.empty())
                     {

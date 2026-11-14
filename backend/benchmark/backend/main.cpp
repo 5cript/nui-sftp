@@ -330,7 +330,7 @@ namespace
 
         ReportContext context{
             .date = fmt::format("{:%Y-%m-%d %H:%M}", std::chrono::system_clock::now()),
-            .serverVersion = server->version(),
+            .serverVersion = fmt::format("{} and {}", server->version(), server->ftpVersion()),
             .libsshVersion = ssh_version(0),
             .serverAddress = server->host(),
             .processors = std::thread::hardware_concurrency(),
