@@ -2,6 +2,7 @@
 #include "connection.hpp"
 #include "libssh_client.hpp"
 #include "openssh_client.hpp"
+#include "processor_time.hpp"
 #include "queue_client.hpp"
 #include "report.hpp"
 #include "transfer_server.hpp"
@@ -248,9 +249,11 @@ namespace
                 break;
             }
 
+            const auto processorStart = processorTime();
             const auto start = std::chrono::steady_clock::now();
             const auto transferred = client.transfer(*transfer);
             const auto took = std::chrono::steady_clock::now() - start - client.fixedOverhead();
+            const auto processor = processorTime() - processorStart - client.fixedProcessorOverhead();
             if (!transferred)
             {
                 measurement.failure = transferred.error();
@@ -262,6 +265,7 @@ namespace
                 break;
             }
             measurement.durations.push_back(std::max(std::chrono::nanoseconds{1}, took));
+            measurement.processorTimes.push_back(std::max(std::chrono::nanoseconds{0}, processor));
             fmt::print(
                 "  {} {} {}: {:.3f} s\n",
                 source.workload.name,

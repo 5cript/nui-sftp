@@ -30,6 +30,11 @@ namespace Benchmark
             return static_cast<double>(bytes) / (1024.0 * 1024.0) / std::max(Seconds{duration}.count(), 1e-9);
         }
 
+        double millisecondsPerMebibyte(std::chrono::nanoseconds processor, std::uint64_t bytes)
+        {
+            return Seconds{processor}.count() * 1000.0 / std::max(static_cast<double>(bytes) / (1024.0 * 1024.0), 1e-9);
+        }
+
         std::optional<std::chrono::nanoseconds> baselineMedian(
             std::vector<Measurement> const& measurements,
             Measurement const& of,
@@ -63,7 +68,7 @@ namespace Benchmark
             if (!measurement.failure.empty() || measurement.durations.empty())
             {
                 return fmt::format(
-                    "| {} | {} | {} | failed: {} | | | | | |\n",
+                    "| {} | {} | {} | failed: {} | | | | | | |\n",
                     label,
                     toString(measurement.direction),
                     measurement.client,
@@ -78,7 +83,7 @@ namespace Benchmark
             const auto relative = baseline ? fmt::format("{:.0f} %", 100.0 * Seconds{*baseline}.count() / seconds)
                                            : std::string{"-"};
             return fmt::format(
-                "| {} | {} | {} | {} | {} | {} | {:.1f} | {:.0f} | {} |\n",
+                "| {} | {} | {} | {} | {} | {} | {:.1f} | {:.0f} | {:.3f} | {} |\n",
                 label,
                 toString(measurement.direction),
                 measurement.client,
@@ -87,6 +92,7 @@ namespace Benchmark
                 formatDuration(slowest),
                 mebibytesPerSecond(workload.totalBytes(), middle),
                 static_cast<double>(workload.fileCount) / seconds,
+                millisecondsPerMebibyte(median(measurement.processorTimes), workload.totalBytes()),
                 relative
             );
         }
@@ -114,9 +120,10 @@ namespace Benchmark
             "- Client library: libssh {}\n"
             "- Processors: {}\n"
             "- Runs per row: {}, the median is shown\n"
+            "- CPU: user and system time of the benchmark process and the programs it ran, all threads, the median\n"
             "\n"
-            "| Workload | Direction | Client | Median | Fastest | Slowest | MiB/s | Files/s | Speed vs {} |\n"
-            "|---|---|---|---:|---:|---:|---:|---:|---:|\n",
+            "| Workload | Direction | Client | Median | Fastest | Slowest | MiB/s | Files/s | CPU ms/MiB | Speed vs {} |\n"
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n",
             context.date,
             context.serverVersion,
             context.serverAddress,

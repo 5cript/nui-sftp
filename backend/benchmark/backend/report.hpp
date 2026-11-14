@@ -14,6 +14,8 @@ namespace Benchmark
         Direction direction{Direction::Download};
         std::string client{};
         std::vector<std::chrono::nanoseconds> durations{};
+        /** @brief The processor time of each run, see processorTime(). */
+        std::vector<std::chrono::nanoseconds> processorTimes{};
         /** @brief Why the client could not complete a run, the measurement is void then. */
         std::string failure{};
     };

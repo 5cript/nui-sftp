@@ -39,6 +39,10 @@ namespace Benchmark
         {
             return overhead_;
         }
+        std::chrono::nanoseconds fixedProcessorOverhead() const override
+        {
+            return processorOverhead_;
+        }
 
       private:
         explicit OpenSshClient(Options options);
@@ -47,5 +51,6 @@ namespace Benchmark
       private:
         Options options_;
         std::chrono::nanoseconds overhead_{};
+        std::chrono::nanoseconds processorOverhead_{};
     };
 }

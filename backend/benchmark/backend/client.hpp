@@ -39,5 +39,11 @@ namespace Benchmark
         {
             return {};
         }
+
+        /** @brief Processor time every transfer spends on something else, subtracted like fixedOverhead(). */
+        virtual std::chrono::nanoseconds fixedProcessorOverhead() const
+        {
+            return {};
+        }
     };
 }
