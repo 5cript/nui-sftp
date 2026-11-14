@@ -28,6 +28,8 @@ namespace Benchmark
         std::string date{};
         std::string serverVersion{};
         std::string libsshVersion{};
+        /** @brief The ring of each asynchronous FTP transfer. */
+        std::string ftpRing{};
         std::string serverAddress{};
         unsigned int processors{0};
         int repeats{0};

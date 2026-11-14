@@ -55,6 +55,9 @@ namespace
         std::uint64_t mediumKibibytes{1024};
         std::uint64_t smallCount{2000};
         std::uint64_t smallKibibytes{4};
+        /** @brief The ring of each asynchronous FTP transfer, see FileTransferProtocol::RingOptions. */
+        std::uint64_t ftpRingKibibytes{256};
+        std::uint64_t ftpRingSlots{4};
         /** @brief The clients that run, by name; all when empty. */
         std::set<std::string, std::less<>> clients{};
     };
@@ -69,6 +72,8 @@ namespace
         "  --medium-kib <n>      Size of a medium file (default: 1024)\n"
         "  --small-count <n>     Number of small files (default: 2000)\n"
         "  --small-kib <n>       Size of a small file (default: 4)\n"
+        "  --ftp-ring-kib <n>    Slot size of the ring of an FTP transfer (default: 256)\n"
+        "  --ftp-ring-slots <n>  Slots of the ring of an FTP transfer (default: 4)\n"
         "  --client <name>       Runs only this client, may be given more than once (default: all)\n";
 
     std::optional<std::uint64_t> parseNumber(std::string_view text)
@@ -89,6 +94,8 @@ namespace
             {"--medium-kib", &arguments.mediumKibibytes},
             {"--small-count", &arguments.smallCount},
             {"--small-kib", &arguments.smallKibibytes},
+            {"--ftp-ring-kib", &arguments.ftpRingKibibytes},
+            {"--ftp-ring-slots", &arguments.ftpRingSlots},
         };
         for (int index = 1; index < argc; ++index)
         {
@@ -397,6 +404,9 @@ namespace
             .date = fmt::format("{:%Y-%m-%d %H:%M}", std::chrono::system_clock::now()),
             .serverVersion = fmt::format("{} and {}", server->version(), server->ftpVersion()),
             .libsshVersion = ssh_version(0),
+            .ftpRing = fmt::format(
+                "{} slots of {}", arguments.ftpRingSlots, formatBytes(arguments.ftpRingKibibytes * kibibyte)
+            ),
             .serverAddress = server->host(),
             .processors = std::thread::hardware_concurrency(),
             .repeats = arguments.repeats,
@@ -486,6 +496,8 @@ namespace
         ftpOptions.port = TransferServer::ftpPort;
         ftpOptions.user = std::string{TransferServer::user};
         ftpOptions.password = std::string{TransferServer::password};
+        ftpOptions.ring.slots = arguments.ftpRingSlots;
+        ftpOptions.ring.chunkSize = arguments.ftpRingKibibytes * kibibyte;
         const FtpClientSetup ftpSetup{
             .sessions = ftpSessions,
             .clients = clients,

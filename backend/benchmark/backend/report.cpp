@@ -132,7 +132,7 @@ namespace Benchmark
             "\n"
             "- Date: {}\n"
             "- Server: {} in docker at {}, files on a tmpfs\n"
-            "- Client library: libssh {}\n"
+            "- Client library: libssh {}; FTP: the app's own client, a ring of {} per asynchronous transfer\n"
             "- Processors: {}\n"
             "- Runs per row: {}, the median is shown\n"
             "- CPU: user and system time of the benchmark process and the programs it ran, all threads, the median\n"
@@ -145,6 +145,7 @@ namespace Benchmark
             context.serverVersion,
             context.serverAddress,
             context.libsshVersion,
+            context.ftpRing,
             context.processors,
             context.repeats,
             describeBaselines(context.baselineClients)
