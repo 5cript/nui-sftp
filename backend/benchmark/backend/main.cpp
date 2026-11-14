@@ -2,9 +2,9 @@
 #include "connection.hpp"
 #include "libssh_client.hpp"
 #include "openssh_client.hpp"
-#include "openssh_server.hpp"
 #include "queue_client.hpp"
 #include "report.hpp"
+#include "transfer_server.hpp"
 #include "workload.hpp"
 
 #include <docker/docker.hpp>
@@ -143,18 +143,18 @@ namespace
 
     std::string remoteTargetRoot()
     {
-        return remoteJoin(OpenSshServer::dataDirectory, "target");
+        return remoteJoin(TransferServer::dataDirectory, "target");
     }
 
     std::expected<Source, std::string>
-    prepareSource(Workload const& workload, OpenSshServer const& server, std::filesystem::path const& workDirectory)
+    prepareSource(Workload const& workload, TransferServer const& server, std::filesystem::path const& workDirectory)
     {
         Source source{.workload = workload};
         const auto fileName = workload.isSingleFile() ? std::string_view{"/file.bin"} : std::string_view{};
         source.localPath = Paths::nativeFromUtf8(
             fmt::format("{}/source/{}{}", Paths::nativeToUtf8(workDirectory), workload.name, fileName)
         );
-        source.remotePath = fmt::format("{}/source/{}{}", OpenSshServer::dataDirectory, workload.name, fileName);
+        source.remotePath = fmt::format("{}/source/{}{}", TransferServer::dataDirectory, workload.name, fileName);
 
         source.localFiles = createLocalSource(workload, source.localPath);
         auto remoteFiles = server.createSource(workload, source.remotePath);
@@ -179,7 +179,7 @@ namespace
     std::expected<Transfer, std::string> prepareTransfer(
         Source const& source,
         Direction direction,
-        OpenSshServer const& server,
+        TransferServer const& server,
         std::filesystem::path const& workDirectory
     )
     {
@@ -217,7 +217,7 @@ namespace
     }
 
     std::expected<void, std::string>
-    verify(Transfer const& transfer, Source const& source, OpenSshServer const& server)
+    verify(Transfer const& transfer, Source const& source, TransferServer const& server)
     {
         const auto digest = transfer.direction == Direction::Download ? localDigest(transfer.localPath)
                                                                       : server.digest(transfer.remotePath);
@@ -233,7 +233,7 @@ namespace
         Client& client,
         Source const& source,
         Direction direction,
-        OpenSshServer const& server,
+        TransferServer const& server,
         std::filesystem::path const& workDirectory,
         int repeats
     )
@@ -294,7 +294,7 @@ namespace
             tmpfsBytes += 2u * workload.totalBytes() + workload.fileCount * 4u * kibibyte;
 
         fmt::print("Starting OpenSSH in docker...\n");
-        auto server = OpenSshServer::start({
+        auto server = TransferServer::start({
             .dockerDirectory = NUI_SFTP_BENCHMARK_DOCKER_DIRECTORY,
             .keyDirectory = workDirectory / "keys",
             .tmpfsBytes = tmpfsBytes,
@@ -346,7 +346,7 @@ namespace
         std::vector<std::unique_ptr<Client>> clients;
         auto openSsh = OpenSshClient::make({
             .host = server->host(),
-            .user = std::string{OpenSshServer::user},
+            .user = std::string{TransferServer::user},
             .key = server->clientKey(),
             .workDirectory = workDirectory,
         });
@@ -360,7 +360,7 @@ namespace
         connections.reserve(connectionCount);
         for (int index = 0; index < connectionCount; ++index)
         {
-            auto connection = connect(server->host(), OpenSshServer::port);
+            auto connection = connect(server->host(), TransferServer::port);
             if (!connection)
             {
                 fmt::print(stderr, "Cannot connect: {}\n", connection.error());

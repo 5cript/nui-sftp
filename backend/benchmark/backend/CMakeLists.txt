@@ -5,10 +5,10 @@ add_executable(
     connection.cpp
     libssh_client.cpp
     openssh_client.cpp
-    openssh_server.cpp
     operation_driver.cpp
     queue_client.cpp
     report.cpp
+    transfer_server.cpp
     workload.cpp
 )
 

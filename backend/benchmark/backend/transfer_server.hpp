@@ -17,7 +17,7 @@ namespace Benchmark
      * @brief OpenSSH with its sftp-server in a container, the transferred files on a tmpfs so the disk of the host is
      *        out of the measurement on that side.
      */
-    class OpenSshServer
+    class TransferServer
     {
       public:
         static constexpr unsigned short port = 22;
@@ -28,7 +28,7 @@ namespace Benchmark
 
         struct Options
         {
-            /** @brief Holds openssh.Dockerfile and sshd_config. */
+            /** @brief Holds server.Dockerfile and sshd_config. */
             std::filesystem::path dockerDirectory{};
             /** @brief Where the key pair of the OpenSSH client baseline is created. */
             std::filesystem::path keyDirectory{};
@@ -38,13 +38,13 @@ namespace Benchmark
         /**
          * @brief Builds the image (cached by docker), starts the container and waits until sshd answers.
          */
-        static std::expected<OpenSshServer, std::string> start(Options const& options);
+        static std::expected<TransferServer, std::string> start(Options const& options);
 
-        ~OpenSshServer() = default;
-        OpenSshServer(OpenSshServer const&) = delete;
-        OpenSshServer& operator=(OpenSshServer const&) = delete;
-        OpenSshServer(OpenSshServer&&) = default;
-        OpenSshServer& operator=(OpenSshServer&&) = default;
+        ~TransferServer() = default;
+        TransferServer(TransferServer const&) = delete;
+        TransferServer& operator=(TransferServer const&) = delete;
+        TransferServer(TransferServer&&) = default;
+        TransferServer& operator=(TransferServer&&) = default;
 
         /** @brief The address of the container, reached without a published port and its userland proxy. */
         std::string const& host() const noexcept
@@ -85,7 +85,7 @@ namespace Benchmark
         std::expected<std::string, std::string> digest(std::string_view remotePath) const;
 
       private:
-        OpenSshServer(Docker::Container container, std::string host);
+        TransferServer(Docker::Container container, std::string host);
 
       private:
         Docker::Container container_;
