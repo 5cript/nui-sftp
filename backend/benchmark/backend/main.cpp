@@ -1,5 +1,6 @@
 #include "application_client.hpp"
 #include "connection.hpp"
+#include "curl_client.hpp"
 #include "ftp_session.hpp"
 #include "libssh_client.hpp"
 #include "openssh_client.hpp"
@@ -457,6 +458,27 @@ namespace
             clients.push_back(std::make_unique<QueueClient>(
                 connections[4].sftp, "nui-sftp queue per file", Protocol::Sftp, *window, *hub, Queueing::OnePerFile
             ));
+        }
+
+        for (const auto protocol : {Protocol::Ftp, Protocol::Ftps})
+        {
+            const auto curlName = CurlClient::nameFor(protocol);
+            context.baselineClients.emplace(protocol, curlName);
+            if (!arguments.clients.empty() && !arguments.clients.contains(curlName))
+                continue;
+            auto curl = CurlClient::make({
+                .host = server->host(),
+                .port = TransferServer::ftpPort,
+                .user = std::string{TransferServer::user},
+                .password = std::string{TransferServer::password},
+                .protocol = protocol,
+                .probePath = sources.front().remotePath,
+                .workDirectory = workDirectory,
+            });
+            if (curl)
+                clients.push_back(std::move(curl).value());
+            else
+                context.notes.push_back(fmt::format("The {} baseline did not run: {}", curlName, curl.error()));
         }
 
         FtpSessionOptions ftpOptions{};

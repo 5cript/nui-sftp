@@ -3,6 +3,7 @@ add_executable(
     main.cpp
     application_client.cpp
     connection.cpp
+    curl_client.cpp
     ftp_session.cpp
     libssh_client.cpp
     openssh_client.cpp
