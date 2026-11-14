@@ -10,7 +10,11 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <future>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -62,8 +66,81 @@ namespace FileTransferProtocol
         AllowMore allowMore_{};
     };
 
+    /**
+     * @brief Synchronous calls that end together before their time: the close of a file system ends the calls its
+     *        streams wait in. Thread-safe.
+     */
+    class CallGroup
+    {
+      public:
+        /** @brief Ends one waiting call: completes its wait with the error and cancels its operation. */
+        using Ender = std::function<void(RemoteIo::RemoteError const&)>;
+
+        CallGroup() = default;
+        ~CallGroup() = default;
+        CallGroup(CallGroup const&) = delete;
+        CallGroup& operator=(CallGroup const&) = delete;
+        CallGroup(CallGroup&&) = delete;
+        CallGroup& operator=(CallGroup&&) = delete;
+
+        /**
+         * @brief Ends every call waiting now with @p error, outside the lock, and every later one at once. Only the
+         *        first end counts.
+         */
+        void end(RemoteIo::RemoteError error);
+
+        /**
+         * @brief Registers the call that @p ender ends.
+         *
+         * @return Its key, nothing once the group ended: the caller ends its call with endedWith() then.
+         */
+        std::optional<std::uint64_t> join(Ender ender);
+
+        void leave(std::uint64_t key);
+
+        /**
+         * @return The error of end(), nothing before it.
+         */
+        std::optional<RemoteIo::RemoteError> endedWith() const;
+
+      private:
+        mutable std::mutex mutex_{};
+        std::unordered_map<std::uint64_t, Ender> waiting_{};
+        std::uint64_t nextKey_{0u};
+        std::optional<RemoteIo::RemoteError> ended_{};
+    };
+
     namespace Detail
     {
+        /**
+         * @brief The result a synchronous call waits for, set once by whichever comes first: the operation or the end
+         *        of its group. Thread-safe.
+         */
+        template <typename ValueT>
+        class SyncOutcome
+        {
+          public:
+            using Result = std::expected<ValueT, RemoteIo::RemoteError>;
+
+            std::future<Result> future()
+            {
+                return promise_.get_future();
+            }
+
+            void set(Result result)
+            {
+                std::scoped_lock lock{mutex_};
+                if (std::exchange(set_, true))
+                    return;
+                promise_.set_value(std::move(result));
+            }
+
+          private:
+            std::mutex mutex_{};
+            bool set_{false};
+            std::promise<Result> promise_{};
+        };
+
         /**
          * @brief What an operation the engine runs needs besides its value: the signal that cancels it, its timer and
          *        its scope. Owned by the handlers of the operation, used on the session strand.

@@ -47,6 +47,11 @@ namespace FileTransferProtocol
         return std::exchange(streams_, {});
     }
 
+    std::shared_ptr<CallGroup> const& OpenStreams::calls() const
+    {
+        return calls_;
+    }
+
     std::size_t OpenStreams::size() const
     {
         std::scoped_lock lock{mutex_};
@@ -61,7 +66,7 @@ namespace FileTransferProtocol
         Paths::RemotePath path,
         Direction direction,
         std::optional<std::uint64_t> size,
-        std::weak_ptr<OpenStreams> streams
+        std::shared_ptr<OpenStreams> const& streams
     )
     {
         return std::make_shared<FtpFileStream>(
@@ -73,7 +78,7 @@ namespace FileTransferProtocol
             std::move(path),
             direction,
             size,
-            std::move(streams)
+            streams
         );
     }
 
@@ -86,7 +91,7 @@ namespace FileTransferProtocol
         Paths::RemotePath path,
         Direction direction,
         std::optional<std::uint64_t> size,
-        std::weak_ptr<OpenStreams> streams
+        std::shared_ptr<OpenStreams> const& streams
     )
         : session_{std::move(session)}
         , options_{std::move(options)}
@@ -94,7 +99,8 @@ namespace FileTransferProtocol
         , path_{std::move(path)}
         , direction_{direction}
         , size_{size}
-        , streams_{std::move(streams)}
+        , streams_{streams}
+        , calls_{streams->calls()}
         , transfer_{makeTransfer(std::move(lease), session_, options_)}
     {}
 
@@ -156,7 +162,8 @@ namespace FileTransferProtocol
                     std::move(held)
                 );
             },
-            options_.operationLimits
+            options_.operationLimits,
+            calls_
         );
     }
 

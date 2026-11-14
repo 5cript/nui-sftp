@@ -41,14 +41,14 @@ namespace FileTransferProtocol
          */
         static std::shared_ptr<FtpFileSystem> create(
             FileSystemSession session,
-            std::unique_ptr<RemoteIo::ProcessingStrand> strand,
+            std::shared_ptr<RemoteIo::ProcessingStrand> strand,
             FtpFileSystemOptions options = {}
         );
 
         FtpFileSystem(
             Private,
             FileSystemSession session,
-            std::unique_ptr<RemoteIo::ProcessingStrand> strand,
+            std::shared_ptr<RemoteIo::ProcessingStrand> strand,
             FtpFileSystemOptions options
         );
         ~FtpFileSystem() override;
@@ -66,14 +66,21 @@ namespace FileTransferProtocol
         RemoteIo::IBufferProvider& bufferProvider() override;
 
         /**
-         * @brief Fails the operations under way with ConnectionLost and refuses later ones, then closes the streams in
-         *        a final task, which finalizes the strand, and waits for that task. Not on the session strand, where
-         *        the completions of later() run: the streams close behind what the processing thread does then. An
+         * @brief Fails the operations under way with ConnectionLost and refuses later ones, ends the calls its
+         *        streams wait in, then closes the streams in a final task, which finalizes the strand, and waits for
+         *        that task, for FtpFileSystemOptions::closeWait at most. Not on the session strand, where the
+         *        completions of later() run, and no longer than that wait: the streams close behind what the
+         *        processing thread does then, a stream of another file system waiting for its server say. An
          *        operation that was failed still runs to its end on the engine, its result is dropped.
          *
          * @return False when it was closed already.
          */
         bool close() override;
+
+        /**
+         * @brief close() ran.
+         */
+        bool closed() const;
 
       protected:
         /**

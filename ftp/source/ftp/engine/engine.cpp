@@ -139,6 +139,11 @@ namespace FileTransferProtocol
         return failed_;
     }
 
+    bool Engine::lost() const
+    {
+        return lost_;
+    }
+
     void Engine::refusePosts()
     {
         std::scoped_lock lock{postMutex_};
@@ -214,8 +219,7 @@ namespace FileTransferProtocol
             Log::warn(
                 "FTP: An operation ran past its backstop of {} ms, it is cancelled", pending->limits().backstop.count()
             );
-            pending->cancel();
-            armCallTimer(pending, pending->limits().drain);
+            beginDrain(pending);
             return;
         }
         Log::warn(
@@ -225,6 +229,26 @@ namespace FileTransferProtocol
         pending->scope()->closeTouched();
         endCall(*pending);
         pending->fail(timedOut(pending->limits()));
+    }
+
+    void Engine::beginDrain(std::shared_ptr<Detail::CallState> const& pending)
+    {
+        pending->cancel();
+        armCallTimer(pending, pending->limits().drain);
+    }
+
+    void Engine::cutShort(std::weak_ptr<Detail::CallState> pending)
+    {
+        // Once posts are refused the close failed every operation already.
+        post(
+            [self = shared_from_this(), pending = std::move(pending)]()
+            {
+                const auto call = pending.lock();
+                if (!call || call->completed() || call->draining())
+                    return;
+                self->beginDrain(call);
+            }
+        );
     }
 
     void Engine::endCall(Detail::CallState& pending)
@@ -285,7 +309,8 @@ namespace FileTransferProtocol
                         co_return Result<void>{};
                     },
                     limits,
-                    CallRole::Quit
+                    CallRole::Quit,
+                    nullptr
                 );
                 quitEnded->set_value();
             }
@@ -353,7 +378,7 @@ namespace FileTransferProtocol
 
     void Engine::reportLost(RemoteIo::RemoteError error)
     {
-        if (!onLost_ || lostReported_.exchange(true))
+        if (lost_.exchange(true) || !onLost_)
             return;
         pushTask(
             [handler = onLost_, error = std::move(error)]()

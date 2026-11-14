@@ -8,6 +8,7 @@
 #include "test_listing_transfer.hpp"
 #include "test_metadata.hpp"
 #include "test_features.hpp"
+#include "test_ftp_connection.hpp"
 #include "test_listing.hpp"
 #include "test_login.hpp"
 #include "test_login_conformance.hpp"
