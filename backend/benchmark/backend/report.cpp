@@ -3,7 +3,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <map>
 #include <optional>
+#include <string>
 
 namespace Benchmark
 {
@@ -38,15 +40,18 @@ namespace Benchmark
         std::optional<std::chrono::nanoseconds> baselineMedian(
             std::vector<Measurement> const& measurements,
             Measurement const& of,
-            std::string const& baselineClient
+            std::map<Protocol, std::string> const& baselineClients
         )
         {
+            const auto baselineClient = baselineClients.find(of.protocol);
+            if (baselineClient == baselineClients.end())
+                return std::nullopt;
             const auto baseline = std::ranges::find_if(
                 measurements,
                 [&](Measurement const& candidate)
                 {
                     return candidate.workload == of.workload && candidate.direction == of.direction &&
-                        candidate.client == baselineClient && candidate.failure.empty() &&
+                        candidate.client == baselineClient->second && candidate.failure.empty() &&
                         !candidate.durations.empty();
                 }
             );
@@ -55,10 +60,18 @@ namespace Benchmark
             return median(baseline->durations);
         }
 
+        std::string describeBaselines(std::map<Protocol, std::string> const& baselineClients)
+        {
+            std::string described{};
+            for (auto const& [protocol, client] : baselineClients)
+                described += fmt::format("{}{} for {}", described.empty() ? "" : ", ", client, toString(protocol));
+            return described;
+        }
+
         std::string row(
             Measurement const& measurement,
             std::vector<Measurement> const& measurements,
-            std::string const& baselineClient
+            std::map<Protocol, std::string> const& baselineClients
         )
         {
             auto const& workload = *measurement.workload;
@@ -68,9 +81,10 @@ namespace Benchmark
             if (!measurement.failure.empty() || measurement.durations.empty())
             {
                 return fmt::format(
-                    "| {} | {} | {} | failed: {} | | | | | | |\n",
+                    "| {} | {} | {} | {} | failed: {} | | | | | | |\n",
                     label,
                     toString(measurement.direction),
+                    toString(measurement.protocol),
                     measurement.client,
                     measurement.failure
                 );
@@ -79,13 +93,14 @@ namespace Benchmark
             const auto middle = median(measurement.durations);
             const auto [fastest, slowest] = std::ranges::minmax(measurement.durations);
             const auto seconds = std::max(Seconds{middle}.count(), 1e-9);
-            const auto baseline = baselineMedian(measurements, measurement, baselineClient);
+            const auto baseline = baselineMedian(measurements, measurement, baselineClients);
             const auto relative = baseline ? fmt::format("{:.0f} %", 100.0 * Seconds{*baseline}.count() / seconds)
                                            : std::string{"-"};
             return fmt::format(
-                "| {} | {} | {} | {} | {} | {} | {:.1f} | {:.0f} | {:.3f} | {} |\n",
+                "| {} | {} | {} | {} | {} | {} | {} | {:.1f} | {:.0f} | {:.3f} | {} |\n",
                 label,
                 toString(measurement.direction),
+                toString(measurement.protocol),
                 measurement.client,
                 formatDuration(middle),
                 formatDuration(fastest),
@@ -121,19 +136,21 @@ namespace Benchmark
             "- Processors: {}\n"
             "- Runs per row: {}, the median is shown\n"
             "- CPU: user and system time of the benchmark process and the programs it ran, all threads, the median\n"
+            "- Baselines, each row is compared with the one of its protocol: {}\n"
             "\n"
-            "| Workload | Direction | Client | Median | Fastest | Slowest | MiB/s | Files/s | CPU ms/MiB | Speed vs {} |\n"
-            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n",
+            "| Workload | Direction | Protocol | Client | Median | Fastest | Slowest | MiB/s | Files/s | CPU ms/MiB | "
+            "Speed vs baseline |\n"
+            "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n",
             context.date,
             context.serverVersion,
             context.serverAddress,
             context.libsshVersion,
             context.processors,
             context.repeats,
-            context.baselineClient
+            describeBaselines(context.baselineClients)
         );
         for (auto const& measurement : measurements)
-            report += row(measurement, measurements, context.baselineClient);
+            report += row(measurement, measurements, context.baselineClients);
 
         report +=
             "\n"

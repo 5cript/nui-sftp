@@ -239,7 +239,12 @@ namespace
         int repeats
     )
     {
-        Measurement measurement{.workload = &source.workload, .direction = direction, .client = client.name()};
+        Measurement measurement{
+            .workload = &source.workload,
+            .direction = direction,
+            .client = client.name(),
+            .protocol = client.protocol(),
+        };
         for (int run = 0; run < repeats; ++run)
         {
             const auto transfer = prepareTransfer(source, direction, server, workDirectory);
@@ -330,7 +335,7 @@ namespace
             .serverAddress = server->host(),
             .processors = std::thread::hardware_concurrency(),
             .repeats = arguments.repeats,
-            .baselineClient = "OpenSSH sftp",
+            .baselineClients = {{Protocol::Sftp, "OpenSSH sftp"}},
         };
 
         // The queue reports to a window as in the app, nothing is shown in it.
@@ -373,12 +378,20 @@ namespace
             connections.push_back(std::move(connection).value());
         }
         clients.push_back(std::make_unique<LibsshClient>(connections[0]));
-        clients.push_back(std::make_unique<ApplicationClient>(connections[1], false));
-        clients.push_back(std::make_unique<ApplicationClient>(connections[2], true));
+        clients.push_back(
+            std::make_unique<ApplicationClient>(connections[1].sftp, "nui-sftp", Protocol::Sftp, UnsafeFast::Off)
+        );
+        clients.push_back(std::make_unique<ApplicationClient>(
+            connections[2].sftp, "nui-sftp unsafe fast", Protocol::Sftp, UnsafeFast::On
+        ));
         if (window)
         {
-            clients.push_back(std::make_unique<QueueClient>(connections[3], *window, *hub, Queueing::AsTheApp));
-            clients.push_back(std::make_unique<QueueClient>(connections[4], *window, *hub, Queueing::OnePerFile));
+            clients.push_back(std::make_unique<QueueClient>(
+                connections[3].sftp, "nui-sftp queue", Protocol::Sftp, *window, *hub, Queueing::AsTheApp
+            ));
+            clients.push_back(std::make_unique<QueueClient>(
+                connections[4].sftp, "nui-sftp queue per file", Protocol::Sftp, *window, *hub, Queueing::OnePerFile
+            ));
         }
         if (!arguments.clients.empty())
         {
@@ -389,8 +402,18 @@ namespace
                     return !arguments.clients.contains(client->name());
                 }
             );
-            if (!arguments.clients.contains(context.baselineClient))
-                context.notes.push_back(fmt::format("Only some clients ran, {} is not among them", context.baselineClient));
+            for (auto const& [protocol, baselineClient] : context.baselineClients)
+            {
+                const auto protocolRuns = std::ranges::any_of(
+                    clients,
+                    [protocol](auto const& client)
+                    {
+                        return client->protocol() == protocol;
+                    }
+                );
+                if (protocolRuns && !arguments.clients.contains(baselineClient))
+                    context.notes.push_back(fmt::format("Only some clients ran, {} is not among them", baselineClient));
+            }
         }
 
         std::vector<Measurement> measurements;

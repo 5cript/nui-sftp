@@ -5,11 +5,13 @@
 #include <backend/sftp/download_operation.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
 #include <backend/sftp/scan_operation.hpp>
+#include <backend/sftp/transfer_path.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <constants/sftp.hpp>
 #include <paths/local_path.hpp>
 #include <paths/native.hpp>
 #include <paths/remote_path.hpp>
+#include <remote_io/remote_file_system_operations.hpp>
 
 #include <fmt/format.h>
 
@@ -46,14 +48,26 @@ namespace Benchmark
         }
     }
 
-    ApplicationClient::ApplicationClient(Connection& connection, bool unsafeFast)
-        : connection_{connection}
-        , unsafeFast_{unsafeFast}
+    ApplicationClient::ApplicationClient(
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
+        std::string name,
+        Protocol protocol,
+        UnsafeFast unsafeFast
+    )
+        : fileSystem_{std::move(fileSystem)}
+        , name_{std::move(name)}
+        , protocol_{protocol}
+        , unsafeFast_{unsafeFast == UnsafeFast::On}
     {}
 
     std::string ApplicationClient::name() const
     {
-        return unsafeFast_ ? "nui-sftp unsafe fast" : "nui-sftp";
+        return name_;
+    }
+
+    Protocol ApplicationClient::protocol() const
+    {
+        return protocol_;
     }
 
     UnsafeFastMode ApplicationClient::unsafeFastMode() const
@@ -81,7 +95,7 @@ namespace Benchmark
         if (transfer.workload->isSingleFile())
         {
             // OperationQueue::addDownloadOperation stats the file first, its size picks the transfer path.
-            auto statFuture = connection_.sftp->lstat(*remote);
+            auto statFuture = fileSystem_->later(RemoteIo::Lstat{.path = *remote});
             if (statFuture.wait_for(10s) != std::future_status::ready)
                 return std::unexpected<std::string>{"lstat timed out"};
             const auto information = statFuture.get();
@@ -89,11 +103,11 @@ namespace Benchmark
                 return std::unexpected{fmt::format("lstat failed: {}", information.error().message)};
 
             DownloadOperation operation{
-                connection_.sftp,
+                fileSystem_,
                 {
                     .remotePath = *remote,
                     .localPath = *local,
-                    .bigFileOptimized = information->size >= Constants::bigFileCutOff,
+                    .bigFileOptimized = takesAsynchronousPath(fileSystem_->capabilities(), information->size),
                     .entry = *information,
                     .unsafeFastMode = unsafeFastMode(),
                 }
@@ -102,7 +116,7 @@ namespace Benchmark
         }
 
         BulkDownloadOperation operation{
-            connection_.sftp,
+            fileSystem_,
             {
                 .remotePath = *remote,
                 .localPath = *local,
@@ -110,9 +124,9 @@ namespace Benchmark
                 .concurrency = bulkConcurrency(),
             }
         };
-        operation.scanFirst(std::make_unique<ScanOperation>(
-            connection_.sftp, ScanOperation::ScanOperationOptions{.remotePath = *remote}
-        ));
+        operation.scanFirst(
+            std::make_unique<ScanOperation>(fileSystem_, ScanOperation::ScanOperationOptions{.remotePath = *remote})
+        );
         return runToCompletion(operation, transferTimeout);
     }
 
@@ -128,11 +142,11 @@ namespace Benchmark
         if (transfer.workload->isSingleFile())
         {
             UploadOperation operation{
-                connection_.sftp,
+                fileSystem_,
                 {
                     .remotePath = *remote,
                     .localPath = *local,
-                    .bigFileOptimized = transfer.workload->fileSize >= Constants::bigFileCutOff,
+                    .bigFileOptimized = takesAsynchronousPath(fileSystem_->capabilities(), transfer.workload->fileSize),
                     .unsafeFastMode = unsafeFastMode(),
                 }
             };
@@ -140,7 +154,7 @@ namespace Benchmark
         }
 
         BulkUploadOperation operation{
-            connection_.sftp,
+            fileSystem_,
             {
                 .remotePath = *remote,
                 .localPath = *local,

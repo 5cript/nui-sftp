@@ -34,6 +34,10 @@ namespace Benchmark
         static std::expected<std::unique_ptr<OpenSshClient>, std::string> make(Options options);
 
         std::string name() const override;
+        Protocol protocol() const override
+        {
+            return Protocol::Sftp;
+        }
         std::expected<void, std::string> transfer(Transfer const& transfer) override;
         std::chrono::nanoseconds fixedOverhead() const override
         {

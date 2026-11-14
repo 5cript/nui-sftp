@@ -1,8 +1,10 @@
 #pragma once
 
+#include "client.hpp"
 #include "workload.hpp"
 
 #include <chrono>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,7 @@ namespace Benchmark
         Workload const* workload{nullptr};
         Direction direction{Direction::Download};
         std::string client{};
+        Protocol protocol{Protocol::Sftp};
         std::vector<std::chrono::nanoseconds> durations{};
         /** @brief The processor time of each run, see processorTime(). */
         std::vector<std::chrono::nanoseconds> processorTimes{};
@@ -28,8 +31,8 @@ namespace Benchmark
         std::string serverAddress{};
         unsigned int processors{0};
         int repeats{0};
-        /** @brief The client every other one is compared with. */
-        std::string baselineClient{};
+        /** @brief The client every other one of the same protocol is compared with. */
+        std::map<Protocol, std::string> baselineClients{};
         /** @brief Remarks such as a baseline that could not run. */
         std::vector<std::string> notes{};
     };

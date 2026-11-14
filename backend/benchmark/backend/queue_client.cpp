@@ -23,14 +23,6 @@ namespace Benchmark
         constexpr auto transferTimeout = std::chrono::seconds{600};
 
         /**
-         * @brief What the queue takes as the file system of an operation.
-         */
-        auto const& fileSystemOf(Connection const& connection)
-        {
-            return connection.sftp;
-        }
-
-        /**
          * @brief Runs @p function on @p strand and waits for it.
          */
         template <typename FunctionT>
@@ -43,8 +35,17 @@ namespace Benchmark
         }
     }
 
-    QueueClient::QueueClient(Connection& connection, Nui::Window& window, Nui::RpcHub& hub, Queueing queueing)
-        : connection_{connection}
+    QueueClient::QueueClient(
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
+        std::string name,
+        Protocol protocol,
+        Nui::Window& window,
+        Nui::RpcHub& hub,
+        Queueing queueing
+    )
+        : fileSystem_{std::move(fileSystem)}
+        , name_{std::move(name)}
+        , protocol_{protocol}
         , queueing_{queueing}
         , strand_{std::make_shared<boost::asio::strand<boost::asio::any_io_executor>>(
               boost::asio::make_strand(pool_.get_executor())
@@ -103,7 +104,12 @@ namespace Benchmark
 
     std::string QueueClient::name() const
     {
-        return queueing_ == Queueing::AsTheApp ? "nui-sftp queue" : "nui-sftp queue per file";
+        return name_;
+    }
+
+    Protocol QueueClient::protocol() const
+    {
+        return protocol_;
     }
 
     bool QueueClient::supports(Workload const& workload) const
@@ -182,12 +188,8 @@ namespace Benchmark
         const auto isBigFile = transfer.workload->fileSize >= Constants::bigFileCutOff;
         const auto operationId = Ids::generateOperationId();
         const auto added = transfer.direction == Direction::Download
-            ? queue_->addDownloadOperation(
-                  fileSystemOf(connection_), operationId, *local, *remote, false, isBigFile, false, true
-              )
-            : queue_->addUploadOperation(
-                  fileSystemOf(connection_), operationId, *local, *remote, false, isBigFile, false, true
-              );
+            ? queue_->addDownloadOperation(fileSystem_, operationId, *local, *remote, false, isBigFile, false, true)
+            : queue_->addUploadOperation(fileSystem_, operationId, *local, *remote, false, isBigFile, false, true);
         if (!added)
             return std::unexpected{fmt::format("adding {} failed: {}", item.remotePath, added.error().toString())};
         return {};
