@@ -3,6 +3,7 @@ add_executable(
     main.cpp
     application_client.cpp
     connection.cpp
+    ftp_session.cpp
     libssh_client.cpp
     openssh_client.cpp
     operation_driver.cpp
@@ -17,6 +18,7 @@ target_link_libraries(
     nui-sftp-transfer-benchmark
     PRIVATE
         backend
+        file-transfer-protocol
         secure-shell
         docker-control
         utility

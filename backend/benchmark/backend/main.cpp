@@ -1,5 +1,6 @@
 #include "application_client.hpp"
 #include "connection.hpp"
+#include "ftp_session.hpp"
 #include "libssh_client.hpp"
 #include "openssh_client.hpp"
 #include "processor_time.hpp"
@@ -41,6 +42,8 @@ namespace
 {
     constexpr std::uint64_t kibibyte = 1024u;
     constexpr std::uint64_t mebibyte = 1024u * kibibyte;
+    /** @brief The engine threads the app runs FTP on by default. */
+    constexpr std::size_t defaultEngineThreads = 2u;
 
     struct Arguments
     {
@@ -285,6 +288,67 @@ namespace
         return measurement;
     }
 
+    /**
+     * @brief Where the FTP clients go and what they need beside their sessions.
+     */
+    struct FtpClientSetup
+    {
+        std::vector<std::unique_ptr<FtpSession>>& sessions;
+        std::vector<std::unique_ptr<Client>>& clients;
+        Nui::Window* window{nullptr};
+        Nui::RpcHub* hub{nullptr};
+        /** @brief The clients asked for, all when empty. */
+        std::set<std::string, std::less<>> const& wanted;
+        std::vector<std::string>& notes;
+    };
+
+    /**
+     * @brief The app's clients over FTP or FTPS, each on a session of its own: the operations and the queue on the
+     *        default engine threads, the operations also on one thread and on four.
+     */
+    void addFtpClients(Protocol protocol, FtpSessionOptions options, FtpClientSetup const& setup)
+    {
+        const std::string prefix = protocol == Protocol::Ftps ? "nui-sftp ftps" : "nui-sftp ftp";
+        const auto fileSystemFor =
+            [&](std::string const& name, std::size_t engineThreads) -> std::shared_ptr<RemoteIo::IRemoteFileSystem>
+        {
+            if (!setup.wanted.empty() && !setup.wanted.contains(name))
+                return nullptr;
+            options.engineThreads = engineThreads;
+            auto session = FtpSession::open(options);
+            if (!session)
+            {
+                setup.notes.push_back(fmt::format("{} did not run: {}", name, session.error()));
+                return nullptr;
+            }
+            setup.sessions.push_back(std::move(session).value());
+            return setup.sessions.back()->fileSystem();
+        };
+        const auto addApplication = [&](std::string const& name, std::size_t engineThreads, UnsafeFast unsafeFast)
+        {
+            if (auto fileSystem = fileSystemFor(name, engineThreads))
+                setup.clients.push_back(
+                    std::make_unique<ApplicationClient>(std::move(fileSystem), name, protocol, unsafeFast)
+                );
+        };
+        const auto addQueue = [&](std::string const& name, Queueing queueing)
+        {
+            if (setup.window == nullptr)
+                return;
+            if (auto fileSystem = fileSystemFor(name, defaultEngineThreads))
+                setup.clients.push_back(std::make_unique<QueueClient>(
+                    std::move(fileSystem), name, protocol, *setup.window, *setup.hub, queueing
+                ));
+        };
+
+        addApplication(prefix, defaultEngineThreads, UnsafeFast::Off);
+        addApplication(fmt::format("{} unsafe fast", prefix), defaultEngineThreads, UnsafeFast::On);
+        addQueue(fmt::format("{} queue", prefix), Queueing::AsTheApp);
+        addQueue(fmt::format("{} queue per file", prefix), Queueing::OnePerFile);
+        addApplication(fmt::format("{} 1 thread", prefix), 1u, UnsafeFast::Off);
+        addApplication(fmt::format("{} 4 threads", prefix), 4u, UnsafeFast::Off);
+    }
+
     int run(Arguments const& arguments, std::filesystem::path const& workDirectory)
     {
         const std::vector<Workload> workloads{
@@ -302,7 +366,7 @@ namespace
         for (auto const& workload : workloads)
             tmpfsBytes += 2u * workload.totalBytes() + workload.fileCount * 4u * kibibyte;
 
-        fmt::print("Starting OpenSSH in docker...\n");
+        fmt::print("Starting OpenSSH and vsftpd in docker...\n");
         auto server = TransferServer::start({
             .dockerDirectory = NUI_SFTP_BENCHMARK_DOCKER_DIRECTORY,
             .keyDirectory = workDirectory / "keys",
@@ -352,6 +416,7 @@ namespace
         }
 
         std::vector<Connection> connections;
+        std::vector<std::unique_ptr<FtpSession>> ftpSessions;
         std::vector<std::unique_ptr<Client>> clients;
         auto openSsh = OpenSshClient::make({
             .host = server->host(),
@@ -393,6 +458,31 @@ namespace
                 connections[4].sftp, "nui-sftp queue per file", Protocol::Sftp, *window, *hub, Queueing::OnePerFile
             ));
         }
+
+        FtpSessionOptions ftpOptions{};
+        ftpOptions.host = server->host();
+        ftpOptions.port = TransferServer::ftpPort;
+        ftpOptions.user = std::string{TransferServer::user};
+        ftpOptions.password = std::string{TransferServer::password};
+        const FtpClientSetup ftpSetup{
+            .sessions = ftpSessions,
+            .clients = clients,
+            .window = window.get(),
+            .hub = hub.get(),
+            .wanted = arguments.clients,
+            .notes = context.notes,
+        };
+        addFtpClients(Protocol::Ftp, ftpOptions, ftpSetup);
+
+        auto ftpsOptions = ftpOptions;
+        ftpsOptions.tlsMode = FileTransferProtocol::TlsMode::Explicit;
+        if (const auto certificate = FtpSession::refusedCertificate(ftpsOptions); certificate)
+        {
+            ftpsOptions.pinnedPublicKey = certificate->publicKeySha256;
+            addFtpClients(Protocol::Ftps, ftpsOptions, ftpSetup);
+        }
+        else
+            context.notes.push_back(fmt::format("The FTPS clients did not run: {}", certificate.error()));
         if (!arguments.clients.empty())
         {
             std::erase_if(

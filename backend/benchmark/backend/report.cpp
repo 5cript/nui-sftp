@@ -169,9 +169,14 @@ namespace Benchmark
             "of requests in flight.\n"
             "- **OpenSSH sftp**: the host's sftp program in batch mode, its start and login measured with an empty "
             "batch and subtracted.\n"
+            "- **nui-sftp ftp**, **nui-sftp ftps**: the app's operations over its FTP client, ftps with AUTH TLS and the "
+            "certificate pinned, each session on the default two engine threads with up to three transfer connections "
+            "beside the one for commands. The unsafe fast and queue variants as above.\n"
+            "- **1 thread**, **4 threads**: the same with the engine on an io_context of one thread or a thread_pool of "
+            "four.\n"
             "\n"
-            "Single files of 16 KiB or more go through the asynchronous transfer, smaller ones through one blocking "
-            "call per work(). Directories are bulk transfers that scan first, the scan is part of the time. The "
+            "Over SFTP single files of 16 KiB or more go through the asynchronous transfer, smaller ones through one "
+            "blocking call per work(); over FTP every file goes through the asynchronous transfer. Directories are bulk transfers that scan first, the scan is part of the time. The "
             "local files are in the page cache, so the host's disk hardly takes part.\n";
         if (!context.notes.empty())
         {
