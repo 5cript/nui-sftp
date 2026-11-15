@@ -51,6 +51,8 @@ namespace SharedData
         ChannelClosed,
         ChangedSinceCompare,
         CopyIntoItself,
-        CopyFailed
+        CopyFailed,
+        // The server cannot check what an upload would replace, only the unsafe fast mode uploads to it.
+        CannotCheckDestination
     );
 }

@@ -52,7 +52,7 @@ namespace RemoteIo
         )
         {
             const auto renamed = fileSystem.inStrand(Rename{.source = source, .destination = destination});
-            if (!renamed.has_value() && fileSystem.inStrand(Lstat{.path = destination}).has_value())
+            if (!renamed.has_value() && probeEntryInStrand(fileSystem, destination).has_value())
                 return std::unexpected(alreadyExistsError(destination.value()));
             return renamed;
         }
@@ -64,7 +64,7 @@ namespace RemoteIo
         moveAside(IRemoteFileSystem& fileSystem, Paths::RemotePath const& destination, Paths::RemotePath const& aside)
         {
             const auto movedAside = fileSystem.inStrand(Rename{.source = destination, .destination = aside});
-            if (movedAside.has_value() || !fileSystem.inStrand(Lstat{.path = aside}).has_value())
+            if (movedAside.has_value() || !probeEntryInStrand(fileSystem, aside).has_value())
                 return movedAside;
 
             // A leftover of an earlier replace holds the name.
@@ -72,6 +72,15 @@ namespace RemoteIo
                 return removed;
             return fileSystem.inStrand(Rename{.source = destination, .destination = aside});
         }
+    }
+
+    std::expected<FileInformation, RemoteError>
+    probeEntryInStrand(IRemoteFileSystem& fileSystem, Paths::RemotePath const& path)
+    {
+        assert(fileSystem.strand()->withinProcessingThread());
+        if (fileSystem.capabilities().probeEntries)
+            return fileSystem.inStrand(ProbeEntry{.path = path});
+        return fileSystem.inStrand(Lstat{.path = path});
     }
 
     std::expected<void, RemoteError> renameNoReplaceInStrand(
@@ -99,7 +108,7 @@ namespace RemoteIo
             return renameToFreeName(fileSystem, source, destination);
 
         // Leaves a window between the check and the rename.
-        const auto existing = fileSystem.inStrand(Lstat{.path = destination});
+        const auto existing = probeEntryInStrand(fileSystem, destination);
         if (existing.has_value())
             return std::unexpected(alreadyExistsError(destination.value()));
         if (!isMissing(existing.error()))
@@ -131,11 +140,11 @@ namespace RemoteIo
             );
         }
 
-        const auto destinationInformation = fileSystem.inStrand(Lstat{.path = destination});
+        const auto destinationInformation = probeEntryInStrand(fileSystem, destination);
         if (!destinationInformation.has_value())
         {
             // A destination that only exists aside, from a rollback that failed, is put back if the rename fails.
-            if (!isMissing(destinationInformation.error()) || !fileSystem.inStrand(Lstat{.path = *aside}).has_value())
+            if (!isMissing(destinationInformation.error()) || !probeEntryInStrand(fileSystem, *aside).has_value())
                 return fileSystem.inStrand(Rename{.source = source, .destination = destination});
         }
         else if (destinationInformation->isDirectory())

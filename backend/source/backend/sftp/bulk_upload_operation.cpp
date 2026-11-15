@@ -1,5 +1,8 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
+#include <backend/sftp/unsafe_fast_mode.hpp>
+#include <backend/sftp/upload_operation.hpp>
 #include <log/log.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
 #include <utility/checked_symlink_status.hpp>
 #include <utility/permissions.hpp>
 
@@ -62,6 +65,12 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::prepareRoot
     SharedData::DirectoryEntry const& root
 )
 {
+    // Refused once for the whole tree rather than for each of its files.
+    if (uploadPathOf(individualOptions_.unsafeFastMode, 0u, fileSystem.capabilities().probeEntries) ==
+        UploadPath::Refused)
+        return std::unexpected(
+            UploadOperation::uncheckableDestination(common().remotePath, individualOptions_.failureToast)
+        );
     // Base directory of the upload, everything after this will be relative to this:
     return createRemoteDirectoryInStrand(fileSystem, common().remotePath, root);
 }
@@ -90,7 +99,7 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createMissi
     std::vector<Paths::RemotePath> missing;
     for (auto parent = path.parent(); parent && *parent != root && parent->isWithin(root); parent = parent->parent())
     {
-        const auto stat = fileSystem.inStrand(RemoteIo::Lstat{.path = *parent});
+        const auto stat = RemoteIo::probeEntryInStrand(fileSystem, *parent);
         if (stat)
             break;
         if (stat.error().kind != RemoteIo::RemoteErrorKind::NoSuchFile)

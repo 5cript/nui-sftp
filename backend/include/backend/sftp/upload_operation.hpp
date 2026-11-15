@@ -181,6 +181,11 @@ class UploadOperation : public Operation
     std::expected<void, Error> prepare();
     std::expected<void, Error> finalize();
 
+    /**
+     * @brief The CannotCheckDestination error of an upload to @p path refused by uploadPathOf(), logged.
+     */
+    static Error uncheckableDestination(Paths::RemotePath const& path, Log::Toast toast);
+
   private:
     /// Returns true if there is more data to write, false if the operation is complete.
     std::expected<bool, Error> writeOnce();

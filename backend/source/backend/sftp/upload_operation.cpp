@@ -499,7 +499,7 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
 std::expected<void, UploadOperation::Error>
 UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
-    const auto result = fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_});
+    const auto result = RemoteIo::probeEntryInStrand(fileSystem, remotePath_);
     if (!result.has_value())
     {
         auto const& error = result.error();
@@ -523,7 +523,7 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
         return std::unexpected(unchanged.error());
     if (options_.adoptPartialOf)
         takeOverPartialFileInStrand(fileSystem);
-    const auto tempResult = fileSystem.inStrand(RemoteIo::Lstat{.path = tempPath_});
+    const auto tempResult = RemoteIo::probeEntryInStrand(fileSystem, tempPath_);
 
     const auto perms = remoteFilePerms();
 
@@ -579,9 +579,11 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
             return std::unexpected(res.error());
     }
 
-    // Without an exclusive create the destination is checked first, another writer may still create it in between.
-    const auto exclusive = !options_.mayOverwrite && fileSystem.capabilities().exclusiveCreate;
-    if (!options_.mayOverwrite && !exclusive)
+    // Without an exclusive create the destination is checked first, another writer may still create it in between. A
+    // file system that cannot check takes uploads only in this mode and gets the destination overwritten.
+    const auto capabilities = fileSystem.capabilities();
+    const auto exclusive = !options_.mayOverwrite && capabilities.exclusiveCreate;
+    if (!options_.mayOverwrite && !exclusive && capabilities.probeEntries)
     {
         if (const auto missing = requireMissingDestinationInStrand(fileSystem); !missing)
             return missing;
@@ -612,7 +614,7 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
 std::expected<void, UploadOperation::Error>
 UploadOperation::requireMissingDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem) const
 {
-    const auto existing = fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_});
+    const auto existing = fileSystem.inStrand(RemoteIo::ProbeEntry{.path = remotePath_});
     if (existing.has_value())
         return std::unexpected(destinationExists());
     if (existing.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
@@ -623,6 +625,17 @@ UploadOperation::requireMissingDestinationInStrand(RemoteIo::IRemoteFileSystem& 
         existing.error().message
     );
     return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = existing.error()});
+}
+
+UploadOperation::Error UploadOperation::uncheckableDestination(Paths::RemotePath const& path, Log::Toast toast)
+{
+    Log::error(toast, "UploadOperation: The server cannot check '{}' before an upload.", path.value());
+    return Error{
+        .type = ErrorType::CannotCheckDestination,
+        .extraInfo =
+            "The server has no command to check for an existing file, MLST or SIZE. Only the unsafe fast mode "
+            "uploads to it, replacing existing files",
+    };
 }
 
 UploadOperation::Error UploadOperation::destinationExists() const
@@ -647,7 +660,7 @@ Paths::RemotePath const& UploadOperation::writtenPath() const
 void UploadOperation::takeOverPartialFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     const auto partial = options_.adoptPartialOf->withFilenameSuffix(options_.tempFileSuffix);
-    if (!partial || *partial == tempPath_ || fileSystem.inStrand(RemoteIo::Lstat{.path = tempPath_}).has_value())
+    if (!partial || *partial == tempPath_ || RemoteIo::probeEntryInStrand(fileSystem, tempPath_).has_value())
         return;
     if (options_.createMissingDirectories)
     {
@@ -751,7 +764,7 @@ std::expected<void, UploadOperation::Error> UploadOperation::ensureRemoteDirecto
     if (dir.isRoot())
         return {};
 
-    const auto statResult = fileSystem.inStrand(RemoteIo::Lstat{.path = dir});
+    const auto statResult = RemoteIo::probeEntryInStrand(fileSystem, dir);
     if (statResult.has_value())
     {
         if (statResult->type == SharedData::FileType::Directory)
@@ -947,7 +960,10 @@ std::expected<void, Operation::Error> UploadOperation::prepare()
 
 std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
-    unsafeFast_ = transfersUnsafeFast(options_.unsafeFastMode, totalSize_);
+    const auto path = uploadPathOf(options_.unsafeFastMode, totalSize_, fileSystem.capabilities().probeEntries);
+    if (path == UploadPath::Refused)
+        return std::unexpected(uncheckableDestination(remotePath_, options_.failureToast));
+    unsafeFast_ = path == UploadPath::UnsafeFast;
     if (unsafeFast_)
     {
         // The buffer comes first: a bulk defers a file that finds none, its destination must still be untouched then.

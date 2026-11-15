@@ -101,13 +101,14 @@ namespace Test
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_EQ(fake_->contentOf(remote("/home/test/replaced.txt")), "new content");
         EXPECT_EQ(fake_->started<RemoteIo::Lstat>(), 0u);
+        EXPECT_EQ(fake_->started<RemoteIo::ProbeEntry>(), 0u);
     }
 
     TEST_F(UnsafeFastWithoutExclusiveCreateTests, AnUploadWhoseCheckFailsOpensNothing)
     {
         fake_->addDirectory(remote("/home/test"));
-        fake_->failWhen<RemoteIo::Lstat>(
-            [](RemoteIo::Lstat const&)
+        fake_->failWhen<RemoteIo::ProbeEntry>(
+            [](RemoteIo::ProbeEntry const&)
             {
                 return true;
             },
