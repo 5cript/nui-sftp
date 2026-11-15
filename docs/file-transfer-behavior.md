@@ -29,7 +29,7 @@ mode.
 | FTP, server lists `SIZE` but not `MLST` | `SIZE` and `MDTM` for a file, else `CWD` for a directory |
 | FTP, server lists neither | none, see below |
 
-Each check is one to three commands. FTP never lists the whole directory to check a single file.
+Each check is one to three commands, none of them lists the directory.
 
 FTP has no command that reliably tells whether a path exists:
 
@@ -37,16 +37,22 @@ FTP has no command that reliably tells whether a path exists:
   `MLST` shows links as links). A link then counts as what it points to.
 - A dangling link, or a path the server cannot reach, counts as free. A safe upload replaces such a link, an unsafe
   fast upload writes through it.
+- Without `MLST` a special file (FIFO, socket, device) counts as free too: `SIZE` and `CWD` both refuse it.
+
+A command that fails for now (a `4yz` reply) tells nothing of the path: the upload fails, the path does not count as
+free.
 
 ### FTP servers without `MLST` and `SIZE`
 
-Nothing can check for an existing file there. The server tells this in its `FEAT` reply at login. Uploads to such a
+No command checks for a single existing file there, only the listing of its whole directory would, once per
+uploaded file. nui-sftp does not do that. The server tells this in its `FEAT` reply at login. Uploads to such a
 server:
 
 - fail in the safe mode with `CannotCheckDestination`, a folder upload once for the whole folder;
 - work in the unsafe fast mode at any size, replacing existing files without asking.
 
-File Tracking uploads are always safe, so they fail on such servers.
+File Tracking uploads are always safe, so they fail on such servers. Directories an upload creates are still looked
+up there, in the listing of their parent.
 
 ## Sync
 
@@ -65,3 +71,5 @@ above.
 - Over FTP the whole directory is listed only when the commands disagree with the compare in a way they may cause
   themselves: only the time differs and one side came from a listing (some servers list local time, `MLST` and `MDTM`
   are UTC), or the compare saw a symbolic link that the commands followed.
+- Where the commands show a symbolic link as one (pure-ftpd), the directory is listed too: only a listing tells where
+  a link points to.
