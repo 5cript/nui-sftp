@@ -130,6 +130,34 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief A TLS upload of "file" that is aborted before its first byte and finished then.
+         */
+        UploadOutcome abortBeforeTheFirstByte(
+            std::shared_ptr<ControlConnection> const& connection,
+            TlsConnectionSettings const& tls,
+            TransferOptions options = quickTransferOptions()
+        )
+        {
+            const TransferSession session{
+                .control = connection,
+                .passiveChoice = std::make_shared<PassiveChoice>(),
+                .tls = tls,
+            };
+            return run(
+                connection,
+                [session, options]() -> asio::awaitable<UploadOutcome>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, options);
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    upload->abort();
+                    co_return co_await upload->finish();
+                }
+            );
+        }
+
+        /**
          * @brief How the server saw the first data connection end, once the client is gone.
          */
         std::optional<std::string> dataEndAfterDisconnect(std::shared_ptr<ControlConnection> const& connection)
@@ -426,6 +454,40 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_TRUE(result->resumedSession);
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
+    }
+
+    TEST_F(UploadTests, TlsUploadAbortedBeforeItsFirstByteEndsCleanlyWithoutAbort)
+    {
+        // The server may still be in the data handshake, a reset there costs the session on proftpd.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(0u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        expectUploadError(abortBeforeTheFirstByte(connection, tls), RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"end of stream"});
+    }
+
+    TEST_F(UploadTests, TlsUploadAbortedBeforeItsFirstByteLimitsTheFinalReply)
+    {
+        // No ABOR follows the clean end, whose drain would end the wait for a final reply that never comes.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(0u), "150 Ok to send data.").beginData().awaitData().stall();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        auto options = quickTransferOptions();
+        options.finalReplyTimeout = 300ms;
+        expectUploadError(abortBeforeTheFirstByte(connection, tls, options), RemoteIo::RemoteErrorKind::Cancelled);
+        const auto reply = execute(connection, command(Verb::Noop));
+        ASSERT_FALSE(reply);
+        EXPECT_EQ(reply.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << reply.error().toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
     TEST_F(UploadTests, TlsUploadAbortedWhileItsDataEndsIsResetAndNotComplete)

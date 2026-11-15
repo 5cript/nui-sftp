@@ -18,6 +18,7 @@
 #include <cassert>
 #include <exception>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -116,36 +117,66 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief Writes ABOR into the running transfer of @p command, the control connection takes the replies up to
-         *        its marker. Nothing once the transfer or the connection ended.
+         * @brief Keeps @p data alive until it closed behind the server's answer.
          */
         asio::awaitable<void> closedOnceAnswered(std::shared_ptr<DataConnection> data)
         {
             co_await data->closeOnceAnswered();
         }
 
-        asio::awaitable<void> endedCleanly(std::shared_ptr<DataConnection> data)
+        /**
+         * @brief What ends the data of an upload that does not finish.
+         */
+        struct UploadEnd
         {
-            co_await data->finishUpload();
+            std::shared_ptr<DataConnection> data{};
+            std::shared_ptr<ControlConnection> control{};
+            std::shared_ptr<PendingCommand> store{};
+            std::chrono::milliseconds finalReplyTimeout{};
+        };
+
+        /**
+         * @brief Ends @p data so that the server takes the empty upload, then limits the final reply of @p store to
+         *        @p finalReplyTimeout: no ABOR follows a clean end that would limit it.
+         */
+        asio::awaitable<void> endedCleanly(
+            std::shared_ptr<DataConnection> data,
+            std::weak_ptr<ControlConnection> control,
+            std::shared_ptr<PendingCommand> store,
+            std::chrono::milliseconds finalReplyTimeout
+        )
+        {
+            std::ignore = co_await data->finishUpload();
+            if (const auto locked = control.lock())
+                locked->limitFinalReply(*store, finalReplyTimeout);
         }
 
         /**
-         * @brief Resets @p data on the strand it is on, or ends it cleanly where the server may still be in its TLS
-         *        handshake.
+         * @brief Resets the data of @p end on the strand it is on, or ends it cleanly where the server may still be in
+         *        its TLS handshake.
          *
          * @return Whether it was reset, which leaves the server a transfer to abort.
          */
-        bool endUploadData(std::shared_ptr<DataConnection> data, asio::strand<asio::any_io_executor> const& strand)
+        bool endUploadData(UploadEnd end)
         {
-            if (!data->serverMayBeInHandshake())
+            if (!end.data->serverMayBeInHandshake())
             {
-                data->reset();
+                end.data->reset();
                 return true;
             }
-            asio::co_spawn(strand, endedCleanly(std::move(data)), asio::detached);
+            const auto strand = end.control->strand();
+            asio::co_spawn(
+                strand,
+                endedCleanly(std::move(end.data), end.control, std::move(end.store), end.finalReplyTimeout),
+                asio::detached
+            );
             return false;
         }
 
+        /**
+         * @brief Writes ABOR into the running transfer of @p command, the control connection takes the replies up to
+         *        its marker. Nothing once the transfer or the connection ended.
+         */
         void abortTransfer(ControlConnection& control, PendingCommand const& command, std::string_view what)
         {
             if (control.state() != ControlState::Open || command.stage() == PendingCommand::Stage::Completed)
@@ -555,9 +586,15 @@ namespace FileTransferProtocol
         // A FIN could make the server take the cut file for a complete one. The last owner may let go off the strand.
         asio::post(
             session_.control->strand(),
-            [data = std::move(data_), strand = session_.control->strand()]() mutable
+            [end =
+                    UploadEnd{
+                        .data = std::move(data_),
+                        .control = session_.control,
+                        .store = std::move(store_),
+                        .finalReplyTimeout = options_.finalReplyTimeout,
+                    }]() mutable
             {
-                endUploadData(std::move(data), strand);
+                endUploadData(std::move(end));
             }
         );
     }
@@ -693,7 +730,14 @@ namespace FileTransferProtocol
             data_->reset();
             return true;
         }
-        return endUploadData(data_, session_.control->strand());
+        return endUploadData(
+            UploadEnd{
+                .data = data_,
+                .control = session_.control,
+                .store = store_,
+                .finalReplyTimeout = options_.finalReplyTimeout,
+            }
+        );
     }
 
     asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>

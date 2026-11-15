@@ -310,8 +310,8 @@ namespace FileTransferProtocol
         Verb verb() const;
         /**
          * @brief Resets the data connection, or ends it cleanly where the server may still be in its TLS handshake
-         *        (DataConnection::serverMayBeInHandshake()): nothing was sent, so the server only gets an empty file.
-         *        A write or a finish() under way is always reset.
+         *        (DataConnection::serverMayBeInHandshake()): nothing was sent, so the server only gets an empty file,
+         *        and its final reply gets the final reply timeout. A write or a finish() under way is always reset.
          *
          * @return Whether it was reset, which leaves the server a transfer to abort.
          */
