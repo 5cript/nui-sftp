@@ -20,6 +20,36 @@
 
 namespace SharedData
 {
+    /**
+     * @brief How exact a modification time is. A listing may round it down, a compare of two times goes by the coarser
+     *        of both.
+     */
+    enum class TimePrecision : std::uint8_t
+    {
+        Second,
+        /** @brief FTP's LIST of an entry younger than about six months: a time of day without seconds. */
+        Minute,
+        /** @brief FTP's LIST of an older entry: a year instead of a time of day. */
+        Day,
+    };
+
+    /**
+     * @brief How many seconds @p precision covers.
+     */
+    constexpr std::uint64_t secondsOf(TimePrecision precision)
+    {
+        switch (precision)
+        {
+            case TimePrecision::Minute:
+                return 60u;
+            case TimePrecision::Day:
+                return 24u * 60u * 60u;
+            case TimePrecision::Second:
+                break;
+        }
+        return 1u;
+    }
+
     enum class FileType : std::uint8_t
     {
         Unknown = 0,
@@ -122,6 +152,7 @@ namespace SharedData
         std::uint32_t createTimeNsec{0};
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        TimePrecision mtimePrecision{TimePrecision::Second};
         std::string acl{};
         /**
          * @brief For symlinks: the link literal readlink returned (not the resolved target), valid UTF-8 with U+FFFD

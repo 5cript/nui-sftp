@@ -1,5 +1,7 @@
 #include <shared_data/file_operations/compared_state.hpp>
 
+#include <algorithm>
+
 namespace SharedData
 {
     ComparedState comparedStateOf(DirectoryEntry const& entry)
@@ -9,8 +11,18 @@ namespace SharedData
             .type = entry.type,
             .size = entry.size,
             .mtime = entry.mtime,
+            .mtimePrecision = entry.mtimePrecision,
             .linkTarget = entry.type == FileType::Symlink ? entry.linkTarget : std::nullopt,
         };
+    }
+
+    namespace
+    {
+        bool sameTime(ComparedState const& compared, ComparedState const& current)
+        {
+            const auto unit = std::max(secondsOf(compared.mtimePrecision), secondsOf(current.mtimePrecision));
+            return compared.mtime / unit == current.mtime / unit;
+        }
     }
 
     bool unchangedSinceCompare(ComparedState const& compared, ComparedState const& current)
@@ -28,7 +40,7 @@ namespace SharedData
             case FileType::Symlink:
                 return compared.linkTarget == current.linkTarget;
             default:
-                return compared.size == current.size && compared.mtime == current.mtime;
+                return compared.size == current.size && sameTime(compared, current);
         }
     }
 }

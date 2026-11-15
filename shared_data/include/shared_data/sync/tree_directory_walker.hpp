@@ -154,6 +154,7 @@ namespace SharedData::Sync
                         .size = raw.size,
                         .mtime = raw.mtime,
                         .mtimeNsec = raw.mtimeNsec,
+                        .mtimePrecision = raw.mtimePrecision,
                         .permissions = raw.permissions,
                         .linkTarget = std::move(raw.linkTarget),
                         .uid = raw.uid,
