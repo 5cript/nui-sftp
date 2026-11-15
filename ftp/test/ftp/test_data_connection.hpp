@@ -4,6 +4,7 @@
 
 #include <ftp/client/data_connection.hpp>
 
+#include <boost/asio/detached.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <gtest/gtest.h>
 
@@ -464,6 +465,38 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(secured) << secured.error().toString();
         EXPECT_FALSE((*data)->resumed());
         expectText(readAll(connection, *data), "secret");
+    }
+
+    TEST_F(DataConnectionTlsTests, ClosingOnceAnsweredWaitsOnlyOnce)
+    {
+        // The server says nothing on the data connection, like one that is still in its handshake.
+        server_->addConnection(securedScript(DataPlan{}.tls().stallAfter("")).expectDisconnect());
+        const auto tls = settings();
+        const auto connection = securedConnection(tls);
+        const auto opened = openData(connection);
+        ASSERT_TRUE(opened) << opened.error().toString();
+        auto const data = *opened;
+        const auto secured = secure(connection, data, tls, true);
+        ASSERT_TRUE(secured) << secured.error().toString();
+        const auto stillWaits =
+            run(connection,
+                [connection, data]() -> asio::awaitable<bool>
+                {
+                    asio::co_spawn(
+                        connection->strand(),
+                        [data]()
+                        {
+                            return data->closeOnceAnswered();
+                        },
+                        asio::detached
+                    );
+                    // A second wait would read beside the first one and return only with the server's answer.
+                    co_await data->closeOnceAnswered();
+                    const auto waits = data->serverMayBeInHandshake();
+                    data->close();
+                    co_return waits;
+                });
+        EXPECT_TRUE(stillWaits);
     }
 
     TEST_F(DataConnectionTlsTests, AnotherCertificateOnTheDataConnectionIsRefused)

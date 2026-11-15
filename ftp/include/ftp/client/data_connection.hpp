@@ -141,7 +141,8 @@ namespace FileTransferProtocol
 
         /**
          * @brief Ends a download cut short while serverMayBeInHandshake(): waits for the server's first bytes or its
-         *        end, which it sends only once its handshake ended, within the inactivity timeout, then closes.
+         *        end, which it sends only once its handshake ended, within the inactivity timeout, then closes. Does
+         *        nothing while that wait already runs.
          */
         boost::asio::awaitable<void> closeOnceAnswered();
 
@@ -211,5 +212,6 @@ namespace FileTransferProtocol
         bool answered_{false};
         /** @brief A write was started, bytes of it may be out even when it failed or was cancelled. */
         bool writeStarted_{false};
+        bool awaitsAnswer_{false};
     };
 }

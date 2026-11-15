@@ -14,6 +14,7 @@
 
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -315,7 +316,10 @@ namespace FileTransferProtocol
 
     asio::awaitable<void> DataConnection::closeOnceAnswered()
     {
-        co_await readSome(asio::buffer(drainBuffer_));
+        if (awaitsAnswer_)
+            co_return;
+        awaitsAnswer_ = true;
+        std::ignore = co_await readSome(asio::buffer(drainBuffer_));
         close();
     }
 
