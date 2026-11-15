@@ -64,6 +64,12 @@ class UploadOperation : public Operation
         Paths::LocalPath localPath{};
         std::string tempFileSuffix{".filepart"};
         bool mayOverwrite{false};
+        /**
+         * @brief Files of at most this many bytes skip the check of their destination before the upload. It only saves
+         *        the upload of a file the rename then refuses, which pays off while such refusals are rare. Nothing
+         *        checks every file. An upload that may overwrite never checks before.
+         */
+        std::optional<std::uint64_t> uncheckedUpToBytes{4u * 1024u};
         bool tryContinue{Persistence::defaultTryContinue};
         bool inheritPermissions{Persistence::defaultInheritPermissions};
         /** @brief A canceled upload deletes its temporary file, see PartialFile. */
@@ -216,6 +222,12 @@ class UploadOperation : public Operation
      *        open on a file system without an exclusive create.
      */
     std::expected<void, Error> openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
+
+    /**
+     * @brief Whether the destination is checked before a safe upload, see UploadOperationOptions::uncheckedUpToBytes.
+     *        The rename refuses an existing destination by itself.
+     */
+    bool checksDestinationFirst() const;
 
     /**
      * @brief Fails with FileExists when the destination exists, with the error of the check when it cannot tell.

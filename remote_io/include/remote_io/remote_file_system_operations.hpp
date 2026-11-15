@@ -103,6 +103,20 @@ namespace RemoteIo
     BOOST_DESCRIBE_STRUCT(Lstat, (), (path))
 
     /**
+     * @brief What a ProbeEntry has to find.
+     */
+    enum class ProbeFor
+    {
+        AnyEntry,
+        /**
+         * @brief Only a file matters, a directory may read as NoSuchFile: what goes there is a file, which a directory
+         *        refuses by itself. Saves the lookup of a directory where a protocol needs one.
+         */
+        File,
+    };
+    BOOST_DESCRIBE_ENUM(ProbeFor, AnyEntry, File)
+
+    /**
      * @brief What a write or a rename to a path would meet, with one cheap lookup where the protocol has one: an Lstat
      *        where that is cheap, else what the server tells of the single path. Then a link may read as what it
      *        leads to, and a dangling link or a path the server cannot reach as NoSuchFile. Unsupported where the
@@ -112,8 +126,9 @@ namespace RemoteIo
     {
         using Result = FileInformation;
         Paths::RemotePath path;
+        ProbeFor lookingFor{ProbeFor::AnyEntry};
     };
-    BOOST_DESCRIBE_STRUCT(ProbeEntry, (), (path))
+    BOOST_DESCRIBE_STRUCT(ProbeEntry, (), (path, lookingFor))
 
     /**
      * @brief Creates a directory, fails when the path exists already.

@@ -75,11 +75,11 @@ namespace RemoteIo
     }
 
     std::expected<FileInformation, RemoteError>
-    probeEntryInStrand(IRemoteFileSystem& fileSystem, Paths::RemotePath const& path)
+    probeEntryInStrand(IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, ProbeFor lookingFor)
     {
         assert(fileSystem.strand()->withinProcessingThread());
         if (fileSystem.capabilities().probeEntries)
-            return fileSystem.inStrand(ProbeEntry{.path = path});
+            return fileSystem.inStrand(ProbeEntry{.path = path, .lookingFor = lookingFor});
         return fileSystem.inStrand(Lstat{.path = path});
     }
 
@@ -107,8 +107,11 @@ namespace RemoteIo
         if (fileSystem.capabilities().renameSemantics == RenameSemantics::Refuses)
             return renameToFreeName(fileSystem, source, destination);
 
-        // Leaves a window between the check and the rename.
-        const auto existing = probeEntryInStrand(fileSystem, destination);
+        // Leaves a window between the check and the rename. A file renamed onto a directory fails by itself, and the
+        // failure is told apart from others by a lookup of any entry.
+        const auto existing = probeEntryInStrand(
+            fileSystem, destination, *type == SharedData::FileType::Regular ? ProbeFor::File : ProbeFor::AnyEntry
+        );
         if (existing.has_value())
             return std::unexpected(alreadyExistsError(destination.value()));
         if (!isMissing(existing.error()))
