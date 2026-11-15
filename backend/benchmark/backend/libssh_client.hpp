@@ -17,6 +17,10 @@ namespace Benchmark
         explicit LibsshClient(Connection& connection);
 
         std::string name() const override;
+        Protocol protocol() const override
+        {
+            return Protocol::Sftp;
+        }
         std::expected<void, std::string> transfer(Transfer const& transfer) override;
 
       private:

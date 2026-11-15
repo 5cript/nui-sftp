@@ -1,4 +1,4 @@
-#include "openssh_server.hpp"
+#include "transfer_server.hpp"
 
 #include <docker/docker.hpp>
 #include <paths/native.hpp>
@@ -21,7 +21,7 @@ namespace Benchmark
 {
     namespace
     {
-        constexpr std::string_view image = "nui-sftp-benchmark-openssh";
+        constexpr std::string_view image = "nui-sftp-benchmark-server";
 
         std::string trimmed(std::string text)
         {
@@ -84,7 +84,7 @@ namespace Benchmark
             const auto deadline = std::chrono::steady_clock::now() + 20s;
             while (std::chrono::steady_clock::now() < deadline)
             {
-                if (answersWithBanner(host, OpenSshServer::port))
+                if (answersWithBanner(host, TransferServer::port))
                     return {};
                 std::this_thread::sleep_for(100ms);
             }
@@ -128,19 +128,19 @@ namespace Benchmark
         return trimmed(result.output).substr(0, 64);
     }
 
-    OpenSshServer::OpenSshServer(Docker::Container container, std::string host)
+    TransferServer::TransferServer(Docker::Container container, std::string host)
         : container_{std::move(container)}
         , host_{std::move(host)}
     {}
 
-    std::expected<OpenSshServer, std::string> OpenSshServer::start(Options const& options)
+    std::expected<TransferServer, std::string> TransferServer::start(Options const& options)
     {
         return Docker::checkAvailable()
             .and_then(
                 [&options]()
                 {
                     return Docker::buildImage(
-                        image, options.dockerDirectory / "openssh.Dockerfile", options.dockerDirectory
+                        image, options.dockerDirectory / "server.Dockerfile", options.dockerDirectory
                     );
                 }
             )
@@ -151,7 +151,8 @@ namespace Benchmark
                         .image = std::string{image},
                         .namePrefix = "nui-sftp-benchmark",
                         .runArguments =
-                            {"--tmpfs",
+                            {"--init",
+                             "--tmpfs",
                              fmt::format(
                                  "{}:rw,size={},mode=0755,uid=1000,gid=1000", dataDirectory, options.tmpfsBytes
                              )},
@@ -164,18 +165,21 @@ namespace Benchmark
                     return container.ipAddress().transform(
                         [&container](std::string host)
                         {
-                            return OpenSshServer{std::move(container), std::move(host)};
+                            return TransferServer{std::move(container), std::move(host)};
                         }
                     );
                 }
             )
             .and_then(
-                [&options](OpenSshServer server) -> std::expected<OpenSshServer, std::string>
+                [&options](TransferServer server) -> std::expected<TransferServer, std::string>
                 {
                     if (const auto answering = waitUntilAnswering(server.host_); !answering)
                         return std::unexpected{answering.error()};
 
                     server.version_ = trimmed(server.container_.execute("sshd -V 2>&1 | head -n 1").output);
+                    // vsftpd writes its version to standard input.
+                    server.ftpVersion_ =
+                        trimmed(server.container_.execute("vsftpd -v 0>&1 | sed 's/: version//'").output);
 
                     if (const auto key = createClientKey(options.keyDirectory); !key.empty())
                     {
@@ -195,7 +199,7 @@ namespace Benchmark
             );
     }
 
-    std::expected<std::string, std::string> OpenSshServer::execute(std::string_view command) const
+    std::expected<std::string, std::string> TransferServer::execute(std::string_view command) const
     {
         const auto result = container_.execute(command, user);
         if (result.exitCode != 0)
@@ -204,7 +208,7 @@ namespace Benchmark
     }
 
     std::expected<std::vector<std::string>, std::string>
-    OpenSshServer::createSource(Workload const& workload, std::string_view remotePath) const
+    TransferServer::createSource(Workload const& workload, std::string_view remotePath) const
     {
         if (workload.isSingleFile())
         {
@@ -250,7 +254,7 @@ namespace Benchmark
         );
     }
 
-    std::expected<std::string, std::string> OpenSshServer::digest(std::string_view remotePath) const
+    std::expected<std::string, std::string> TransferServer::digest(std::string_view remotePath) const
     {
         return execute(digestCommand(remotePath)).transform(
             [](std::string const& output)

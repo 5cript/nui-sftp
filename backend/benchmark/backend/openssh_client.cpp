@@ -1,4 +1,5 @@
 #include "openssh_client.hpp"
+#include "processor_time.hpp"
 
 #include <docker/docker.hpp>
 #include <paths/native.hpp>
@@ -43,15 +44,20 @@ namespace Benchmark
 
         std::unique_ptr<OpenSshClient> client{new OpenSshClient{std::move(options)}};
         std::array<std::chrono::nanoseconds, 5> overheads{};
-        for (auto& overhead : overheads)
+        std::array<std::chrono::nanoseconds, 5> processorOverheads{};
+        for (std::size_t index = 0; index < overheads.size(); ++index)
         {
+            const auto processorStart = processorTime();
             const auto start = std::chrono::steady_clock::now();
             if (const auto ran = client->runBatch("pwd\n"); !ran)
                 return std::unexpected{ran.error()};
-            overhead = std::chrono::steady_clock::now() - start;
+            overheads[index] = std::chrono::steady_clock::now() - start;
+            processorOverheads[index] = processorTime() - processorStart;
         }
         std::ranges::sort(overheads);
+        std::ranges::sort(processorOverheads);
         client->overhead_ = overheads[overheads.size() / 2];
+        client->processorOverhead_ = processorOverheads[processorOverheads.size() / 2];
         return client;
     }
 

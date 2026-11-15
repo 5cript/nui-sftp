@@ -1,5 +1,5 @@
 #include "connection.hpp"
-#include "openssh_server.hpp"
+#include "transfer_server.hpp"
 
 #include <persistence/state/session_options.hpp>
 
@@ -18,7 +18,7 @@ namespace Benchmark
         const Persistence::SshSessionOptions options{
             .host = host,
             .port = port,
-            .users = {Persistence::SshUser{.name = std::string{OpenSshServer::user}}},
+            .users = {Persistence::SshUser{.name = std::string{TransferServer::user}}},
             .sshOptions =
                 Persistence::SshOptions{
                     .tryAgentForAuthentication = false,
@@ -32,7 +32,7 @@ namespace Benchmark
             options,
             +[](char const*, char* buffer, std::size_t length, int, int, void*)
             {
-                const auto password = OpenSshServer::password;
+                const auto password = TransferServer::password;
                 const auto copied = std::min(password.size(), length - 1);
                 std::memcpy(buffer, password.data(), copied);
                 buffer[copied] = '\0';

@@ -1,11 +1,11 @@
 #pragma once
 
 #include "client.hpp"
-#include "connection.hpp"
 
 #include <backend/sftp/operation_queue.hpp>
 #include <nui/rpc.hpp>
 #include <nui/window.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 
 #include <boost/asio/strand.hpp>
@@ -41,7 +41,14 @@ namespace Benchmark
     class QueueClient : public Client
     {
       public:
-        QueueClient(Connection& connection, Nui::Window& window, Nui::RpcHub& hub, Queueing queueing);
+        QueueClient(
+            std::shared_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
+            std::string name,
+            Protocol protocol,
+            Nui::Window& window,
+            Nui::RpcHub& hub,
+            Queueing queueing
+        );
         ~QueueClient() override;
         QueueClient(QueueClient const&) = delete;
         QueueClient& operator=(QueueClient const&) = delete;
@@ -49,6 +56,7 @@ namespace Benchmark
         QueueClient& operator=(QueueClient&&) = delete;
 
         std::string name() const override;
+        Protocol protocol() const override;
         bool supports(Workload const& workload) const override;
         std::expected<void, std::string> transfer(Transfer const& transfer) override;
 
@@ -77,7 +85,9 @@ namespace Benchmark
         void doWork();
 
       private:
-        Connection& connection_;
+        std::shared_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
+        std::string name_;
+        Protocol protocol_;
         Queueing queueing_;
         boost::asio::thread_pool pool_{4};
         std::shared_ptr<boost::asio::strand<boost::asio::any_io_executor>> strand_;
