@@ -608,7 +608,11 @@ namespace FileTransferProtocol
     {
         if (aborted_)
             co_return std::unexpected(aborted());
+        ending_ = true;
         const auto ended = co_await data_->finishUpload();
+        // An abort meanwhile reset the data, a 226 behind it would not complete the upload.
+        if (aborted_)
+            co_return std::unexpected(aborted());
         if (!ended)
         {
             if (isCancelled(co_await asio::this_coro::cancellation_state))
@@ -684,7 +688,7 @@ namespace FileTransferProtocol
 
     bool Upload::endData()
     {
-        if (writing_)
+        if (writing_ || ending_)
         {
             data_->reset();
             return true;

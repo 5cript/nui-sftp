@@ -428,6 +428,47 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
     }
 
+    TEST_F(UploadTests, TlsUploadAbortedWhileItsDataEndsIsResetAndNotComplete)
+    {
+        // The server took the empty upload by then, its 226 comes among the replies to the ABOR.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(0u), "150 Ok to send data.")
+            .beginData()
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto finished =
+            run(connection,
+                [connection, session]() -> asio::awaitable<UploadOutcome>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    // On its strand finish() runs up to its wait for the server's close_notify, the abort comes into
+                    // it.
+                    auto finishing =
+                        asio::co_spawn(connection->strand(), upload->finish(), asio::experimental::use_promise);
+                    upload->abort();
+                    auto [exception, result] = co_await finishing(asio::as_tuple(asio::use_awaitable));
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        expectUploadError(finished, RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(UploadTests, TlsUploadCancelledWithItsFirstPieceIsReset)
     {
         // A clean end behind bytes that went out would make the server take the cut file for a complete one.
