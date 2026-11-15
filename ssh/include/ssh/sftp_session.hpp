@@ -516,6 +516,10 @@ namespace SecureShell
         RemoteIo::OperationResult<RemoteIo::ListDirectory> run(RemoteIo::ListDirectory const& operation);
         RemoteIo::OperationResult<RemoteIo::Stat> run(RemoteIo::Stat const& operation);
         RemoteIo::OperationResult<RemoteIo::Lstat> run(RemoteIo::Lstat const& operation);
+        /**
+         * @brief An Lstat, which costs one request over SFTP.
+         */
+        RemoteIo::OperationResult<RemoteIo::ProbeEntry> run(RemoteIo::ProbeEntry const& operation);
         RemoteIo::OperationResult<RemoteIo::CreateNewDirectory> run(RemoteIo::CreateNewDirectory const& operation);
         RemoteIo::OperationResult<RemoteIo::CreateDirectoryIfItDoesntExist>
         run(RemoteIo::CreateDirectoryIfItDoesntExist const& operation);

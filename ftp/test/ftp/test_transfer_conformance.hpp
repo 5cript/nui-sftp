@@ -103,6 +103,7 @@ namespace FileTransferProtocol::Test
                 .tls = loginOptions.tls,
                 .restartStream = result->features.has("REST", "STREAM"),
             };
+            features_ = result->features;
         }
 
         std::string pathOf(std::string_view name) const
@@ -217,6 +218,8 @@ namespace FileTransferProtocol::Test
         std::string workspace_{};
         std::shared_ptr<ControlConnection> connection_{};
         TransferSession session_{};
+        /** @brief What FEAT listed at the login. */
+        Features features_{};
     };
 
     TEST_P(TransferConformance, DownloadsEveryFixtureSize)

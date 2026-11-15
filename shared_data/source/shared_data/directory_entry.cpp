@@ -32,6 +32,8 @@ namespace SharedData
             j["createTime"] = entry.createTime;
         if (entry.createTimeNsec != 0)
             j["createTimeNsec"] = entry.createTimeNsec;
+        if (entry.mtimePrecision != TimePrecision::Second)
+            j["mtimePrecision"] = entry.mtimePrecision;
         if (!entry.acl.empty())
             j["acl"] = entry.acl;
         if (entry.linkTarget)
@@ -62,6 +64,7 @@ namespace SharedData
         getOptional("createTimeNsec", entry.createTimeNsec);
         getOptional("mtime", entry.mtime);
         getOptional("mtimeNsec", entry.mtimeNsec);
+        getOptional("mtimePrecision", entry.mtimePrecision);
         getOptional("acl", entry.acl);
         if (auto found = j.find("linkTarget"); found != j.end() && !found->is_null())
             entry.linkTarget = found->get<std::string>();

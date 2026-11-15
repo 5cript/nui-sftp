@@ -86,6 +86,7 @@ namespace SharedData::Sync
             .type = node->type,
             .size = node->size,
             .mtime = node->mtime,
+            .mtimePrecision = node->mtimePrecision,
             .linkTarget = node->type == FileType::Symlink ? node->linkTarget : std::nullopt,
         };
     }

@@ -46,8 +46,16 @@ namespace ComparedStateCheck
     requireUnchangedLocal(std::filesystem::path const& path, std::optional<SharedData::ComparedState> const& compared);
 
     /**
+     * @brief Whether @p probed, a RemoteIo::ProbeEntry of what the compare saw as @p compared, may differ only because
+     *        of the probe: a time where one side came from a listing, which may round it or read another clock, a time
+     *        the probe did not tell, or a symlink the probe may have followed.
+     */
+    bool probeMayMislead(SharedData::ComparedState const& compared, SharedData::ComparedState const& probed);
+
+    /**
      * @brief The remote counterpart of @ref requireUnchangedLocal, failing with SftpError when the server cannot
-     *        tell.
+     *        tell. Asks a RemoteIo::ProbeEntry where the file system answers one, and an Lstat only where the probe
+     *        differs from @p compared and @ref probeMayMislead.
      */
     std::expected<void, Operation::Error> requireUnchangedRemoteInStrand(
         RemoteIo::IRemoteFileSystem& fileSystem,

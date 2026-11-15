@@ -212,7 +212,7 @@ namespace FileTransferProtocol
                 return Shared::logInWith(shared, engine ? engine->pool() : nullptr);
             },
             options_.loginLimits.value_or(loginLimitsFor(options_.pool)),
-            [shared = shared_, promise](Engine::Result<LoginResult> result)
+            [shared = shared_, dialect = dialect_, promise](Engine::Result<LoginResult> result)
             {
                 if (!result)
                 {
@@ -223,6 +223,7 @@ namespace FileTransferProtocol
                     promise->set_value(std::unexpected(std::move(failure)));
                     return;
                 }
+                dialect->learnFrom(result->features);
                 shared->loggedIn(result->homeDirectory);
                 promise->set_value(std::move(*result));
             }
@@ -258,6 +259,7 @@ namespace FileTransferProtocol
                 .dialect = dialect_,
                 .homeDirectory = std::move(*homeDirectory),
                 .parallelTransfers = options_.pool.transferConnections,
+                .probesEntries = dialect_->probesEntries(),
             },
             strandKeeping(thread_),
             options_.fileSystem

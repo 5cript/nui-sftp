@@ -247,6 +247,12 @@ namespace FileTransferProtocol
         co_return (co_await lstatPath(std::move(session), operation.path.value())).transform(informationOf);
     }
 
+    asio::awaitable<RemoteIo::OperationResult<RemoteIo::ProbeEntry>>
+    runOperation(MetadataSession session, RemoteIo::ProbeEntry operation)
+    {
+        co_return (co_await probePath(std::move(session), operation.path.value())).transform(informationOf);
+    }
+
     asio::awaitable<RemoteIo::OperationResult<RemoteIo::CreateNewDirectory>>
     runOperation(MetadataSession session, RemoteIo::CreateNewDirectory operation)
     {

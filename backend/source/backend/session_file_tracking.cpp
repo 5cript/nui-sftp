@@ -91,7 +91,7 @@ namespace
             for (std::size_t index = 0; index < paths_.size(); ++index)
             {
                 if (const auto information = channel.inStrand(RemoteIo::Lstat{.path = paths_[index]}))
-                    states_[index] = FileTracking::ServerState{.mtime = information->mtime, .size = information->size};
+                    states_[index] = FileTracking::serverStateOf(*information);
             }
             deliver();
         }
@@ -127,26 +127,6 @@ namespace
         return [onEnded = std::move(onEnded)](SharedData::OperationCompleted const& completed)
         {
             onEnded(completed.reason);
-        };
-    }
-
-    /**
-     * @brief What an upload must find at its destination to replace it, from what the tracker expects there. A file
-     *        the server lost counts as changed, the tracker asks before it recreates it.
-     */
-    std::optional<SharedData::ComparedState>
-    comparedStateOf(std::optional<FileTracking::ExpectedDestination> const& expected)
-    {
-        if (!expected)
-            return std::nullopt;
-        if (!expected->file)
-            return SharedData::ComparedState{};
-        return SharedData::ComparedState{
-            .exists = true,
-            .type = SharedData::FileType::Regular,
-            .size = expected->file->size,
-            .mtime = expected->file->mtime,
-            .mustStillExist = true,
         };
     }
 
@@ -313,7 +293,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                     request.createMissingDirectories,
                     SharedData::OperationMode::PriorityQueued,
                     /*sourceMayVanish=*/true,
-                    comparedStateOf(request.expectedDestination),
+                    FileTracking::comparedStateOf(request.expectedDestination),
                     sent->recorder(),
                     request.continuesPartialOf,
                     // The File Tracking panel lists the failure.
@@ -449,7 +429,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         .destination = request.destination,
                         .sizeBytes = sizeBytes,
                         .mayOverwrite = true,
-                        .comparedDestination = comparedStateOf(request.expectedDestination),
+                        .comparedDestination = FileTracking::comparedStateOf(request.expectedDestination),
                     });
                     files.push_back({.source = request.source, .sizeBytes = sizeBytes});
                 }
@@ -680,7 +660,7 @@ class Session::FileTrackingRemote : public FileTracking::BulkTrackerRemote
                         return std::nullopt;
                     return std::unexpected{result.error().toString()};
                 }
-                return FileTracking::ServerState{.mtime = result->mtime, .size = result->size};
+                return FileTracking::serverStateOf(*result);
             }
         );
     }

@@ -16,13 +16,20 @@
 namespace RemoteIo
 {
     /**
+     * @brief What a write or a rename to @p path would meet: ProbeEntry where Capabilities::probeEntries is set, else
+     *        Lstat. Must be called on the processing thread of the file system's strand.
+     */
+    std::expected<FileInformation, RemoteError>
+    probeEntryInStrand(IRemoteFileSystem& fileSystem, Paths::RemotePath const& path);
+
+    /**
      * @brief Renames without replacing @p destination, fails with AlreadyExists when it exists. Must be called on the
      *        processing thread of the file system's strand.
      *
      * A regular file moves with LinkIntoPlace where Capabilities::hardLinks is set, atomically where the link
      * succeeds. Otherwise a file system whose rename refuses an existing destination is left to refuse it, and on
      * any other the destination is checked before the rename, which leaves a window. A destination that cannot be
-     * checked is never renamed over.
+     * checked is never renamed over. Checks are ProbeEntry where the file system answers one, else Lstat.
      *
      * @param sourceType The type of @p source when the caller knows it, saves an Lstat.
      */
@@ -40,7 +47,7 @@ namespace RemoteIo
      * One rename where the file system's rename replaces. Otherwise the destination is moved aside to
      * @p asideSuffix first and moved back when the rename fails; if moving it back fails too, the error names where
      * it is kept. A leftover aside is removed when the destination exists, and put back when it does not and the
-     * rename fails.
+     * rename fails. Checks are ProbeEntry where the file system answers one, else Lstat.
      */
     std::expected<void, RemoteError> renameReplaceInStrand(
         IRemoteFileSystem& fileSystem,

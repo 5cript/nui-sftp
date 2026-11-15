@@ -58,6 +58,10 @@ namespace FileTransferProtocol
     boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::Lstat>>
     runOperation(MetadataSession session, RemoteIo::Lstat operation);
 
+    /** @brief probePath(). */
+    boost::asio::awaitable<RemoteIo::OperationResult<RemoteIo::ProbeEntry>>
+    runOperation(MetadataSession session, RemoteIo::ProbeEntry operation);
+
     /**
      * @brief MKD, the permissions are the server's: FTP has no mode for a new directory.
      */

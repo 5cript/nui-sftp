@@ -1,5 +1,6 @@
 #include <ftp/client/metadata.hpp>
 #include <ftp/protocol/command.hpp>
+#include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 #include <paths/utf8.hpp>
@@ -497,6 +498,45 @@ namespace FileTransferProtocol
         learnOnce(modificationTimeSetter_, setter);
     }
 
+    Support ServerDialect::machineListSingle() const
+    {
+        return machineListSingle_.load();
+    }
+
+    void ServerDialect::learnMachineListSingle(Support support)
+    {
+        if (support == Support::Refused)
+            machineListSingle_.store(support);
+        else
+            learnOnce(machineListSingle_, support);
+    }
+
+    Support ServerDialect::size() const
+    {
+        return size_.load();
+    }
+
+    void ServerDialect::learnSize(Support support)
+    {
+        if (support == Support::Refused)
+            size_.store(support);
+        else
+            learnOnce(size_, support);
+    }
+
+    void ServerDialect::learnFrom(Features const& features)
+    {
+        if (features.has("MLST"))
+            learnMachineListSingle(Support::Works);
+        if (features.has("SIZE"))
+            learnSize(Support::Works);
+    }
+
+    bool ServerDialect::probesEntries() const
+    {
+        return machineListSingle() == Support::Works || size() == Support::Works;
+    }
+
     Support ServerDialect::machineListing() const
     {
         return machineListing_.load();
@@ -575,15 +615,57 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief A refusal that tells nothing of the path it answers: the server lacks the command, or it failed for
+         *        now (4yz) without naming a missing path.
+         */
+        bool tellsNothingOfThePath(RemoteIo::RemoteError const& refusal)
+        {
+            return lacksTheCommand(refusal) ||
+                (classifyReply(refusal.protocolCode) == ReplyClass::TransientNegative &&
+                    refusal.kind != RemoteErrorKind::NoSuchFile);
+        }
+
+        /**
+         * @brief What followedEntry() makes of a refusal that tellsNothingOfThePath().
+         */
+        enum class UntellingRefusal
+        {
+            /** @brief No answer, something else looks the path up after it. */
+            IsNoAnswer,
+            /** @brief The error of the lookup, nothing else tells whether the path exists. */
+            Fails,
+        };
+
+        /**
+         * @brief The file of @p bytes that SIZE told of @p path, with its time where MDTM tells one.
+         */
+        asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+        timedFile(std::shared_ptr<ControlConnection> control, std::string path, std::uint64_t bytes)
+        {
+            ListingEntry entry{.name = std::string{lastSegmentOf(path)}, .type = FileType::Regular, .size = bytes};
+            const auto modified =
+                co_await control->execute(Command{.verb = Verb::ModificationTime, .argument = std::move(path)});
+            if (!modified)
+                co_return std::unexpected(modified.error());
+            if (const auto time = parseModificationTimeReply(*modified))
+                entry.modified = *time;
+            co_return entry;
+        }
+
+        /**
          * @brief What SIZE and MDTM, then CWD tell of @p path, which all follow links.
          *
-         * @return The entry, named like the last segment of @p path, nothing when none of them answers.
+         * @return The entry, named like the last segment of @p path, nothing when none of them answers. The
+         *         replyError() of a refusal that tellsNothingOfThePath() where @p untelling says so.
          */
         asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
-        followedEntry(MetadataSession session, std::string path)
+        followedEntry(MetadataSession session, std::string path, UntellingRefusal untelling)
         {
             auto const& control = session.transfer.control;
-            const auto name = std::string{lastSegmentOf(path)};
+            const auto fails = [untelling](RemoteIo::RemoteError const& refusal)
+            {
+                return untelling == UntellingRefusal::Fails && tellsNothingOfThePath(refusal);
+            };
             // Not MLST: proftpd's follows a link for its type but not for its size.
             const auto size = co_await control->execute(Command{.verb = Verb::Size, .argument = path});
             if (!size)
@@ -593,19 +675,14 @@ namespace FileTransferProtocol
                 const auto bytes = parseSizeReply(*size);
                 if (!bytes)
                     co_return std::unexpected(bytes.error());
-                ListingEntry entry{.name = name, .type = FileType::Regular, .size = *bytes};
-                const auto modified =
-                    co_await control->execute(Command{.verb = Verb::ModificationTime, .argument = path});
-                if (!modified)
-                    co_return std::unexpected(modified.error());
-                if (const auto time = parseModificationTimeReply(*modified))
-                    entry.modified = *time;
-                co_return entry;
+                co_return co_await timedFile(control, std::move(path), *bytes);
             }
+            if (auto refusal = replyError(*size, Verb::Size); fails(refusal))
+                co_return std::unexpected(std::move(refusal));
             const auto entered = co_await changeDirectory(control, path);
             if (entered)
-                co_return ListingEntry{.name = name, .type = FileType::Directory};
-            if (entered.error().protocolCode == 0)
+                co_return ListingEntry{.name = std::string{lastSegmentOf(path)}, .type = FileType::Directory};
+            if (entered.error().protocolCode == 0 || fails(entered.error()))
                 co_return std::unexpected(entered.error());
             co_return std::nullopt;
         }
@@ -614,7 +691,7 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
     statPath(MetadataSession session, std::string path)
     {
-        auto followed = co_await followedEntry(session, path);
+        auto followed = co_await followedEntry(session, path, UntellingRefusal::IsNoAnswer);
         if (!followed)
             co_return std::unexpected(std::move(followed).error());
         if (*followed)
@@ -629,12 +706,83 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
     statLinkTarget(MetadataSession session, std::string path)
     {
-        auto followed = co_await followedEntry(std::move(session), std::move(path));
+        auto followed = co_await followedEntry(std::move(session), std::move(path), UntellingRefusal::IsNoAnswer);
         if (!followed)
             co_return std::unexpected(std::move(followed).error());
         if (*followed)
             co_return std::move(**followed);
         co_return std::unexpected(unreachableTarget());
+    }
+
+    namespace
+    {
+        RemoteIo::RemoteError cannotProbe()
+        {
+            return errorOf(RemoteErrorKind::Unsupported, "The server has no command to look up a single path");
+        }
+
+        /**
+         * @brief What MLST tells of @p path.
+         *
+         * @return The entry, named like the last segment of @p path, nothing for a refusal that tells no more than that
+         *         the path cannot be listed. Unsupported where the server lacks MLST, the replyError() of a refusal
+         *         for now (4yz).
+         */
+        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
+        machineListedEntry(MetadataSession session, std::string path)
+        {
+            const auto reply =
+                co_await session.transfer.control->execute(Command{.verb = Verb::MachineListSingle, .argument = path});
+            if (!reply)
+                co_return std::unexpected(reply.error());
+            if (!succeeded(*reply))
+            {
+                auto refusal = replyError(*reply, Verb::MachineListSingle);
+                if (refusal.kind == RemoteErrorKind::NoSuchFile || (untold(refusal) && !tellsNothingOfThePath(refusal)))
+                    co_return std::optional<ListingEntry>{};
+                co_return std::unexpected(std::move(refusal));
+            }
+            auto entry = parseMachineListReply(*reply);
+            if (!entry)
+                co_return std::unexpected(std::move(entry).error());
+            entry->name = std::string{lastSegmentOf(path)};
+            co_return std::optional<ListingEntry>{std::move(*entry)};
+        }
+
+        /**
+         * @brief The entry of a lookup, NoSuchFile when it found nothing.
+         */
+        std::expected<ListingEntry, RemoteIo::RemoteError>
+        foundOrMissing(std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError> found)
+        {
+            if (!found)
+                return std::unexpected(std::move(found).error());
+            if (!*found)
+                return std::unexpected(missing());
+            return std::move(**found);
+        }
+    }
+
+    asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    probePath(MetadataSession session, std::string path)
+    {
+        auto& dialect = *session.dialect;
+        if (dialect.machineListSingle() == Support::Works)
+        {
+            auto listed = co_await machineListedEntry(session, path);
+            if (listed || !lacksTheCommand(listed.error()))
+                co_return foundOrMissing(std::move(listed));
+            dialect.learnMachineListSingle(Support::Refused);
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return std::unexpected(std::move(listed).error());
+        }
+        if (dialect.size() != Support::Works)
+            co_return std::unexpected(cannotProbe());
+        auto sized = co_await followedEntry(std::move(session), std::move(path), UntellingRefusal::Fails);
+        if (sized || !lacksTheCommand(sized.error()))
+            co_return foundOrMissing(std::move(sized));
+        dialect.learnSize(Support::Refused);
+        co_return std::unexpected(cannotProbe());
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> makeDirectory(MetadataSession session, std::string path)
@@ -962,7 +1110,12 @@ namespace FileTransferProtocol
             );
         }
         else if (entry.listedTime)
+        {
             converted.mtime = secondsSinceEpoch(entry.listedTime->time.time_since_epoch().count());
+            converted.mtimePrecision = entry.listedTime->precision == ListedTimePrecision::Day
+                ? SharedData::TimePrecision::Day
+                : SharedData::TimePrecision::Minute;
+        }
         if (entry.linkTarget)
             converted.linkTarget = Paths::sanitizedUtf8(*entry.linkTarget);
         return converted;

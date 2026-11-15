@@ -153,6 +153,9 @@ You can download and upload files and folders directly as tar archives, no manua
 - Sorting files.
 - Asks the user to overwrite files on upload/download.
 
+# Documentation
+- [File transfer behavior](docs/file-transfer-behavior.md): how uploads check, replace and continue files, per protocol.
+
 # No intention to support for now:
 - Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
 - GSSAPI auth: Will make work when a need arises

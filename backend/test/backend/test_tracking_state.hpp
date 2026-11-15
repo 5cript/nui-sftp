@@ -1,10 +1,13 @@
 #pragma once
 
+#include <backend/file_tracking/tracker_remote.hpp>
 #include <backend/file_tracking/tracking_state.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -38,6 +41,55 @@ namespace Test::TrackingState
     {
         EXPECT_TRUE(serverChanged(ServerState{.mtime = 5, .size = 10}, ServerState{.mtime = 6, .size = 10}));
         EXPECT_TRUE(serverChanged(ServerState{.mtime = 5, .size = 10}, ServerState{.mtime = 5, .size = 11}));
+    }
+
+    TEST(TrackingStateTests, ATimeAListingRoundedIsTheExactTimeOfItsMinute)
+    {
+        using SharedData::TimePrecision;
+        // 2023-11-14 22:13:57 UTC, listed as 22:13.
+        const std::uint64_t exact{1700000037u};
+        const ServerState listed{.mtime = exact - exact % 60u, .size = 10, .mtimePrecision = TimePrecision::Minute};
+
+        EXPECT_FALSE(serverChanged(listed, ServerState{.mtime = exact, .size = 10}));
+        EXPECT_FALSE(serverChanged(ServerState{.mtime = exact, .size = 10}, listed));
+        EXPECT_TRUE(serverChanged(listed, ServerState{.mtime = exact + 60u, .size = 10}));
+        EXPECT_TRUE(serverChanged(listed, ServerState{.mtime = exact, .size = 11}));
+    }
+
+    TEST(TrackingStateTests, AnUploadExpectsWhatAListingToldAtThePrecisionOfTheListing)
+    {
+        using SharedData::TimePrecision;
+        const std::uint64_t exact{1700000037u};
+        SharedData::DirectoryEntry listed{};
+        listed.type = SharedData::FileType::Regular;
+        listed.size = 10u;
+        listed.mtime = exact - exact % 60u;
+        listed.mtimePrecision = TimePrecision::Minute;
+
+        const auto expected = comparedStateOf(ExpectedDestination{.file = serverStateOf(listed)});
+
+        ASSERT_TRUE(expected.has_value());
+        EXPECT_EQ(expected->mtimePrecision, TimePrecision::Minute);
+        EXPECT_TRUE(expected->mustStillExist);
+        // What a lookup of the single path tells: the exact time.
+        const SharedData::ComparedState probed{
+            .exists = true,
+            .type = SharedData::FileType::Regular,
+            .size = 10u,
+            .mtime = exact,
+        };
+        EXPECT_TRUE(SharedData::unchangedSinceCompare(*expected, probed));
+        auto later = probed;
+        later.mtime += 60u;
+        EXPECT_FALSE(SharedData::unchangedSinceCompare(*expected, later));
+    }
+
+    TEST(TrackingStateTests, AnUploadThatExpectsNothingThereComparesAgainstNothing)
+    {
+        EXPECT_FALSE(comparedStateOf(std::nullopt).has_value());
+        const auto nothing = comparedStateOf(ExpectedDestination{});
+        ASSERT_TRUE(nothing.has_value());
+        EXPECT_FALSE(nothing->exists);
     }
 
     TEST(TrackingStateTests, VanishedServerCopyIsAChange)

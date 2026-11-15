@@ -82,6 +82,28 @@ namespace SecureShell::Test
         EXPECT_EQ(information->type, SharedData::FileType::Regular);
     }
 
+    TEST_F(SftpFileSystemTests, AProbeAnswersLikeAnLstatAlsoForADanglingLink)
+    {
+        CREATE_SERVER_AND_JOINER(Sftp);
+        auto [owner, sftp] = createSftpSession(serverStartResult->port);
+        ASSERT_TRUE(sftp->capabilities().probeEntries);
+        const auto linked = runInStrand(
+            *sftp, RemoteIo::CreateSymLink{.target = "missing.txt", .linkPath = remote("/home/test/dangling")}
+        );
+        ASSERT_TRUE(linked.has_value()) << linked.error().toString();
+
+        for (auto const* path : {"/home/test/file1.txt", "/home/test/dangling", "/home/test/missing.txt"})
+        {
+            const auto probed = runInStrand(*sftp, RemoteIo::ProbeEntry{.path = remote(path)});
+            const auto listed = runInStrand(*sftp, RemoteIo::Lstat{.path = remote(path)});
+            ASSERT_EQ(probed.has_value(), listed.has_value()) << path;
+            if (probed)
+                EXPECT_EQ(probed->type, listed->type) << path;
+            else
+                EXPECT_EQ(probed.error().kind, listed.error().kind) << path;
+        }
+    }
+
     TEST_F(SftpFileSystemTests, TheSessionOpensAFileSystemAsAConnection)
     {
         CREATE_SERVER_AND_JOINER(Sftp);
@@ -180,6 +202,7 @@ namespace SecureShell::Test
             EXPECT_TRUE(capabilities.setModificationTime);
             EXPECT_TRUE(capabilities.exclusiveCreate);
             EXPECT_TRUE(capabilities.canonicalPath);
+            EXPECT_TRUE(capabilities.probeEntries);
 
             const auto renamed = runInStrand(
                 *sftp,

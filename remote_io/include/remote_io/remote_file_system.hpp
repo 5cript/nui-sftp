@@ -54,6 +54,11 @@ namespace RemoteIo
         std::optional<std::size_t> maxParallelTransfers{};
         /** @brief Small files also take the asynchronous transfer path. */
         bool preferAsyncTransfers{false};
+        /**
+         * @brief ProbeEntry answers. Without it nothing checks what a write would replace, short of an Lstat that may
+         *        list a whole directory.
+         */
+        bool probeEntries{false};
     };
 
     /**

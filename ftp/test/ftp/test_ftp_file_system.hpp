@@ -363,6 +363,32 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(capabilities.preferAsyncTransfers);
         EXPECT_EQ(capabilities.renameSemantics, RemoteIo::RenameSemantics::Unknown);
         EXPECT_FALSE(capabilities.hardLinks);
+        EXPECT_TRUE(capabilities.probeEntries) << "FEAT lists SIZE";
+    }
+
+    TEST_P(FtpFileSystemTests, AProbeAsksSizeAndCwdWithoutAListing)
+    {
+        auto script = loggedInScript();
+        script.expect("SIZE", "/dir/a")
+            .reply("213 5")
+            .expect("MDTM", "/dir/a")
+            .reply("213 20240102030405")
+            .expect("SIZE", "/dir/missing")
+            .reply("550 Could not get file size.")
+            .expect("CWD", "/dir/missing")
+            .reply("550 Failed to change directory.")
+            .expectDisconnect();
+        connect(std::move(script));
+
+        const auto file = later(RemoteIo::ProbeEntry{.path = remote("/dir/a")});
+        ASSERT_TRUE(file) << file.error().toString();
+        EXPECT_TRUE(file->isRegularFile());
+        EXPECT_EQ(file->size, 5u);
+        EXPECT_EQ(file->mtime, 1704164645u);
+        EXPECT_EQ(file->mtimePrecision, SharedData::TimePrecision::Second);
+        const auto missing = later(RemoteIo::ProbeEntry{.path = remote("/dir/missing")});
+        ASSERT_FALSE(missing);
+        EXPECT_EQ(missing.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
     }
 
     TEST_P(FtpFileSystemTests, RemovesFilesAndEmptyDirectoriesAlike)

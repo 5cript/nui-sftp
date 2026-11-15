@@ -32,6 +32,26 @@ namespace SharedData::Test
         EXPECT_FALSE(unchangedSinceCompare(file(3, 100), file(3, 101)));
     }
 
+    TEST(ComparedStateTests, TimesCompareAtTheCoarserPrecisionOfBoth)
+    {
+        using namespace ComparedStateTestDetail;
+        // 1700000037 is 2023-11-14 22:13:57 UTC, its minute starts at 1699999980 and its day at 1699920000.
+        auto listed = file(3, 1699999980u);
+        listed.mtimePrecision = TimePrecision::Minute;
+        EXPECT_TRUE(unchangedSinceCompare(listed, file(3, 1700000037u)));
+        EXPECT_TRUE(unchangedSinceCompare(file(3, 1700000037u), listed));
+        EXPECT_FALSE(unchangedSinceCompare(listed, file(3, 1700000080u)));
+        EXPECT_FALSE(unchangedSinceCompare(listed, file(4, 1700000037u)));
+
+        auto old = file(3, 1699920000u);
+        old.mtimePrecision = TimePrecision::Day;
+        EXPECT_TRUE(unchangedSinceCompare(old, file(3, 1700000037u)));
+        EXPECT_TRUE(unchangedSinceCompare(old, listed));
+        EXPECT_FALSE(unchangedSinceCompare(old, file(3, 1700006400u)));
+
+        EXPECT_FALSE(unchangedSinceCompare(file(3, 1699999980u), file(3, 1700000037u)));
+    }
+
     TEST(ComparedStateTests, SomethingThatAppearedWhereNothingWasChanged)
     {
         using namespace ComparedStateTestDetail;
@@ -88,5 +108,7 @@ namespace SharedData::Test
         );
         const DirectoryEntry regular{.type = FileType::Regular, .size = 7, .mtime = 9, .linkTarget = "ignored"};
         EXPECT_FALSE(comparedStateOf(regular).linkTarget);
+        const DirectoryEntry listed{.type = FileType::Regular, .mtime = 60, .mtimePrecision = TimePrecision::Minute};
+        EXPECT_EQ(comparedStateOf(listed).mtimePrecision, TimePrecision::Minute);
     }
 }

@@ -66,6 +66,8 @@ namespace FileTransferProtocol
         std::string homeDirectory{};
         /** @brief How many transfers run at once, the transfer connections of the pool. */
         std::size_t parallelTransfers{1u};
+        /** @brief ProbeEntry answers, ServerDialect::probesEntries() when the file system was created. */
+        bool probesEntries{false};
     };
 
     /**

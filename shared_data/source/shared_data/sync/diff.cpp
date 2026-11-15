@@ -3,6 +3,7 @@
 #include <shared_data/sync/diff_tree_node.hpp>
 
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -103,6 +104,15 @@ namespace SharedData::Sync
                 .descendantByteTotal = isDirectory ? source.subtreeByteTotal : source.size,
                 .typeConflict = localNode.type != remoteNode.type,
             };
+        }
+
+        /**
+         * @brief How the time of @p localNode compares to that of @p remoteNode, at the coarser precision of both: a
+         *        listing over FTP shows minutes or days.
+         */
+        std::strong_ordering timeOf(ScanNode const& localNode, ScanNode const& remoteNode)
+        {
+            return compareTimes(localNode.mtime, localNode.mtimePrecision, remoteNode.mtime, remoteNode.mtimePrecision);
         }
 
         /**
@@ -450,7 +460,7 @@ namespace SharedData::Sync
         }
         if (localNode.size != remoteNode.size)
             return true;
-        if (localNode.mtime != remoteNode.mtime)
+        if (timeOf(localNode, remoteNode) != 0)
             return true;
         return false;
     }
