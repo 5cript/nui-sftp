@@ -512,13 +512,7 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     else
     {
         if (!options_.mayOverwrite)
-        {
-            Log::warn(
-                "UploadOperation: Remote file '{}' already exists and may not be overwritten.",
-                options_.remotePath.value()
-            );
-            return std::unexpected(Error{.type = ErrorType::FileExists});
-        }
+            return std::unexpected(destinationExists());
     }
 
     // Checked before anything is sent too, not only before the destination is replaced.
@@ -584,23 +578,26 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
             return std::unexpected(res.error());
     }
 
+    // Without an exclusive create the destination is checked first, another writer may still create it in between.
+    const auto exclusive = !options_.mayOverwrite && fileSystem.capabilities().exclusiveCreate;
+    if (!options_.mayOverwrite && !exclusive)
+    {
+        if (const auto missing = requireMissingDestinationInStrand(fileSystem); !missing)
+            return missing;
+    }
+
     using enum RemoteIo::OpenMode;
     Log::debug("UploadOperation: Starting unsafe fast upload to '{}'.", remotePath_.value());
     const auto openResult = fileSystem.inStrand(
-        wakingOpen(remotePath_, Write | Create | (options_.mayOverwrite ? Truncate : Exclusive), remoteFilePerms())
+        wakingOpen(remotePath_, Write | Create | (exclusive ? Exclusive : Truncate), remoteFilePerms())
     );
     if (!openResult.has_value())
     {
         Error error{.type = ErrorType::SftpError, .remoteError = openResult.error()};
         // Servers of SFTP version 3 refuse an exclusive open of an existing file with a plain failure.
-        if (!waitsForConnection(error) && !options_.mayOverwrite &&
+        if (!waitsForConnection(error) && exclusive &&
             fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_}).has_value())
-        {
-            Log::warn(
-                "UploadOperation: Remote file '{}' already exists and may not be overwritten.", remotePath_.value()
-            );
-            return std::unexpected(Error{.type = ErrorType::FileExists});
-        }
+            return std::unexpected(destinationExists());
         return std::unexpected(loggedOpenFailure(
             std::move(error), "UploadOperation: Failed to open remote file for upload", options_.failureToast
         ));
@@ -609,6 +606,28 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     fileStream_ = openResult.value();
     openedDestination_ = true;
     return {};
+}
+
+std::expected<void, UploadOperation::Error>
+UploadOperation::requireMissingDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem) const
+{
+    const auto existing = fileSystem.inStrand(RemoteIo::Lstat{.path = remotePath_});
+    if (existing.has_value())
+        return std::unexpected(destinationExists());
+    if (existing.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
+        return {};
+    Log::error(
+        options_.failureToast,
+        "UploadOperation: Failed to check the remote file to upload to: {}",
+        existing.error().message
+    );
+    return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = existing.error()});
+}
+
+UploadOperation::Error UploadOperation::destinationExists() const
+{
+    Log::warn("UploadOperation: Remote file '{}' already exists and may not be overwritten.", remotePath_.value());
+    return Error{.type = ErrorType::FileExists};
 }
 
 std::filesystem::perms UploadOperation::remoteFilePerms() const

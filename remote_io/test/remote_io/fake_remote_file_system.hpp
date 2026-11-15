@@ -479,6 +479,8 @@ namespace RemoteIo::Test
         }
         OperationResult<OpenFile> run(OpenFile const& operation)
         {
+            if (contains(operation.mode, OpenMode::Exclusive) && !options_.capabilities.exclusiveCreate)
+                return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "No exclusive create"));
             if (takenFor_ && takenFor_(operation))
             {
                 ++busyOpens_;
@@ -512,6 +514,10 @@ namespace RemoteIo::Test
             );
             streams_.push_back(stream);
             return stream;
+        }
+        OperationResult<ReadTransferLimits> run(ReadTransferLimits const&)
+        {
+            return TransferLimits{.maxWriteLength = 1024u};
         }
         OperationResult<ReadFile> run(ReadFile const& operation)
         {
