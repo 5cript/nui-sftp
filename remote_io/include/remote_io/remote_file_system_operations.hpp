@@ -103,6 +103,19 @@ namespace RemoteIo
     BOOST_DESCRIBE_STRUCT(Lstat, (), (path))
 
     /**
+     * @brief What a write or a rename to a path would meet, with one cheap lookup where the protocol has one: an Lstat
+     *        where that is cheap, else what the server tells of the single path. Then a link may read as what it
+     *        leads to, and a dangling link or a path the server cannot reach as NoSuchFile. Unsupported where the
+     *        file system cannot look up a single path, see Capabilities::probeEntries.
+     */
+    struct ProbeEntry
+    {
+        using Result = FileInformation;
+        Paths::RemotePath path;
+    };
+    BOOST_DESCRIBE_STRUCT(ProbeEntry, (), (path))
+
+    /**
      * @brief Creates a directory, fails when the path exists already.
      */
     struct CreateNewDirectory
@@ -333,6 +346,7 @@ namespace RemoteIo
         ListDirectory,
         Stat,
         Lstat,
+        ProbeEntry,
         CreateNewDirectory,
         CreateDirectoryIfItDoesntExist,
         CreateEmptyFile,

@@ -43,6 +43,7 @@ namespace SecureShell
                 .renameSemantics = sftp_extension_supported(session, "posix-rename@openssh.com", "1") == 1
                     ? RemoteIo::RenameSemantics::Replaces
                     : RemoteIo::RenameSemantics::Refuses,
+                .probeEntries = true,
             };
         }
 
@@ -507,6 +508,11 @@ namespace SecureShell
             return std::unexpected(lastError());
 
         return fromSftpAttributes(attributes.get());
+    }
+
+    RemoteIo::OperationResult<RemoteIo::ProbeEntry> SftpSession::run(RemoteIo::ProbeEntry const& operation)
+    {
+        return run(RemoteIo::Lstat{.path = operation.path});
     }
 
     std::expected<FileInformation, SftpSession::Error> SftpSession::lstatInStrand(Paths::RemotePath const& path)

@@ -104,7 +104,7 @@ namespace RemoteIo::Test
       public:
         struct Options
         {
-            Capabilities capabilities{};
+            Capabilities capabilities{.probeEntries = true};
             /** @brief Whether a rename replaces an existing destination when the capabilities say Unknown. */
             bool unknownRenameReplaces{true};
             /** @brief Smaller than the files of most tests, so they take several reads. */
@@ -389,6 +389,12 @@ namespace RemoteIo::Test
          */
         OperationResult<Stat> run(Stat const& operation)
         {
+            return run(Lstat{.path = operation.path});
+        }
+        OperationResult<ProbeEntry> run(ProbeEntry const& operation)
+        {
+            if (!options_.capabilities.probeEntries)
+                return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "No lookup of a single path"));
             return run(Lstat{.path = operation.path});
         }
         OperationResult<ListDirectory> run(ListDirectory const& operation)

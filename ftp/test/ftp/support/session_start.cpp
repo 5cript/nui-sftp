@@ -29,12 +29,15 @@ namespace FileTransferProtocol::Test
             engine->close();
             return std::unexpected(fmt::format("The login failed: {}", loggedIn.error().toString()));
         }
+        start.dialect->learnFrom(loggedIn->features);
+        const auto probesEntries = start.dialect->probesEntries();
         auto fileSystem = FtpFileSystem::create(
             FileSystemSession{
                 .engine = engine,
                 .dialect = std::move(start.dialect),
                 .homeDirectory = loggedIn->homeDirectory,
                 .parallelTransfers = parallelTransfers,
+                .probesEntries = probesEntries,
             },
             thread.createStrand(),
             std::move(start.fileSystem)

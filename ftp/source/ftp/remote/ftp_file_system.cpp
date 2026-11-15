@@ -125,6 +125,7 @@ namespace FileTransferProtocol
             .renameSemantics = RemoteIo::RenameSemantics::Unknown,
             .maxParallelTransfers = std::max<std::size_t>(session_.parallelTransfers, 1u),
             .preferAsyncTransfers = true,
+            .probeEntries = session_.probesEntries,
         };
     }
 

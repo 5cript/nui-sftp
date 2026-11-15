@@ -273,6 +273,7 @@ namespace RemoteIo::Test
         EXPECT_FALSE(capabilities.canonicalPath);
         EXPECT_FALSE(capabilities.userDirectories);
         EXPECT_EQ(capabilities.renameSemantics, RenameSemantics::Unknown);
+        EXPECT_FALSE(capabilities.probeEntries);
         EXPECT_FALSE(capabilities.maxParallelTransfers.has_value());
         EXPECT_FALSE(capabilities.preferAsyncTransfers);
     }
