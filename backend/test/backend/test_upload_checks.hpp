@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/sftp/bulk_upload_operation.hpp>
+#include <backend/sftp/compared_state_check.hpp>
 #include <backend/sftp/local_scan_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <constants/sftp.hpp>
@@ -13,6 +14,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -72,6 +75,42 @@ namespace Test
                 },
             };
         }
+
+        /**
+         * @brief ComparedStateCheck::requireUnchangedRemoteInStrand of @p path on the strand of @p fake.
+         */
+        static std::expected<void, Operation::Error> checkUnchanged(
+            RemoteIo::Test::FakeRemoteFileSystem& fake,
+            std::string const& path,
+            SharedData::ComparedState const& compared
+        )
+        {
+            return fake
+                .performPromise(
+                    [&fake, &path, &compared]()
+                    {
+                        return ComparedStateCheck::requireUnchangedRemoteInStrand(fake, remote(path), compared);
+                    }
+                )
+                .get();
+        }
+
+        /**
+         * @brief What a sync compare saw of a 3 byte file whose time a listing showed to the minute.
+         */
+        static SharedData::ComparedState listedByMinute(std::uint64_t mtime)
+        {
+            return SharedData::ComparedState{
+                .exists = true,
+                .type = SharedData::FileType::Regular,
+                .size = 3u,
+                .mtime = mtime - mtime % 60u,
+                .mtimePrecision = SharedData::TimePrecision::Minute,
+            };
+        }
+
+        /** @brief 2023-11-14 22:13:57 UTC. */
+        static constexpr std::uint64_t fileTime{1700000037u};
 
         Utility::TemporaryDirectory localDirectory_{temporaryRoot, true};
         RemoteIo::ProcessingThread processingThread_{};
@@ -163,5 +202,80 @@ namespace Test
         EXPECT_EQ(result.error().type, Operation::ErrorType::CannotCheckDestination);
         EXPECT_FALSE(fake->exists(remote("/home/test/tree")));
         EXPECT_EQ(fake->started<RemoteIo::OpenFile>(), 0u);
+    }
+
+    TEST_F(UploadCheckTests, ASyncedFileIsCheckedWithTheProbeAtThePrecisionOfItsListing)
+    {
+        const auto fake = makeFake(true);
+        fake->addFile(remote("/home/test/synced.txt"), "old");
+        fake->setModificationTime(remote("/home/test/synced.txt"), fileTime);
+        auto options = uploadOf("synced.txt", "new content", false);
+        options.mayOverwrite = true;
+        options.comparedDestination = listedByMinute(fileTime);
+        UploadOperation operation{fake, std::move(options)};
+
+        const auto result = runToEnd(operation);
+
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(fake->contentOf(remote("/home/test/synced.txt")), "new content");
+        EXPECT_EQ(fake->started<RemoteIo::Lstat>(), 0u);
+    }
+
+    TEST_F(UploadCheckTests, AProbedTimeOnAnotherClockIsCheckedAgainstTheListing)
+    {
+        RemoteIo::Test::FakeRemoteFileSystem::Options options{.capabilities = {.probeEntries = true}};
+        options.probeTimeShift = 2u * 60u * 60u;
+        const auto fake = std::make_shared<RemoteIo::Test::FakeRemoteFileSystem>(strand_.get(), options);
+        fake->addFile(remote("/home/test/synced.txt"), "old");
+        fake->setModificationTime(remote("/home/test/synced.txt"), fileTime);
+
+        const auto checked = checkUnchanged(*fake, "/home/test/synced.txt", listedByMinute(fileTime));
+
+        EXPECT_TRUE(checked.has_value()) << checked.error().toString();
+        EXPECT_EQ(fake->started<RemoteIo::ProbeEntry>(), 1u);
+        EXPECT_EQ(fake->started<RemoteIo::Lstat>(), 1u);
+    }
+
+    TEST_F(UploadCheckTests, AChangeTheProbeCannotHaveMadeIsChangedWithoutTheListing)
+    {
+        const auto fake = makeFake(true);
+        fake->addFile(remote("/home/test/synced.txt"), "four");
+        fake->setModificationTime(remote("/home/test/synced.txt"), fileTime);
+        auto exact = listedByMinute(fileTime);
+        exact.size = 4u;
+        exact.mtimePrecision = SharedData::TimePrecision::Second;
+
+        const auto otherSize = checkUnchanged(*fake, "/home/test/synced.txt", listedByMinute(fileTime));
+        const auto otherTime = checkUnchanged(*fake, "/home/test/synced.txt", exact);
+
+        ASSERT_FALSE(otherSize.has_value());
+        EXPECT_EQ(otherSize.error().type, Operation::ErrorType::ChangedSinceCompare);
+        ASSERT_FALSE(otherTime.has_value());
+        EXPECT_EQ(otherTime.error().type, Operation::ErrorType::ChangedSinceCompare);
+        EXPECT_EQ(fake->started<RemoteIo::Lstat>(), 0u);
+    }
+
+    TEST_F(UploadCheckTests, OnlyADifferenceTheProbeMayHaveMadeAsksTheListing)
+    {
+        using SharedData::ComparedState;
+        using SharedData::FileType;
+        using SharedData::TimePrecision;
+        const ComparedState exactFile{.exists = true, .type = FileType::Regular, .size = 3u, .mtime = fileTime};
+        auto laterFile = exactFile;
+        laterFile.mtime += 60u;
+        auto listedFile = exactFile;
+        listedFile.mtimePrecision = TimePrecision::Minute;
+        auto untimedFile = exactFile;
+        untimedFile.mtime = 0u;
+        const ComparedState link{.exists = true, .type = FileType::Symlink, .linkTarget = "a"};
+
+        EXPECT_FALSE(ComparedStateCheck::probeMayMislead(exactFile, laterFile)) << "both times are exact";
+        EXPECT_TRUE(ComparedStateCheck::probeMayMislead(listedFile, laterFile)) << "a listing may read another clock";
+        EXPECT_TRUE(ComparedStateCheck::probeMayMislead(exactFile, untimedFile)) << "the probe told no time";
+        EXPECT_TRUE(ComparedStateCheck::probeMayMislead(link, exactFile)) << "the probe may follow the link";
+        EXPECT_FALSE(ComparedStateCheck::probeMayMislead(ComparedState{}, exactFile)) << "something appeared";
+        auto biggerFile = laterFile;
+        biggerFile.size = 4u;
+        EXPECT_FALSE(ComparedStateCheck::probeMayMislead(listedFile, biggerFile)) << "the size is exact";
     }
 }

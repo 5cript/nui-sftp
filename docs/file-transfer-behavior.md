@@ -38,6 +38,18 @@ FTP has no command that reliably tells whether a path exists:
 - A dangling link, or a path the server cannot reach, counts as free. A safe upload replaces such a link, an unsafe
   fast upload writes through it.
 
+### Unchanged since the compare
+
+A sync, and File Tracking, only replace a destination that is still what they last saw: the same type, size and
+modification time. They check this before the upload and again before the rename, with the same commands as above
+(`MDTM` adds the time where `SIZE` found a file).
+
+- Times are compared at the coarser precision of both sides. FTP's `LIST`, which a sync scan reads, shows minutes, or
+  only the day for files older than about six months.
+- Over FTP the whole directory is listed only when the commands disagree with the compare in a way they may cause
+  themselves: only the time differs and one side came from a listing (some servers list local time, `MLST` and `MDTM`
+  are UTC), or the compare saw a symbolic link that the commands followed.
+
 ### FTP servers without `MLST` and `SIZE`
 
 Nothing can check for an existing file there. The server tells this in its `FEAT` reply at login. Uploads to such a

@@ -109,6 +109,11 @@ namespace RemoteIo::Test
             bool unknownRenameReplaces{true};
             /** @brief Smaller than the files of most tests, so they take several reads. */
             std::size_t readLengthLimit{1024u};
+            /**
+             * @brief Added to the time a ProbeEntry tells, as a server whose listing shows another clock than MLST and
+             *        MDTM.
+             */
+            std::uint64_t probeTimeShift{0u};
         };
 
         FakeRemoteFileSystem(ProcessingStrand* strand, Options options)
@@ -150,6 +155,16 @@ namespace RemoteIo::Test
             if (node == nodes_.end() || node->second.type != SharedData::FileType::Regular)
                 return std::nullopt;
             return node->second.content;
+        }
+
+        /**
+         * @brief Sets the modification time of the entry at @p path, which Lstat tells.
+         */
+        void setModificationTime(Paths::RemotePath const& path, std::uint64_t mtime)
+        {
+            std::scoped_lock lock{mutex_};
+            if (auto* node = find(path))
+                node->mtime = mtime;
         }
 
         bool exists(Paths::RemotePath const& path) const
@@ -305,6 +320,7 @@ namespace RemoteIo::Test
         {
             SharedData::FileType type{SharedData::FileType::Regular};
             std::string content{};
+            std::uint64_t mtime{0};
         };
 
         static RemoteError errorOf(RemoteErrorKind kind, std::string message)
@@ -382,6 +398,7 @@ namespace RemoteIo::Test
                 .name = name ? std::string{name->view()} : std::string{},
                 .type = node->type,
                 .size = node->content.size(),
+                .mtime = node->mtime,
             };
         }
         /**
@@ -395,7 +412,14 @@ namespace RemoteIo::Test
         {
             if (!options_.capabilities.probeEntries)
                 return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "No lookup of a single path"));
-            return run(Lstat{.path = operation.path});
+            return run(Lstat{.path = operation.path})
+                .transform(
+                    [this](FileInformation information)
+                    {
+                        information.mtime += options_.probeTimeShift;
+                        return information;
+                    }
+                );
         }
         OperationResult<ListDirectory> run(ListDirectory const& operation)
         {
