@@ -99,8 +99,9 @@ namespace SharedData::Sync
      *
      * Type mismatches always count. Symlinks compare by raw @ref ScanNode::linkTarget
      * (size/mtime of the link metadata itself is meaningless). Files compare by
-     * (size, mtime). Directories alone never "differ" — differences among their
-     * children are the diff's job, handled by the merge walk.
+     * (size, mtime), the time at the coarser precision of both sides. Directories
+     * alone never "differ" — differences among their children are the diff's job,
+     * handled by the merge walk.
      */
     bool entriesDiffer(ScanNode const& localNode, ScanNode const& remoteNode);
 

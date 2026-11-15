@@ -26,10 +26,10 @@ mode.
 |---|---|
 | SFTP | `lstat` of the path |
 | FTP, server lists `MLST` in `FEAT` | `MLST` of the path |
-| FTP, server lists `SIZE` but not `MLST` | `SIZE`, then `CWD` for a directory |
+| FTP, server lists `SIZE` but not `MLST` | `SIZE` and `MDTM` for a file, else `CWD` for a directory |
 | FTP, server lists neither | none, see below |
 
-Each check is one or two commands. FTP never lists the whole directory to check a single file.
+Each check is one to three commands. FTP never lists the whole directory to check a single file.
 
 FTP has no command that reliably tells whether a path exists:
 
@@ -37,18 +37,6 @@ FTP has no command that reliably tells whether a path exists:
   `MLST` shows links as links). A link then counts as what it points to.
 - A dangling link, or a path the server cannot reach, counts as free. A safe upload replaces such a link, an unsafe
   fast upload writes through it.
-
-### Unchanged since the compare
-
-A sync, and File Tracking, only replace a destination that is still what they last saw: the same type, size and
-modification time. They check this before the upload and again before the rename, with the same commands as above
-(`MDTM` adds the time where `SIZE` found a file).
-
-- Times are compared at the coarser precision of both sides. FTP's `LIST`, which a sync scan reads, shows minutes, or
-  only the day for files older than about six months.
-- Over FTP the whole directory is listed only when the commands disagree with the compare in a way they may cause
-  themselves: only the time differs and one side came from a listing (some servers list local time, `MLST` and `MDTM`
-  are UTC), or the compare saw a symbolic link that the commands followed.
 
 ### FTP servers without `MLST` and `SIZE`
 
@@ -59,3 +47,21 @@ server:
 - work in the unsafe fast mode at any size, replacing existing files without asking.
 
 File Tracking uploads are always safe, so they fail on such servers.
+
+## Sync
+
+A sync compares the files of both sides by size and modification time. Times compare at the coarser precision of
+both sides: FTP's `LIST` shows minutes, or only the day for files older than about six months, so a file differs only
+when its minute or day does. `LIST` names no time zone and is read as UTC, as vsftpd and proftpd print it; on servers
+that list local time (pure-ftpd, IIS) the remote times are off by the time zone offset.
+
+### Unchanged since the compare
+
+A sync, and File Tracking, only replace a destination that is still what they last saw: the same type, size and
+modification time. They check this before the upload and again before the rename, with the same commands as
+above.
+
+- Times are compared at the coarser precision of both sides, as above.
+- Over FTP the whole directory is listed only when the commands disagree with the compare in a way they may cause
+  themselves: only the time differs and one side came from a listing (some servers list local time, `MLST` and `MDTM`
+  are UTC), or the compare saw a symbolic link that the commands followed.

@@ -8,7 +8,9 @@
 #include <fmt/format.h>
 #include <fmt/chrono.h>
 
+#include <algorithm>
 #include <chrono>
+#include <compare>
 #include <expected>
 #include <filesystem>
 #include <memory>
@@ -48,6 +50,17 @@ namespace SharedData
                 break;
         }
         return 1u;
+    }
+
+    /**
+     * @brief How the time @p first compares to @p second, both seconds since the epoch, at the coarser of their
+     *        precisions.
+     */
+    constexpr std::strong_ordering
+    compareTimes(std::uint64_t first, TimePrecision firstPrecision, std::uint64_t second, TimePrecision secondPrecision)
+    {
+        const auto unit = std::max(secondsOf(firstPrecision), secondsOf(secondPrecision));
+        return first / unit <=> second / unit;
     }
 
     enum class FileType : std::uint8_t
