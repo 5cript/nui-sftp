@@ -517,7 +517,7 @@ namespace RemoteIo::Test
         }
         OperationResult<ReadTransferLimits> run(ReadTransferLimits const&)
         {
-            return TransferLimits{.maxWriteLength = 1024u};
+            return TransferLimits{};
         }
         OperationResult<ReadFile> run(ReadFile const& operation)
         {

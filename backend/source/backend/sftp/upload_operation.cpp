@@ -16,6 +16,7 @@
 #include <chrono>
 #include <filesystem>
 #include <future>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -953,7 +954,10 @@ std::expected<void, UploadOperation::Error> UploadOperation::prepareInStrand(Rem
         const auto limits = fileSystem.inStrand(RemoteIo::ReadTransferLimits{});
         if (!limits)
             return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = limits.error()});
-        return leaseBufferInStrand(fileSystem, limits->maxWriteLength)
+        // 0 is no limit, the buffer keeps its size.
+        const auto lengthLimit = limits->maxWriteLength == 0u ? std::numeric_limits<std::size_t>::max()
+                                                              : static_cast<std::size_t>(limits->maxWriteLength);
+        return leaseBufferInStrand(fileSystem, lengthLimit)
             .and_then(
                 [this, &fileSystem]()
                 {
