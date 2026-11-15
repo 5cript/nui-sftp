@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/file_tracking/event_spelling.hpp>
+#include <shared_data/directory_entry.hpp>
 #include <paths/paths.hpp>
 
 #include <algorithm>
@@ -22,15 +23,35 @@
 namespace FileTracking
 {
     /**
-     * @brief Size and modification time (seconds) of a file on the server.
+     * @brief Size and modification time (seconds) of a file on the server, the time as exact as the server told it.
      */
     struct ServerState
     {
         std::uint64_t mtime{0};
         std::uint64_t size{0};
+        SharedData::TimePrecision mtimePrecision{SharedData::TimePrecision::Second};
 
-        friend bool operator==(ServerState const&, ServerState const&) = default;
+        /**
+         * @brief The same size and time, the time at the coarser precision of both: a listing may round it.
+         */
+        friend bool operator==(ServerState const& first, ServerState const& second)
+        {
+            return first.size == second.size &&
+                SharedData::compareTimes(first.mtime, first.mtimePrecision, second.mtime, second.mtimePrecision) == 0;
+        }
     };
+
+    /**
+     * @brief What @p information, an entry as the server told it, says of its file.
+     */
+    inline ServerState serverStateOf(SharedData::DirectoryEntry const& information)
+    {
+        return ServerState{
+            .mtime = information.mtime,
+            .size = information.size,
+            .mtimePrecision = information.mtimePrecision,
+        };
+    }
 
     /**
      * @brief Size and modification time of a local file, as exact as its file system keeps them: the state an upload
