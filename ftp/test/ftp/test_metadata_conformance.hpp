@@ -361,7 +361,9 @@ namespace FileTransferProtocol::Test
         using SharedData::FileType;
         dialect_->learnFrom(features_);
         ASSERT_TRUE(dialect_->probesEntries()) << "FEAT lists neither MLST nor SIZE";
-        ASSERT_NO_FATAL_FAILURE(expectEntry(probeOf(pathOf("plain.txt")), "plain.txt", FileType::Regular, 11u));
+        const auto plain = probeOf(pathOf("plain.txt"));
+        ASSERT_NO_FATAL_FAILURE(expectEntry(plain, "plain.txt", FileType::Regular, 11u));
+        EXPECT_TRUE(plain->modified) << "MLST and MDTM tell the exact time";
         ASSERT_NO_FATAL_FAILURE(
             expectEntry(probeOf(pathOf("unreadable.txt")), "unreadable.txt", FileType::Regular, 7u)
         );

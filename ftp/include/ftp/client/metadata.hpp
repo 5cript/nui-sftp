@@ -151,10 +151,10 @@ namespace FileTransferProtocol
 
     /**
      * @brief What a write to the absolute @p path would meet, with commands on the control connection only: MLST where
-     *        it works, else SIZE for a file, then CWD for a directory. proftpd's and pyftpdlib's MLST, SIZE and CWD
-     *        follow links, so a link reads as what it leads to there; pure-ftpd's MLST shows links.
+     *        it works, else SIZE and MDTM for a file, then CWD for a directory. proftpd's and pyftpdlib's MLST, SIZE
+     *        and CWD follow links, so a link reads as what it leads to there; pure-ftpd's MLST shows links.
      *
-     * @return The entry, named like the last segment of @p path, a file with its size but no time where SIZE told.
+     * @return The entry, named like the last segment of @p path, a file with its size, and its time where MDTM told.
      *         NoSuchFile when nothing answers, also for a dangling link or a path the server cannot reach. Unsupported
      *         where neither MLST nor SIZE works, see ServerDialect::probesEntries().
      */
@@ -274,7 +274,8 @@ namespace FileTransferProtocol
     /**
      * @brief @p entry as the rest of the application reads entries. A name that is no UTF-8 is shown with U+FFFD and
      *        marked, owner, group and link target are made UTF-8. A time from LIST is taken as UTC with seconds as
-     *        listed, the listing names no time zone and vsftpd and proftpd print UTC.
+     *        listed, the listing names no time zone and vsftpd and proftpd print UTC; its precision is that of the
+     *        listing.
      */
     SharedData::DirectoryEntry toDirectoryEntry(ListingEntry const& entry);
 }

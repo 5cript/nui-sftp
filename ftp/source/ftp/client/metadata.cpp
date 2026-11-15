@@ -711,7 +711,7 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief What SIZE, then CWD tell of @p path.
+         * @brief What SIZE and MDTM, then CWD tell of @p path.
          *
          * @return The entry, named like the last segment of @p path, nothing when neither answers. Unsupported where
          *         the server lacks SIZE.
@@ -729,7 +729,14 @@ namespace FileTransferProtocol
                 const auto bytes = parseSizeReply(*size);
                 if (!bytes)
                     co_return std::unexpected(bytes.error());
-                co_return ListingEntry{.name = name, .type = FileType::Regular, .size = *bytes};
+                ListingEntry entry{.name = name, .type = FileType::Regular, .size = *bytes};
+                const auto modified =
+                    co_await control->execute(Command{.verb = Verb::ModificationTime, .argument = path});
+                if (!modified)
+                    co_return std::unexpected(modified.error());
+                if (const auto time = parseModificationTimeReply(*modified))
+                    entry.modified = *time;
+                co_return entry;
             }
             if (auto refusal = replyError(*size, Verb::Size); lacksTheCommand(refusal))
                 co_return std::unexpected(std::move(refusal));
@@ -1102,7 +1109,12 @@ namespace FileTransferProtocol
             );
         }
         else if (entry.listedTime)
+        {
             converted.mtime = secondsSinceEpoch(entry.listedTime->time.time_since_epoch().count());
+            converted.mtimePrecision = entry.listedTime->precision == ListedTimePrecision::Day
+                ? SharedData::TimePrecision::Day
+                : SharedData::TimePrecision::Minute;
+        }
         if (entry.linkTarget)
             converted.linkTarget = Paths::sanitizedUtf8(*entry.linkTarget);
         return converted;

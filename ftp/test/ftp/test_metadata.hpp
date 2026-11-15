@@ -528,6 +528,8 @@ namespace FileTransferProtocol::Test
         script.reply("220 Ready")
             .expect("SIZE", "/dir/a")
             .reply("213 5")
+            .expect("MDTM", "/dir/a")
+            .reply("213 20240102030405")
             .expect("SIZE", "/dir/sub")
             .reply("550 Could not get file size.");
         enters(script, "/dir/sub")
@@ -542,6 +544,7 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(file) << file.error().toString();
         EXPECT_EQ(file->type, SharedData::FileType::Regular);
         EXPECT_EQ(file->size, std::optional<std::uint64_t>{5u});
+        EXPECT_TRUE(file->modified);
         const auto directory = probeIn(connection, "/dir/sub");
         ASSERT_TRUE(directory) << directory.error().toString();
         EXPECT_EQ(directory->name, "sub");
@@ -561,8 +564,12 @@ namespace FileTransferProtocol::Test
             .reply("500 Unknown command.")
             .expect("SIZE", "/dir/a")
             .reply("213 5")
+            .expect("MDTM", "/dir/a")
+            .reply("213 20240102030405")
             .expect("SIZE", "/dir/a")
             .reply("213 5")
+            .expect("MDTM", "/dir/a")
+            .reply("502 Command not implemented.")
             .expectDisconnect();
         const auto connection = plainConnection(std::move(script));
 
@@ -571,6 +578,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(dialect_->machineListSingle(), Support::Refused);
         const auto second = probeIn(connection, "/dir/a");
         ASSERT_TRUE(second) << second.error().toString();
+        EXPECT_FALSE(second->modified) << "a time MDTM did not tell";
         EXPECT_TRUE(dialect_->probesEntries());
     }
 
@@ -892,6 +900,7 @@ namespace FileTransferProtocol::Test
             toDirectoryEntry(FileTransferProtocol::ListingEntry{.name = "a", .size = 3u, .modified = modified});
         EXPECT_EQ(converted.mtime, static_cast<std::uint64_t>(floor<seconds>(modified).time_since_epoch().count()));
         EXPECT_EQ(converted.mtimeNsec, 250'000'000u);
+        EXPECT_EQ(converted.mtimePrecision, SharedData::TimePrecision::Second);
         EXPECT_EQ(converted.size, 3u);
     }
 
@@ -911,6 +920,19 @@ namespace FileTransferProtocol::Test
             )
         );
         EXPECT_EQ(converted.mtimeNsec, 0u);
+        EXPECT_EQ(converted.mtimePrecision, SharedData::TimePrecision::Minute);
+    }
+
+    TEST(DirectoryEntryConversionTests, AListedYearIsADayPrecision)
+    {
+        using namespace std::chrono;
+        const auto converted = toDirectoryEntry(
+            FileTransferProtocol::ListingEntry{
+                .name = "a",
+                .listedTime = ListedTime{.time = local_days{2024y / March / 4}, .precision = ListedTimePrecision::Day}
+            }
+        );
+        EXPECT_EQ(converted.mtimePrecision, SharedData::TimePrecision::Day);
     }
 
     TEST(DirectoryEntryConversionTests, ALinkKeepsItsTargetAsUtf8)
