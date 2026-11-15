@@ -554,6 +554,27 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(missing.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
     }
 
+    TEST_F(MetadataTests, AProbeForAFileAsksNoCwd)
+    {
+        dialect_->learnSize(Support::Works);
+        Script script{};
+        script.reply("220 Ready")
+            .expect("SIZE", "/dir/a.filepart")
+            .reply("550 Could not get file size.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto probed =
+            run(connection,
+                [session = sessionOf(connection)]() -> asio::awaitable<EntryResult>
+                {
+                    co_return co_await probePath(session, "/dir/a.filepart", RemoteIo::ProbeFor::File);
+                });
+
+        ASSERT_FALSE(probed);
+        EXPECT_EQ(probed.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+    }
+
     TEST_F(MetadataTests, AnMlstTheServerLacksIsLearnedAndSizeAnswers)
     {
         dialect_->learnMachineListSingle(Support::Works);

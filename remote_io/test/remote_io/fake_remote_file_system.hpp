@@ -412,6 +412,11 @@ namespace RemoteIo::Test
         {
             if (!options_.capabilities.probeEntries)
                 return std::unexpected(errorOf(RemoteErrorKind::Unsupported, "No lookup of a single path"));
+            // As SIZE over FTP, which finds files only.
+            auto const* node = find(operation.path);
+            if (operation.lookingFor == ProbeFor::File && node != nullptr &&
+                node->type != SharedData::FileType::Regular)
+                return std::unexpected(noSuchFile(operation.path));
             return run(Lstat{.path = operation.path})
                 .transform(
                     [this](FileInformation information)

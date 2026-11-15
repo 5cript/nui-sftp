@@ -523,7 +523,7 @@ UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem
         return std::unexpected(unchanged.error());
     if (options_.adoptPartialOf)
         takeOverPartialFileInStrand(fileSystem);
-    const auto tempResult = RemoteIo::probeEntryInStrand(fileSystem, tempPath_);
+    const auto tempResult = RemoteIo::probeEntryInStrand(fileSystem, tempPath_, RemoteIo::ProbeFor::File);
 
     const auto perms = remoteFilePerms();
 
@@ -660,7 +660,8 @@ Paths::RemotePath const& UploadOperation::writtenPath() const
 void UploadOperation::takeOverPartialFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     const auto partial = options_.adoptPartialOf->withFilenameSuffix(options_.tempFileSuffix);
-    if (!partial || *partial == tempPath_ || RemoteIo::probeEntryInStrand(fileSystem, tempPath_).has_value())
+    if (!partial || *partial == tempPath_ ||
+        RemoteIo::probeEntryInStrand(fileSystem, tempPath_, RemoteIo::ProbeFor::File).has_value())
         return;
     if (options_.createMissingDirectories)
     {

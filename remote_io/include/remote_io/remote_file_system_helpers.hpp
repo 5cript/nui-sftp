@@ -19,8 +19,11 @@ namespace RemoteIo
      * @brief What a write or a rename to @p path would meet: ProbeEntry where Capabilities::probeEntries is set, else
      *        Lstat. Must be called on the processing thread of the file system's strand.
      */
-    std::expected<FileInformation, RemoteError>
-    probeEntryInStrand(IRemoteFileSystem& fileSystem, Paths::RemotePath const& path);
+    std::expected<FileInformation, RemoteError> probeEntryInStrand(
+        IRemoteFileSystem& fileSystem,
+        Paths::RemotePath const& path,
+        ProbeFor lookingFor = ProbeFor::AnyEntry
+    );
 
     /**
      * @brief Renames without replacing @p destination, fails with AlreadyExists when it exists. Must be called on the

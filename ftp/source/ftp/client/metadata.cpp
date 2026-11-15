@@ -655,11 +655,16 @@ namespace FileTransferProtocol
         /**
          * @brief What SIZE and MDTM, then CWD tell of @p path, which all follow links.
          *
-         * @return The entry, named like the last segment of @p path, nothing when none of them answers. The
-         *         replyError() of a refusal that tellsNothingOfThePath() where @p untelling says so.
+         * @return The entry, named like the last segment of @p path, nothing when none of them answers, or SIZE does
+         * not and @p lookingFor is a file. The replyError() of a refusal that tellsNothingOfThePath() where
+         *         @p untelling says so.
          */
-        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
-        followedEntry(MetadataSession session, std::string path, UntellingRefusal untelling)
+        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>> followedEntry(
+            MetadataSession session,
+            std::string path,
+            UntellingRefusal untelling,
+            RemoteIo::ProbeFor lookingFor = RemoteIo::ProbeFor::AnyEntry
+        )
         {
             auto const& control = session.transfer.control;
             const auto fails = [untelling](RemoteIo::RemoteError const& refusal)
@@ -679,6 +684,8 @@ namespace FileTransferProtocol
             }
             if (auto refusal = replyError(*size, Verb::Size); fails(refusal))
                 co_return std::unexpected(std::move(refusal));
+            if (lookingFor == RemoteIo::ProbeFor::File)
+                co_return std::nullopt;
             const auto entered = co_await changeDirectory(control, path);
             if (entered)
                 co_return ListingEntry{.name = std::string{lastSegmentOf(path)}, .type = FileType::Directory};
@@ -764,7 +771,7 @@ namespace FileTransferProtocol
     }
 
     asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
-    probePath(MetadataSession session, std::string path)
+    probePath(MetadataSession session, std::string path, RemoteIo::ProbeFor lookingFor)
     {
         auto& dialect = *session.dialect;
         if (dialect.machineListSingle() == Support::Works)
@@ -778,7 +785,7 @@ namespace FileTransferProtocol
         }
         if (dialect.size() != Support::Works)
             co_return std::unexpected(cannotProbe());
-        auto sized = co_await followedEntry(std::move(session), std::move(path), UntellingRefusal::Fails);
+        auto sized = co_await followedEntry(std::move(session), std::move(path), UntellingRefusal::Fails, lookingFor);
         if (sized || !lacksTheCommand(sized.error()))
             co_return foundOrMissing(std::move(sized));
         dialect.learnSize(Support::Refused);

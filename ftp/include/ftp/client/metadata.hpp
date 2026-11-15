@@ -4,6 +4,7 @@
 #include <ftp/protocol/features.hpp>
 #include <ftp/protocol/listing.hpp>
 #include <remote_io/remote_error.hpp>
+#include <remote_io/remote_file_system_operations.hpp>
 #include <shared_data/directory_entry.hpp>
 
 #include <boost/asio/awaitable.hpp>
@@ -157,10 +158,11 @@ namespace FileTransferProtocol
      * @return The entry, named like the last segment of @p path, a file with its size, and its time where MDTM told.
      *         NoSuchFile when nothing answers, also for a dangling link or a path the server cannot reach. Unsupported
      *         where neither MLST nor SIZE works, see ServerDialect::probesEntries(). The replyError() of a command
-     *         that failed for now (4yz) without naming a missing path: that tells nothing of the path.
+     *         that failed for now (4yz) without naming a missing path: that tells nothing of the path. Without MLST a
+     *         directory is NoSuchFile where @p lookingFor is a file, no CWD asks for it.
      */
     boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
-    probePath(MetadataSession session, std::string path);
+    probePath(MetadataSession session, std::string path, RemoteIo::ProbeFor lookingFor = RemoteIo::ProbeFor::AnyEntry);
 
     /**
      * @brief statPath() for a path that a listing showed as a symlink: when neither SIZE nor CWD answers, the target
