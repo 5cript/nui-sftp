@@ -140,6 +140,12 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> finishUpload();
 
         /**
+         * @brief Ends a download cut short while serverMayBeInHandshake(): waits for the server's first bytes or its
+         *        end, which it sends only once its handshake ended, within the inactivity timeout, then closes.
+         */
+        boost::asio::awaitable<void> closeOnceAnswered();
+
+        /**
          * @brief Closes at once, operations under way end as Cancelled.
          */
         void close();
@@ -164,6 +170,13 @@ namespace FileTransferProtocol
          * @brief The handshake of secure() resumed the control connection's session.
          */
         bool resumed() const;
+
+        /**
+         * @brief Nothing was read or written since the TLS handshake, so the server may still finish its side of it. A
+         *        reset then can lose the client's last handshake message, and proftpd ends the whole session for a data
+         *        handshake that failed.
+         */
+        bool serverMayBeInHandshake() const;
 
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
@@ -194,5 +207,8 @@ namespace FileTransferProtocol
         bool secured_{false};
         bool resumed_{false};
         bool closed_{false};
+        /** @brief Something was read or the data ended since the handshake. */
+        bool answered_{false};
+        bool wrote_{false};
     };
 }

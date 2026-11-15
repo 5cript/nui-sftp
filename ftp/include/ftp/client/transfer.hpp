@@ -187,6 +187,11 @@ namespace FileTransferProtocol
          * @brief Closes the data connection and sends ABOR, the next read starts the transfer again.
          */
         void drop(std::string_view why);
+        /**
+         * @brief Closes the data connection, once the server answered on it where it may still be in its TLS
+         *        handshake (DataConnection::serverMayBeInHandshake()).
+         */
+        void closeData();
 
         TransferSession session_;
         DownloadRequest request_;
@@ -286,8 +291,9 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
         /**
-         * @brief Ends the upload as failed: resets the data connection and sends ABOR. A final reply that comes after
-         *        it never completes the upload, not even a 226: the server may keep the partial file.
+         * @brief Ends the upload as failed: resets the data connection and sends ABOR, or ends an upload cut before
+         *        any byte cleanly, see endData(). A final reply that comes after it never completes the upload, not
+         *        even a 226: the server may keep the partial file.
          */
         void abort();
 
@@ -302,6 +308,13 @@ namespace FileTransferProtocol
          */
         RemoteIo::RemoteError failureOf(std::optional<Reply> const& answer, RemoteIo::RemoteError dataError);
         Verb verb() const;
+        /**
+         * @brief Resets the data connection, or ends it cleanly where the server may still be in its TLS handshake
+         *        (DataConnection::serverMayBeInHandshake()): nothing was sent, so the server only gets an empty file.
+         *
+         * @return Whether it was reset, which leaves the server a transfer to abort.
+         */
+        bool endData();
 
         TransferSession session_;
         UploadRequest request_;
@@ -313,6 +326,7 @@ namespace FileTransferProtocol
         /** @brief The data ended so that the server took all of it. */
         bool dataEnded_{false};
         bool aborted_{false};
+        bool writing_{false};
     };
 
     /**

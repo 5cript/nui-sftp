@@ -215,11 +215,18 @@ namespace FileTransferProtocol
         if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
             co_return std::unexpected(cancelled());
         if (!error)
+        {
+            answered_ = true;
             co_return size;
+        }
         if (error == asio::error::eof)
+        {
+            answered_ = true;
             co_return std::size_t{0u};
+        }
         if (error == asio::ssl::error::stream_truncated)
         {
+            answered_ = true;
             endedWithoutCloseNotify_ = true;
             co_return std::size_t{0u};
         }
@@ -240,6 +247,7 @@ namespace FileTransferProtocol
                 co_return std::unexpected(cancelled());
             if (error)
                 co_return std::unexpected(transferError(error, error == asio::error::operation_aborted, "Writing"));
+            wrote_ = true;
             buffer += size;
         }
         co_return std::expected<void, RemoteIo::RemoteError>{};
@@ -305,6 +313,12 @@ namespace FileTransferProtocol
         co_return std::unexpected(transferError(error, false, "Ending"));
     }
 
+    asio::awaitable<void> DataConnection::closeOnceAnswered()
+    {
+        co_await readSome(asio::buffer(drainBuffer_));
+        close();
+    }
+
     void DataConnection::close()
     {
         closed_ = true;
@@ -333,6 +347,11 @@ namespace FileTransferProtocol
     bool DataConnection::resumed() const
     {
         return resumed_;
+    }
+
+    bool DataConnection::serverMayBeInHandshake() const
+    {
+        return secured_ && !answered_ && !wrote_ && !closed_;
     }
 
     asio::ip::tcp::endpoint DataConnection::remoteEndpoint() const

@@ -7,6 +7,7 @@
 
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/post.hpp>
@@ -118,6 +119,33 @@ namespace FileTransferProtocol
          * @brief Writes ABOR into the running transfer of @p command, the control connection takes the replies up to
          *        its marker. Nothing once the transfer or the connection ended.
          */
+        asio::awaitable<void> closedOnceAnswered(std::shared_ptr<DataConnection> data)
+        {
+            co_await data->closeOnceAnswered();
+        }
+
+        asio::awaitable<void> endedCleanly(std::shared_ptr<DataConnection> data)
+        {
+            co_await data->finishUpload();
+        }
+
+        /**
+         * @brief Resets @p data on the strand it is on, or ends it cleanly where the server may still be in its TLS
+         *        handshake.
+         *
+         * @return Whether it was reset, which leaves the server a transfer to abort.
+         */
+        bool endUploadData(std::shared_ptr<DataConnection> data, asio::strand<asio::any_io_executor> const& strand)
+        {
+            if (!data->serverMayBeInHandshake())
+            {
+                data->reset();
+                return true;
+            }
+            asio::co_spawn(strand, endedCleanly(std::move(data)), asio::detached);
+            return false;
+        }
+
         void abortTransfer(ControlConnection& control, PendingCommand const& command, std::string_view what)
         {
             if (control.state() != ControlState::Open || command.stage() == PendingCommand::Stage::Completed)
@@ -465,7 +493,7 @@ namespace FileTransferProtocol
     void Download::drop(std::string_view why)
     {
         dropped_ = true;
-        data_->close();
+        closeData();
         abortTransfer(*session_.control, *retrieve_, why);
     }
 
@@ -491,8 +519,18 @@ namespace FileTransferProtocol
             return;
         aborted_ = true;
         pauseTimer_.cancel();
-        data_->close();
+        closeData();
         abortTransfer(*session_.control, *retrieve_, "a failed download");
+    }
+
+    void Download::closeData()
+    {
+        if (reading_ || !data_->serverMayBeInHandshake())
+        {
+            data_->close();
+            return;
+        }
+        asio::co_spawn(session_.control->strand(), closedOnceAnswered(data_), asio::detached);
     }
 
     Upload::Upload(
@@ -517,9 +555,9 @@ namespace FileTransferProtocol
         // A FIN could make the server take the cut file for a complete one. The last owner may let go off the strand.
         asio::post(
             session_.control->strand(),
-            [data = std::move(data_)]()
+            [data = std::move(data_), strand = session_.control->strand()]() mutable
             {
-                data->reset();
+                endUploadData(std::move(data), strand);
             }
         );
     }
@@ -548,7 +586,9 @@ namespace FileTransferProtocol
     {
         if (aborted_)
             co_return std::unexpected(aborted());
+        writing_ = true;
         const auto written = co_await data_->writeAll(buffer);
+        writing_ = false;
         if (!written)
         {
             // A cancelled coroutine would throw at its next co_await.
@@ -637,8 +677,19 @@ namespace FileTransferProtocol
         if (aborted_)
             return;
         aborted_ = true;
-        data_->reset();
-        abortTransfer(*session_.control, *store_, "an aborted upload");
+        // An ABOR beside a clean end can make proftpd answer with garbage in its 426, the server answers it as any end.
+        if (endData())
+            abortTransfer(*session_.control, *store_, "an aborted upload");
+    }
+
+    bool Upload::endData()
+    {
+        if (writing_)
+        {
+            data_->reset();
+            return true;
+        }
+        return endUploadData(data_, session_.control->strand());
     }
 
     asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>

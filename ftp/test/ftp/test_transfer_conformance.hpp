@@ -290,6 +290,35 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(expectDownload({.path = pathOf("one.bin"), .expectedSize = 1u}, fixtureContent(1u)));
     }
 
+    TEST_P(TransferConformance, AnAbortBeforeTheFirstByteOrAfterTheLastKeepsTheLogin)
+    {
+        const auto whole = fixtureContent(16384u);
+        for (const auto readFirst : {false, true})
+        {
+            auto started = startDownload({.path = pathOf("chunk.bin"), .expectedSize = whole.size()});
+            ASSERT_TRUE(started) << started.error().toString();
+            auto const download = std::move(started).value();
+            if (readFirst)
+            {
+                // One byte more than the file has, so the read sees the data end.
+                const auto all = readFrom(download, whole.size() + 1u);
+                ASSERT_TRUE(all) << all.error().toString();
+                EXPECT_EQ(all->content.size(), whole.size());
+            }
+            onStrand(
+                connection_,
+                [download]() -> boost::asio::awaitable<void>
+                {
+                    download->abort();
+                    co_return;
+                }
+            );
+            ASSERT_NO_FATAL_FAILURE(expectUsableLogin()) << "read first: " << readFirst;
+            ASSERT_NO_FATAL_FAILURE(expectDownload({.path = pathOf("one.bin"), .expectedSize = 1u}, fixtureContent(1u)))
+                << "read first: " << readFirst;
+        }
+    }
+
     TEST_P(TransferConformance, EveryDataConnectionOfALoginResumesItsTlsSession)
     {
         const auto tls = mode() != TlsMode::None;
@@ -370,6 +399,39 @@ namespace FileTransferProtocol::Test
         const auto rest = upload({.path = path, .offset = *kept}, content.substr(*kept));
         ASSERT_TRUE(rest) << rest.error().toString();
         ASSERT_NO_FATAL_FAILURE(expectDownload({.path = path, .expectedSize = content.size()}, content));
+    }
+
+    TEST_P(TransferConformance, AnUploadAbortedBeforeTheFirstByteOrAfterTheLastIsNotComplete)
+    {
+        const auto content = uploadContent(64u * 1024u);
+        for (const auto writeAll : {false, true})
+        {
+            const auto path = pathOf(writeAll ? "aborted-at-the-end.bin" : "aborted-at-the-start.bin");
+            const auto aborted = onStrand(
+                connection_,
+                [session = session_, path, content, writeAll]() -> boost::asio::awaitable<UploadOutcome>
+                {
+                    auto started = co_await Upload::start(session, {.path = path}, transferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    if (writeAll)
+                    {
+                        if (auto sent = co_await upload->write(asio::buffer(content)); !sent)
+                            co_return std::unexpected(std::move(sent).error());
+                    }
+                    upload->abort();
+                    co_return co_await upload->finish();
+                }
+            );
+            ASSERT_FALSE(aborted) << "write all: " << writeAll;
+            EXPECT_EQ(aborted.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << aborted.error().toString();
+            ASSERT_NO_FATAL_FAILURE(expectUsableLogin()) << "write all: " << writeAll;
+            const auto sizeReply = execute(Command{.verb = Verb::Size, .argument = path});
+            ASSERT_TRUE(sizeReply) << sizeReply.error().toString();
+            if (const auto kept = parseSizeReply(*sizeReply))
+                EXPECT_LE(*kept, writeAll ? content.size() : 0u) << "write all: " << writeAll;
+        }
     }
 
     TEST_P(TransferConformance, UploadsReadBackTheSame)
