@@ -240,6 +240,7 @@ namespace FileTransferProtocol
         // The inactivity timeout limits each piece, a slow link may take longer for the whole buffer.
         while (buffer.size() > 0u)
         {
+            writeStarted_ = true;
             const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
             const auto [error, size] = tls_ ? co_await tls_->async_write_some(buffer, token)
                                             : co_await socket_.async_write_some(buffer, token);
@@ -247,7 +248,6 @@ namespace FileTransferProtocol
                 co_return std::unexpected(cancelled());
             if (error)
                 co_return std::unexpected(transferError(error, error == asio::error::operation_aborted, "Writing"));
-            wrote_ = true;
             buffer += size;
         }
         co_return std::expected<void, RemoteIo::RemoteError>{};
@@ -351,7 +351,7 @@ namespace FileTransferProtocol
 
     bool DataConnection::serverMayBeInHandshake() const
     {
-        return secured_ && !answered_ && !wrote_ && !closed_;
+        return secured_ && !answered_ && !writeStarted_ && !closed_;
     }
 
     asio::ip::tcp::endpoint DataConnection::remoteEndpoint() const

@@ -4,6 +4,8 @@
 
 #include <ftp/client/transfer.hpp>
 
+#include <boost/asio/experimental/promise.hpp>
+#include <boost/asio/experimental/use_promise.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -125,6 +127,16 @@ namespace FileTransferProtocol::Test
         {
             ASSERT_FALSE(result) << "uploaded " << result->bytes << " bytes";
             EXPECT_EQ(result.error().kind, kind) << result.error().toString();
+        }
+
+        /**
+         * @brief How the server saw the first data connection end, once the client is gone.
+         */
+        std::optional<std::string> dataEndAfterDisconnect(std::shared_ptr<ControlConnection> const& connection)
+        {
+            connection->close();
+            EXPECT_TRUE(server_->waitUntilDisconnected());
+            return detailOf(server_->transcript(), TranscriptEntry::Kind::DataEnded);
         }
     };
 
@@ -414,6 +426,52 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_TRUE(result->resumedSession);
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
+    }
+
+    TEST_F(UploadTests, TlsUploadCancelledWithItsFirstPieceIsReset)
+    {
+        // A clean end behind bytes that went out would make the server take the cut file for a complete one.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(1u << 20u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto written =
+            run(connection,
+                [connection, session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    const std::string content(4096u, 'c');
+                    // On its strand the write runs up to its wait for the first piece, the cancel comes before it
+                    // learns how that piece went.
+                    auto writing = asio::co_spawn(
+                        connection->strand(), upload->write(asio::buffer(content)), asio::experimental::use_promise
+                    );
+                    writing.cancel();
+                    auto [exception, result] = co_await writing(asio::as_tuple(asio::use_awaitable));
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        ASSERT_FALSE(written);
+        EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << written.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"reset"});
     }
 
     TEST_F(UploadTests, TlsUploadRefusedForSessionReuseIsNoSecureConnection)

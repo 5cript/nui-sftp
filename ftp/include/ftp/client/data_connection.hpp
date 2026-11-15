@@ -172,9 +172,9 @@ namespace FileTransferProtocol
         bool resumed() const;
 
         /**
-         * @brief Nothing was read or written since the TLS handshake, so the server may still finish its side of it. A
-         *        reset then can lose the client's last handshake message, and proftpd ends the whole session for a data
-         *        handshake that failed.
+         * @brief Nothing was read and no write was started since the TLS handshake, so the server may still finish its
+         *        side of it. A reset then can lose the client's last handshake message, and proftpd ends the whole
+         *        session for a data handshake that failed.
          */
         bool serverMayBeInHandshake() const;
 
@@ -209,6 +209,7 @@ namespace FileTransferProtocol
         bool closed_{false};
         /** @brief Something was read or the data ended since the handshake. */
         bool answered_{false};
-        bool wrote_{false};
+        /** @brief A write was started, bytes of it may be out even when it failed or was cancelled. */
+        bool writeStarted_{false};
     };
 }
