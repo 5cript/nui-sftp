@@ -10,8 +10,10 @@ The default. A file is written to `<name>.filepart` next to its destination and 
 nobody sees a half written file and a failed upload leaves the destination as it was. An interrupted upload continues
 its `.filepart` file later.
 
-The destination is checked before the upload and again when the file is moved into place. An existing file is only
-replaced when overwriting was allowed.
+The destination is checked when the file is moved into place: an existing file is only replaced when overwriting
+was allowed. A file larger than 4 KiB that may not overwrite is checked before the upload too, so it is not sent for
+nothing. A smaller one is not: sending it costs less than checking every file, as long as existing destinations are
+rare. Then the rename refuses it and its `.filepart` file is removed.
 
 ### Unsafe fast mode
 
@@ -29,7 +31,9 @@ mode.
 | FTP, server lists `SIZE` but not `MLST` | `SIZE` and `MDTM` for a file, else `CWD` for a directory |
 | FTP, server lists neither | none, see below |
 
-Each check is one to three commands, none of them lists the directory.
+Each check is one to three commands, none of them lists the directory. The `.filepart` file and the destination
+right before the rename are looked up as files only, which is `SIZE` alone: only a file can be continued, and a file
+renamed onto a directory fails by itself.
 
 FTP has no command that reliably tells whether a path exists:
 
@@ -38,6 +42,8 @@ FTP has no command that reliably tells whether a path exists:
 - A dangling link, or a path the server cannot reach, counts as free. A safe upload replaces such a link, an unsafe
   fast upload writes through it.
 - Without `MLST` a special file (FIFO, socket, device) counts as free too: `SIZE` and `CWD` both refuse it.
+- Without `MLST` a symbolic link to a directory that appears at the destination during an upload is replaced by the
+  rename: the lookup right before it asks for a file only.
 
 A command that fails for now (a `4yz` reply) tells nothing of the path: the upload fails, the path does not count as
 free.
