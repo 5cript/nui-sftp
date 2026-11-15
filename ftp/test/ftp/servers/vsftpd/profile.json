@@ -12,12 +12,6 @@
         "features": {"mlsd": false, "mlst": false, "mfmt": false, "utf8": true, "epsv": true},
         "advertised": ["EPRT", "EPSV", "MDTM", "PASV", "PBSZ", "PROT", "REST STREAM", "SIZE", "TVFS"],
         "modificationTime": "mdtm",
-        "abortReplies": {"plain": [426, 225], "tls": [426, 225]},
-        "finalReplyWaitsForDataClose": {"plain": false, "tls": true},
-        "sessionReuseRequired": true,
-        "missingReuse": "endsSession",
-        "connectionLimit": "atGreeting",
-        "repliesTell550Causes": false,
-        "listOfMissingDirectory": "emptyListing"
+        "repliesTell550Causes": false
     }
 }

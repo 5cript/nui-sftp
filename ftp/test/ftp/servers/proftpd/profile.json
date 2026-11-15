@@ -12,12 +12,6 @@
         "features": {"mlsd": true, "mlst": true, "mfmt": true, "utf8": true, "epsv": true},
         "advertised": ["AUTH TLS", "EPRT", "EPSV", "MDTM", "MFMT", "PBSZ", "PROT", "REST STREAM", "SIZE", "TVFS", "UTF8"],
         "modificationTime": "mfmt",
-        "abortReplies": {"plain": [426, 226], "tls": [226, 426]},
-        "finalReplyWaitsForDataClose": {"plain": true, "tls": true},
-        "sessionReuseRequired": true,
-        "missingReuse": "keepsSession",
-        "connectionLimit": "afterPass",
-        "repliesTell550Causes": true,
-        "listOfMissingDirectory": "failsAfterPreliminary"
+        "repliesTell550Causes": true
     }
 }

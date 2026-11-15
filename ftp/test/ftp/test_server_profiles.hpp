@@ -46,8 +46,8 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(profile.has_value()) << profile.error();
         EXPECT_EQ(profile->name, "vsftpd");
         EXPECT_EQ(profile->implicitPort, 990u);
-        EXPECT_EQ(profile->expectations.missingReuse, MissingReuse::EndsSession);
-        EXPECT_EQ(profile->expectations.abortReplies.plain, (std::vector<int>{426, 225}));
+        EXPECT_EQ(profile->expectations.modificationTime, ModificationTimeCommand::Mdtm);
+        EXPECT_FALSE(profile->expectations.repliesTell550Causes);
     }
 
     TEST(ServerProfileTests, AMissingFileIsAnError)
@@ -73,11 +73,12 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(valid.has_value()) << valid.error();
         std::ifstream stream{valid->directory / "profile.json"};
         std::string text{std::istreambuf_iterator<char>{stream}, {}};
-        const std::string known = R"("missingReuse": "endsSession")";
-        text.replace(text.find(known), known.size(), R"("missingReuse": "shrugs")");
+        const std::string known = R"("modificationTime": "mdtm")";
+        text.replace(text.find(known), known.size(), R"("modificationTime": "shrugs")");
 
         const auto profile = loadServerProfile(writeProfile(text));
         ASSERT_FALSE(profile.has_value());
-        EXPECT_NE(profile.error().find("missingReuse: unknown value 'shrugs'"), std::string::npos) << profile.error();
+        EXPECT_NE(profile.error().find("modificationTime: unknown value 'shrugs'"), std::string::npos)
+            << profile.error();
     }
 }
