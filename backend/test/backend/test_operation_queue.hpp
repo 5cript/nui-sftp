@@ -3234,10 +3234,11 @@ namespace Test
             for (auto const& [path, error] : completed.failedEntries)
                 failures.emplace(path.substr(path.rfind('/') + 1), error.type);
         }
+        // A small file is not checked for existence before its upload, the check against the compare finds the new one.
         EXPECT_EQ(
             failures,
             (std::map<std::string, Operation::ErrorType>{
-                {"appears.txt", Operation::ErrorType::FileExists},
+                {"appears.txt", Operation::ErrorType::ChangedSinceCompare},
                 {"edited.txt", Operation::ErrorType::ChangedSinceCompare},
                 {"kept.txt", Operation::ErrorType::ChangedSinceCompare},
             })

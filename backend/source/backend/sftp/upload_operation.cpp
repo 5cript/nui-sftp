@@ -499,21 +499,10 @@ std::expected<bool, UploadOperation::Error> UploadOperation::writeOnceInStrand()
 std::expected<void, UploadOperation::Error>
 UploadOperation::openOrAdoptFileInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
-    const auto result = RemoteIo::probeEntryInStrand(fileSystem, remotePath_);
-    if (!result.has_value())
+    if (checksDestinationFirst())
     {
-        auto const& error = result.error();
-        if (error.kind != RemoteIo::RemoteErrorKind::NoSuchFile)
-        {
-            Log::error(options_.failureToast, "Failed to stat remote sftp file for continue: {}", error.message);
-            return std::unexpected(Error{.type = ErrorType::SftpError, .remoteError = error});
-        }
-        // else ok — target does not yet exist.
-    }
-    else
-    {
-        if (!options_.mayOverwrite)
-            return std::unexpected(destinationExists());
+        if (const auto missing = requireMissingDestinationInStrand(fileSystem); !missing)
+            return missing;
     }
 
     // Checked before anything is sent too, not only before the destination is replaced.
@@ -611,10 +600,17 @@ UploadOperation::openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem
     return {};
 }
 
+bool UploadOperation::checksDestinationFirst() const
+{
+    if (options_.mayOverwrite)
+        return false;
+    return !options_.uncheckedUpToBytes || totalSize_ > *options_.uncheckedUpToBytes;
+}
+
 std::expected<void, UploadOperation::Error>
 UploadOperation::requireMissingDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem) const
 {
-    const auto existing = fileSystem.inStrand(RemoteIo::ProbeEntry{.path = remotePath_});
+    const auto existing = RemoteIo::probeEntryInStrand(fileSystem, remotePath_);
     if (existing.has_value())
         return std::unexpected(destinationExists());
     if (existing.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)

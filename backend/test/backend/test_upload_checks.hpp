@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -20,6 +21,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
 
 extern std::filesystem::path temporaryRoot;
 
@@ -107,6 +109,35 @@ namespace Test
                 .mtime = mtime - mtime % 60u,
                 .mtimePrecision = SharedData::TimePrecision::Minute,
             };
+        }
+
+        /**
+         * @brief Records the ProbeEntry operations @p fake starts from now on.
+         */
+        static std::shared_ptr<std::vector<RemoteIo::ProbeEntry>>
+        recordProbes(RemoteIo::Test::FakeRemoteFileSystem& fake)
+        {
+            auto probes = std::make_shared<std::vector<RemoteIo::ProbeEntry>>();
+            fake.failWhen<RemoteIo::ProbeEntry>(
+                [probes](RemoteIo::ProbeEntry const& probe)
+                {
+                    probes->push_back(probe);
+                    return false;
+                },
+                {}
+            );
+            return probes;
+        }
+
+        static bool probedAnyEntryAt(std::vector<RemoteIo::ProbeEntry> const& probes, std::string const& path)
+        {
+            return std::ranges::any_of(
+                probes,
+                [&path](RemoteIo::ProbeEntry const& probe)
+                {
+                    return probe.path == remote(path) && probe.lookingFor == RemoteIo::ProbeFor::AnyEntry;
+                }
+            );
         }
 
         /** @brief 2023-11-14 22:13:57 UTC. */
@@ -277,5 +308,65 @@ namespace Test
         auto biggerFile = laterFile;
         biggerFile.size = 4u;
         EXPECT_FALSE(ComparedStateCheck::probeMayMislead(listedFile, biggerFile)) << "the size is exact";
+    }
+
+    TEST_F(UploadCheckTests, ASmallFileIsCheckedForFilesOnlyAndOnlyBeforeTheRename)
+    {
+        const auto fake = makeFake(true);
+        const auto probes = recordProbes(*fake);
+        UploadOperation operation{fake, uploadOf("small.txt", std::string(4u * 1024u, 's'), false)};
+
+        const auto result = runToEnd(operation);
+
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        ASSERT_EQ(probes->size(), 2u);
+        EXPECT_EQ(probes->at(0).path, remote("/home/test/small.txt.filepart"));
+        EXPECT_EQ(probes->at(0).lookingFor, RemoteIo::ProbeFor::File);
+        EXPECT_EQ(probes->at(1).path, remote("/home/test/small.txt"));
+        EXPECT_EQ(probes->at(1).lookingFor, RemoteIo::ProbeFor::File);
+    }
+
+    TEST_F(UploadCheckTests, ALargerFileOrTheOptionOffChecksTheDestinationFirst)
+    {
+        const auto fake = makeFake(true);
+        const auto probes = recordProbes(*fake);
+        UploadOperation larger{fake, uploadOf("larger.txt", std::string(4u * 1024u + 1u, 'l'), false)};
+        auto options = uploadOf("checked.txt", "small", false);
+        options.uncheckedUpToBytes = std::nullopt;
+        UploadOperation checked{fake, std::move(options)};
+
+        ASSERT_TRUE(runToEnd(larger).has_value());
+        ASSERT_TRUE(runToEnd(checked).has_value());
+
+        EXPECT_TRUE(probedAnyEntryAt(*probes, "/home/test/larger.txt"));
+        EXPECT_TRUE(probedAnyEntryAt(*probes, "/home/test/checked.txt"));
+    }
+
+    TEST_F(UploadCheckTests, AnUploadThatMayOverwriteChecksNothingBeforeItSends)
+    {
+        const auto fake = makeFake(true);
+        fake->addFile(remote("/home/test/replaced.txt"), "old content");
+        auto options = uploadOf("replaced.txt", std::string(64u * 1024u, 'r'), false);
+        options.mayOverwrite = true;
+        UploadOperation operation{fake, std::move(options)};
+        const auto probes = recordProbes(*fake);
+        ASSERT_TRUE(operation.prepare().has_value());
+
+        EXPECT_FALSE(probedAnyEntryAt(*probes, "/home/test/replaced.txt"));
+        EXPECT_EQ(fake->contentOf(remote("/home/test/replaced.txt")), "old content");
+    }
+
+    TEST_F(UploadCheckTests, ASmallFileOntoAnExistingOneIsRefusedAtTheRenameAndLeavesNoPart)
+    {
+        const auto fake = makeFake(true);
+        fake->addFile(remote("/home/test/kept.txt"), "kept content");
+        UploadOperation operation{fake, uploadOf("kept.txt", "new content", false)};
+
+        const auto result = runToEnd(operation);
+
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, Operation::ErrorType::FileExists);
+        EXPECT_EQ(fake->contentOf(remote("/home/test/kept.txt")), "kept content");
+        EXPECT_FALSE(fake->exists(remote("/home/test/kept.txt.filepart")));
     }
 }
