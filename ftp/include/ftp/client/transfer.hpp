@@ -66,6 +66,8 @@ namespace FileTransferProtocol
          *        connection is Dead then, its replies are out of step.
          */
         std::optional<Reply> finalReply{};
+        /** @brief The TLS handshake of the last data connection resumed the control connection's session. */
+        bool resumedSession{false};
     };
 
     struct DownloadRequest
@@ -227,6 +229,8 @@ namespace FileTransferProtocol
         std::uint64_t bytes{0u};
         /** @brief The positive final reply, without it no upload counts as complete. */
         Reply finalReply{};
+        /** @brief The TLS handshake of the data connection resumed the control connection's session. */
+        bool resumedSession{false};
     };
 
     /**

@@ -808,6 +808,7 @@ namespace FileTransferProtocol::Test
         const auto result = download(connection, {.path = "file"}, tls);
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_EQ(result->content, "secret");
+        EXPECT_TRUE(result->result.resumedSession);
     }
 
     TEST_F(DownloadTlsTests, TlsEndWithoutCloseNotifyAndTheWholeSizeIsComplete)

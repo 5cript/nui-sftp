@@ -343,7 +343,7 @@ namespace FileTransferProtocol
                 !data_->endedWithoutCloseNotify())
             {
                 Log::debug("FTP: Accepted a download without its final reply, its size matched");
-                co_return TransferResult{.bytes = bytes_};
+                co_return TransferResult{.bytes = bytes_, .resumedSession = data_->resumed()};
             }
             co_return std::unexpected(reply.error());
         }
@@ -370,7 +370,9 @@ namespace FileTransferProtocol
     {
         const auto expected = expectedBytes();
         if (expected == bytes_ || (!expected && !data_->endedWithoutCloseNotify()))
-            co_return TransferResult{.bytes = bytes_, .finalReply = std::move(finalReply)};
+            co_return TransferResult{
+                .bytes = bytes_, .finalReply = std::move(finalReply), .resumedSession = data_->resumed()
+            };
 
         // Fewer or more bytes than expected, or TLS that ended without close_notify: the server's size decides now.
         const auto reply = co_await session_.control->execute(Command{.verb = Verb::Size, .argument = request_.path});
@@ -383,7 +385,9 @@ namespace FileTransferProtocol
             }
         );
         if (size && *size == request_.offset + bytes_)
-            co_return TransferResult{.bytes = bytes_, .finalReply = std::move(finalReply)};
+            co_return TransferResult{
+                .bytes = bytes_, .finalReply = std::move(finalReply), .resumedSession = data_->resumed()
+            };
         auto truncated = errorOf(
             RemoteErrorKind::Truncated,
             size ? fmt::format("The download ended after {} of {} bytes", request_.offset + bytes_, *size)
@@ -577,7 +581,7 @@ namespace FileTransferProtocol
             if (!answer || !succeeded(*answer))
                 co_return std::unexpected(failureOf(answer, ended.error()));
             dataEnded_ = true;
-            co_return UploadResult{.bytes = bytes_, .finalReply = *answer};
+            co_return UploadResult{.bytes = bytes_, .finalReply = *answer, .resumedSession = data_->resumed()};
         }
         dataEnded_ = true;
 
@@ -595,7 +599,7 @@ namespace FileTransferProtocol
         }
         if (!succeeded(*reply))
             co_return std::unexpected(refusalOf(*reply, verb(), *data_, *session_.control));
-        co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply)};
+        co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply), .resumedSession = data_->resumed()};
     }
 
     asio::awaitable<std::optional<Reply>> Upload::answerToFailedData()

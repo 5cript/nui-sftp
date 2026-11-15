@@ -290,6 +290,24 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(expectDownload({.path = pathOf("one.bin"), .expectedSize = 1u}, fixtureContent(1u)));
     }
 
+    TEST_P(TransferConformance, EveryDataConnectionOfALoginResumesItsTlsSession)
+    {
+        const auto tls = mode() != TlsMode::None;
+        // Six data connections of one control connection, uploads and downloads in turn.
+        for (std::size_t round = 0u; round < 3u; ++round)
+        {
+            const auto name = fmt::format("resumed-{}.bin", round);
+            const auto content = uploadContent(1000u + round);
+            const auto uploaded = upload({.path = pathOf(name)}, content);
+            ASSERT_TRUE(uploaded) << name << ": " << uploaded.error().toString();
+            EXPECT_EQ(uploaded->resumedSession, tls) << name;
+            const auto downloaded = download({.path = pathOf(name), .expectedSize = content.size()});
+            ASSERT_TRUE(downloaded) << name << ": " << downloaded.error().toString();
+            EXPECT_TRUE(downloaded->content == content) << name;
+            EXPECT_EQ(downloaded->result.resumedSession, tls) << name;
+        }
+    }
+
     TEST_P(TransferConformance, SeekBackContinuesAtThePosition)
     {
         const auto whole = fixtureContent(10485760u);

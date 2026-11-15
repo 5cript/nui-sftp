@@ -412,6 +412,7 @@ namespace FileTransferProtocol::Test
         const std::string content(200u * 1024u, 't');
         const auto result = upload(connection, {.path = "file"}, content, tls);
         ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_TRUE(result->resumedSession);
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
     }
 
