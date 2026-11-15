@@ -156,7 +156,8 @@ namespace FileTransferProtocol
      *
      * @return The entry, named like the last segment of @p path, a file with its size, and its time where MDTM told.
      *         NoSuchFile when nothing answers, also for a dangling link or a path the server cannot reach. Unsupported
-     *         where neither MLST nor SIZE works, see ServerDialect::probesEntries().
+     *         where neither MLST nor SIZE works, see ServerDialect::probesEntries(). The replyError() of a command
+     *         that failed for now (4yz) without naming a missing path: that tells nothing of the path.
      */
     boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
     probePath(MetadataSession session, std::string path);

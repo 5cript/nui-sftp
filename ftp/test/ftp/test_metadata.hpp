@@ -608,6 +608,53 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(dialect_->probesEntries());
     }
 
+    TEST_F(MetadataTests, AnMlstThatFailedForNowFailsTheProbeAndNamesNoMissingPath)
+    {
+        dialect_->learnMachineListSingle(Support::Works);
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MLST", "/dir/busy")
+            .reply("450 Requested file action not taken.")
+            .expect("MLST", "/dir/gone")
+            .reply("450 /dir/gone: No such file or directory")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto busy = probeIn(connection, "/dir/busy");
+        ASSERT_FALSE(busy);
+        EXPECT_EQ(busy.error().protocolCode, 450);
+        EXPECT_NE(busy.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+        const auto gone = probeIn(connection, "/dir/gone");
+        ASSERT_FALSE(gone);
+        EXPECT_EQ(gone.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+        EXPECT_EQ(dialect_->machineListSingle(), Support::Works);
+    }
+
+    TEST_F(MetadataTests, ASizeOrCwdThatFailedForNowFailsTheProbeAndNamesNoMissingPath)
+    {
+        dialect_->learnSize(Support::Works);
+        Script script{};
+        script.reply("220 Ready")
+            .expect("SIZE", "/dir/busy")
+            .reply("450 Requested file action not taken.")
+            .expect("SIZE", "/dir/sub")
+            .reply("550 Could not get file size.")
+            .expect("CWD", "/dir/sub")
+            .reply("451 Requested action aborted: local error in processing.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto busy = probeIn(connection, "/dir/busy");
+        ASSERT_FALSE(busy);
+        EXPECT_EQ(busy.error().protocolCode, 450);
+        EXPECT_NE(busy.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+        const auto directory = probeIn(connection, "/dir/sub");
+        ASSERT_FALSE(directory);
+        EXPECT_EQ(directory.error().protocolCode, 451);
+        EXPECT_NE(directory.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+        EXPECT_EQ(dialect_->size(), Support::Works);
+    }
+
     TEST_F(MetadataTests, ALinkWhoseTargetEndsWithItsPathKeepsTheTarget)
     {
         Script script{};
