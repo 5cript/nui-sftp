@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ftp/client/transfer.hpp>
+#include <ftp/protocol/features.hpp>
 #include <ftp/protocol/listing.hpp>
 #include <remote_io/remote_error.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -73,12 +74,28 @@ namespace FileTransferProtocol
         ModificationTimeSetter modificationTimeSetter() const;
         void learnModificationTimeSetter(ModificationTimeSetter setter);
 
+        /** @brief MLST of a single path, RFC 3659 7, as FEAT lists it. A refusal overrides FEAT. */
+        Support machineListSingle() const;
+        void learnMachineListSingle(Support support);
+
+        /** @brief SIZE, RFC 3659 4, as FEAT lists it. A refusal overrides FEAT. */
+        Support size() const;
+        void learnSize(Support support);
+
+        /** @brief Takes MLST and SIZE as working where @p features lists them, RFC 3659 asks servers to list both. */
+        void learnFrom(Features const& features);
+
+        /** @brief probePath() can answer: MLST or SIZE works as far as the session knows. */
+        bool probesEntries() const;
+
       private:
         std::atomic<Support> machineListing_{Support::Unknown};
         std::atomic<Support> listAll_{Support::Unknown};
         std::atomic<Support> status_{Support::Unknown};
         std::atomic<Support> statusListsDots_{Support::Unknown};
         std::atomic<ModificationTimeSetter> modificationTimeSetter_{ModificationTimeSetter::Unknown};
+        std::atomic<Support> machineListSingle_{Support::Unknown};
+        std::atomic<Support> size_{Support::Unknown};
     };
 
     /**
@@ -131,6 +148,18 @@ namespace FileTransferProtocol
      */
     boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
     statPath(MetadataSession session, std::string path);
+
+    /**
+     * @brief What a write to the absolute @p path would meet, with commands on the control connection only: MLST where
+     *        it works, else SIZE for a file, then CWD for a directory. proftpd's and pyftpdlib's MLST, SIZE and CWD
+     *        follow links, so a link reads as what it leads to there; pure-ftpd's MLST shows links.
+     *
+     * @return The entry, named like the last segment of @p path, a file with its size but no time where SIZE told.
+     *         NoSuchFile when nothing answers, also for a dangling link or a path the server cannot reach. Unsupported
+     *         where neither MLST nor SIZE works, see ServerDialect::probesEntries().
+     */
+    boost::asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    probePath(MetadataSession session, std::string path);
 
     /**
      * @brief statPath() for a path that a listing showed as a symlink: when neither SIZE nor CWD answers, the target

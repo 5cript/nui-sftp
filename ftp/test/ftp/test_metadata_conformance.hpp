@@ -98,6 +98,17 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        EntryResult probeOf(std::string path)
+        {
+            return onStrand(
+                connection_,
+                [session = metadataSession(), path = std::move(path)]() -> boost::asio::awaitable<EntryResult>
+                {
+                    co_return co_await probePath(session, path);
+                }
+            );
+        }
+
         EntryResult statOf(std::string path)
         {
             return onStrand(
@@ -343,6 +354,29 @@ namespace FileTransferProtocol::Test
         ASSERT_NO_FATAL_FAILURE(expectEntry(statOf(pathOf("directory")), "directory", FileType::Directory));
         ASSERT_NO_FATAL_FAILURE(expectEntry(statOf(pathOf("unreadable.txt")), "unreadable.txt", FileType::Regular, 7u));
         ASSERT_NO_FATAL_FAILURE(expectMissing(statOf(pathOf("dangling-link")), "dangling-link"));
+    }
+
+    TEST_P(MetadataConformance, AProbeFindsFilesAndDirectoriesAndFollowsLinks)
+    {
+        using SharedData::FileType;
+        dialect_->learnFrom(features_);
+        ASSERT_TRUE(dialect_->probesEntries()) << "FEAT lists neither MLST nor SIZE";
+        ASSERT_NO_FATAL_FAILURE(expectEntry(probeOf(pathOf("plain.txt")), "plain.txt", FileType::Regular, 11u));
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(probeOf(pathOf("unreadable.txt")), "unreadable.txt", FileType::Regular, 7u)
+        );
+        ASSERT_NO_FATAL_FAILURE(expectEntry(probeOf(pathOf("unwritable/file.txt")), "file.txt", FileType::Regular, 7u));
+        ASSERT_NO_FATAL_FAILURE(expectEntry(probeOf(pathOf("directory")), "directory", FileType::Directory));
+        // MLST of proftpd and SIZE and CWD of vsftpd follow links, a dangling one reads as missing.
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(probeOf(pathOf("link-to-plain.txt")), "link-to-plain.txt", FileType::Regular)
+        );
+        ASSERT_NO_FATAL_FAILURE(
+            expectEntry(probeOf(pathOf("link-to-directory")), "link-to-directory", FileType::Directory)
+        );
+        for (auto const name : {"dangling-link", "does-not-exist", "does-not-exist/child", "plain.txt/child"})
+            ASSERT_NO_FATAL_FAILURE(expectMissing(probeOf(pathOf(name)), name));
+        ASSERT_NO_FATAL_FAILURE(expectUsableLogin());
     }
 
     TEST_P(MetadataConformance, MissingPathsAreNoSuchFileOnEveryServer)

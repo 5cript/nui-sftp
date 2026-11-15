@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ftp/client/metadata.hpp>
 #include <ftp/protocol/features.hpp>
 
 #include <fmt/format.h>
@@ -63,6 +64,33 @@ namespace FileTransferProtocol::Test
                 "211 End."
             },
         };
+    }
+
+    TEST(FeaturesTests, FeatTellsWhetherASinglePathCanBeLookedUp)
+    {
+        const auto vsftpd = Features::fromReply(vsftpdFeatures);
+        const auto proftpd = Features::fromReply(proftpdFeatures);
+        const auto neither = Features::fromReply(Reply{.code = 211, .lines = {"211-Features:", " EPSV", "211 End"}});
+        ASSERT_TRUE(vsftpd && proftpd && neither);
+
+        ServerDialect sizeOnly{};
+        sizeOnly.learnFrom(*vsftpd);
+        EXPECT_EQ(sizeOnly.machineListSingle(), Support::Unknown);
+        EXPECT_EQ(sizeOnly.size(), Support::Works);
+        EXPECT_TRUE(sizeOnly.probesEntries());
+
+        ServerDialect machineListing{};
+        machineListing.learnFrom(*proftpd);
+        EXPECT_EQ(machineListing.machineListSingle(), Support::Works);
+        EXPECT_TRUE(machineListing.probesEntries());
+
+        ServerDialect none{};
+        none.learnFrom(*neither);
+        EXPECT_FALSE(none.probesEntries());
+
+        // A refusal overrides what FEAT listed.
+        sizeOnly.learnSize(Support::Refused);
+        EXPECT_FALSE(sizeOnly.probesEntries());
     }
 
     TEST(FeaturesTests, VsftpdFeatures)

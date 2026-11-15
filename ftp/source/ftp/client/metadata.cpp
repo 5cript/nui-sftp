@@ -497,6 +497,45 @@ namespace FileTransferProtocol
         learnOnce(modificationTimeSetter_, setter);
     }
 
+    Support ServerDialect::machineListSingle() const
+    {
+        return machineListSingle_.load();
+    }
+
+    void ServerDialect::learnMachineListSingle(Support support)
+    {
+        if (support == Support::Refused)
+            machineListSingle_.store(support);
+        else
+            learnOnce(machineListSingle_, support);
+    }
+
+    Support ServerDialect::size() const
+    {
+        return size_.load();
+    }
+
+    void ServerDialect::learnSize(Support support)
+    {
+        if (support == Support::Refused)
+            size_.store(support);
+        else
+            learnOnce(size_, support);
+    }
+
+    void ServerDialect::learnFrom(Features const& features)
+    {
+        if (features.has("MLST"))
+            learnMachineListSingle(Support::Works);
+        if (features.has("SIZE"))
+            learnSize(Support::Works);
+    }
+
+    bool ServerDialect::probesEntries() const
+    {
+        return machineListSingle() == Support::Works || size() == Support::Works;
+    }
+
     Support ServerDialect::machineListing() const
     {
         return machineListing_.load();
@@ -635,6 +674,107 @@ namespace FileTransferProtocol
         if (*followed)
             co_return std::move(**followed);
         co_return std::unexpected(unreachableTarget());
+    }
+
+    namespace
+    {
+        RemoteIo::RemoteError cannotProbe()
+        {
+            return errorOf(RemoteErrorKind::Unsupported, "The server has no command to look up a single path");
+        }
+
+        /**
+         * @brief What MLST tells of @p path.
+         *
+         * @return The entry, named like the last segment of @p path, nothing for a refusal that tells no more than that
+         *         the path cannot be listed. Unsupported where the server lacks MLST.
+         */
+        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
+        machineListedEntry(MetadataSession session, std::string path)
+        {
+            const auto reply =
+                co_await session.transfer.control->execute(Command{.verb = Verb::MachineListSingle, .argument = path});
+            if (!reply)
+                co_return std::unexpected(reply.error());
+            if (!succeeded(*reply))
+            {
+                auto refusal = replyError(*reply, Verb::MachineListSingle);
+                if (refusal.kind == RemoteErrorKind::NoSuchFile || untold(refusal))
+                    co_return std::optional<ListingEntry>{};
+                co_return std::unexpected(std::move(refusal));
+            }
+            auto entry = parseMachineListReply(*reply);
+            if (!entry)
+                co_return std::unexpected(std::move(entry).error());
+            entry->name = std::string{lastSegmentOf(path)};
+            co_return std::optional<ListingEntry>{std::move(*entry)};
+        }
+
+        /**
+         * @brief What SIZE, then CWD tell of @p path.
+         *
+         * @return The entry, named like the last segment of @p path, nothing when neither answers. Unsupported where
+         *         the server lacks SIZE.
+         */
+        asio::awaitable<std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError>>
+        sizedEntry(MetadataSession session, std::string path)
+        {
+            auto const& control = session.transfer.control;
+            const auto name = std::string{lastSegmentOf(path)};
+            const auto size = co_await control->execute(Command{.verb = Verb::Size, .argument = path});
+            if (!size)
+                co_return std::unexpected(size.error());
+            if (succeeded(*size))
+            {
+                const auto bytes = parseSizeReply(*size);
+                if (!bytes)
+                    co_return std::unexpected(bytes.error());
+                co_return ListingEntry{.name = name, .type = FileType::Regular, .size = *bytes};
+            }
+            if (auto refusal = replyError(*size, Verb::Size); lacksTheCommand(refusal))
+                co_return std::unexpected(std::move(refusal));
+            const auto entered = co_await changeDirectory(control, path);
+            if (entered)
+                co_return ListingEntry{.name = name, .type = FileType::Directory};
+            if (entered.error().protocolCode == 0)
+                co_return std::unexpected(entered.error());
+            co_return std::nullopt;
+        }
+
+        /**
+         * @brief The entry of a lookup, NoSuchFile when it found nothing.
+         */
+        std::expected<ListingEntry, RemoteIo::RemoteError>
+        foundOrMissing(std::expected<std::optional<ListingEntry>, RemoteIo::RemoteError> found)
+        {
+            if (!found)
+                return std::unexpected(std::move(found).error());
+            if (!*found)
+                return std::unexpected(missing());
+            return std::move(**found);
+        }
+    }
+
+    asio::awaitable<std::expected<ListingEntry, RemoteIo::RemoteError>>
+    probePath(MetadataSession session, std::string path)
+    {
+        auto& dialect = *session.dialect;
+        if (dialect.machineListSingle() == Support::Works)
+        {
+            auto listed = co_await machineListedEntry(session, path);
+            if (listed || !lacksTheCommand(listed.error()))
+                co_return foundOrMissing(std::move(listed));
+            dialect.learnMachineListSingle(Support::Refused);
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return std::unexpected(std::move(listed).error());
+        }
+        if (dialect.size() != Support::Works)
+            co_return std::unexpected(cannotProbe());
+        auto sized = co_await sizedEntry(std::move(session), std::move(path));
+        if (sized || !lacksTheCommand(sized.error()))
+            co_return foundOrMissing(std::move(sized));
+        dialect.learnSize(Support::Refused);
+        co_return std::unexpected(cannotProbe());
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> makeDirectory(MetadataSession session, std::string path)

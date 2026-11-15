@@ -98,6 +98,17 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        EntryResult probeIn(std::shared_ptr<ControlConnection> const& connection, std::string path)
+        {
+            return run(
+                connection,
+                [session = sessionOf(connection), path = std::move(path)]() -> asio::awaitable<EntryResult>
+                {
+                    co_return co_await probePath(session, path);
+                }
+            );
+        }
+
         std::expected<void, RemoteIo::RemoteError>
         setTimeIn(std::shared_ptr<ControlConnection> const& connection, std::string path, std::chrono::sys_seconds time)
         {
@@ -472,6 +483,121 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(link->name, "link");
         EXPECT_EQ(link->type, SharedData::FileType::Symlink);
         EXPECT_EQ(link->linkTarget, std::optional<std::string>{"plain.txt"});
+    }
+
+    TEST_F(MetadataTests, AProbeAsksMlstWhereItWorksAndReadsAMissingPathFromItsRefusal)
+    {
+        dialect_->learnMachineListSingle(Support::Works);
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MLST", "/dir/a")
+            .replyRaw(
+                "250-Listing /dir/a\r\n"
+                " modify=20240102030405;perm=adfrw;size=5;type=file; /dir/a\r\n"
+                "250 End\r\n"
+            )
+            .expect("MLST", "/dir/link")
+            .replyRaw(
+                "250-Listing /dir/link\r\n"
+                " type=OS.unix=slink:;size=8;modify=20240102030405; /dir/link\r\n"
+                "250 End\r\n"
+            )
+            .expect("MLST", "/dir/missing")
+            .reply("550 '/dir/missing' cannot be listed")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto file = probeIn(connection, "/dir/a");
+        ASSERT_TRUE(file) << file.error().toString();
+        EXPECT_EQ(file->name, "a");
+        EXPECT_EQ(file->type, SharedData::FileType::Regular);
+        EXPECT_EQ(file->size, std::optional<std::uint64_t>{5u});
+        const auto link = probeIn(connection, "/dir/link");
+        ASSERT_TRUE(link) << link.error().toString();
+        EXPECT_EQ(link->name, "link");
+        EXPECT_EQ(link->type, SharedData::FileType::Symlink);
+        const auto missing = probeIn(connection, "/dir/missing");
+        ASSERT_FALSE(missing);
+        EXPECT_EQ(missing.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+    }
+
+    TEST_F(MetadataTests, AProbeAsksSizeThenCwdWithoutMlst)
+    {
+        dialect_->learnSize(Support::Works);
+        Script script{};
+        script.reply("220 Ready")
+            .expect("SIZE", "/dir/a")
+            .reply("213 5")
+            .expect("SIZE", "/dir/sub")
+            .reply("550 Could not get file size.");
+        enters(script, "/dir/sub")
+            .expect("SIZE", "/dir/missing")
+            .reply("550 Could not get file size.")
+            .expect("CWD", "/dir/missing")
+            .reply("550 Failed to change directory.")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto file = probeIn(connection, "/dir/a");
+        ASSERT_TRUE(file) << file.error().toString();
+        EXPECT_EQ(file->type, SharedData::FileType::Regular);
+        EXPECT_EQ(file->size, std::optional<std::uint64_t>{5u});
+        const auto directory = probeIn(connection, "/dir/sub");
+        ASSERT_TRUE(directory) << directory.error().toString();
+        EXPECT_EQ(directory->name, "sub");
+        EXPECT_EQ(directory->type, SharedData::FileType::Directory);
+        const auto missing = probeIn(connection, "/dir/missing");
+        ASSERT_FALSE(missing);
+        EXPECT_EQ(missing.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile);
+    }
+
+    TEST_F(MetadataTests, AnMlstTheServerLacksIsLearnedAndSizeAnswers)
+    {
+        dialect_->learnMachineListSingle(Support::Works);
+        dialect_->learnSize(Support::Works);
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MLST", "/dir/a")
+            .reply("500 Unknown command.")
+            .expect("SIZE", "/dir/a")
+            .reply("213 5")
+            .expect("SIZE", "/dir/a")
+            .reply("213 5")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto first = probeIn(connection, "/dir/a");
+        ASSERT_TRUE(first) << first.error().toString();
+        EXPECT_EQ(dialect_->machineListSingle(), Support::Refused);
+        const auto second = probeIn(connection, "/dir/a");
+        ASSERT_TRUE(second) << second.error().toString();
+        EXPECT_TRUE(dialect_->probesEntries());
+    }
+
+    TEST_F(MetadataTests, AProbeWithoutMlstAndSizeIsUnsupportedAndAsksNothing)
+    {
+        Script script{};
+        script.reply("220 Ready").expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        EXPECT_FALSE(dialect_->probesEntries());
+        const auto probed = probeIn(connection, "/dir/a");
+        ASSERT_FALSE(probed);
+        EXPECT_EQ(probed.error().kind, RemoteIo::RemoteErrorKind::Unsupported);
+    }
+
+    TEST_F(MetadataTests, ASizeTheServerLacksIsLearnedAndTheProbeIsUnsupported)
+    {
+        dialect_->learnSize(Support::Works);
+        Script script{};
+        script.reply("220 Ready").expect("SIZE", "/dir/a").reply("502 Command not implemented.").expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto probed = probeIn(connection, "/dir/a");
+        ASSERT_FALSE(probed);
+        EXPECT_EQ(probed.error().kind, RemoteIo::RemoteErrorKind::Unsupported);
+        EXPECT_EQ(dialect_->size(), Support::Refused);
+        EXPECT_FALSE(dialect_->probesEntries());
     }
 
     TEST_F(MetadataTests, ALinkWhoseTargetEndsWithItsPathKeepsTheTarget)
