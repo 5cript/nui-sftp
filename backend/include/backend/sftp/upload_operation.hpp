@@ -207,9 +207,20 @@ class UploadOperation : public Operation
 
     /**
      * @brief The unsafe fast mode's open: the destination itself, created, or truncated when it may be overwritten.
-     *        Nothing is checked before, an existing destination that may not be overwritten fails the open.
+     *        An existing destination that may not be overwritten fails the exclusive open, or the check before the
+     *        open on a file system without an exclusive create.
      */
     std::expected<void, Error> openDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
+
+    /**
+     * @brief Fails with FileExists when the destination exists, with the error of the check when it cannot tell.
+     */
+    std::expected<void, Error> requireMissingDestinationInStrand(RemoteIo::IRemoteFileSystem& fileSystem) const;
+
+    /**
+     * @brief The FileExists error of a destination that may not be overwritten, logged.
+     */
+    Error destinationExists() const;
 
     /**
      * @brief Leases the transfer buffer for chunks of at most @p lengthLimit bytes.
