@@ -435,6 +435,11 @@ namespace FileTransferProtocol
         return announced_;
     }
 
+    std::shared_ptr<DataConnection> const& Download::dataConnection() const
+    {
+        return data_;
+    }
+
     std::optional<std::uint64_t> Download::expectedBytes() const
     {
         // Only a download that started at 0 reads the announcement, which names the whole file then.
@@ -737,6 +742,11 @@ namespace FileTransferProtocol
         // An ABOR beside a clean end can make proftpd answer with garbage in its 426, the server answers it as any end.
         if (endData())
             abortTransfer(*session_.control, *store_, "an aborted upload");
+    }
+
+    std::shared_ptr<DataConnection> const& Upload::dataConnection() const
+    {
+        return data_;
     }
 
     bool Upload::endData()

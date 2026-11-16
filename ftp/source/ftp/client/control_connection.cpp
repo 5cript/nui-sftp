@@ -459,6 +459,8 @@ namespace FileTransferProtocol
             co_return std::unexpected(endpoint.error());
         }
         remote_ = *endpoint;
+        boost::system::error_code localError{};
+        local_ = transport_->socket().local_endpoint(localError);
         state_ = ControlState::Open;
         if (const auto configured = applyControlSocketOptions(transport_->socket(), options_.socket); !configured)
         {
@@ -744,6 +746,11 @@ namespace FileTransferProtocol
     asio::ip::tcp::endpoint ControlConnection::remoteEndpoint() const
     {
         return remote_;
+    }
+
+    asio::ip::tcp::endpoint ControlConnection::localEndpoint() const
+    {
+        return local_;
     }
 
     std::optional<TrustedCertificate> const& ControlConnection::trustedCertificate() const

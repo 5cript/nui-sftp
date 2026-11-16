@@ -157,6 +157,12 @@ namespace FileTransferProtocol
          */
         std::expected<void, RemoteIo::RemoteError> seek(std::uint64_t position);
 
+        /**
+         * @brief The data connection of the running transfer, a new one after a drop for a pause once a read
+         *        continued it.
+         */
+        std::shared_ptr<DataConnection> const& dataConnection() const;
+
       private:
         /**
          * @brief readSome() without its pause bookkeeping: a transfer dropped for a pause starts again first, the end
@@ -294,6 +300,8 @@ namespace FileTransferProtocol
          *        even a 226, nor one a running finish() waits for: the server may keep the partial file.
          */
         void abort();
+
+        std::shared_ptr<DataConnection> const& dataConnection() const;
 
       private:
         /**

@@ -197,6 +197,11 @@ namespace FileTransferProtocol
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
         /**
+         * @brief The client's end of the control connection, set by connect().
+         */
+        boost::asio::ip::tcp::endpoint localEndpoint() const;
+
+        /**
          * @brief The certificate of the handshake and who vouched for it, nothing without TLS.
          */
         std::optional<TrustedCertificate> const& trustedCertificate() const;
@@ -276,6 +281,7 @@ namespace FileTransferProtocol
         /** @brief Shared with the operations in flight, an ssl::stream must outlive them. */
         std::shared_ptr<Transport> transport_;
         boost::asio::ip::tcp::endpoint remote_{};
+        boost::asio::ip::tcp::endpoint local_{};
         ReplyFramer framer_;
         boost::asio::steady_timer deadlineTimer_;
         /** @brief What deadlineTimer_ waits for, an unchanged earliest deadline is not armed again. */

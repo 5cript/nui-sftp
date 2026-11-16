@@ -183,6 +183,11 @@ namespace FileTransferProtocol
 
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
+        /**
+         * @brief The client's end of the data connection, set once it is connected.
+         */
+        boost::asio::ip::tcp::endpoint localEndpoint() const;
+
       private:
         /**
          * @brief EPSV and a connect to its port on @p address.
@@ -212,6 +217,7 @@ namespace FileTransferProtocol
         boost::asio::ip::tcp::socket socket_;
         std::optional<boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>> tls_{};
         boost::asio::ip::tcp::endpoint remote_{};
+        boost::asio::ip::tcp::endpoint local_{};
         /** @brief Takes what the server sends after an upload, until its end. */
         std::array<char, 512> drainBuffer_{};
         bool endedWithoutCloseNotify_{false};

@@ -164,6 +164,8 @@ namespace FileTransferProtocol
                 RemoteErrorKind::NoConnection, fmt::format("Could not open the data connection: {}", error.message())
             ));
         remote_ = endpoint;
+        boost::system::error_code localError{};
+        local_ = socket_.local_endpoint(localError);
         boost::system::error_code noDelay{};
         socket_.set_option(asio::ip::tcp::no_delay{true}, noDelay);
         co_return std::expected<void, RemoteIo::RemoteError>{};
@@ -402,6 +404,11 @@ namespace FileTransferProtocol
     asio::ip::tcp::endpoint DataConnection::remoteEndpoint() const
     {
         return remote_;
+    }
+
+    asio::ip::tcp::endpoint DataConnection::localEndpoint() const
+    {
+        return local_;
     }
 
     RemoteIo::RemoteError
