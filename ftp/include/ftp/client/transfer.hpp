@@ -130,7 +130,8 @@ namespace FileTransferProtocol
          *
          * @return The result. The replyError() of a negative final reply, Truncated for data that ended early or
          *         without close_notify and the wrong size, TimedOut when no final reply came and the size proves
-         *         nothing, Failure before the data ended.
+         *         nothing, Failure before the data ended, Cancelled after an abort(), one that came during its waits
+         *         included.
          */
         boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> finish();
 
@@ -290,7 +291,7 @@ namespace FileTransferProtocol
         /**
          * @brief Ends the upload as failed: resets the data connection and sends ABOR, or ends an upload cut before
          *        any byte cleanly, see endData(). A final reply that comes after it never completes the upload, not
-         *        even a 226: the server may keep the partial file.
+         *        even a 226, nor one a running finish() waits for: the server may keep the partial file.
          */
         void abort();
 

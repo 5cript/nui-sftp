@@ -401,6 +401,52 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
+    TEST_F(UploadTests, AbortDuringTheWaitForTheFinalReplyIsNotComplete)
+    {
+        // The server has the whole file and says so behind the abort.
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.expectUpload(1024u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .checkpoint("data ended")
+            .awaitRelease("aborted")
+            .abortSequence(AbortReplies::FinalOnly)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const auto started =
+            run(connection,
+                [session]() -> asio::awaitable<std::expected<std::shared_ptr<Upload>, RemoteIo::RemoteError>>
+                {
+                    auto upload = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!upload)
+                        co_return upload;
+                    if (auto written = co_await (*upload)->write(asio::buffer(std::string_view{"content"})); !written)
+                        co_return std::unexpected(std::move(written).error());
+                    co_return upload;
+                });
+        ASSERT_TRUE(started) << started.error().toString();
+        auto const upload = *started;
+        auto finishing = asio::co_spawn(connection->strand(), upload->finish(), asio::use_future);
+        // The server ended its side of the data, the 226 stays out until the abort ran.
+        ASSERT_TRUE(server_->waitForCheckpoint("data ended"));
+        run(connection,
+            [upload]() -> asio::awaitable<void>
+            {
+                upload->abort();
+                co_return;
+            });
+        server_->release("aborted");
+        ASSERT_EQ(finishing.wait_for(20s), std::future_status::ready);
+        expectUploadError(finishing.get(), RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(UploadTests, PathThatCannotBeSentSendsNoRest)
     {
         Script script{};

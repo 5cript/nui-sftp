@@ -450,6 +450,44 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
+    TEST_F(DownloadTests, AbortDuringTheWaitForTheFinalReplyEndsAsCancelled)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(script, DataPlan{}.send("12345"), "150 Opening BINARY mode data connection for file (5 bytes).")
+            .beginData()
+            .awaitData()
+            .awaitRelease("aborted")
+            .abortSequence(AbortReplies::FinalOnly)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        auto const download = startDownload(
+            {.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()}, quickTransferOptions()
+        );
+        ASSERT_TRUE(download);
+        const auto whole = readUpTo(connection, download, 100u);
+        ASSERT_TRUE(whole) << whole.error().toString();
+        EXPECT_EQ(whole->content, "12345");
+        // On the strand finish() waits for the final reply before the abort runs, the 226 comes behind both.
+        auto finishing = asio::co_spawn(connection->strand(), download->finish(), asio::use_future);
+        run(connection,
+            [download]() -> asio::awaitable<void>
+            {
+                download->abort();
+                co_return;
+            });
+        server_->release("aborted");
+        ASSERT_EQ(finishing.wait_for(20s), std::future_status::ready);
+        const auto finished = finishing.get();
+        ASSERT_FALSE(finished);
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << finished.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(DownloadTests, CancelledReadAbortsTheDownloadAndKeepsTheLogin)
     {
         Script script{};

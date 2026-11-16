@@ -410,6 +410,9 @@ namespace FileTransferProtocol
 
         auto reply =
             co_await finalReplyBehindData(*session_.control, *retrieve_, earlyFinalReply_, options_.finalReplyTimeout);
+        // An abort ends the download as cancelled, whatever the server answers behind it.
+        if (aborted_)
+            co_return std::unexpected(aborted());
         if (!reply)
         {
             // Its deadline ended the control connection. All the data that should come is proof enough.
@@ -453,6 +456,8 @@ namespace FileTransferProtocol
         const auto reply = co_await session_.control->execute(Command{.verb = Verb::Size, .argument = request_.path});
         if (isCancelled(co_await asio::this_coro::cancellation_state))
             co_return std::unexpected(cancelled());
+        if (aborted_)
+            co_return std::unexpected(aborted());
         const auto size = reply.and_then(
             [](Reply const& sizeReply)
             {
@@ -665,6 +670,8 @@ namespace FileTransferProtocol
             }
             // Every byte was written: a server that confirms the upload took it, however its side of the data ended.
             const auto answer = co_await answerToFailedData();
+            if (aborted_)
+                co_return std::unexpected(aborted());
             if (!answer || !succeeded(*answer))
                 co_return std::unexpected(failureOf(answer, ended.error()));
             dataEnded_ = true;
@@ -674,6 +681,9 @@ namespace FileTransferProtocol
 
         auto reply =
             co_await finalReplyBehindData(*session_.control, *store_, earlyFinalReply_, options_.finalReplyTimeout);
+        // The server has the whole file by now, the upload still ends as the abort said.
+        if (aborted_)
+            co_return std::unexpected(aborted());
         if (!reply)
         {
             // Its deadline ended the control connection, SIZE on another one has to tell.
