@@ -68,7 +68,7 @@ namespace FileTransferProtocol::Test
             return "default";
         }
 
-        PoolOptions poolOptions(std::size_t transferConnections, std::optional<Sha256Digest> pin) const
+        virtual PoolOptions poolOptions(std::size_t transferConnections, std::optional<Sha256Digest> pin) const
         {
             return PoolOptions{
                 .host = endpoint_.address,
@@ -79,9 +79,17 @@ namespace FileTransferProtocol::Test
             };
         }
 
+        /**
+         * @brief Where the pools and their connections run.
+         */
+        virtual boost::asio::any_io_executor poolExecutor()
+        {
+            return pool_.get_executor();
+        }
+
         std::shared_ptr<Pool> makePool(PoolOptions poolOptions)
         {
-            auto pool = Pool::create(boost::asio::make_strand(pool_.get_executor()), resolver_, std::move(poolOptions));
+            auto pool = Pool::create(boost::asio::make_strand(poolExecutor()), resolver_, std::move(poolOptions));
             pools_.push_back(pool);
             return pool;
         }
@@ -184,27 +192,9 @@ namespace FileTransferProtocol::Test
             return future.get();
         }
 
-      protected:
-        std::shared_ptr<Resolver> resolver_ = std::make_shared<Resolver>();
-        std::vector<std::shared_ptr<Pool>> pools_{};
-        std::string workspace_{};
-    };
-
-    /**
-     * @brief The limits variant: three connections from one address, idle sessions end after 5 s. Its cases run one
-     *        at a time, they share the count of the address.
-     */
-    class PoolLimitConformance : public PoolConformance
-    {
-      protected:
-        std::string_view variant() const override
-        {
-            return "limits";
-        }
-
         /**
-         * @brief Waits until @p control ended. Only the server's clock decides when, so its state is asked again
-         *        until then.
+         * @brief Waits until @p control ended. Only the server's clock or the keepalive decides when, so its state is
+         *        asked again until then.
          */
         static bool waitForEnd(std::shared_ptr<ControlConnection> const& control)
         {
@@ -225,6 +215,24 @@ namespace FileTransferProtocol::Test
                     std::this_thread::sleep_for(100ms);
             }
             return !open;
+        }
+
+      protected:
+        std::shared_ptr<Resolver> resolver_ = std::make_shared<Resolver>();
+        std::vector<std::shared_ptr<Pool>> pools_{};
+        std::string workspace_{};
+    };
+
+    /**
+     * @brief The limits variant: three connections from one address, idle sessions end after 5 s. Its cases run one
+     *        at a time, they share the count of the address.
+     */
+    class PoolLimitConformance : public PoolConformance
+    {
+      protected:
+        std::string_view variant() const override
+        {
+            return "limits";
         }
     };
 

@@ -5,7 +5,10 @@
     "users": [{"name": "ftptest", "password": "ftptest"}],
     "variants": {
         "default": {"command": ["default"]},
-        "throttled": {"command": ["throttled"], "runArguments": ["--cap-add", "NET_ADMIN"]},
+        "throttled": {
+            "command": ["throttled"],
+            "runArguments": ["--cap-add", "NET_ADMIN", "--sysctl", "net.ipv4.tcp_wmem=4096 16384 65536"]
+        },
         "limits": {"command": ["limits"]}
     },
     "expectations": {
