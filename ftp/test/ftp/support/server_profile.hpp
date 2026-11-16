@@ -37,39 +37,11 @@ namespace FileTransferProtocol::Test
         bool epsv{false};
     };
 
-    /**
-     * @brief The same behaviour can differ between plain connections and TLS.
-     */
-    template <typename Value>
-    struct PerSecurity
-    {
-        Value plain{};
-        Value tls{};
-    };
-
     enum class ModificationTimeCommand
     {
         Mfmt,
         Mdtm,
         SiteUtime,
-    };
-
-    enum class MissingReuse
-    {
-        EndsSession,
-        KeepsSession,
-    };
-
-    enum class ConnectionLimit
-    {
-        AtGreeting,
-        AfterPass,
-    };
-
-    enum class ListOfMissingDirectory
-    {
-        EmptyListing,
-        FailsAfterPreliminary,
     };
 
     /**
@@ -81,16 +53,10 @@ namespace FileTransferProtocol::Test
         /** @brief What its FEAT reply lists at least. */
         std::vector<std::string> advertised{};
         ModificationTimeCommand modificationTime{};
-        /** @brief The replies to an ABOR after the data connection closed, in order. */
-        PerSecurity<std::vector<int>> abortReplies{};
-        /** @brief Whether the final reply of a download waits until the client closed the data connection. */
-        PerSecurity<bool> finalReplyWaitsForDataClose{};
-        bool sessionReuseRequired{false};
-        MissingReuse missingReuse{};
-        ConnectionLimit connectionLimit{};
         /** @brief Whether the text of a 550 says what went wrong. */
         bool repliesTell550Causes{false};
-        ListOfMissingDirectory listOfMissingDirectory{};
+        /** @brief Whether a data connection that offers the TLS session of the control connection resumes it. */
+        bool resumesDataSessions{false};
     };
 
     /**

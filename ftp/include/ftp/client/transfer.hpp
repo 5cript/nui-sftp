@@ -66,6 +66,8 @@ namespace FileTransferProtocol
          *        connection is Dead then, its replies are out of step.
          */
         std::optional<Reply> finalReply{};
+        /** @brief The TLS handshake of the last data connection resumed the control connection's session. */
+        bool resumedSession{false};
     };
 
     struct DownloadRequest
@@ -128,7 +130,8 @@ namespace FileTransferProtocol
          *
          * @return The result. The replyError() of a negative final reply, Truncated for data that ended early or
          *         without close_notify and the wrong size, TimedOut when no final reply came and the size proves
-         *         nothing, Failure before the data ended.
+         *         nothing, Failure before the data ended, Cancelled after an abort(), one that came during its waits
+         *         included.
          */
         boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> finish();
 
@@ -138,8 +141,10 @@ namespace FileTransferProtocol
         std::optional<std::uint64_t> announcedSize() const;
 
         /**
-         * @brief Ends the download as cancelled: closes the data connection and sends ABOR, the control connection
-         *        drains behind it and stays usable. Reads and finish() fail as Cancelled from then on.
+         * @brief Ends the download as cancelled: closes the data connection as DataConnection::closeOnceAnswered()
+         *        does and sends ABOR, the control connection drains behind it and stays usable. Reads and finish()
+         *        fail as Cancelled from then on, a first read under way once the server answered on the data
+         *        connection.
          */
         void abort();
 
@@ -227,6 +232,8 @@ namespace FileTransferProtocol
         std::uint64_t bytes{0u};
         /** @brief The positive final reply, without it no upload counts as complete. */
         Reply finalReply{};
+        /** @brief The TLS handshake of the data connection resumed the control connection's session. */
+        bool resumedSession{false};
     };
 
     /**
@@ -282,8 +289,9 @@ namespace FileTransferProtocol
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
         /**
-         * @brief Ends the upload as failed: resets the data connection and sends ABOR. A final reply that comes after
-         *        it never completes the upload, not even a 226: the server may keep the partial file.
+         * @brief Ends the upload as failed: resets the data connection and sends ABOR, or ends an upload cut before
+         *        any byte cleanly, see endData(). A final reply that comes after it never completes the upload, not
+         *        even a 226, nor one a running finish() waits for: the server may keep the partial file.
          */
         void abort();
 
@@ -298,6 +306,14 @@ namespace FileTransferProtocol
          */
         RemoteIo::RemoteError failureOf(std::optional<Reply> const& answer, RemoteIo::RemoteError dataError);
         Verb verb() const;
+        /**
+         * @brief Resets the data connection, or ends it cleanly where the server may still be in its TLS handshake
+         *        (DataConnection::serverMayBeInHandshake()): nothing was sent, so the server only gets an empty file,
+         *        and its final reply gets the final reply timeout. A write or a finish() under way is always reset.
+         *
+         * @return Whether it was reset, which leaves the server a transfer to abort.
+         */
+        bool endData();
 
         TransferSession session_;
         UploadRequest request_;
@@ -309,6 +325,9 @@ namespace FileTransferProtocol
         /** @brief The data ended so that the server took all of it. */
         bool dataEnded_{false};
         bool aborted_{false};
+        bool writing_{false};
+        /** @brief finish() began to end the data. */
+        bool ending_{false};
     };
 
     /**

@@ -4,6 +4,8 @@
 
 #include <ftp/client/transfer.hpp>
 
+#include <boost/asio/experimental/promise.hpp>
+#include <boost/asio/experimental/use_promise.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -125,6 +127,34 @@ namespace FileTransferProtocol::Test
         {
             ASSERT_FALSE(result) << "uploaded " << result->bytes << " bytes";
             EXPECT_EQ(result.error().kind, kind) << result.error().toString();
+        }
+
+        /**
+         * @brief A TLS upload of "file" that is aborted before its first byte and finished then.
+         */
+        UploadOutcome abortBeforeTheFirstByte(
+            std::shared_ptr<ControlConnection> const& connection,
+            TlsConnectionSettings const& tls,
+            TransferOptions options = quickTransferOptions()
+        )
+        {
+            const TransferSession session{
+                .control = connection,
+                .passiveChoice = std::make_shared<PassiveChoice>(),
+                .tls = tls,
+            };
+            return run(
+                connection,
+                [session, options]() -> asio::awaitable<UploadOutcome>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, options);
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    upload->abort();
+                    co_return co_await upload->finish();
+                }
+            );
         }
     };
 
@@ -371,6 +401,52 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
+    TEST_F(UploadTests, AbortDuringTheWaitForTheFinalReplyIsNotComplete)
+    {
+        // The server has the whole file and says so behind the abort.
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.expectUpload(1024u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .checkpoint("data ended")
+            .awaitRelease("aborted")
+            .abortSequence(AbortReplies::FinalOnly)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const TransferSession session{.control = connection, .passiveChoice = std::make_shared<PassiveChoice>()};
+        const auto started =
+            run(connection,
+                [session]() -> asio::awaitable<std::expected<std::shared_ptr<Upload>, RemoteIo::RemoteError>>
+                {
+                    auto upload = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!upload)
+                        co_return upload;
+                    if (auto written = co_await (*upload)->write(asio::buffer(std::string_view{"content"})); !written)
+                        co_return std::unexpected(std::move(written).error());
+                    co_return upload;
+                });
+        ASSERT_TRUE(started) << started.error().toString();
+        auto const upload = *started;
+        auto finishing = asio::co_spawn(connection->strand(), upload->finish(), asio::use_future);
+        // The server ended its side of the data, the 226 stays out until the abort ran.
+        ASSERT_TRUE(server_->waitForCheckpoint("data ended"));
+        run(connection,
+            [upload]() -> asio::awaitable<void>
+            {
+                upload->abort();
+                co_return;
+            });
+        server_->release("aborted");
+        ASSERT_EQ(finishing.wait_for(20s), std::future_status::ready);
+        expectUploadError(finishing.get(), RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(UploadTests, PathThatCannotBeSentSendsNoRest)
     {
         Script script{};
@@ -412,7 +488,169 @@ namespace FileTransferProtocol::Test
         const std::string content(200u * 1024u, 't');
         const auto result = upload(connection, {.path = "file"}, content, tls);
         ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_TRUE(result->resumedSession);
         EXPECT_EQ(uploadedAfterDisconnect(connection), content);
+    }
+
+    TEST_F(UploadTests, TlsUploadAbortedBeforeItsFirstByteEndsCleanlyWithoutAbort)
+    {
+        // The server may still be in the data handshake, a reset there costs the session on proftpd.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(0u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .reply("226 Transfer complete.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        expectUploadError(abortBeforeTheFirstByte(connection, tls), RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"end of stream"});
+    }
+
+    TEST_F(UploadTests, TlsUploadCancelledBehindItsHandshakeEndsCleanly)
+    {
+        // The 150 stays out, so the start waits with its data handshake done until the cancel.
+        auto script = securedPrefix();
+        script.expect("EPSV")
+            .passive(DataPlan{}.tls().expectUpload(0u))
+            .expect("STOR", "file")
+            .beginData()
+            .awaitData()
+            .reply("150 Ok to send data.")
+            .reply("226 Transfer complete.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto started =
+            run(connection,
+                [connection, session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto [exception, result] = co_await asio::co_spawn(
+                        connection->strand(),
+                        Upload::start(session, {.path = "file"}, quickTransferOptions()),
+                        asio::cancel_after(300ms, asio::as_tuple(asio::use_awaitable))
+                    );
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result.transform([](std::shared_ptr<Upload> const&) {});
+                });
+        ASSERT_FALSE(started);
+        EXPECT_EQ(started.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << started.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"end of stream"});
+    }
+
+    TEST_F(UploadTests, TlsUploadAbortedBeforeItsFirstByteLimitsTheFinalReply)
+    {
+        // No ABOR follows the clean end, whose drain would end the wait for a final reply that never comes.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(0u), "150 Ok to send data.").beginData().awaitData().stall();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        auto options = quickTransferOptions();
+        options.finalReplyTimeout = 300ms;
+        expectUploadError(abortBeforeTheFirstByte(connection, tls, options), RemoteIo::RemoteErrorKind::Cancelled);
+        const auto reply = execute(connection, command(Verb::Noop));
+        ASSERT_FALSE(reply);
+        EXPECT_EQ(reply.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << reply.error().toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+    }
+
+    TEST_F(UploadTests, TlsUploadAbortedWhileItsDataEndsIsResetAndNotComplete)
+    {
+        // The server took the empty upload by then, its 226 comes among the replies to the ABOR.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(0u), "150 Ok to send data.")
+            .beginData()
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto finished =
+            run(connection,
+                [connection, session]() -> asio::awaitable<UploadOutcome>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    // On its strand finish() runs up to its wait for the server's close_notify, the abort comes into
+                    // it.
+                    auto finishing =
+                        asio::co_spawn(connection->strand(), upload->finish(), asio::experimental::use_promise);
+                    upload->abort();
+                    auto [exception, result] = co_await finishing(asio::as_tuple(asio::use_awaitable));
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        expectUploadError(finished, RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
+    TEST_F(UploadTests, TlsUploadCancelledWithItsFirstPieceIsReset)
+    {
+        // A clean end behind bytes that went out would make the server take the cut file for a complete one.
+        auto script = securedPrefix();
+        storeWith(script, DataPlan{}.tls().expectUpload(1u << 20u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto written =
+            run(connection,
+                [connection, session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto started = co_await Upload::start(session, {.path = "file"}, quickTransferOptions());
+                    if (!started)
+                        co_return std::unexpected(std::move(started).error());
+                    auto const upload = std::move(started).value();
+                    const std::string content(4096u, 'c');
+                    // On its strand the write runs up to its wait for the first piece, the cancel comes before it
+                    // learns how that piece went.
+                    auto writing = asio::co_spawn(
+                        connection->strand(), upload->write(asio::buffer(content)), asio::experimental::use_promise
+                    );
+                    writing.cancel();
+                    auto [exception, result] = co_await writing(asio::as_tuple(asio::use_awaitable));
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        ASSERT_FALSE(written);
+        EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << written.error().toString();
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"reset"});
     }
 
     TEST_F(UploadTests, TlsUploadRefusedForSessionReuseIsNoSecureConnection)

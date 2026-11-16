@@ -61,6 +61,16 @@ namespace FileTransferProtocol::Test
                 co_return std::unexpected(read.error());
             co_return content;
         }
+
+        /**
+         * @brief One read of @p data, which stays alive for it.
+         */
+        asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
+        readOnce(std::shared_ptr<DataConnection> data)
+        {
+            std::array<char, 16> buffer{};
+            co_return co_await data->readSome(asio::buffer(buffer));
+        }
     }
 
     class DataConnectionTests : public ControlConnectionTlsTests
@@ -464,6 +474,80 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(secured) << secured.error().toString();
         EXPECT_FALSE((*data)->resumed());
         expectText(readAll(connection, *data), "secret");
+    }
+
+    TEST_F(DataConnectionTlsTests, CloseOnceAnsweredKeepsASilentConnectionOpen)
+    {
+        // The server says nothing on the data connection, like one that is still in its handshake.
+        server_->addConnection(securedScript(DataPlan{}.tls().stallAfter("")).expectDisconnect());
+        const auto tls = settings();
+        const auto connection = securedConnection(tls);
+        const auto opened = openData(connection);
+        ASSERT_TRUE(opened) << opened.error().toString();
+        auto const data = *opened;
+        const auto secured = secure(connection, data, tls, true);
+        ASSERT_TRUE(secured) << secured.error().toString();
+        const auto stillOpen =
+            run(connection,
+                [data]() -> asio::awaitable<bool>
+                {
+                    data->closeOnceAnswered();
+                    // Asked again, it goes on with the wait it has.
+                    data->closeOnceAnswered();
+                    const auto open = data->serverMayBeInHandshake();
+                    data->close();
+                    co_return open;
+                });
+        EXPECT_TRUE(stillOpen);
+    }
+
+    TEST_F(DataConnectionTlsTests, CloseOnceAnsweredClosesWithTheFirstBytesOfTheServer)
+    {
+        // The server only learns of the close when it comes: its plan waits for the client behind its bytes.
+        server_->addConnection(securedScript(DataPlan{}.tls().stallAfter("answer")).expectDisconnect());
+        const auto tls = settings();
+        const auto connection = securedConnection(tls);
+        const auto opened = openData(connection);
+        ASSERT_TRUE(opened) << opened.error().toString();
+        auto const data = *opened;
+        const auto secured = secure(connection, data, tls, true);
+        ASSERT_TRUE(secured) << secured.error().toString();
+        run(connection,
+            [data]() -> asio::awaitable<void>
+            {
+                data->closeOnceAnswered();
+                co_return;
+            });
+        EXPECT_TRUE(server_->waitForTranscriptEntry(TranscriptEntry::Kind::DataEnded));
+    }
+
+    TEST_F(DataConnectionTlsTests, CloseOnceAnsweredEndsAReadUnderWayWithTheAnswer)
+    {
+        server_->addConnection(
+            securedScript(DataPlan{}.tls().stallAfter("")).awaitRelease("answer").stopData().expectDisconnect()
+        );
+        const auto tls = settings();
+        const auto connection = securedConnection(tls);
+        const auto opened = openData(connection);
+        ASSERT_TRUE(opened) << opened.error().toString();
+        auto const data = *opened;
+        const auto secured = secure(connection, data, tls, true);
+        ASSERT_TRUE(secured) << secured.error().toString();
+        // On the strand the read is under way before the next coroutine starts.
+        auto reading = asio::co_spawn(connection->strand(), readOnce(data), asio::use_future);
+        const auto stillOpen =
+            run(connection,
+                [data]() -> asio::awaitable<bool>
+                {
+                    data->closeOnceAnswered();
+                    co_return data->serverMayBeInHandshake();
+                });
+        EXPECT_TRUE(stillOpen);
+        server_->release("answer");
+        ASSERT_EQ(reading.wait_for(20s), std::future_status::ready);
+        const auto read = reading.get();
+        ASSERT_FALSE(read);
+        EXPECT_EQ(read.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << read.error().toString();
     }
 
     TEST_F(DataConnectionTlsTests, AnotherCertificateOnTheDataConnectionIsRefused)

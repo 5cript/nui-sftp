@@ -65,7 +65,7 @@ namespace FileTransferProtocol
      * @brief The data connection of one transfer, on the strand of its control connection (RFC 959 3.2: passive,
      *        one per transfer). The caller keeps it while one of its operations runs.
      */
-    class DataConnection
+    class DataConnection : public std::enable_shared_from_this<DataConnection>
     {
         struct Private
         {};
@@ -114,7 +114,8 @@ namespace FileTransferProtocol
          * @brief The next bytes of a download, 0 once the data ended. A TLS stream that ended without close_notify
          *        ends the data too, see endedWithoutCloseNotify().
          *
-         * @return TimedOut past the inactivity timeout, ConnectionLost for a reset, Cancelled after close().
+         * @return TimedOut past the inactivity timeout, ConnectionLost for a reset, Cancelled after close() or
+         *         closeOnceAnswered().
          */
         boost::asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
         readSome(boost::asio::mutable_buffer buffer);
@@ -138,6 +139,14 @@ namespace FileTransferProtocol
          * @return TimedOut when the server did not end its side in time, the error of the shutdown otherwise.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>> finishUpload();
+
+        /**
+         * @brief Ends a download or a listing that is cut short. Closes at once, unless serverMayBeInHandshake(): then
+         *        it closes with the server's first bytes or its end, which the server sends only once its handshake
+         *        ended, or past the inactivity timeout. A read under way is that wait and ends as Cancelled then,
+         *        without one the connection keeps itself until it closed.
+         */
+        void closeOnceAnswered();
 
         /**
          * @brief Closes at once, operations under way end as Cancelled.
@@ -165,6 +174,13 @@ namespace FileTransferProtocol
          */
         bool resumed() const;
 
+        /**
+         * @brief Nothing was read and no write was started since the TLS handshake, so the server may still finish its
+         *        side of it. A reset then can lose the client's last handshake message, and proftpd ends the whole
+         *        session for a data handshake that failed.
+         */
+        bool serverMayBeInHandshake() const;
+
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
 
       private:
@@ -182,6 +198,14 @@ namespace FileTransferProtocol
         connectTo(boost::asio::ip::tcp::endpoint endpoint);
         RemoteIo::RemoteError
         transferError(boost::system::error_code error, bool timedOut, std::string_view operation) const;
+        /**
+         * @brief Closes where the server answered, else starts the wait for its answer.
+         */
+        void closeAnsweredOrWait();
+        /**
+         * @brief Reads the server's answer within the inactivity timeout, then closes.
+         */
+        boost::asio::awaitable<void> awaitAnswer();
 
         DataConnectionOptions options_;
         boost::asio::strand<boost::asio::any_io_executor> strand_;
@@ -194,5 +218,12 @@ namespace FileTransferProtocol
         bool secured_{false};
         bool resumed_{false};
         bool closed_{false};
+        /** @brief Something was read, the data ended or the inactivity timeout passed since the handshake. */
+        bool answered_{false};
+        /** @brief A write was started, bytes of it may be out even when it failed or was cancelled. */
+        bool writeStarted_{false};
+        /** @brief closeOnceAnswered() waits for the server's answer. */
+        bool awaitsAnswer_{false};
+        bool reading_{false};
     };
 }

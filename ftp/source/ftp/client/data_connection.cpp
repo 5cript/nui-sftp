@@ -4,6 +4,8 @@
 #include "client_support.hpp"
 
 #include <boost/asio/cancel_after.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio/ssl/error.hpp>
@@ -14,6 +16,7 @@
 
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -207,23 +210,35 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
     DataConnection::readSome(asio::mutable_buffer buffer)
     {
-        if (closed_)
+        if (closed_ || awaitsAnswer_)
             co_return std::unexpected(cancelled());
         const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
+        reading_ = true;
         const auto [error, size] =
             tls_ ? co_await tls_->async_read_some(buffer, token) : co_await socket_.async_read_some(buffer, token);
-        if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
+        reading_ = false;
+        const bool cancelledRead = isCancelled(co_await asio::this_coro::cancellation_state);
+        const bool ended = error == asio::error::eof || error == asio::ssl::error::stream_truncated;
+        // A server that let the inactivity timeout pass had its time for the handshake.
+        const bool timedOut = error == asio::error::operation_aborted && !cancelledRead && !closed_;
+        if (!error || ended || timedOut)
+            answered_ = true;
+        if (awaitsAnswer_)
+        {
+            closeAnsweredOrWait();
+            co_return std::unexpected(cancelled());
+        }
+        if (cancelledRead || closed_)
             co_return std::unexpected(cancelled());
         if (!error)
             co_return size;
-        if (error == asio::error::eof)
-            co_return std::size_t{0u};
-        if (error == asio::ssl::error::stream_truncated)
+        if (ended)
         {
-            endedWithoutCloseNotify_ = true;
+            if (error == asio::ssl::error::stream_truncated)
+                endedWithoutCloseNotify_ = true;
             co_return std::size_t{0u};
         }
-        co_return std::unexpected(transferError(error, error == asio::error::operation_aborted, "Reading"));
+        co_return std::unexpected(transferError(error, timedOut, "Reading"));
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> DataConnection::writeAll(asio::const_buffer buffer)
@@ -233,6 +248,7 @@ namespace FileTransferProtocol
         // The inactivity timeout limits each piece, a slow link may take longer for the whole buffer.
         while (buffer.size() > 0u)
         {
+            writeStarted_ = true;
             const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
             const auto [error, size] = tls_ ? co_await tls_->async_write_some(buffer, token)
                                             : co_await socket_.async_write_some(buffer, token);
@@ -305,6 +321,49 @@ namespace FileTransferProtocol
         co_return std::unexpected(transferError(error, false, "Ending"));
     }
 
+    void DataConnection::closeOnceAnswered()
+    {
+        if (!serverMayBeInHandshake())
+        {
+            close();
+            return;
+        }
+        if (awaitsAnswer_)
+            return;
+        awaitsAnswer_ = true;
+        // A read under way ends with the answer and closes then.
+        if (!reading_)
+            closeAnsweredOrWait();
+    }
+
+    void DataConnection::closeAnsweredOrWait()
+    {
+        if (closed_)
+            return;
+        if (answered_)
+        {
+            close();
+            return;
+        }
+        asio::co_spawn(
+            strand_,
+            [self = shared_from_this()]()
+            {
+                return self->awaitAnswer();
+            },
+            asio::detached
+        );
+    }
+
+    asio::awaitable<void> DataConnection::awaitAnswer()
+    {
+        // Only a secured connection gets here.
+        std::ignore = co_await tls_->async_read_some(
+            asio::buffer(drainBuffer_), asio::cancel_after(options_.inactivityTimeout, useTuple)
+        );
+        close();
+    }
+
     void DataConnection::close()
     {
         closed_ = true;
@@ -333,6 +392,11 @@ namespace FileTransferProtocol
     bool DataConnection::resumed() const
     {
         return resumed_;
+    }
+
+    bool DataConnection::serverMayBeInHandshake() const
+    {
+        return secured_ && !answered_ && !writeStarted_ && !closed_;
     }
 
     asio::ip::tcp::endpoint DataConnection::remoteEndpoint() const

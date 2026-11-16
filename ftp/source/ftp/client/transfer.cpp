@@ -7,6 +7,7 @@
 
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/post.hpp>
@@ -17,6 +18,7 @@
 #include <cassert>
 #include <exception>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -92,13 +94,16 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The first reply to a transfer command. A refusal or a 3yz closes the data side, a handshake under way
-         *        included.
+         * @brief The first reply to a transfer command. A refusal, a 3yz or a wait that failed closes the data side, a
+         *        handshake under way included. A cancel does not: it ends the handshake by itself, and
+         *        startTransfer() ends the data.
          */
         asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
         firstReply(std::shared_ptr<PendingCommand> pending, std::shared_ptr<DataConnection> data)
         {
             auto reply = co_await pending->nextReply();
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return reply;
             if (!reply || refused(*reply) || asksForMore(*reply))
                 data->close();
             co_return reply;
@@ -112,6 +117,70 @@ namespace FileTransferProtocol
             if (isPreliminary(first.code))
                 return std::nullopt;
             return first;
+        }
+
+        /**
+         * @brief What ends the data of an upload that does not finish.
+         */
+        struct UploadEnd
+        {
+            std::shared_ptr<DataConnection> data{};
+            std::shared_ptr<ControlConnection> control{};
+            std::shared_ptr<PendingCommand> store{};
+            std::chrono::milliseconds finalReplyTimeout{};
+        };
+
+        /**
+         * @brief Ends @p data so that the server takes the empty upload, then limits the final reply of @p store to
+         *        @p finalReplyTimeout: no ABOR follows a clean end that would limit it.
+         */
+        asio::awaitable<void> endedCleanly(
+            std::shared_ptr<DataConnection> data,
+            std::weak_ptr<ControlConnection> control,
+            std::shared_ptr<PendingCommand> store,
+            std::chrono::milliseconds finalReplyTimeout
+        )
+        {
+            std::ignore = co_await data->finishUpload();
+            if (const auto locked = control.lock())
+                locked->limitFinalReply(*store, finalReplyTimeout);
+        }
+
+        /**
+         * @brief Resets the data of @p end on the strand it is on, or ends it cleanly where the server may still be in
+         *        its TLS handshake.
+         *
+         * @return Whether it was reset, which leaves the server a transfer to abort.
+         */
+        bool endUploadData(UploadEnd end)
+        {
+            if (!end.data->serverMayBeInHandshake())
+            {
+                end.data->reset();
+                return true;
+            }
+            const auto strand = end.control->strand();
+            asio::co_spawn(
+                strand,
+                endedCleanly(std::move(end.data), end.control, std::move(end.store), end.finalReplyTimeout),
+                asio::detached
+            );
+            return false;
+        }
+
+        /**
+         * @brief Ends the data of a transfer that was cancelled while it started, where the server may still be in
+         *        its TLS handshake without a reset: an upload as endUploadData() does, anything else once the server
+         *        answered on it.
+         *
+         * @return Whether the server is left a transfer to abort.
+         */
+        bool endStartedData(Verb verb, UploadEnd end)
+        {
+            if (verb == Verb::Store || verb == Verb::Append)
+                return endUploadData(std::move(end));
+            end.data->closeOnceAnswered();
+            return true;
         }
 
         /**
@@ -226,8 +295,14 @@ namespace FileTransferProtocol
                 first = co_await firstReply(*command, data);
             if (isCancelled(co_await asio::this_coro::cancellation_state))
             {
-                data->reset();
-                abortTransfer(*control, **command, "a cancelled transfer");
+                const UploadEnd end{
+                    .data = data,
+                    .control = control,
+                    .store = *command,
+                    .finalReplyTimeout = options.finalReplyTimeout,
+                };
+                if (endStartedData(verb, end))
+                    abortTransfer(*control, **command, "a cancelled transfer");
                 co_return std::unexpected(cancelled());
             }
 
@@ -335,6 +410,9 @@ namespace FileTransferProtocol
 
         auto reply =
             co_await finalReplyBehindData(*session_.control, *retrieve_, earlyFinalReply_, options_.finalReplyTimeout);
+        // An abort ends the download as cancelled, whatever the server answers behind it.
+        if (aborted_)
+            co_return std::unexpected(aborted());
         if (!reply)
         {
             // Its deadline ended the control connection. All the data that should come is proof enough.
@@ -343,7 +421,7 @@ namespace FileTransferProtocol
                 !data_->endedWithoutCloseNotify())
             {
                 Log::debug("FTP: Accepted a download without its final reply, its size matched");
-                co_return TransferResult{.bytes = bytes_};
+                co_return TransferResult{.bytes = bytes_, .resumedSession = data_->resumed()};
             }
             co_return std::unexpected(reply.error());
         }
@@ -370,12 +448,16 @@ namespace FileTransferProtocol
     {
         const auto expected = expectedBytes();
         if (expected == bytes_ || (!expected && !data_->endedWithoutCloseNotify()))
-            co_return TransferResult{.bytes = bytes_, .finalReply = std::move(finalReply)};
+            co_return TransferResult{
+                .bytes = bytes_, .finalReply = std::move(finalReply), .resumedSession = data_->resumed()
+            };
 
         // Fewer or more bytes than expected, or TLS that ended without close_notify: the server's size decides now.
         const auto reply = co_await session_.control->execute(Command{.verb = Verb::Size, .argument = request_.path});
         if (isCancelled(co_await asio::this_coro::cancellation_state))
             co_return std::unexpected(cancelled());
+        if (aborted_)
+            co_return std::unexpected(aborted());
         const auto size = reply.and_then(
             [](Reply const& sizeReply)
             {
@@ -383,7 +465,9 @@ namespace FileTransferProtocol
             }
         );
         if (size && *size == request_.offset + bytes_)
-            co_return TransferResult{.bytes = bytes_, .finalReply = std::move(finalReply)};
+            co_return TransferResult{
+                .bytes = bytes_, .finalReply = std::move(finalReply), .resumedSession = data_->resumed()
+            };
         auto truncated = errorOf(
             RemoteErrorKind::Truncated,
             size ? fmt::format("The download ended after {} of {} bytes", request_.offset + bytes_, *size)
@@ -461,7 +545,7 @@ namespace FileTransferProtocol
     void Download::drop(std::string_view why)
     {
         dropped_ = true;
-        data_->close();
+        data_->closeOnceAnswered();
         abortTransfer(*session_.control, *retrieve_, why);
     }
 
@@ -487,7 +571,7 @@ namespace FileTransferProtocol
             return;
         aborted_ = true;
         pauseTimer_.cancel();
-        data_->close();
+        data_->closeOnceAnswered();
         abortTransfer(*session_.control, *retrieve_, "a failed download");
     }
 
@@ -513,9 +597,15 @@ namespace FileTransferProtocol
         // A FIN could make the server take the cut file for a complete one. The last owner may let go off the strand.
         asio::post(
             session_.control->strand(),
-            [data = std::move(data_)]()
+            [end =
+                    UploadEnd{
+                        .data = std::move(data_),
+                        .control = session_.control,
+                        .store = std::move(store_),
+                        .finalReplyTimeout = options_.finalReplyTimeout,
+                    }]() mutable
             {
-                data->reset();
+                endUploadData(std::move(end));
             }
         );
     }
@@ -544,7 +634,9 @@ namespace FileTransferProtocol
     {
         if (aborted_)
             co_return std::unexpected(aborted());
+        writing_ = true;
         const auto written = co_await data_->writeAll(buffer);
+        writing_ = false;
         if (!written)
         {
             // A cancelled coroutine would throw at its next co_await.
@@ -564,7 +656,11 @@ namespace FileTransferProtocol
     {
         if (aborted_)
             co_return std::unexpected(aborted());
+        ending_ = true;
         const auto ended = co_await data_->finishUpload();
+        // An abort meanwhile reset the data, a 226 behind it would not complete the upload.
+        if (aborted_)
+            co_return std::unexpected(aborted());
         if (!ended)
         {
             if (isCancelled(co_await asio::this_coro::cancellation_state))
@@ -574,15 +670,20 @@ namespace FileTransferProtocol
             }
             // Every byte was written: a server that confirms the upload took it, however its side of the data ended.
             const auto answer = co_await answerToFailedData();
+            if (aborted_)
+                co_return std::unexpected(aborted());
             if (!answer || !succeeded(*answer))
                 co_return std::unexpected(failureOf(answer, ended.error()));
             dataEnded_ = true;
-            co_return UploadResult{.bytes = bytes_, .finalReply = *answer};
+            co_return UploadResult{.bytes = bytes_, .finalReply = *answer, .resumedSession = data_->resumed()};
         }
         dataEnded_ = true;
 
         auto reply =
             co_await finalReplyBehindData(*session_.control, *store_, earlyFinalReply_, options_.finalReplyTimeout);
+        // The server has the whole file by now, the upload still ends as the abort said.
+        if (aborted_)
+            co_return std::unexpected(aborted());
         if (!reply)
         {
             // Its deadline ended the control connection, SIZE on another one has to tell.
@@ -595,7 +696,7 @@ namespace FileTransferProtocol
         }
         if (!succeeded(*reply))
             co_return std::unexpected(refusalOf(*reply, verb(), *data_, *session_.control));
-        co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply)};
+        co_return UploadResult{.bytes = bytes_, .finalReply = std::move(*reply), .resumedSession = data_->resumed()};
     }
 
     asio::awaitable<std::optional<Reply>> Upload::answerToFailedData()
@@ -633,8 +734,26 @@ namespace FileTransferProtocol
         if (aborted_)
             return;
         aborted_ = true;
-        data_->reset();
-        abortTransfer(*session_.control, *store_, "an aborted upload");
+        // An ABOR beside a clean end can make proftpd answer with garbage in its 426, the server answers it as any end.
+        if (endData())
+            abortTransfer(*session_.control, *store_, "an aborted upload");
+    }
+
+    bool Upload::endData()
+    {
+        if (writing_ || ending_)
+        {
+            data_->reset();
+            return true;
+        }
+        return endUploadData(
+            UploadEnd{
+                .data = data_,
+                .control = session_.control,
+                .store = store_,
+                .finalReplyTimeout = options_.finalReplyTimeout,
+            }
+        );
     }
 
     asio::awaitable<std::expected<Listing, RemoteIo::RemoteError>>
@@ -660,7 +779,7 @@ namespace FileTransferProtocol
             const auto read = co_await data->readSome(asio::buffer(buffer));
             if (!read)
             {
-                data->close();
+                data->closeOnceAnswered();
                 abortTransfer(*control, *started->command, "a failed listing");
                 co_return std::unexpected(read.error());
             }

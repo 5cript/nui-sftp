@@ -44,8 +44,6 @@ namespace FileTransferProtocol::Test
         ServerExpectations readExpectations(json const& object, std::string& problems)
         {
             auto const& features = object.at("features");
-            auto const& abortReplies = object.at("abortReplies");
-            auto const& finalReply = object.at("finalReplyWaitsForDataClose");
             return ServerExpectations{
                 .features =
                     ServerFeatures{
@@ -64,37 +62,8 @@ namespace FileTransferProtocol::Test
                      {"siteUtime", ModificationTimeCommand::SiteUtime}},
                     problems
                 ),
-                .abortReplies =
-                    {
-                        .plain = abortReplies.at("plain").get<std::vector<int>>(),
-                        .tls = abortReplies.at("tls").get<std::vector<int>>(),
-                    },
-                .finalReplyWaitsForDataClose =
-                    {
-                        .plain = finalReply.at("plain").get<bool>(),
-                        .tls = finalReply.at("tls").get<bool>(),
-                    },
-                .sessionReuseRequired = object.at("sessionReuseRequired").get<bool>(),
-                .missingReuse = readEnum<MissingReuse>(
-                    object,
-                    "missingReuse",
-                    {{"endsSession", MissingReuse::EndsSession}, {"keepsSession", MissingReuse::KeepsSession}},
-                    problems
-                ),
-                .connectionLimit = readEnum<ConnectionLimit>(
-                    object,
-                    "connectionLimit",
-                    {{"atGreeting", ConnectionLimit::AtGreeting}, {"afterPass", ConnectionLimit::AfterPass}},
-                    problems
-                ),
                 .repliesTell550Causes = object.at("repliesTell550Causes").get<bool>(),
-                .listOfMissingDirectory = readEnum<ListOfMissingDirectory>(
-                    object,
-                    "listOfMissingDirectory",
-                    {{"emptyListing", ListOfMissingDirectory::EmptyListing},
-                     {"failsAfterPreliminary", ListOfMissingDirectory::FailsAfterPreliminary}},
-                    problems
-                ),
+                .resumesDataSessions = object.at("resumesDataSessions").get<bool>(),
             };
         }
 
