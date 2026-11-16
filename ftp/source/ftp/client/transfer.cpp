@@ -43,6 +43,15 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief The control connection ended without the final reply: at the reply's deadline, by the keepalive, or
+         *        by the server without a word. Only the size tells whether the transfer is complete then.
+         */
+        bool endedWithoutFinalReply(ControlConnection const& control)
+        {
+            return control.state() == ControlState::Dead;
+        }
+
+        /**
          * @brief What a transfer answers once it was aborted.
          */
         RemoteIo::RemoteError aborted()
@@ -415,10 +424,9 @@ namespace FileTransferProtocol
             co_return std::unexpected(aborted());
         if (!reply)
         {
-            // Its deadline ended the control connection. All the data that should come is proof enough.
+            // All the data that should come is proof enough.
             const auto expected = expectedBytes();
-            if (reply.error().kind == RemoteErrorKind::TimedOut && expected == bytes_ &&
-                !data_->endedWithoutCloseNotify())
+            if (endedWithoutFinalReply(*session_.control) && expected == bytes_ && !data_->endedWithoutCloseNotify())
             {
                 Log::debug("FTP: Accepted a download without its final reply, its size matched");
                 co_return TransferResult{.bytes = bytes_, .resumedSession = data_->resumed()};
@@ -691,8 +699,8 @@ namespace FileTransferProtocol
             co_return std::unexpected(aborted());
         if (!reply)
         {
-            // Its deadline ended the control connection, SIZE on another one has to tell.
-            if (reply.error().kind == RemoteErrorKind::TimedOut)
+            // SIZE on another connection has to tell.
+            if (endedWithoutFinalReply(*session_.control))
                 co_return std::unexpected(errorOf(
                     RemoteErrorKind::TimedOut,
                     "The server did not confirm the upload in time, only the file's size tells whether it is complete"

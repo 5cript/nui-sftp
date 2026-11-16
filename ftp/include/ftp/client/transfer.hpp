@@ -62,8 +62,8 @@ namespace FileTransferProtocol
         /** @brief Bytes of this transfer, without the offset it started or a download was sought at. */
         std::uint64_t bytes{0u};
         /**
-         * @brief Nothing when no final reply came in time and the size showed the data complete. The control
-         *        connection is Dead then, its replies are out of step.
+         * @brief Nothing when the control connection ended without the final reply, at its deadline or by the
+         *        keepalive, and the size showed the data complete. The control connection is Dead then.
          */
         std::optional<Reply> finalReply{};
         /** @brief The TLS handshake of the last data connection resumed the control connection's session. */
@@ -129,9 +129,9 @@ namespace FileTransferProtocol
          * @brief The final reply and the size checks, once readSome() returned 0.
          *
          * @return The result. The replyError() of a negative final reply, Truncated for data that ended early or
-         *         without close_notify and the wrong size, TimedOut when no final reply came and the size proves
-         *         nothing, Failure before the data ended, Cancelled after an abort(), one that came during its waits
-         *         included.
+         *         without close_notify and the wrong size, the error that ended the control connection when no
+         *         final reply came and the size proves nothing, Failure before the data ended, Cancelled after an
+         *         abort(), one that came during its waits included.
          */
         boost::asio::awaitable<std::expected<TransferResult, RemoteIo::RemoteError>> finish();
 
@@ -288,9 +288,9 @@ namespace FileTransferProtocol
          * @brief Ends the data so the server takes all of it, then the final reply.
          *
          * @return The result. The replyError() of a negative final reply. The error of a data end that failed, unless
-         *         a positive final reply within the refusal wait confirms the upload. TimedOut when no final reply
-         *         came in time: the control connection is Dead then, and the upload is complete only when SIZE on
-         *         another connection shows the offset plus the bytes written.
+         *         a positive final reply within the refusal wait confirms the upload. TimedOut when the control
+         *         connection ended without the final reply, at its deadline or by the keepalive: the upload is
+         *         complete only when SIZE on another connection shows the offset plus the bytes written.
          */
         boost::asio::awaitable<std::expected<UploadResult, RemoteIo::RemoteError>> finish();
 
