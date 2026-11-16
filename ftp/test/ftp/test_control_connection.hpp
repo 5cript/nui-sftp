@@ -1352,6 +1352,79 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
+    TEST_F(ControlConnectionTests, UntilIdleWaitsForTheDrainOfAnAbort)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .reply("150 Opening")
+                .expect("ABOR")
+                .checkpoint("aborted")
+                .awaitRelease("drain")
+                .reply("426 Transfer aborted")
+                .reply("226 Abort successful")
+                .expect("PWD")
+                .reply(currentDirectory)
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto abort =
+            run(connection,
+                [connection]() -> asio::awaitable<std::shared_ptr<PendingCommand>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    if (!opened)
+                        co_return nullptr;
+                    co_return connection->send(command(Verb::Abort)).value();
+                });
+        ASSERT_TRUE(abort);
+        auto idle = asio::co_spawn(
+            connection->strand(),
+            [connection, abort]() -> asio::awaitable<PendingCommand::Stage>
+            {
+                co_await connection->untilIdle();
+                co_return abort->stage();
+            },
+            asio::use_future
+        );
+        ASSERT_TRUE(server_->waitForCheckpoint("aborted"));
+        // stateOf() runs behind the wait on the strand, only the replies the server holds back can end it.
+        EXPECT_EQ(stateOf(connection), ControlState::Open);
+        EXPECT_EQ(idle.wait_for(0s), std::future_status::timeout);
+
+        server_->release("drain");
+        ASSERT_EQ(idle.wait_for(10s), std::future_status::ready);
+        EXPECT_EQ(idle.get(), PendingCommand::Stage::Completed);
+    }
+
+    TEST_F(ControlConnectionTests, UntilIdleEndsWithTheConnection)
+    {
+        server_->addConnection(
+            Script{}.reply("220 Ready").expect("RETR", "file").reply("150 Opening").awaitRelease("close").closeControl()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto retrieve =
+            run(connection,
+                [connection]() -> asio::awaitable<std::shared_ptr<PendingCommand>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    co_return opened ? retrieve : nullptr;
+                });
+        ASSERT_TRUE(retrieve);
+        auto idle = asio::co_spawn(connection->strand(), connection->untilIdle(), asio::use_future);
+        EXPECT_EQ(stateOf(connection), ControlState::Open);
+        EXPECT_EQ(idle.wait_for(0s), std::future_status::timeout);
+
+        server_->release("close");
+        ASSERT_EQ(idle.wait_for(10s), std::future_status::ready);
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+    }
+
     struct AbortCase
     {
         std::string_view name{};

@@ -79,6 +79,20 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief A connection that logs in and opens a RETR, then takes ABOR and holds its replies back until the test
+         *        releases "drain".
+         */
+        Script abortedRetrieveHeldAtTheDrain()
+        {
+            Script script{};
+            return loggedIn(script)
+                .expect("RETR", "file")
+                .reply("150 Opening BINARY mode data connection for file.")
+                .expect("ABOR")
+                .awaitRelease("drain");
+        }
+
+        /**
          * @brief A connection refused at the greeting the way vsftpd refuses one over its limit.
          */
         Script refusedAtTheGreeting()
@@ -344,6 +358,31 @@ namespace FileTransferProtocol::Test
             lease.release();
             flush(strand);
             flush(pool_->strand());
+        }
+
+        /**
+         * @brief Sends RETR on the connection of @p lease and ABOR once the transfer opened, without waiting for the
+         *        end of the drain.
+         */
+        static void abortRetrieve(Lease const& lease)
+        {
+            const auto control = lease.control();
+            auto future = asio::co_spawn(
+                control->strand(),
+                [control]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    const auto retrieve = control->send(Command{.verb = Verb::Retrieve, .argument = "file"});
+                    if (!retrieve)
+                        co_return std::unexpected(retrieve.error());
+                    const auto opened = co_await (*retrieve)->nextReply();
+                    if (!opened)
+                        co_return std::unexpected(opened.error());
+                    co_return control->send(Command{.verb = Verb::Abort}).transform([](auto const&) {});
+                },
+                asio::use_future
+            );
+            const auto aborted = waitFor(future);
+            ASSERT_TRUE(aborted) << aborted.error().toString();
         }
 
         static std::expected<Reply, RemoteIo::RemoteError> execute(Lease const& lease, Verb verb)
@@ -963,6 +1002,57 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(next.name(), "C2");
         EXPECT_EQ(pool->health(), PoolHealth::Healthy);
         EXPECT_EQ(connectionsAccepted(), 3u);
+    }
+
+    TEST_F(PoolTests, ConnectionReleasedDuringTheDrainOfAnAbortComesBackOnceTheDrainEnded)
+    {
+        server_->addConnection(loginThenDisconnect());
+        server_->addConnection(
+            abortedRetrieveHeldAtTheDrain()
+                .reply("426 Transfer aborted.")
+                .reply("226 Abort successful")
+                .expect("PWD")
+                .reply(currentDirectory)
+                .expect("NOOP")
+                .reply("200 Fine")
+                .expectDisconnect()
+        );
+        auto poolOptions = options();
+        poolOptions.transferConnections = 1u;
+        const auto pool = startedPool(std::move(poolOptions));
+        auto transfer = leaseFrom(run(pool->acquireTransfer()));
+        abortRetrieve(transfer);
+        giveBack(transfer);
+        const auto wakes = std::make_shared<WakeCount>();
+        expectError(run(pool->acquireTransfer(wakes->wake())), RemoteErrorKind::Busy);
+
+        server_->release("drain");
+        ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready);
+        const auto next = leaseFrom(run(pool->acquireTransfer()));
+        EXPECT_EQ(next.name(), "C1");
+        expectReply(execute(next, Verb::Noop), 200);
+        EXPECT_EQ(connectionsAccepted(), 2u);
+    }
+
+    TEST_F(PoolTests, ConnectionThatEndsInTheDrainOfAnAbortAfterItsReleaseIsNotHandedOutAgain)
+    {
+        server_->addConnection(loginThenDisconnect());
+        server_->addConnection(abortedRetrieveHeldAtTheDrain().closeControl());
+        server_->addConnection(loginThenDisconnect());
+        auto poolOptions = options();
+        poolOptions.transferConnections = 1u;
+        const auto pool = startedPool(std::move(poolOptions));
+        auto transfer = leaseFrom(run(pool->acquireTransfer()));
+        abortRetrieve(transfer);
+        giveBack(transfer);
+        const auto wakes = std::make_shared<WakeCount>();
+        expectError(run(pool->acquireTransfer(wakes->wake())), RemoteErrorKind::Busy);
+
+        server_->release("drain");
+        ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready);
+        const auto next = leaseFrom(run(pool->acquireTransfer()));
+        EXPECT_EQ(next.name(), "C2");
+        EXPECT_EQ(pool->health(), PoolHealth::Healthy);
     }
 
     TEST_F(PoolTests, LeaseEndsOnAnyThread)
