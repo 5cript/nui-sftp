@@ -156,16 +156,6 @@ namespace FileTransferProtocol::Test
                 }
             );
         }
-
-        /**
-         * @brief How the server saw the first data connection end, once the client is gone.
-         */
-        std::optional<std::string> dataEndAfterDisconnect(std::shared_ptr<ControlConnection> const& connection)
-        {
-            connection->close();
-            EXPECT_TRUE(server_->waitUntilDisconnected());
-            return detailOf(server_->transcript(), TranscriptEntry::Kind::DataEnded);
-        }
     };
 
     TEST_F(UploadTests, StoresTheFile)
@@ -470,6 +460,46 @@ namespace FileTransferProtocol::Test
         const auto tls = settings();
         const auto connection = securedWith(std::move(script), tls);
         expectUploadError(abortBeforeTheFirstByte(connection, tls), RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"end of stream"});
+    }
+
+    TEST_F(UploadTests, TlsUploadCancelledBehindItsHandshakeEndsCleanly)
+    {
+        // The 150 stays out, so the start waits with its data handshake done until the cancel.
+        auto script = securedPrefix();
+        script.expect("EPSV")
+            .passive(DataPlan{}.tls().expectUpload(0u))
+            .expect("STOR", "file")
+            .beginData()
+            .awaitData()
+            .reply("150 Ok to send data.")
+            .reply("226 Transfer complete.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto started =
+            run(connection,
+                [connection, session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto [exception, result] = co_await asio::co_spawn(
+                        connection->strand(),
+                        Upload::start(session, {.path = "file"}, quickTransferOptions()),
+                        asio::cancel_after(300ms, asio::as_tuple(asio::use_awaitable))
+                    );
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result.transform([](std::shared_ptr<Upload> const&) {});
+                });
+        ASSERT_FALSE(started);
+        EXPECT_EQ(started.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << started.error().toString();
         expectReply(execute(connection, command(Verb::Noop)), 200);
         EXPECT_EQ(dataEndAfterDisconnect(connection), std::optional<std::string>{"end of stream"});
     }

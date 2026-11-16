@@ -94,13 +94,16 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The first reply to a transfer command. A refusal or a 3yz closes the data side, a handshake under way
-         *        included.
+         * @brief The first reply to a transfer command. A refusal, a 3yz or a wait that failed closes the data side, a
+         *        handshake under way included. A cancel does not: it ends the handshake by itself, and
+         *        startTransfer() ends the data.
          */
         asio::awaitable<std::expected<Reply, RemoteIo::RemoteError>>
         firstReply(std::shared_ptr<PendingCommand> pending, std::shared_ptr<DataConnection> data)
         {
             auto reply = co_await pending->nextReply();
+            if (isCancelled(co_await asio::this_coro::cancellation_state))
+                co_return reply;
             if (!reply || refused(*reply) || asksForMore(*reply))
                 data->close();
             co_return reply;
@@ -114,14 +117,6 @@ namespace FileTransferProtocol
             if (isPreliminary(first.code))
                 return std::nullopt;
             return first;
-        }
-
-        /**
-         * @brief Keeps @p data alive until it closed behind the server's answer.
-         */
-        asio::awaitable<void> closedOnceAnswered(std::shared_ptr<DataConnection> data)
-        {
-            co_await data->closeOnceAnswered();
         }
 
         /**
@@ -171,6 +166,21 @@ namespace FileTransferProtocol
                 asio::detached
             );
             return false;
+        }
+
+        /**
+         * @brief Ends the data of a transfer that was cancelled while it started, where the server may still be in
+         *        its TLS handshake without a reset: an upload as endUploadData() does, anything else once the server
+         *        answered on it.
+         *
+         * @return Whether the server is left a transfer to abort.
+         */
+        bool endStartedData(Verb verb, UploadEnd end)
+        {
+            if (verb == Verb::Store || verb == Verb::Append)
+                return endUploadData(std::move(end));
+            end.data->closeOnceAnswered();
+            return true;
         }
 
         /**
@@ -285,8 +295,14 @@ namespace FileTransferProtocol
                 first = co_await firstReply(*command, data);
             if (isCancelled(co_await asio::this_coro::cancellation_state))
             {
-                data->reset();
-                abortTransfer(*control, **command, "a cancelled transfer");
+                const UploadEnd end{
+                    .data = data,
+                    .control = control,
+                    .store = *command,
+                    .finalReplyTimeout = options.finalReplyTimeout,
+                };
+                if (endStartedData(verb, end))
+                    abortTransfer(*control, **command, "a cancelled transfer");
                 co_return std::unexpected(cancelled());
             }
 
@@ -524,7 +540,7 @@ namespace FileTransferProtocol
     void Download::drop(std::string_view why)
     {
         dropped_ = true;
-        closeData();
+        data_->closeOnceAnswered();
         abortTransfer(*session_.control, *retrieve_, why);
     }
 
@@ -550,18 +566,8 @@ namespace FileTransferProtocol
             return;
         aborted_ = true;
         pauseTimer_.cancel();
-        closeData();
+        data_->closeOnceAnswered();
         abortTransfer(*session_.control, *retrieve_, "a failed download");
-    }
-
-    void Download::closeData()
-    {
-        if (reading_ || !data_->serverMayBeInHandshake())
-        {
-            data_->close();
-            return;
-        }
-        asio::co_spawn(session_.control->strand(), closedOnceAnswered(data_), asio::detached);
     }
 
     Upload::Upload(
@@ -763,7 +769,7 @@ namespace FileTransferProtocol
             const auto read = co_await data->readSome(asio::buffer(buffer));
             if (!read)
             {
-                data->close();
+                data->closeOnceAnswered();
                 abortTransfer(*control, *started->command, "a failed listing");
                 co_return std::unexpected(read.error());
             }

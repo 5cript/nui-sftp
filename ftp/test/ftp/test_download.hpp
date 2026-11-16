@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <optional>
@@ -166,6 +167,27 @@ namespace FileTransferProtocol::Test
                     co_return co_await readPart(download, size);
                 }
             );
+        }
+
+        /**
+         * @brief How the server saw the client end the first data connection, once the client is gone. Nothing when
+         *        the server ended that connection itself.
+         */
+        std::optional<std::string> dataEndAfterDisconnect(std::shared_ptr<ControlConnection> const& connection)
+        {
+            connection->close();
+            EXPECT_TRUE(server_->waitUntilDisconnected());
+            const auto transcript = server_->transcript();
+            const auto ended = std::ranges::find_if(
+                transcript,
+                [](TranscriptEntry const& entry)
+                {
+                    return entry.kind == TranscriptEntry::Kind::DataEnded;
+                }
+            );
+            if (ended == transcript.end())
+                return std::nullopt;
+            return ended->detail;
         }
 
         std::expected<void, RemoteIo::RemoteError> seekTo(
@@ -809,6 +831,51 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(result) << result.error().toString();
         EXPECT_EQ(result->content, "secret");
         EXPECT_TRUE(result->result.resumedSession);
+    }
+
+    TEST_F(DownloadTlsTests, TlsDownloadCancelledBehindItsHandshakeClosesWithTheServersAnswer)
+    {
+        // The 150 stays out, so the start waits with its data handshake done until the cancel. The ABOR goes out
+        // with the 150, and the server ends the data connection for it.
+        auto script = securedPrefix();
+        script.expect("EPSV")
+            .passive(DataPlan{}.tls().stallAfter(""))
+            .expect("RETR", "file")
+            .beginData()
+            .awaitRelease("cancelled")
+            .reply("150 Here it comes")
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .stopData()
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto started =
+            run(connection,
+                [connection, session]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    auto [exception, result] = co_await asio::co_spawn(
+                        connection->strand(),
+                        Download::start(session, {.path = "file"}, quickTransferOptions()),
+                        asio::cancel_after(300ms, asio::as_tuple(asio::use_awaitable))
+                    );
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result.transform([](std::shared_ptr<Download> const&) {});
+                });
+        ASSERT_FALSE(started);
+        EXPECT_EQ(started.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << started.error().toString();
+        server_->release("cancelled");
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::nullopt);
     }
 
     TEST_F(DownloadTlsTests, TlsEndWithoutCloseNotifyAndTheWholeSizeIsComplete)

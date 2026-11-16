@@ -4,6 +4,8 @@
 #include "client_support.hpp"
 
 #include <boost/asio/cancel_after.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio/ssl/error.hpp>
@@ -208,30 +210,35 @@ namespace FileTransferProtocol
     asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
     DataConnection::readSome(asio::mutable_buffer buffer)
     {
-        if (closed_)
+        if (closed_ || awaitsAnswer_)
             co_return std::unexpected(cancelled());
         const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
+        reading_ = true;
         const auto [error, size] =
             tls_ ? co_await tls_->async_read_some(buffer, token) : co_await socket_.async_read_some(buffer, token);
-        if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
+        reading_ = false;
+        const bool cancelledRead = isCancelled(co_await asio::this_coro::cancellation_state);
+        const bool ended = error == asio::error::eof || error == asio::ssl::error::stream_truncated;
+        // A server that let the inactivity timeout pass had its time for the handshake.
+        const bool timedOut = error == asio::error::operation_aborted && !cancelledRead && !closed_;
+        if (!error || ended || timedOut)
+            answered_ = true;
+        if (awaitsAnswer_)
+        {
+            closeAnsweredOrWait();
+            co_return std::unexpected(cancelled());
+        }
+        if (cancelledRead || closed_)
             co_return std::unexpected(cancelled());
         if (!error)
-        {
-            answered_ = true;
             co_return size;
-        }
-        if (error == asio::error::eof)
+        if (ended)
         {
-            answered_ = true;
+            if (error == asio::ssl::error::stream_truncated)
+                endedWithoutCloseNotify_ = true;
             co_return std::size_t{0u};
         }
-        if (error == asio::ssl::error::stream_truncated)
-        {
-            answered_ = true;
-            endedWithoutCloseNotify_ = true;
-            co_return std::size_t{0u};
-        }
-        co_return std::unexpected(transferError(error, error == asio::error::operation_aborted, "Reading"));
+        co_return std::unexpected(transferError(error, timedOut, "Reading"));
     }
 
     asio::awaitable<std::expected<void, RemoteIo::RemoteError>> DataConnection::writeAll(asio::const_buffer buffer)
@@ -314,12 +321,46 @@ namespace FileTransferProtocol
         co_return std::unexpected(transferError(error, false, "Ending"));
     }
 
-    asio::awaitable<void> DataConnection::closeOnceAnswered()
+    void DataConnection::closeOnceAnswered()
     {
+        if (!serverMayBeInHandshake())
+        {
+            close();
+            return;
+        }
         if (awaitsAnswer_)
-            co_return;
+            return;
         awaitsAnswer_ = true;
-        std::ignore = co_await readSome(asio::buffer(drainBuffer_));
+        // A read under way ends with the answer and closes then.
+        if (!reading_)
+            closeAnsweredOrWait();
+    }
+
+    void DataConnection::closeAnsweredOrWait()
+    {
+        if (closed_)
+            return;
+        if (answered_)
+        {
+            close();
+            return;
+        }
+        asio::co_spawn(
+            strand_,
+            [self = shared_from_this()]()
+            {
+                return self->awaitAnswer();
+            },
+            asio::detached
+        );
+    }
+
+    asio::awaitable<void> DataConnection::awaitAnswer()
+    {
+        // Only a secured connection gets here.
+        std::ignore = co_await tls_->async_read_some(
+            asio::buffer(drainBuffer_), asio::cancel_after(options_.inactivityTimeout, useTuple)
+        );
         close();
     }
 

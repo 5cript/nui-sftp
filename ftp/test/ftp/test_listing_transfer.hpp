@@ -223,6 +223,47 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(listedNames(*result), (std::vector<std::string>{"a.txt", "sub"}));
     }
 
+    TEST_F(ListingTransferTests, ATlsListingCancelledBeforeItsFirstByteClosesWithTheServersAnswer)
+    {
+        // Nothing comes on the data connection, the read waits for the cancel. The server ends the data for the ABOR.
+        auto script = securedPrefix();
+        script.expect("EPSV")
+            .passive(DataPlan{}.tls().stallAfter(""))
+            .expect("MLSD")
+            .reply("150 Opening ASCII mode data connection for MLSD")
+            .beginData()
+            .abortSequence(AbortReplies::ProftpdTlsLike)
+            .stopData()
+            .expect("PWD")
+            .reply(currentDirectory)
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        const TransferSession session{
+            .control = connection,
+            .passiveChoice = std::make_shared<PassiveChoice>(),
+            .tls = tls,
+        };
+        const auto listed =
+            run(connection,
+                [connection, session]() -> asio::awaitable<ListingResult>
+                {
+                    auto [exception, result] = co_await asio::co_spawn(
+                        connection->strand(),
+                        fetchListing(session, machineListing(), machineParser(), quickTransferOptions()),
+                        asio::cancel_after(300ms, asio::as_tuple(asio::use_awaitable))
+                    );
+                    if (exception)
+                        std::rethrow_exception(exception);
+                    co_return result;
+                });
+        expectListingError(listed, RemoteIo::RemoteErrorKind::Cancelled);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        EXPECT_EQ(dataEndAfterDisconnect(connection), std::nullopt);
+    }
+
     TEST_F(ListingTransferTests, TlsListingDataWithoutCloseNotifyIsTruncated)
     {
         auto script = securedPrefix();

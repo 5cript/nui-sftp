@@ -140,8 +140,10 @@ namespace FileTransferProtocol
         std::optional<std::uint64_t> announcedSize() const;
 
         /**
-         * @brief Ends the download as cancelled: closes the data connection and sends ABOR, the control connection
-         *        drains behind it and stays usable. Reads and finish() fail as Cancelled from then on.
+         * @brief Ends the download as cancelled: closes the data connection as DataConnection::closeOnceAnswered()
+         *        does and sends ABOR, the control connection drains behind it and stays usable. Reads and finish()
+         *        fail as Cancelled from then on, a first read under way once the server answered on the data
+         *        connection.
          */
         void abort();
 
@@ -187,11 +189,6 @@ namespace FileTransferProtocol
          * @brief Closes the data connection and sends ABOR, the next read starts the transfer again.
          */
         void drop(std::string_view why);
-        /**
-         * @brief Closes the data connection, once the server answered on it where it may still be in its TLS
-         *        handshake (DataConnection::serverMayBeInHandshake()).
-         */
-        void closeData();
 
         TransferSession session_;
         DownloadRequest request_;
