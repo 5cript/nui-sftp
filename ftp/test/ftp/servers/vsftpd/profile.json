@@ -12,6 +12,7 @@
         "features": {"mlsd": false, "mlst": false, "mfmt": false, "utf8": true, "epsv": true},
         "advertised": ["EPRT", "EPSV", "MDTM", "PASV", "PBSZ", "PROT", "REST STREAM", "SIZE", "TVFS"],
         "modificationTime": "mdtm",
-        "repliesTell550Causes": false
+        "repliesTell550Causes": false,
+        "resumesDataSessions": true
     }
 }

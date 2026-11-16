@@ -63,6 +63,7 @@ namespace FileTransferProtocol::Test
                     problems
                 ),
                 .repliesTell550Causes = object.at("repliesTell550Causes").get<bool>(),
+                .resumesDataSessions = object.at("resumesDataSessions").get<bool>(),
             };
         }
 

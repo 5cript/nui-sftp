@@ -321,7 +321,7 @@ namespace FileTransferProtocol::Test
 
     TEST_P(TransferConformance, EveryDataConnectionOfALoginResumesItsTlsSession)
     {
-        const auto tls = mode() != TlsMode::None;
+        const auto resumes = mode() != TlsMode::None && profile_.expectations.resumesDataSessions;
         // Six data connections of one control connection, uploads and downloads in turn.
         for (std::size_t round = 0u; round < 3u; ++round)
         {
@@ -329,11 +329,11 @@ namespace FileTransferProtocol::Test
             const auto content = uploadContent(1000u + round);
             const auto uploaded = upload({.path = pathOf(name)}, content);
             ASSERT_TRUE(uploaded) << name << ": " << uploaded.error().toString();
-            EXPECT_EQ(uploaded->resumedSession, tls) << name;
+            EXPECT_EQ(uploaded->resumedSession, resumes) << name;
             const auto downloaded = download({.path = pathOf(name), .expectedSize = content.size()});
             ASSERT_TRUE(downloaded) << name << ": " << downloaded.error().toString();
             EXPECT_TRUE(downloaded->content == content) << name;
-            EXPECT_EQ(downloaded->result.resumedSession, tls) << name;
+            EXPECT_EQ(downloaded->result.resumedSession, resumes) << name;
         }
     }
 

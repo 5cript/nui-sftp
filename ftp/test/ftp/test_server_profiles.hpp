@@ -48,6 +48,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(profile->implicitPort, 990u);
         EXPECT_EQ(profile->expectations.modificationTime, ModificationTimeCommand::Mdtm);
         EXPECT_FALSE(profile->expectations.repliesTell550Causes);
+        EXPECT_TRUE(profile->expectations.resumesDataSessions);
     }
 
     TEST(ServerProfileTests, AMissingFileIsAnError)

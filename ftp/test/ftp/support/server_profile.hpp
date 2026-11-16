@@ -55,6 +55,8 @@ namespace FileTransferProtocol::Test
         ModificationTimeCommand modificationTime{};
         /** @brief Whether the text of a 550 says what went wrong. */
         bool repliesTell550Causes{false};
+        /** @brief Whether a data connection that offers the TLS session of the control connection resumes it. */
+        bool resumesDataSessions{false};
     };
 
     /**
