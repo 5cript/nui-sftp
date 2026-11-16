@@ -17,8 +17,8 @@ namespace FileTransferProtocol
      *        of its control connection. Commands that belong together, RNFR and RNTO or CWD and LIST, go out within one
      *        lease.
      *
-     * A lease may end on any thread. The pool takes the connection back once the connection's strand said whether it
-     * is still open, one that ended is dropped.
+     * A lease may end on any thread. The pool takes the connection back once its commands ended, the drain of an ABOR
+     * included, and its strand said whether it is still open; one that ended is dropped.
      */
     class Lease
     {

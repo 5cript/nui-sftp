@@ -397,6 +397,7 @@ namespace FileTransferProtocol
         , framer_{options_.replyLimits}
         , deadlineTimer_{strand_}
         , settleTimer_{strand_}
+        , idleSignal_{strand_, std::chrono::steady_clock::time_point::max()}
         , readBuffer_{std::make_shared<std::array<char, 4096>>()}
     {}
 
@@ -691,8 +692,21 @@ namespace FileTransferProtocol
             return false;
         (*found)->fail(errorOf(RemoteErrorKind::Cancelled, "The command was withdrawn before it was written"));
         queued_.erase(found);
+        wakeIdleWaiters();
         writeNext();
         return true;
+    }
+
+    asio::awaitable<void> ControlConnection::untilIdle()
+    {
+        while (isLive() && (!queued_.empty() || !awaiting_.empty()))
+            co_await idleSignal_.async_wait(useTuple);
+    }
+
+    void ControlConnection::wakeIdleWaiters()
+    {
+        if (queued_.empty() && awaiting_.empty())
+            idleSignal_.cancel();
     }
 
     void ControlConnection::limitFinalReply(PendingCommand& pending, std::chrono::milliseconds timeout)
@@ -897,7 +911,10 @@ namespace FileTransferProtocol
         if (preliminary)
             pending->deadline_ = deadlineAfterPreliminary(*pending);
         else
+        {
             awaiting_.pop_front();
+            wakeIdleWaiters();
+        }
 
         // A 421 ends the connection like a close (RFC 1123 4.1.2.11), the command still gets it as its reply.
         auto closing = code == 421 ? std::optional{replyError(reply, verb)} : std::nullopt;
@@ -957,6 +974,7 @@ namespace FileTransferProtocol
                 return pending == drain.transfer || pending == drain.abort || pending == drain.marker;
             }
         );
+        wakeIdleWaiters();
         if (drain.replies.empty())
         {
             const auto missing = unreadableReply("The server answered neither the aborted transfer nor ABOR");
@@ -1180,6 +1198,7 @@ namespace FileTransferProtocol
         deadlineTimer_.cancel();
         armedDeadline_.reset();
         settleTimer_.cancel();
+        idleSignal_.cancel();
         drain_.reset();
         const auto awaiting = std::exchange(awaiting_, {});
         const auto queued = std::exchange(queued_, {});

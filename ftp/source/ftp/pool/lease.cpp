@@ -1,7 +1,8 @@
 #include <ftp/pool/lease.hpp>
 #include <ftp/pool/pool.hpp>
 
-#include <boost/asio/dispatch.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 
 #include <cassert>
@@ -67,17 +68,19 @@ namespace FileTransferProtocol
         if (!connection)
             return;
         const auto strand = connection->control->strand();
-        // Only the connection's strand knows whether it is still open, the pool's strand takes it back.
-        asio::dispatch(
+        // Only the connection's strand knows whether it is still open, once its commands ended: the next holder would
+        // wait for the drain of an abort and fail with it. The pool's strand takes it back.
+        asio::co_spawn(
             strand,
-            [pool = std::exchange(pool_, {}), connection = std::move(connection)]()
+            [](std::weak_ptr<Pool> pool, std::shared_ptr<PooledConnection> connection) -> asio::awaitable<void>
             {
+                co_await connection->control->untilIdle();
                 const auto open = connection->control->state() == ControlState::Open;
                 const auto locked = pool.lock();
                 if (!locked)
                 {
                     connection->control->close();
-                    return;
+                    co_return;
                 }
                 asio::post(
                     locked->strand(),
@@ -86,7 +89,8 @@ namespace FileTransferProtocol
                         locked->release(connection, open);
                     }
                 );
-            }
+            }(std::exchange(pool_, {}), std::move(connection)),
+            asio::detached
         );
     }
 }
