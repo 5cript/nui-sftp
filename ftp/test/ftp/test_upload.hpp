@@ -236,6 +236,18 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
+    TEST_F(UploadTests, ControlEndedByTheServerAfterTheDataLeavesItToTheSize)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}.expectUpload(1024u), "150 Ok to send data.")
+            .beginData()
+            .awaitData()
+            .closeControl();
+        const auto connection = plainConnection(std::move(script));
+        expectUploadError(upload(connection, {.path = "file"}, "content"), RemoteIo::RemoteErrorKind::TimedOut);
+    }
+
     TEST_F(UploadTests, NegativeFinalReplyFails)
     {
         Script script{};
