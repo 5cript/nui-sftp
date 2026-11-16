@@ -517,7 +517,7 @@ namespace FileTransferProtocol::Test
             }
             if (const auto error = co_await transport.handshake(server.contextFor(behaviour)); error)
             {
-                server.record(connection, Kind::TlsFailed, fmt::format("{}: {}", label, error.message()));
+                server.record(connection, Kind::TlsFailed, fmt::format("{}: {}", label, endReason(error)));
                 co_return TlsOutcome::Failed;
             }
             server.record(

@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -170,23 +171,28 @@ namespace FileTransferProtocol::Test
         }
 
         /**
-         * @brief How the server saw the client end the first data connection, once the client is gone. Nothing when
-         *        the server ended that connection itself.
+         * @brief How the server saw the client end the first data connection, once the client is gone, also when that
+         *        end failed the server's handshake: a reset may overtake the client's last handshake message. Nothing
+         *        when the server ended that connection itself.
          */
         std::optional<std::string> dataEndAfterDisconnect(std::shared_ptr<ControlConnection> const& connection)
         {
             connection->close();
             EXPECT_TRUE(server_->waitUntilDisconnected());
+            const std::string_view failedHandshake = "data: ";
             const auto transcript = server_->transcript();
             const auto ended = std::ranges::find_if(
                 transcript,
-                [](TranscriptEntry const& entry)
+                [failedHandshake](TranscriptEntry const& entry)
                 {
-                    return entry.kind == TranscriptEntry::Kind::DataEnded;
+                    return entry.kind == TranscriptEntry::Kind::DataEnded ||
+                        (entry.kind == TranscriptEntry::Kind::TlsFailed && entry.detail.starts_with(failedHandshake));
                 }
             );
             if (ended == transcript.end())
                 return std::nullopt;
+            if (ended->kind == TranscriptEntry::Kind::TlsFailed)
+                return ended->detail.substr(failedHandshake.size());
             return ended->detail;
         }
 
