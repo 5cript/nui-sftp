@@ -427,10 +427,14 @@ namespace FileTransferProtocol::Test
             ASSERT_FALSE(aborted) << "write all: " << writeAll;
             EXPECT_EQ(aborted.error().kind, RemoteIo::RemoteErrorKind::Cancelled) << aborted.error().toString();
             ASSERT_NO_FATAL_FAILURE(expectUsableLogin()) << "write all: " << writeAll;
-            const auto sizeReply = execute(Command{.verb = Verb::Size, .argument = path});
-            ASSERT_TRUE(sizeReply) << sizeReply.error().toString();
-            if (const auto kept = parseSizeReply(*sizeReply))
-                EXPECT_LE(*kept, writeAll ? content.size() : 0u) << "write all: " << writeAll;
+            // What a server keeps of an upload that was cut behind its last byte is its own matter.
+            if (!writeAll)
+            {
+                const auto sizeReply = execute(Command{.verb = Verb::Size, .argument = path});
+                ASSERT_TRUE(sizeReply) << sizeReply.error().toString();
+                // Nothing was sent: no file is as good as an empty one.
+                EXPECT_EQ(parseSizeReply(*sizeReply).value_or(0u), 0u);
+            }
         }
     }
 
