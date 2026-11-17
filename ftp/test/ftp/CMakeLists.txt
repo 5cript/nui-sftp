@@ -22,6 +22,8 @@ function(add_ftp_test name ftpLibrary remoteIoLibrary outputDirectory)
     add_library(
         ${name}-support
         STATIC
+            support/dropped_connection.cpp
+            support/executor_probes.cpp
             support/file_system_harness.cpp
             support/ftp_script.cpp
             support/scripted_ftp_server.cpp
@@ -114,7 +116,8 @@ if (NOT WIN32)
     add_test(NAME FtpServerFleetStart COMMAND nui-sftp-ftp-fleet start "${FTP_FLEET_ENDPOINTS}")
     add_test(NAME FtpServerFleetStop COMMAND nui-sftp-ftp-fleet stop "${FTP_FLEET_ENDPOINTS}")
     set_tests_properties(FtpServerFleetStart PROPERTIES FIXTURES_SETUP FtpServerFleet TIMEOUT 900)
-    set_tests_properties(FtpServerFleetStop PROPERTIES FIXTURES_CLEANUP FtpServerFleet)
+    # Docker removes containers slowly while the shell suites create theirs.
+    set_tests_properties(FtpServerFleetStop PROPERTIES FIXTURES_CLEANUP FtpServerFleet TIMEOUT 600)
 endif()
 
 # A configure of its own with -DCODE_COVERAGE=ON, a report to look at that no test fails on. The instrumented libraries

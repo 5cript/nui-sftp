@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends proftpd-core proftpd-mod-crypto iptables openssl procps \
+ && apt-get install -y --no-install-recommends proftpd-core proftpd-mod-crypto iptables iproute2 openssl procps \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /var/log/proftpd /run/proftpd \
  && openssl req -x509 -nodes -newkey rsa:2048 -days 36500 -subj "/CN=nui-sftp-ftp-test-proftpd" \

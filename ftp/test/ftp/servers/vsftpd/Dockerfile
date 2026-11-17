@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends vsftpd iptables openssl \
+ && apt-get install -y --no-install-recommends vsftpd iptables iproute2 openssl \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /var/run/vsftpd/empty \
  && openssl req -x509 -nodes -newkey rsa:2048 -days 36500 -subj "/CN=nui-sftp-ftp-test-vsftpd" \

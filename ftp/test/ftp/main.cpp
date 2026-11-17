@@ -14,6 +14,7 @@
 #include "test_login_conformance.hpp"
 #include "test_pool.hpp"
 #include "test_pool_conformance.hpp"
+#include "test_fault_conformance.hpp"
 #include "test_engine.hpp"
 #include "test_ftp_file_system.hpp"
 #include "test_ftp_file_stream.hpp"

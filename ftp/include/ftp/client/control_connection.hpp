@@ -174,6 +174,14 @@ namespace FileTransferProtocol
         void limitFinalReply(PendingCommand& pending, std::chrono::milliseconds timeout);
 
         /**
+         * @brief Waits until no command is queued or owes its final reply, the drain of an ABOR included, or the
+         *        connection ended. For a connection nobody holds anymore: one that is still busy after the command
+         *        timeout plus the drain timeout ends as Dead, a transfer nobody finishes has no deadline of its own.
+         *        On strand().
+         */
+        boost::asio::awaitable<void> untilIdle();
+
+        /**
          * @brief Closes the socket without QUIT. Waiting commands fail as Cancelled. Callable from any thread.
          */
         void close();
@@ -195,6 +203,11 @@ namespace FileTransferProtocol
          * @brief The peer of the control connection, which passive data connections go to (RFC 2577).
          */
         boost::asio::ip::tcp::endpoint remoteEndpoint() const;
+
+        /**
+         * @brief The client's end of the control connection, set by connect().
+         */
+        boost::asio::ip::tcp::endpoint localEndpoint() const;
 
         /**
          * @brief The certificate of the handshake and who vouched for it, nothing without TLS.
@@ -265,6 +278,7 @@ namespace FileTransferProtocol
         void armDeadline();
         void takeDeadline();
         void armSettle();
+        void wakeIdleWaiters();
         void die(RemoteIo::RemoteError error);
         void end(ControlState state, RemoteIo::RemoteError error);
         bool isLive() const;
@@ -276,11 +290,14 @@ namespace FileTransferProtocol
         /** @brief Shared with the operations in flight, an ssl::stream must outlive them. */
         std::shared_ptr<Transport> transport_;
         boost::asio::ip::tcp::endpoint remote_{};
+        boost::asio::ip::tcp::endpoint local_{};
         ReplyFramer framer_;
         boost::asio::steady_timer deadlineTimer_;
         /** @brief What deadlineTimer_ waits for, an unchanged earliest deadline is not armed again. */
         std::optional<std::chrono::steady_clock::time_point> armedDeadline_{};
         boost::asio::steady_timer settleTimer_;
+        /** @brief Never expires, a cancel wakes the waits of untilIdle(). */
+        boost::asio::steady_timer idleSignal_;
         /** @brief Shared with the read in flight, which may still fill it after the connection is gone. */
         std::shared_ptr<std::array<char, 4096>> readBuffer_;
         /** @brief Commands not written yet, in the order they were sent. */

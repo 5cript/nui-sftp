@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -170,23 +171,28 @@ namespace FileTransferProtocol::Test
         }
 
         /**
-         * @brief How the server saw the client end the first data connection, once the client is gone. Nothing when
-         *        the server ended that connection itself.
+         * @brief How the server saw the client end the first data connection, once the client is gone, also when that
+         *        end failed the server's handshake: a reset may overtake the client's last handshake message. Nothing
+         *        when the server ended that connection itself.
          */
         std::optional<std::string> dataEndAfterDisconnect(std::shared_ptr<ControlConnection> const& connection)
         {
             connection->close();
             EXPECT_TRUE(server_->waitUntilDisconnected());
+            const std::string_view failedHandshake = "data: ";
             const auto transcript = server_->transcript();
             const auto ended = std::ranges::find_if(
                 transcript,
-                [](TranscriptEntry const& entry)
+                [failedHandshake](TranscriptEntry const& entry)
                 {
-                    return entry.kind == TranscriptEntry::Kind::DataEnded;
+                    return entry.kind == TranscriptEntry::Kind::DataEnded ||
+                        (entry.kind == TranscriptEntry::Kind::TlsFailed && entry.detail.starts_with(failedHandshake));
                 }
             );
             if (ended == transcript.end())
                 return std::nullopt;
+            if (ended->kind == TranscriptEntry::Kind::TlsFailed)
+                return ended->detail.substr(failedHandshake.size());
             return ended->detail;
         }
 
@@ -374,6 +380,42 @@ namespace FileTransferProtocol::Test
         expectDownloadError(
             download(connection, {.path = "file"}, std::nullopt, options), RemoteIo::RemoteErrorKind::TimedOut
         );
+    }
+
+    TEST_F(DownloadTests, ControlEndedByTheServerAfterTheWholeSizeIsComplete)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(script, DataPlan{}.send("12345"), "150 Opening BINARY mode data connection for file (5 bytes).")
+            .beginData()
+            .awaitData()
+            .closeControl();
+        const auto connection = plainConnection(std::move(script));
+        const auto result = download(connection, {.path = "file"});
+        ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_EQ(result->content, "12345");
+        EXPECT_FALSE(result->result.finalReply);
+    }
+
+    TEST_F(DownloadTests, ControlEndedByTheServerBeforeTheWholeSizeFails)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(script, DataPlan{}.send("123"), "150 Opening BINARY mode data connection for file (5 bytes).")
+            .beginData()
+            .awaitData()
+            .closeControl();
+        const auto connection = plainConnection(std::move(script));
+        expectDownloadError(download(connection, {.path = "file"}), RemoteIo::RemoteErrorKind::ConnectionLost);
+    }
+
+    TEST_F(DownloadTests, ControlEndedByTheServerWithoutAKnownSizeFails)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        retrieveWith(script, DataPlan{}.send("12345"), "150 Here it comes.").beginData().awaitData().closeControl();
+        const auto connection = plainConnection(std::move(script));
+        expectDownloadError(download(connection, {.path = "file"}), RemoteIo::RemoteErrorKind::ConnectionLost);
     }
 
     TEST_F(DownloadTests, NegativeFinalReplyFails)
@@ -944,6 +986,19 @@ namespace FileTransferProtocol::Test
         const auto tls = settings();
         const auto connection = securedWith(std::move(script), tls);
         expectDownloadError(download(connection, {.path = "file"}, tls), RemoteIo::RemoteErrorKind::Truncated);
+    }
+
+    TEST_F(DownloadTlsTests, TlsEndWithoutCloseNotifyAndAnEndedControlFails)
+    {
+        // The size matches, but neither a 226 nor close_notify confirmed the end of the data.
+        auto script = securedPrefix();
+        retrieveWith(script, DataPlan{}.tls({.closeWithoutCloseNotify = true}).send("cut"), "150 Opening (3 bytes)")
+            .beginData()
+            .awaitData()
+            .closeControl();
+        const auto tls = settings();
+        const auto connection = securedWith(std::move(script), tls);
+        expectDownloadError(download(connection, {.path = "file"}, tls), RemoteIo::RemoteErrorKind::ConnectionLost);
     }
 
     TEST_F(DownloadTlsTests, RefusalForAMissingSessionReuseIsNoSecureConnection)

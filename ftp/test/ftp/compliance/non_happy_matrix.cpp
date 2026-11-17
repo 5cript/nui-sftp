@@ -1627,9 +1627,22 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief What a transfer whose control connection ended without the final reply is.
+         */
+        enum class WithoutFinalReply
+        {
+            /** @brief Complete, all the data the server announced is proof enough. */
+            Complete,
+            /** @brief Unconfirmed, TimedOut: only the size on the server tells. */
+            SizeTells,
+            /** @brief Failed with the end of the control connection. */
+            Fails,
+        };
+
+        /**
          * @brief The outcomes of the reply that ends a transfer once its data ended, named Final....
          */
-        std::vector<Row> finalReplies(Route const& route, std::string preliminary, bool sizeKnown)
+        std::vector<Row> finalReplies(Route const& route, std::string preliminary, WithoutFinalReply missing)
         {
             const auto after = [&route, &preliminary](std::string name, Steps final)
             {
@@ -1653,14 +1666,16 @@ namespace FileTransferProtocol::Test
             closing.afterwards = Afterwards::Dead;
             auto ended = after("EndOfStream", [](Script& script) { script.closeControl(); });
             ended.serverEnds = true;
-            ended.kind = RemoteErrorKind::ConnectionLost;
             ended.afterwards = Afterwards::Dead;
             auto silent = after("Silence", [](Script& script) { script.stall(); });
             silent.serverEnds = true;
             silent.hurried = true;
             silent.afterwards = Afterwards::Dead;
-            // All the data the server announced is proof enough without the final reply.
-            if (!sizeKnown)
+            if (missing == WithoutFinalReply::SizeTells)
+                ended.kind = RemoteErrorKind::TimedOut;
+            if (missing == WithoutFinalReply::Fails)
+                ended.kind = RemoteErrorKind::ConnectionLost;
+            if (missing != WithoutFinalReply::Complete)
                 silent.kind = RemoteErrorKind::TimedOut;
             return {
                 after("Completion250", replying("250 Requested file action okay, completed.")),
@@ -1782,7 +1797,7 @@ namespace FileTransferProtocol::Test
                         refused(route, "550 /dir/file: No such file or directory", RemoteErrorKind::NoSuchFile),
                     }
                 );
-                append(rows, finalReplies(route, std::string{downloadAnnounced}, true));
+                append(rows, finalReplies(route, std::string{downloadAnnounced}, WithoutFinalReply::Complete));
                 append(rows, breakdowns(route));
             }
             for (auto const* route : {&storeRoute(), &appendRoute()})
@@ -1799,7 +1814,7 @@ namespace FileTransferProtocol::Test
                         refused(*route, "553 Requested action not taken: file name not allowed.", RemoteErrorKind::PermissionDenied),
                     }
                 );
-                append(rows, finalReplies(*route, std::string{uploadAnnounced}, false));
+                append(rows, finalReplies(*route, std::string{uploadAnnounced}, WithoutFinalReply::SizeTells));
                 append(rows, breakdowns(*route));
             }
             for (auto const* route : {&listRoute(), &machineListRoute()})
@@ -1812,7 +1827,7 @@ namespace FileTransferProtocol::Test
                         refused(*route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
                     }
                 );
-                append(rows, finalReplies(*route, std::string{listingAnnounced}, false));
+                append(rows, finalReplies(*route, std::string{listingAnnounced}, WithoutFinalReply::Fails));
                 append(rows, breakdowns(*route));
             }
             append(
