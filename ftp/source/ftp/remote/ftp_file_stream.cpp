@@ -411,16 +411,24 @@ namespace FileTransferProtocol
     {
         if (transfer->upload)
             co_return Result<void>{};
-        if (start.appendsAt)
+        // The server's part has to end where the upload continues (RFC 3659 5.1): APPE writes at the end of the file,
+        // wherever the seek pointed, and a STOR behind REST keeps what lies past its offset.
+        if (const auto continuesAt = start.appendsAt.value_or(start.request.offset); continuesAt > 0u)
         {
-            // APPE writes at the end of the file, wherever the seek pointed.
             const auto size = co_await sizeOf(transfer->metadata(), start.request.path);
-            if (size && *size != *start.appendsAt)
+            if (size && *size != continuesAt && start.appendsAt)
             {
                 co_return std::unexpected(errorOf(
                     RemoteErrorKind::Unsupported,
+                    fmt::format("The server has no REST STREAM and the file ends at {}, not at {}", *size, continuesAt)
+                ));
+            }
+            if (size && *size != continuesAt)
+            {
+                co_return std::unexpected(errorOf(
+                    RemoteErrorKind::Failure,
                     fmt::format(
-                        "The server has no REST STREAM and the file ends at {}, not at {}", *size, *start.appendsAt
+                        "The file on the server ends at {}, not at {} where the upload continues", *size, continuesAt
                     )
                 ));
             }

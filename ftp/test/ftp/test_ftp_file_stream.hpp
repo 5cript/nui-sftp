@@ -281,12 +281,13 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{""});
     }
 
-    TEST_P(FtpFileStreamTests, AContinuedUploadRestartsWhereItWasSought)
+    TEST_P(FtpFileStreamTests, AContinuedUploadRestartsWhereItWasSoughtOnceTheSizeShowsThePartEndsThere)
     {
         auto metadata = loggedInScript();
         metadata.expectDisconnect();
         auto transfer = loggedInScript();
-        transfer.expect("EPSV")
+        sized(transfer, "/dir/part", "3")
+            .expect("EPSV")
             .passive(DataPlan{}.expectUpload(1024u))
             .expect("REST", "3")
             .reply("350 Restart position accepted (3).");
@@ -353,6 +354,30 @@ namespace FileTransferProtocol::Test
         );
         ASSERT_FALSE(written) << "appended to a file that ends elsewhere than the seek";
         EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << written.error().toString();
+        closeOnThread(stream);
+    }
+
+    TEST_P(FtpFileStreamTests, AContinuedUploadIsRefusedWhereThePartEndsElsewhereThanTheRestart)
+    {
+        // A STOR behind REST would keep the bytes past the offset of a part that grew meanwhile.
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/part", "9").expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/part", RemoteIo::OpenMode::Write);
+        const auto written = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto sought = stream->seekInStrand(3u); !sought)
+                    return sought;
+                return stream->writeInStrand("def");
+            }
+        );
+        ASSERT_FALSE(written) << "restarted inside a part that ends elsewhere";
+        EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Failure) << written.error().toString();
+        EXPECT_TRUE(written.error().message.contains("ends at 9")) << written.error().toString();
         closeOnThread(stream);
     }
 
