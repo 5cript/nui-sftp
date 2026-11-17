@@ -180,10 +180,17 @@ namespace FileTransferProtocol::Test
             .lines = {"521-\"/usr/dm/pathname\" directory already exists;", "521 taking no action."},
         };
         EXPECT_EQ(replyError(reply, Verb::MakeDirectory).kind, RemoteErrorKind::AlreadyExists);
+    }
+
+    TEST(ReplyErrorTests, TransferRefusedForItsDataProtectionIsNoSecureConnection)
+    {
         EXPECT_EQ(
             kindOf(521, "Data connection cannot be opened with this PROT setting.", Verb::Retrieve),
-            RemoteErrorKind::Failure
+            RemoteErrorKind::NoSecureConnection
         );
+        EXPECT_EQ(kindOf(521, "Data connections must be encrypted.", Verb::List), RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Store), RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Delete), RemoteErrorKind::PermissionDenied);
     }
 
     TEST(ReplyErrorTests, TextsAreReadInAnyCase)
