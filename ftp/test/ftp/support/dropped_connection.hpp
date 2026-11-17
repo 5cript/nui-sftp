@@ -12,7 +12,8 @@ namespace FileTransferProtocol::Test
     /**
      * @brief Drops every packet of one TCP connection in both directions inside a server container, with iptables,
      *        so neither end sees a FIN or a reset. The container needs NET_ADMIN, which the throttled variants have.
-     *        With the object the server's end of the connection is killed and the rules go again.
+     *        With the object the server's end of the connection is killed and the rules go again. Each rule names
+     *        the process that added it, drop() first deletes those of processes that ended without taking theirs back.
      */
     class DroppedConnection
     {
