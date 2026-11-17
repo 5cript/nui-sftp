@@ -180,8 +180,8 @@ namespace FileTransferProtocol::Test
       protected:
         static constexpr std::size_t largeSize = 10485760u;
         static constexpr std::uint64_t dropAfter = 1024u * 1024u;
-        /** @brief Far above what a fault stalls the thread for, its shortest stall takes seconds. */
-        static constexpr std::chrono::milliseconds threadHeldLimit{50};
+        /** @brief A fault that held the thread would hold it for 2 s or more, a busy machine wakes it far sooner. */
+        static constexpr std::chrono::milliseconds threadHeldLimit{1000};
         /** @brief Far above the keepalive's 3 s, far below the final reply timeout. */
         static constexpr std::chrono::seconds keepaliveEndLimit{20};
 
