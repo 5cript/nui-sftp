@@ -1099,10 +1099,11 @@ namespace FileTransferProtocol::Test
                         succeeds(*route),
                         toleratesPreliminary(*route),
                         intermediate(*route, "350 Requested file action pending further information."),
-                        refused(*route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
-                        refusedAndAsked(
-                            *route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::PermissionDenied
+                        refused(
+                            *route, "451 Requested action aborted: local error in processing.", RemoteErrorKind::Failure
                         ),
+                        refused(*route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refused(*route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Unsupported),
                         refused(*route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
                         refused(*route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
                         refused(*route, "550 /dir/file: No such file or directory", RemoteErrorKind::NoSuchFile),
