@@ -261,6 +261,38 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{"abcdef"});
     }
 
+    TEST_P(FtpFileStreamTests, AnUploadUnderWayCannotMoveAndAnEmptyWriteSendsNothing)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        completed(transferring(transfer, DataPlan{}.expectUpload(1024u), "STOR", "/dir/new")).expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/new", writeMode);
+        const auto moved = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto first = stream->writeInStrand("abc"); !first)
+                    return first;
+                if (auto empty = stream->writeInStrand(""); !empty)
+                    return empty;
+                return stream->seekInStrand(0u);
+            }
+        );
+        ASSERT_FALSE(moved) << "moved an upload under way";
+        EXPECT_EQ(moved.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << moved.error().toString();
+        const auto finished = onThread(
+            [stream]()
+            {
+                return stream->finishInStrand();
+            }
+        );
+        ASSERT_TRUE(finished) << finished.error().toString();
+        closeOnThread(stream);
+        EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{"abc"});
+    }
+
     TEST_P(FtpFileStreamTests, AnUploadThatWroteNothingStoresAnEmptyFile)
     {
         auto metadata = loggedInScript();
@@ -792,6 +824,11 @@ namespace FileTransferProtocol::Test
         );
         ASSERT_FALSE(exclusive) << "promised an exclusive create";
         EXPECT_EQ(exclusive.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << exclusive.error().toString();
+        const auto bothWays = later(RemoteIo::OpenFile{.path = remote("/dir/a"), .mode = readMode | writeMode});
+        ASSERT_FALSE(bothWays) << "opened a file to read and write at once";
+        EXPECT_EQ(bothWays.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << bothWays.error().toString();
+        const auto neitherWay = later(RemoteIo::OpenFile{.path = remote("/dir/a"), .mode = RemoteIo::OpenMode::Create});
+        ASSERT_FALSE(neitherWay) << "opened a file neither to read nor to write";
 
         const auto stream = open("/dir/a", readMode);
         const auto written = onThread(
