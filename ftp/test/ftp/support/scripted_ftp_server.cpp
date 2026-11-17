@@ -543,6 +543,7 @@ namespace FileTransferProtocol::Test
                 , acceptor_{server.executor()}
                 , begun_{server.executor()}
                 , finished_{server.executor()}
+                , stoppedSignal_{server.executor()}
             {}
 
             /**
@@ -601,6 +602,7 @@ namespace FileTransferProtocol::Test
             void stop()
             {
                 stopped_ = true;
+                stoppedSignal_.set();
                 error_code ignored;
                 acceptor_.close(ignored);
                 if (transport_)
@@ -749,6 +751,12 @@ namespace FileTransferProtocol::Test
                 co_return false;
             }
 
+            asio::awaitable<bool> perform(DataPlan::Hold const&)
+            {
+                co_await stoppedSignal_.wait();
+                co_return false;
+            }
+
           private:
             Server& server_;
             const std::size_t connection_;
@@ -759,6 +767,7 @@ namespace FileTransferProtocol::Test
             std::optional<Transport> transport_{};
             Event begun_;
             Event finished_;
+            Event stoppedSignal_;
             bool stopped_{false};
             bool closed_{false};
         };

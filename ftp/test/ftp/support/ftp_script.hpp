@@ -69,7 +69,9 @@ namespace FileTransferProtocol::Test
         {
             std::string bytes{};
         };
-        using Action = std::variant<Send, SendForever, ExpectUpload, Close, Reset, StallAfter>;
+        struct Hold
+        {};
+        using Action = std::variant<Send, SendForever, ExpectUpload, Close, Reset, StallAfter, Hold>;
 
         DataPlan& send(std::string bytes, std::size_t chunkSize = 0, std::chrono::milliseconds interval = {});
         /** @brief Sends until the client goes away or the control script calls stopData(), nothing can follow. */
@@ -80,6 +82,8 @@ namespace FileTransferProtocol::Test
         DataPlan& reset();
         /** @brief Sends @p bytes, then neither sends nor closes until the client goes away or stopData(). */
         DataPlan& stallAfter(std::string bytes);
+        /** @brief Neither reads, sends nor closes until stopData() or the end of the control connection. */
+        DataPlan& hold();
         DataPlan& tls(TlsBehaviour behaviour = {});
         /** @brief Announces this address and port instead of the real ones. */
         DataPlan& announce(std::string address, std::uint16_t port);

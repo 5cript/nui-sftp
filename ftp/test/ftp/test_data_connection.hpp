@@ -374,6 +374,36 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(uploaded->detail, content);
     }
 
+    TEST_F(DataConnectionTests, UploadWhoseDataConnectionTheServerKeepsOpenTimesOut)
+    {
+        // The server read to the end but never ends its side, nothing tells the client that it took the bytes.
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("EPSV")
+                .passive(DataPlan{}.expectUpload(1024u).hold())
+                .beginData()
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        auto options = quickDataOptions();
+        options.inactivityTimeout = 300ms;
+        const auto data = openData(connection, options);
+        ASSERT_TRUE(data) << data.error().toString();
+        const auto finished =
+            run(connection,
+                [data = *data]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    const std::string_view content = "small";
+                    if (auto written = co_await data->writeAll(asio::buffer(content)); !written)
+                        co_return written;
+                    co_return co_await data->finishUpload();
+                });
+        ASSERT_FALSE(finished) << "the upload ended without the server's end";
+        EXPECT_EQ(finished.error().kind, RemoteIo::RemoteErrorKind::TimedOut) << finished.error().toString();
+    }
+
     TEST_F(DataConnectionTests, CloseEndsAReadAsCancelled)
     {
         server_->addConnection(
