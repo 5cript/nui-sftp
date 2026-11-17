@@ -699,8 +699,15 @@ namespace FileTransferProtocol
 
     asio::awaitable<void> ControlConnection::untilIdle()
     {
+        // A transfer nobody finishes or aborts has no deadline, and whoever waits here holds no command anymore.
+        const auto limit = Clock::now() + options_.commandTimeout + options_.drainTimeout;
         while (isLive() && (!queued_.empty() || !awaiting_.empty()))
-            co_await idleSignal_.async_wait(useTuple);
+        {
+            if (Clock::now() < limit)
+                co_await idleSignal_.async_wait(asio::cancel_after(limit - Clock::now(), useTuple));
+            else
+                die(errorOf(RemoteErrorKind::TimedOut, "The control connection did not get idle in time"));
+        }
     }
 
     void ControlConnection::wakeIdleWaiters()

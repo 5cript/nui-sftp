@@ -18,7 +18,8 @@ namespace FileTransferProtocol
      *        lease.
      *
      * A lease may end on any thread. The pool takes the connection back once its commands ended, the drain of an ABOR
-     * included, and its strand said whether it is still open; one that ended is dropped.
+     * included, and its strand said whether it is still open; one that ended is dropped. A connection whose commands
+     * do not end, a transfer nobody finished or aborted, ends after the command timeout plus the drain timeout.
      */
     class Lease
     {

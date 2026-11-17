@@ -175,7 +175,9 @@ namespace FileTransferProtocol
 
         /**
          * @brief Waits until no command is queued or owes its final reply, the drain of an ABOR included, or the
-         *        connection ended. On strand().
+         *        connection ended. For a connection nobody holds anymore: one that is still busy after the command
+         *        timeout plus the drain timeout ends as Dead, a transfer nobody finishes has no deadline of its own.
+         *        On strand().
          */
         boost::asio::awaitable<void> untilIdle();
 

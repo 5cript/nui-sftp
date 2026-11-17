@@ -1425,6 +1425,33 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(stateOf(connection), ControlState::Dead);
     }
 
+    TEST_F(ControlConnectionTests, UntilIdleEndsAConnectionWhoseTransferNobodyFinishes)
+    {
+        server_->addConnection(Script{}.reply("220 Ready").expect("RETR", "file").reply("150 Opening").stall());
+        auto options = relaxedOptions();
+        options.commandTimeout = 200ms;
+        options.drainTimeout = 100ms;
+        const auto connection = makeConnection(options);
+        connect(connection);
+        const auto retrieve =
+            run(connection,
+                [connection]() -> asio::awaitable<std::shared_ptr<PendingCommand>>
+                {
+                    const auto retrieve = connection->send(command(Verb::Retrieve, "file")).value();
+                    const auto opened = co_await retrieve->nextReply();
+                    co_return opened ? retrieve : nullptr;
+                });
+        ASSERT_TRUE(retrieve);
+        auto idle = asio::co_spawn(connection->strand(), connection->untilIdle(), asio::use_future);
+
+        // The transfer has no deadline of its own, only the wait ends the connection.
+        ASSERT_EQ(idle.wait_for(10s), std::future_status::ready);
+        const auto ended = waitForEnd();
+        ASSERT_TRUE(ended);
+        EXPECT_EQ(ended->kind, RemoteErrorKind::TimedOut) << ended->toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+    }
+
     struct AbortCase
     {
         std::string_view name{};

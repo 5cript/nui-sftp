@@ -361,15 +361,15 @@ namespace FileTransferProtocol::Test
         }
 
         /**
-         * @brief Sends RETR on the connection of @p lease and ABOR once the transfer opened, without waiting for the
-         *        end of the drain.
+         * @brief Sends RETR on the connection of @p lease and waits until the transfer opened. With @p abort ABOR
+         *        follows, without a wait for the end of the drain, else nothing finishes or aborts the transfer.
          */
-        static void abortRetrieve(Lease const& lease)
+        static void openRetrieve(Lease const& lease, bool abort)
         {
             const auto control = lease.control();
             auto future = asio::co_spawn(
                 control->strand(),
-                [control]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                [control, abort]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
                 {
                     const auto retrieve = control->send(Command{.verb = Verb::Retrieve, .argument = "file"});
                     if (!retrieve)
@@ -377,12 +377,19 @@ namespace FileTransferProtocol::Test
                     const auto opened = co_await (*retrieve)->nextReply();
                     if (!opened)
                         co_return std::unexpected(opened.error());
+                    if (!abort)
+                        co_return std::expected<void, RemoteIo::RemoteError>{};
                     co_return control->send(Command{.verb = Verb::Abort}).transform([](auto const&) {});
                 },
                 asio::use_future
             );
-            const auto aborted = waitFor(future);
-            ASSERT_TRUE(aborted) << aborted.error().toString();
+            const auto opened = waitFor(future);
+            ASSERT_TRUE(opened) << opened.error().toString();
+        }
+
+        static void abortRetrieve(Lease const& lease)
+        {
+            openRetrieve(lease, true);
         }
 
         static std::expected<Reply, RemoteIo::RemoteError> execute(Lease const& lease, Verb verb)
@@ -1049,6 +1056,31 @@ namespace FileTransferProtocol::Test
         expectError(run(pool->acquireTransfer(wakes->wake())), RemoteErrorKind::Busy);
 
         server_->release("drain");
+        ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready);
+        const auto next = leaseFrom(run(pool->acquireTransfer()));
+        EXPECT_EQ(next.name(), "C2");
+        EXPECT_EQ(pool->health(), PoolHealth::Healthy);
+    }
+
+    TEST_F(PoolTests, ConnectionReleasedWithATransferNobodyFinishesEndsAndFreesItsSlot)
+    {
+        server_->addConnection(loginThenDisconnect());
+        Script unfinished{};
+        loggedIn(unfinished).expect("RETR", "file").reply("150 Opening BINARY mode data connection for file.").stall();
+        server_->addConnection(std::move(unfinished));
+        server_->addConnection(loginThenDisconnect());
+        auto poolOptions = options();
+        poolOptions.transferConnections = 1u;
+        poolOptions.control.commandTimeout = 1s;
+        poolOptions.control.drainTimeout = 100ms;
+        const auto pool = startedPool(std::move(poolOptions));
+        auto transfer = leaseFrom(run(pool->acquireTransfer()));
+        ASSERT_NO_FATAL_FAILURE(openRetrieve(transfer, false));
+        giveBack(transfer);
+        const auto wakes = std::make_shared<WakeCount>();
+        expectError(run(pool->acquireTransfer(wakes->wake())), RemoteErrorKind::Busy);
+
+        // The transfer has no deadline of its own, the release ends the connection that stays busy.
         ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready);
         const auto next = leaseFrom(run(pool->acquireTransfer()));
         EXPECT_EQ(next.name(), "C2");
