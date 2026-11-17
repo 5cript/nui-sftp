@@ -325,21 +325,42 @@ namespace FileTransferProtocol::Test
         }
 
         /**
-         * @brief The session goes on: a transfer gets a connection, a new one in place of a dropped one.
+         * @brief A transfer lease, asked for again whenever the pool says a slot may be free: the leases given back
+         *        before reach the pool on its strand, a connection that drains an ABOR or ended frees its slot later.
          */
-        void expectSessionGoesOn(std::shared_ptr<Pool> const& pool) const
+        static Pool::LeaseResult transferOnceFree(std::shared_ptr<Pool> const& pool)
         {
-            const auto wakes = std::make_shared<WakeCount>();
+            const auto deadline = FaultClock::now() + 30s;
+            auto wakes = std::make_shared<WakeCount>();
             auto acquired = run(pool, pool->acquireTransfer(wakes->wake()));
-            if (!acquired && acquired.error().kind == RemoteIo::RemoteErrorKind::Busy)
+            while (
+                !acquired && acquired.error().kind == RemoteIo::RemoteErrorKind::Busy &&
+                wakes->woken.wait_until(deadline) == std::future_status::ready
+            )
             {
-                // The leases given back before reach the pool on its strand.
-                ASSERT_EQ(wakes->woken.wait_for(30s), std::future_status::ready) << "no release woke the transfer";
-                acquired = run(pool, pool->acquireTransfer());
+                wakes = std::make_shared<WakeCount>();
+                acquired = run(pool, pool->acquireTransfer(wakes->wake()));
             }
-            const auto next = leaseFrom(std::move(acquired));
-            auto download = downloadOn(next, "chunk.bin");
-            ASSERT_NO_FATAL_FAILURE(expectDownload(download, 16384u));
+            return acquired;
+        }
+
+        /**
+         * @brief The session goes on with @p transfers at once, as many as the pool has slots: the slot of the dropped
+         *        connection is free again, a new connection takes it.
+         */
+        void expectSessionGoesOn(std::shared_ptr<Pool> const& pool, std::size_t transfers) const
+        {
+            std::vector<Lease> leases{};
+            std::vector<std::future<DownloadResult>> downloads{};
+            for (std::size_t index = 0u; index < transfers; ++index)
+            {
+                auto acquired = transferOnceFree(pool);
+                ASSERT_TRUE(acquired) << "transfer " << index << " got no connection: " << acquired.error().toString();
+                leases.push_back(std::move(*acquired));
+                downloads.push_back(downloadOn(leases.back(), "chunk.bin"));
+            }
+            for (auto& download : downloads)
+                ASSERT_NO_FATAL_FAILURE(expectDownload(download, 16384u));
             EXPECT_EQ(pool->health(), PoolHealth::Healthy);
         }
 
@@ -384,7 +405,7 @@ namespace FileTransferProtocol::Test
 
         victimLease.release();
         bystanderLease.release();
-        ASSERT_NO_FATAL_FAILURE(expectSessionGoesOn(pool));
+        ASSERT_NO_FATAL_FAILURE(expectSessionGoesOn(pool, 2u));
         expectThreadNeverHeld();
     }
 
@@ -415,7 +436,7 @@ namespace FileTransferProtocol::Test
 
         victimLease.release();
         bystanderLease.release();
-        ASSERT_NO_FATAL_FAILURE(expectSessionGoesOn(pool));
+        ASSERT_NO_FATAL_FAILURE(expectSessionGoesOn(pool, 2u));
         expectThreadNeverHeld();
     }
 
@@ -445,7 +466,7 @@ namespace FileTransferProtocol::Test
         // The abort behind the failure leaves the control connection usable or ends it, the pool takes either.
         victimLease.release();
         bystanderLease.release();
-        ASSERT_NO_FATAL_FAILURE(expectSessionGoesOn(pool));
+        ASSERT_NO_FATAL_FAILURE(expectSessionGoesOn(pool, 2u));
         expectThreadNeverHeld();
     }
 
