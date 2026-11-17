@@ -699,11 +699,14 @@ namespace FileTransferProtocol
             co_return std::unexpected(aborted());
         if (!reply)
         {
-            // SIZE on another connection has to tell.
+            // SIZE on another connection has to tell. The kind says so, the text keeps how the connection ended.
             if (endedWithoutFinalReply(*session_.control))
                 co_return std::unexpected(errorOf(
                     RemoteErrorKind::TimedOut,
-                    "The server did not confirm the upload in time, only the file's size tells whether it is complete"
+                    fmt::format(
+                        "The server did not confirm the upload, only the file's size tells whether it is complete: {}",
+                        reply.error().message
+                    )
                 ));
             co_return std::unexpected(reply.error());
         }

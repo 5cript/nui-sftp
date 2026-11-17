@@ -245,7 +245,9 @@ namespace FileTransferProtocol::Test
             .awaitData()
             .closeControl();
         const auto connection = plainConnection(std::move(script));
-        expectUploadError(upload(connection, {.path = "file"}, "content"), RemoteIo::RemoteErrorKind::TimedOut);
+        const auto result = upload(connection, {.path = "file"}, "content");
+        ASSERT_NO_FATAL_FAILURE(expectUploadError(result, RemoteIo::RemoteErrorKind::TimedOut));
+        EXPECT_TRUE(result.error().message.contains("closed the control connection")) << result.error().toString();
     }
 
     TEST_F(UploadTests, NegativeFinalReplyFails)
