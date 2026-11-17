@@ -19,6 +19,12 @@ namespace FileTransferProtocol::Test
     namespace asio = boost::asio;
     using Clock = std::chrono::steady_clock;
 
+    namespace
+    {
+        /** @brief Far above what an executor that runs takes to end the timer. */
+        constexpr std::chrono::seconds stopLimit{10};
+    }
+
     struct ExecutorProbes::State
     {
         State(asio::any_io_executor executor, std::chrono::milliseconds probePeriod)
@@ -130,7 +136,8 @@ namespace FileTransferProtocol::Test
                 state->timer.cancel();
             }
         );
-        state_->timerEnded.get_future().wait();
+        // An executor that was stopped never runs the end of the timer, its probe goes with the executor then.
+        state_->timerEnded.get_future().wait_for(stopLimit);
     }
 
     std::chrono::microseconds ExecutorProbes::worstTimerLateness() const

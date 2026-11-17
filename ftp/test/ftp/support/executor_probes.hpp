@@ -28,7 +28,8 @@ namespace FileTransferProtocol::Test
         ExecutorProbes& operator=(ExecutorProbes&&) = delete;
 
         /**
-         * @brief Ends both probes and waits for them, the worst values stay.
+         * @brief Ends both probes and waits for them, the worst values stay. An executor that no longer runs keeps the
+         *        timer's probe, the wait for it ends after 10 s.
          */
         void stop();
 

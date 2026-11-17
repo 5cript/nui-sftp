@@ -229,7 +229,12 @@ namespace FileTransferProtocol::Test
         {
             probes_.reset();
             PoolConformance::TearDown();
-            // The pools hold sockets of the thread, which goes before the members of the base.
+        }
+
+        ~FaultConformance() override
+        {
+            // The pools hold sockets of the thread, which goes before the members of the base. Here they go even when
+            // TearDown() threw for a pool that did not close.
             pools_.clear();
         }
 
