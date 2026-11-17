@@ -1282,6 +1282,7 @@ namespace FileTransferProtocol::Test
                         refusedTls("501 Syntax error in parameters or arguments."),
                         refusedTls("502 Command not implemented."),
                         refusedTls("504 Command not implemented for that parameter."),
+                        refusedTls("533 Command protection level denied for policy reasons."),
                         refusedTls("534 Request denied for policy reasons."),
                     }
                 );
@@ -1312,6 +1313,7 @@ namespace FileTransferProtocol::Test
                         refusedProtection("502 Command not implemented."),
                         refusedProtection("503 Bad sequence of commands."),
                         refusedProtection("530 Not logged in."),
+                        refusedProtection("533 Command protection level denied for policy reasons."),
                     }
                 );
                 for (auto& row : rows)

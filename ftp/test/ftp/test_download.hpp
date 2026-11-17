@@ -268,6 +268,28 @@ namespace FileTransferProtocol::Test
         EXPECT_FALSE(result->announced);
     }
 
+    TEST_F(DownloadTests, BadRestartPositionRefusedOnlyByTheRetrieveFailsAndKeepsTheLogin)
+    {
+        // RFC 3659 5.3: a server may take any REST and refuse the transfer command behind it.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("EPSV")
+            .passive(DataPlan{})
+            .expect("REST", "50")
+            .reply("350 Restarting at 50.")
+            .expect("RETR", "file")
+            .reply("554 Requested action not taken: invalid REST parameter.")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const auto result = download(connection, {.path = "file", .offset = 50u});
+        ASSERT_FALSE(result) << "downloaded '" << result->content << "'";
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::Failure) << result.error().toString();
+        EXPECT_EQ(result.error().protocolCode, 554);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(DownloadTests, RefusedRestartFails)
     {
         Script script{};

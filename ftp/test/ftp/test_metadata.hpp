@@ -430,6 +430,24 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(second) << second.error().toString();
     }
 
+    TEST_F(MetadataTests, AnEntryIsFoundByItsNameInItsOwnCase)
+    {
+        Script script{};
+        const std::string bothCases =
+            "-rw-r--r--    1 0        0               5 Jan 02 03:04 file\r\n"
+            "-rw-r--r--    1 0        0               7 Jan 02 03:04 File\r\n";
+        script.reply("220 Ready").expect("STAT", "/dir/File").reply("502 Command not implemented.");
+        listingOf(enters(script, "/dir"), "LIST", "", bothCases);
+        listingOf(script, "LIST", "-a", bothCases);
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto entry = lstatIn(connection, "/dir/File");
+        ASSERT_TRUE(entry) << entry.error().toString();
+        EXPECT_EQ(entry->name, "File");
+        EXPECT_EQ(entry->size, std::optional<std::uint64_t>{7u});
+    }
+
     TEST_F(MetadataTests, BelowADirectoryThatCannotBeEnteredIsPermissionDenied)
     {
         // vsftpd's refusals say nothing, the directory's own entry tells that it exists.

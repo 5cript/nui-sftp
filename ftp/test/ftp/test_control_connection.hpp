@@ -1543,4 +1543,10 @@ namespace FileTransferProtocol::Test
             return std::string{info.param.name};
         }
     );
+
+    TEST(ControlConnectionOptionsTests, ARefusedPasswordGetsSeveralSecondsByDefault)
+    {
+        // RFC 2577 5: servers delay the reply to a wrong PASS to slow down guessing, vsftpd by a second.
+        EXPECT_GE(ControlConnectionOptions{}.commandTimeout, std::chrono::seconds{5});
+    }
 }

@@ -193,6 +193,18 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Delete), RemoteErrorKind::PermissionDenied);
     }
 
+    TEST(ReplyErrorTests, TheCodeDecidesWhateverLanguageTheTextIsIn)
+    {
+        const Reply missing{.code = 550, .lines = {"550 Datei nicht gefunden"}};
+        const auto error = replyError(missing, Verb::Retrieve);
+        EXPECT_EQ(error.kind, RemoteErrorKind::Failure);
+        EXPECT_EQ(error.protocolCode, 550);
+        EXPECT_TRUE(error.message.contains("Datei nicht gefunden")) << error.toString();
+        EXPECT_EQ(kindOf(452, "Espace disque insuffisant", Verb::Store), RemoteErrorKind::NoSpace);
+        EXPECT_EQ(kindOf(530, "Anmeldung fehlgeschlagen", Verb::Password), RemoteErrorKind::AuthenticationFailed);
+        EXPECT_EQ(kindOf(552, "Speicherplatz erschöpft", Verb::Store), RemoteErrorKind::QuotaExceeded);
+    }
+
     TEST(ReplyErrorTests, TextsAreReadInAnyCase)
     {
         EXPECT_EQ(kindOf(550, "FILE NOT FOUND"), RemoteErrorKind::NoSuchFile);

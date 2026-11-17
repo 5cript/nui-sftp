@@ -211,6 +211,22 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(uploadedAfterDisconnect(connection), std::optional<std::string>{"more"});
     }
 
+    TEST_F(UploadTests, AppendRefusedForItsTypeOrStructureFailsAndKeepsTheLogin)
+    {
+        Script script{};
+        script.reply("220 Ready");
+        storeWith(script, DataPlan{}, "555 Requested action not taken: type or stru mismatch.", "APPE")
+            .expect("NOOP")
+            .reply("200 Fine")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+        const auto result = upload(connection, {.path = "file", .mode = UploadMode::Append, .offset = 5u}, "more");
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::Failure) << result.error().toString();
+        EXPECT_EQ(result.error().protocolCode, 555);
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(UploadTests, RefusedStoreLeavesTheControlConnectionUsable)
     {
         Script script{};

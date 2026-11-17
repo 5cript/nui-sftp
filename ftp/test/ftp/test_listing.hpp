@@ -803,6 +803,13 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(listing.entries[2u].size, 4u);
     }
 
+    TEST(ListingParserTests, NamesThatDifferOnlyInCaseAreTwoEntries)
+    {
+        const auto listing = machineListingOf("type=file;size=1; readme\ntype=file;size=2; README\n");
+        EXPECT_EQ(listing.repeatedNames, 0u);
+        EXPECT_EQ(namesOf(listing), (std::set<std::string>{"readme", "README"}));
+    }
+
     TEST(ListingParserTests, LineEndsOfAnyKind)
     {
         const auto crlf = machineListingOf("type=file; a\r\ntype=file; b\r\n");

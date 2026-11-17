@@ -6,8 +6,11 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace FileTransferProtocol::Test
@@ -191,6 +194,23 @@ namespace FileTransferProtocol::Test
         const auto features = Features::fromReply(Reply{.code = 211, .lines = {"211 No features"}});
         ASSERT_TRUE(features);
         EXPECT_TRUE(features->all().empty());
+    }
+
+    TEST(FeaturesTests, TheOrderOfTheFeatureLinesChangesNothing)
+    {
+        auto lines = proftpdFeatures.lines;
+        std::reverse(std::next(lines.begin()), std::prev(lines.end()));
+        const auto inOrder = Features::fromReply(proftpdFeatures);
+        const auto reversed = Features::fromReply(Reply{.code = 211, .lines = std::move(lines)});
+        ASSERT_TRUE(inOrder && reversed);
+        ASSERT_EQ(reversed->all().size(), inOrder->all().size());
+        for (auto const& feature : inOrder->all())
+            EXPECT_EQ(reversed->parametersOf(feature.name), std::optional<std::string_view>{feature.parameters})
+                << feature.name;
+        EXPECT_TRUE(reversed->has("REST", "STREAM"));
+        EXPECT_TRUE(reversed->has("AUTH", "TLS"));
+        EXPECT_EQ(reversed->parametersOf("MLST"), inOrder->parametersOf("MLST"));
+        EXPECT_EQ(reversed->machineListFact("size"), FactState::Enabled);
     }
 
     TEST(FeaturesTests, NoFeatCommandMeansNoFeatures)
