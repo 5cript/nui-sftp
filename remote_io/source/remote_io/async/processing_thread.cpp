@@ -154,6 +154,11 @@ namespace RemoteIo
         catch (...)
         {
             // Outside the loop no task ends anything, a promise task completes with its unfinished result.
+            Log::error(
+                Log::Toast::Skip,
+                "A task threw behind the end of its processing thread: {}",
+                describe(std::current_exception())
+            );
         }
     }
     bool ProcessingThread::pushTask(std::function<void()>&& task)
