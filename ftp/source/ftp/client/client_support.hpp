@@ -8,6 +8,7 @@
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
+#include <exception>
 #include <string>
 #include <utility>
 
@@ -22,6 +23,25 @@ namespace FileTransferProtocol::Detail
             .protocol = RemoteIo::Protocol::Ftp,
             .message = std::move(message),
         };
+    }
+
+    /**
+     * @brief What @p exception says, for the log and the error of what it ended.
+     */
+    inline std::string describe(std::exception_ptr exception)
+    {
+        try
+        {
+            std::rethrow_exception(exception);
+        }
+        catch (std::exception const& error)
+        {
+            return error.what();
+        }
+        catch (...)
+        {
+            return "an exception of an unknown type";
+        }
     }
 
     inline bool isCancelled(boost::asio::cancellation_state const& state)

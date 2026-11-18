@@ -20,28 +20,13 @@ namespace FileTransferProtocol
     {
         namespace asio = boost::asio;
         using RemoteIo::RemoteErrorKind;
+        using Detail::describe;
         using Detail::errorOf;
 
         static_assert(
             TeardownOptions{}.quitBackstop > PoolOptions{}.quitTimeout,
             "The pool ends a QUIT without an answer before the backstop of the close cancels it"
         );
-
-        std::string describe(std::exception_ptr exception)
-        {
-            try
-            {
-                std::rethrow_exception(exception);
-            }
-            catch (std::exception const& error)
-            {
-                return error.what();
-            }
-            catch (...)
-            {
-                return "an exception of an unknown type";
-            }
-        }
     }
 
     std::shared_ptr<Engine> Engine::create(

@@ -628,18 +628,14 @@ namespace FileTransferProtocol
                 {
                     if (!exception)
                         return;
-                    try
-                    {
-                        std::rethrow_exception(exception);
-                    }
-                    catch (std::exception const& error)
-                    {
-                        Log::error("FTP: Work of the connection pool ended with an exception: {}", error.what());
-                    }
-                    catch (...)
-                    {
-                        Log::error("FTP: Work of the connection pool ended with an exception");
-                    }
+                    // The work may have ended halfway, nothing else brings the pool back to a state it can go on from.
+                    const auto what = Detail::describe(exception);
+                    Log::error("FTP: Work of the connection pool ended with an exception, the session is lost: {}", what);
+                    if (!self->closed_)
+                        self->loseSession(errorOf(
+                            RemoteErrorKind::ConnectionLost,
+                            fmt::format("Work of the connection pool ended with an exception: {}", what)
+                        ));
                 }
             )
         );

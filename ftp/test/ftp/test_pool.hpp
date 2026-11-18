@@ -730,6 +730,42 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(connectionsAccepted(), 2u);
     }
 
+    TEST_F(PoolTests, BackgroundWorkThatEndsWithAnExceptionLosesTheSession)
+    {
+        server_->addConnection(loginThenResetOn("NOOP"));
+        server_->addConnection(refusedAtTheGreeting());
+        Script held{};
+        held.awaitRelease("again");
+        server_->addConnection(loggedIn(held).expectDisconnect());
+        const auto pool = startedPool();
+        // The refused login leaves only C0 for transfers, so the login of a new C0 fires their wakes.
+        auto transfer = leaseFrom(run(pool->acquireTransfer()));
+        ASSERT_EQ(transfer.name(), "C0");
+        ASSERT_FALSE(execute(transfer, Verb::Noop)) << "the reset connection answered";
+        giveBack(transfer);
+
+        // The login in the background waits for the server, the wake is in place when it adopts the new C0.
+        expectError(
+            run(pool->acquireTransfer(
+                []()
+                {
+                    throw std::runtime_error{"boom"};
+                }
+            )),
+            RemoteErrorKind::Busy
+        );
+        server_->release("again");
+
+        ASSERT_EQ(losses_->lost.wait_for(10s), std::future_status::ready);
+        const auto losses = losses_->recorded();
+        ASSERT_EQ(losses.size(), 1u);
+        EXPECT_EQ(losses.front().kind, RemoteErrorKind::ConnectionLost) << losses.front().toString();
+        EXPECT_NE(losses.front().message.find("boom"), std::string::npos) << losses.front().toString();
+        flush(pool->strand());
+        EXPECT_EQ(pool->health(), PoolHealth::Lost);
+        expectError(run(pool->acquireCommand()), RemoteErrorKind::ConnectionLost);
+    }
+
     TEST_F(PoolTests, ACommandBesideTheOnlyConnectionItsCallerHoldsIsBusyAtOnce)
     {
         server_->addConnection(loginThenDisconnect());
