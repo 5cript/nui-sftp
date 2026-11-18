@@ -5,7 +5,6 @@
 
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio/ssl/error.hpp>
@@ -353,7 +352,13 @@ namespace FileTransferProtocol
             {
                 return self->awaitAnswer();
             },
-            asio::detached
+            Detail::endingOnException(
+                "The wait for the answer on a data connection",
+                [self = shared_from_this()]()
+                {
+                    self->close();
+                }
+            )
         );
     }
 
