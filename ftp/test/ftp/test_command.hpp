@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -109,6 +110,16 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(wireName(Verb::Retrieve), "RETR");
         EXPECT_EQ(wireName(Verb::MachineListDirectory), "MLSD");
         EXPECT_EQ(wireName(Verb::Quit), "QUIT");
+    }
+
+    TEST(CommandTests, TheMinimumCommandsOfRfc1123CanBeSent)
+    {
+        const auto names = allWireNames();
+        const std::string_view minimum =
+            "USER PASS ACCT PASV TYPE RETR STOR APPE RNFR RNTO DELE CWD CDUP RMD MKD PWD "
+            "LIST NLST STAT NOOP QUIT";
+        for (const auto required : std::views::split(minimum, ' '))
+            EXPECT_TRUE(names.contains(std::string_view{required})) << std::string_view{required};
     }
 
     TEST(CommandTests, ValueThatIsNoVerbHasNoWireName)

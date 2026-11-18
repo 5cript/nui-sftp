@@ -116,9 +116,21 @@ namespace FileTransferProtocol
                 mentionsAny(text, {"must", "require", "not accepted", "not allow", "need"});
         }
 
+        /**
+         * @brief A transfer refused for the protection level of its data connection: 521 (RFC 4217 10.2), 522 as
+         *        vsftpd's "Data connections must be encrypted" and proftpd's "SSL/TLS required on the data channel",
+         *        or 534 (RFC 2228 6).
+         */
+        bool refusesDataProtection(int code, std::optional<Verb> verb)
+        {
+            const auto transfer = verb == Verb::Retrieve || verb == Verb::Store || verb == Verb::Append ||
+                verb == Verb::List || verb == Verb::NameList || verb == Verb::MachineListDirectory;
+            return transfer && (code == 521 || code == 522 || code == 534);
+        }
+
         RemoteErrorKind kindOf(int code, std::string_view text, std::optional<Verb> verb)
         {
-            if (demandsTls(verb, text))
+            if (demandsTls(verb, text) || refusesDataProtection(code, verb))
                 return RemoteErrorKind::NoSecureConnection;
             switch (code)
             {
@@ -143,7 +155,7 @@ namespace FileTransferProtocol
                     return RemoteErrorKind::Unsupported;
                 case 450:
                 case 451:
-                // RFC 959 Appendix II for MKD of an existing directory, RFC 4217 for a data connection PROT refuses.
+                // RFC 959 Appendix II for MKD of an existing directory.
                 case 521:
                 case 550:
                     return kindNamedBy(text).value_or(RemoteErrorKind::Failure);

@@ -180,10 +180,33 @@ namespace FileTransferProtocol::Test
             .lines = {"521-\"/usr/dm/pathname\" directory already exists;", "521 taking no action."},
         };
         EXPECT_EQ(replyError(reply, Verb::MakeDirectory).kind, RemoteErrorKind::AlreadyExists);
+    }
+
+    TEST(ReplyErrorTests, TransferRefusedForItsDataProtectionIsNoSecureConnection)
+    {
         EXPECT_EQ(
             kindOf(521, "Data connection cannot be opened with this PROT setting.", Verb::Retrieve),
-            RemoteErrorKind::Failure
+            RemoteErrorKind::NoSecureConnection
         );
+        // What vsftpd and proftpd send.
+        EXPECT_EQ(kindOf(522, "Data connections must be encrypted.", Verb::List), RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(
+            kindOf(522, "SSL/TLS required on the data channel", Verb::Store), RemoteErrorKind::NoSecureConnection
+        );
+        EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Store), RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Delete), RemoteErrorKind::PermissionDenied);
+    }
+
+    TEST(ReplyErrorTests, TheCodeDecidesWhateverLanguageTheTextIsIn)
+    {
+        const Reply missing{.code = 550, .lines = {"550 Datei nicht gefunden"}};
+        const auto error = replyError(missing, Verb::Retrieve);
+        EXPECT_EQ(error.kind, RemoteErrorKind::Failure);
+        EXPECT_EQ(error.protocolCode, 550);
+        EXPECT_TRUE(error.message.contains("Datei nicht gefunden")) << error.toString();
+        EXPECT_EQ(kindOf(452, "Espace disque insuffisant", Verb::Store), RemoteErrorKind::NoSpace);
+        EXPECT_EQ(kindOf(530, "Anmeldung fehlgeschlagen", Verb::Password), RemoteErrorKind::AuthenticationFailed);
+        EXPECT_EQ(kindOf(552, "Speicherplatz erschöpft", Verb::Store), RemoteErrorKind::QuotaExceeded);
     }
 
     TEST(ReplyErrorTests, TextsAreReadInAnyCase)

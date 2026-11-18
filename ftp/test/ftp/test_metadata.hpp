@@ -430,6 +430,24 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(second) << second.error().toString();
     }
 
+    TEST_F(MetadataTests, AnEntryIsFoundByItsNameInItsOwnCase)
+    {
+        Script script{};
+        const std::string bothCases =
+            "-rw-r--r--    1 0        0               5 Jan 02 03:04 file\r\n"
+            "-rw-r--r--    1 0        0               7 Jan 02 03:04 File\r\n";
+        script.reply("220 Ready").expect("STAT", "/dir/File").reply("502 Command not implemented.");
+        listingOf(enters(script, "/dir"), "LIST", "", bothCases);
+        listingOf(script, "LIST", "-a", bothCases);
+        script.expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto entry = lstatIn(connection, "/dir/File");
+        ASSERT_TRUE(entry) << entry.error().toString();
+        EXPECT_EQ(entry->name, "File");
+        EXPECT_EQ(entry->size, std::optional<std::uint64_t>{7u});
+    }
+
     TEST_F(MetadataTests, BelowADirectoryThatCannotBeEnteredIsPermissionDenied)
     {
         // vsftpd's refusals say nothing, the directory's own entry tells that it exists.
@@ -753,6 +771,28 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::SiteUtime);
         const auto second = setTimeIn(connection, "/b", someTime());
         ASSERT_TRUE(second) << second.error().toString();
+    }
+
+    TEST_F(MetadataTests, ATimeRefusedByAnUnknownSetterLeavesTheNextTimeItsSetters)
+    {
+        // MFMT draft 3.2: a 501 refuses the time, the server has the command.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MFMT")
+            .reply("501 Invalid time.")
+            .expect("MFMT")
+            .reply("213 Modify=20200102030405; /b")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto refused = setTimeIn(connection, "/a", someTime());
+        ASSERT_FALSE(refused) << "set a time the server refused";
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << refused.error().toString();
+        EXPECT_EQ(refused.error().protocolCode, 501);
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::Unknown);
+        const auto set = setTimeIn(connection, "/b", someTime());
+        ASSERT_TRUE(set) << set.error().toString();
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::ModifyFact);
     }
 
     TEST_F(MetadataTests, AServerThatSetsNoTimeIsAskedOnce)

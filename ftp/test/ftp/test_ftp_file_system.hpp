@@ -543,6 +543,70 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(deep->targetInfo->isDirectory());
     }
 
+    TEST_P(FtpFileSystemTests, ALinkWhoseTargetIsMissingEndsItsChainThere)
+    {
+        const auto parentListing = std::string{listedDanglingLink} + std::string{listedFile};
+        auto script = loggedInScript();
+        listsIn(script, "/dir", parentListing);
+        listsIn(script, "/dir", parentListing).expectDisconnect();
+        connect(std::move(script));
+
+        const auto deep = later(RemoteIo::ReadLinkDeep{.path = remote("/dir/gone")});
+        ASSERT_TRUE(deep) << deep.error().toString();
+        EXPECT_EQ(deep->linkContent, "none");
+        EXPECT_EQ(deep->linkTarget.value(), "/dir/none");
+        EXPECT_FALSE(deep->targetInfo);
+    }
+
+    TEST_P(FtpFileSystemTests, ALinkChainLongerThanItsLimitFails)
+    {
+        const std::string loop =
+            "lrwxrwxrwx    1 0        0               1 Jan 02 03:04 x -> y\r\n"
+            "lrwxrwxrwx    1 0        0               1 Jan 02 03:04 y -> x\r\n";
+        auto script = loggedInScript();
+        listsIn(script, "/dir", loop);
+        listsIn(script, "/dir", loop);
+        listsIn(script, "/dir", loop).expectDisconnect();
+        connect(std::move(script));
+
+        const auto deep = later(RemoteIo::ReadLinkDeep{.path = remote("/dir/x"), .maxDepth = 3});
+        ASSERT_FALSE(deep) << "followed a loop to " << deep->linkTarget.value();
+        EXPECT_EQ(deep.error().kind, RemoteIo::RemoteErrorKind::Failure) << deep.error().toString();
+        EXPECT_EQ(deep.error().message, "Maximum symlink depth exceeded");
+    }
+
+    TEST_P(FtpFileSystemTests, ReadingALinkThatIsNoLinkFails)
+    {
+        auto script = loggedInScript();
+        listsIn(script, "/dir", std::string{listedFile}).expectDisconnect();
+        connect(std::move(script));
+
+        const auto content = later(RemoteIo::ReadLink{.path = remote("/dir/a")});
+        ASSERT_FALSE(content) << "read '" << *content << "' from a file";
+        EXPECT_EQ(content.error().kind, RemoteIo::RemoteErrorKind::Failure) << content.error().toString();
+    }
+
+    TEST_P(FtpFileSystemTests, OperationsOnOnePathSendTheirCommandForIt)
+    {
+        auto script = loggedInScript();
+        script.expect("MKD", "/dir/new").reply("257 \"/dir/new\" created");
+        script.expect("DELE", "/dir/a").reply("250 Delete operation successful.");
+        enters(script, "/dir");
+        script.expect("RMD", "/dir/b").reply("250 Remove directory operation successful.");
+        script.expect("MFMT", "20200102030405 /dir/c").reply("213 Modify=20200102030405; /dir/c").expectDisconnect();
+        connect(std::move(script));
+
+        const auto made = later(RemoteIo::CreateNewDirectory{.path = remote("/dir/new")});
+        EXPECT_TRUE(made) << made.error().toString();
+        const auto deleted = later(RemoteIo::RemoveFile{.path = remote("/dir/a")});
+        EXPECT_TRUE(deleted) << deleted.error().toString();
+        const auto removed = later(RemoteIo::RemoveEmptyDirectory{.path = remote("/dir/b")});
+        EXPECT_TRUE(removed) << removed.error().toString();
+        const auto time = std::chrono::sys_days{std::chrono::year{2020} / 1 / 2} + 3h + 4min + 5s;
+        const auto set = later(RemoteIo::SetModificationTime{.path = remote("/dir/c"), .modificationTime = time});
+        EXPECT_TRUE(set) << set.error().toString();
+    }
+
     TEST_P(FtpFileSystemTests, CloseFailsTheOperationsUnderWayAndRefusesLaterOnes)
     {
         auto script = loggedInScript();

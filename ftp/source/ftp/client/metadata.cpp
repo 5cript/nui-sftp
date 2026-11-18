@@ -340,11 +340,11 @@ namespace FileTransferProtocol
 
         /**
          * @brief The error of a reply to a setter: a 202 is a command not implemented (RFC 959 4.2), the time stays as
-         *        it was.
+         *        it was; a 501 is a time the server does not take (MFMT draft 3.2).
          */
         RemoteIo::RemoteError setterError(Reply const& reply, Verb verb)
         {
-            if (reply.code != 202)
+            if (reply.code != 202 && reply.code != 501)
                 return replyError(reply, verb);
             return RemoteIo::RemoteError{
                 .kind = RemoteErrorKind::Unsupported,
@@ -974,8 +974,11 @@ namespace FileTransferProtocol
             }
             auto error = setterError(*reply, command.verb);
             const auto probing = learned == ModificationTimeSetter::Unknown;
-            // 501: arguments in a form the server does not know.
-            if (probing && (lacksTheCommand(error) || reply->code == 501))
+            // A server that has MFMT refused this time (MFMT draft 3.2), the next time is asked the same way.
+            if (probing && setter == ModificationTimeSetter::ModifyFact && reply->code == 501)
+                co_return std::unexpected(std::move(error));
+            // A 501 to another form: arguments in a form the server does not know.
+            if (probing && lacksTheCommand(error))
                 continue;
             if (probing && setter == ModificationTimeSetter::ModificationTimeWithTime && reply->code == 550)
             {
@@ -988,7 +991,8 @@ namespace FileTransferProtocol
                     undecided = std::move(error);
                 continue;
             }
-            if (!untold(error))
+            // A 4yz is temporary (MFMT draft 3.2), the path explains no such refusal.
+            if (!untold(error) || classifyReply(reply->code) == ReplyClass::TransientNegative)
                 co_return std::unexpected(std::move(error));
             co_return std::unexpected(co_await explain(std::move(session), std::move(path), std::move(error), denied));
         }

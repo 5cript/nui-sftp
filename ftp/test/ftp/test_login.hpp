@@ -12,6 +12,7 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <future>
 #include <memory>
 #include <string>
@@ -250,6 +251,25 @@ namespace FileTransferProtocol::Test
         const auto connection = makeConnection();
         const auto result = login(connection, LoginOptions{.credentials = testCredentials()});
         ASSERT_TRUE(result) << result.error().toString();
+    }
+
+    TEST_F(LoginTests, ARefusedPasswordAnsweredLateIsStillTheServersRefusal)
+    {
+        // RFC 2577 5: servers delay the reply to a wrong PASS to slow down guessing.
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("USER", "user")
+                .reply("331 Password required")
+                .expect("PASS", "password")
+                .delay(std::chrono::milliseconds{300})
+                .reply("530 Login incorrect.")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        const auto result = login(connection, LoginOptions{.credentials = testCredentials()});
+        expectLoginError(result, RemoteIo::RemoteErrorKind::AuthenticationFailed);
+        EXPECT_EQ(result.error().protocolCode, 530) << result.error().toString();
     }
 
     TEST_F(LoginTests, AccountIsSentWhenAskedFor)

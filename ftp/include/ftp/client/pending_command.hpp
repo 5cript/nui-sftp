@@ -39,6 +39,9 @@ namespace FileTransferProtocol
             Completed,
         };
 
+        /** @brief More undelivered replies than this break the protocol. */
+        static constexpr std::size_t maximumHeldReplies = 16u;
+
         /**
          * @param command Nothing for the greeting, which the server sends unasked.
          * @param bytes What is written, see Command::encode().
@@ -72,9 +75,6 @@ namespace FileTransferProtocol
 
       private:
         friend class ControlConnection;
-
-        /** @brief More undelivered replies than this break the protocol. */
-        static constexpr std::size_t maximumHeldReplies = 16u;
 
         enum class Wanted : std::uint8_t
         {

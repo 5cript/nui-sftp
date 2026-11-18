@@ -1099,10 +1099,11 @@ namespace FileTransferProtocol::Test
                         succeeds(*route),
                         toleratesPreliminary(*route),
                         intermediate(*route, "350 Requested file action pending further information."),
-                        refused(*route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
-                        refusedAndAsked(
-                            *route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::PermissionDenied
+                        refused(
+                            *route, "451 Requested action aborted: local error in processing.", RemoteErrorKind::Failure
                         ),
+                        refused(*route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
+                        refused(*route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Unsupported),
                         refused(*route, "502 Command not implemented.", RemoteErrorKind::Unsupported),
                         refused(*route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
                         refused(*route, "550 /dir/file: No such file or directory", RemoteErrorKind::NoSuchFile),
@@ -1281,6 +1282,7 @@ namespace FileTransferProtocol::Test
                         refusedTls("501 Syntax error in parameters or arguments."),
                         refusedTls("502 Command not implemented."),
                         refusedTls("504 Command not implemented for that parameter."),
+                        refusedTls("533 Command protection level denied for policy reasons."),
                         refusedTls("534 Request denied for policy reasons."),
                     }
                 );
@@ -1311,6 +1313,7 @@ namespace FileTransferProtocol::Test
                         refusedProtection("502 Command not implemented."),
                         refusedProtection("503 Bad sequence of commands."),
                         refusedProtection("530 Not logged in."),
+                        refusedProtection("533 Command protection level denied for policy reasons."),
                     }
                 );
                 for (auto& row : rows)
@@ -1711,7 +1714,16 @@ namespace FileTransferProtocol::Test
                 refused(route, "451 Requested action aborted: local error in processing.", RemoteErrorKind::Failure),
                 refused(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
                 refused(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
+                // The data connection would need another protection level, RFC 4217 10.2 and RFC 2228 6.
+                refused(
+                    route,
+                    "521 Data connection cannot be opened with this PROT setting.",
+                    RemoteErrorKind::NoSecureConnection
+                ),
+                // What vsftpd sends.
+                refused(route, "522 Data connections must be encrypted.", RemoteErrorKind::NoSecureConnection),
                 refused(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
+                refused(route, "534 Request denied for policy reasons.", RemoteErrorKind::NoSecureConnection),
             };
         }
 
