@@ -2,6 +2,7 @@
 
 #include <ftp/protocol/reply.hpp>
 #include <ftp/protocol/reply_code.hpp>
+#include <log/log.hpp>
 #include <remote_io/remote_error.hpp>
 
 #include <boost/asio/as_tuple.hpp>
@@ -42,6 +43,22 @@ namespace FileTransferProtocol::Detail
         {
             return "an exception of an unknown type";
         }
+    }
+
+    /**
+     * @brief The completion of a coroutine nothing waits for. An exception it ended with is logged as the end of
+     *        @p what, then @p end runs: it ends what the coroutine left halfway, a connection as a rule.
+     */
+    template <typename EndT>
+    auto endingOnException(std::string what, EndT end)
+    {
+        return [what = std::move(what), end = std::move(end)](std::exception_ptr exception) mutable
+        {
+            if (!exception)
+                return;
+            Log::error("FTP: {} ended with an exception: {}", what, describe(exception));
+            end();
+        };
     }
 
     inline bool isCancelled(boost::asio::cancellation_state const& state)

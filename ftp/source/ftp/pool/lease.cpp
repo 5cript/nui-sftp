@@ -1,8 +1,8 @@
 #include <ftp/pool/lease.hpp>
 #include <ftp/pool/pool.hpp>
+#include "../client/client_support.hpp"
 
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 
 #include <cassert>
@@ -67,7 +67,8 @@ namespace FileTransferProtocol
         auto connection = std::exchange(connection_, nullptr);
         if (!connection)
             return;
-        const auto strand = connection->control->strand();
+        const auto control = connection->control;
+        const auto strand = control->strand();
         // Only the connection's strand knows whether it is still open, once its commands ended: the next holder would
         // wait for the drain of an abort and fail with it. The pool's strand takes it back.
         asio::co_spawn(
@@ -90,7 +91,14 @@ namespace FileTransferProtocol
                     }
                 );
             }(std::exchange(pool_, {}), std::move(connection)),
-            asio::detached
+            // The pool learns of the end of the connection and drops it, a lease that never came back held its slot.
+            Detail::endingOnException(
+                "The release of a connection",
+                [control]()
+                {
+                    control->close();
+                }
+            )
         );
     }
 }
