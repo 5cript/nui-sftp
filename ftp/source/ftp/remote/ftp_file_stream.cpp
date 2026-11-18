@@ -17,6 +17,42 @@ namespace FileTransferProtocol
     using Detail::errorOf;
     using RemoteIo::RemoteErrorKind;
 
+    namespace
+    {
+        /**
+         * @brief The error of an upload that continues at @p continuesAt while the file on the server ends at
+         *        @p size. @p appends: by APPE, the server has no REST STREAM.
+         */
+        RemoteIo::RemoteError endsElsewhere(std::uint64_t size, std::uint64_t continuesAt, bool appends)
+        {
+            if (appends)
+            {
+                return errorOf(
+                    RemoteErrorKind::Unsupported,
+                    fmt::format("The server has no REST STREAM and the file ends at {}, not at {}", size, continuesAt)
+                );
+            }
+            return errorOf(
+                RemoteErrorKind::Failure,
+                fmt::format(
+                    "The file on the server ends at {}, not at {} where the upload continues", size, continuesAt
+                )
+            );
+        }
+
+        /**
+         * @brief A SIZE that failed with @p error stops the upload it was asked for. A server without SIZE gets the
+         *        caller's offset. An APPE writes at an end nobody knows then. A STOR behind REST writes at its offset:
+         *        only a missing part or an answer that never came stops it.
+         */
+        bool sizeFailureStopsUpload(RemoteIo::RemoteError const& error, bool appends)
+        {
+            if (error.kind == RemoteErrorKind::Unsupported)
+                return false;
+            return appends || error.protocolCode == 0 || error.kind == RemoteErrorKind::NoSuchFile;
+        }
+    }
+
     bool OpenStreams::add(std::shared_ptr<FtpFileStream> stream)
     {
         std::scoped_lock lock{mutex_};
@@ -415,24 +451,11 @@ namespace FileTransferProtocol
         // wherever the seek pointed, and a STOR behind REST keeps what lies past its offset.
         if (const auto continuesAt = start.appendsAt.value_or(start.request.offset); continuesAt > 0u)
         {
+            const auto appends = start.appendsAt.has_value();
             const auto size = co_await sizeOf(transfer->metadata(), start.request.path);
-            if (size && *size != continuesAt && start.appendsAt)
-            {
-                co_return std::unexpected(errorOf(
-                    RemoteErrorKind::Unsupported,
-                    fmt::format("The server has no REST STREAM and the file ends at {}, not at {}", *size, continuesAt)
-                ));
-            }
             if (size && *size != continuesAt)
-            {
-                co_return std::unexpected(errorOf(
-                    RemoteErrorKind::Failure,
-                    fmt::format(
-                        "The file on the server ends at {}, not at {} where the upload continues", *size, continuesAt
-                    )
-                ));
-            }
-            if (!size && size.error().kind != RemoteErrorKind::Unsupported)
+                co_return std::unexpected(endsElsewhere(*size, continuesAt, appends));
+            if (!size && sizeFailureStopsUpload(size.error(), appends))
                 co_return std::unexpected(size.error());
         }
         auto started = co_await Upload::start(transfer->session, std::move(start.request), transfer->options);

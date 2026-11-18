@@ -70,6 +70,20 @@ namespace FileTransferProtocol::Test
         {
             return script.beginData().awaitData().reply("226 Transfer complete.");
         }
+
+        /**
+         * @brief SIZE /dir/part answered with @p sizeReply, then an upload behind REST 3 that runs to its end.
+         */
+        Script& restartedBehindSize(Script& script, std::string sizeReply)
+        {
+            script.expect("SIZE", "/dir/part")
+                .reply(std::move(sizeReply))
+                .expect("EPSV")
+                .passive(DataPlan{}.expectUpload(1024u))
+                .expect("REST", "3")
+                .reply("350 Restart position accepted (3).");
+            return completed(script.expect("STOR", "/dir/part").reply("150 Ok to send data."));
+        }
     }
 
     class FtpFileStreamTests : public FtpFileSystemTests
@@ -410,6 +424,77 @@ namespace FileTransferProtocol::Test
         ASSERT_FALSE(written) << "restarted inside a part that ends elsewhere";
         EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::Failure) << written.error().toString();
         EXPECT_TRUE(written.error().message.contains("ends at 9")) << written.error().toString();
+        closeOnThread(stream);
+    }
+
+    TEST_P(FtpFileStreamTests, AContinuedUploadRestartsAtTheCallersOffsetOnAServerWithoutSize)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        restartedBehindSize(transfer, "502 Command not implemented.").expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/part", RemoteIo::OpenMode::Write);
+        const auto written = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto sought = stream->seekInStrand(3u); !sought)
+                    return sought;
+                if (auto rest = stream->writeInStrand("def"); !rest)
+                    return rest;
+                return stream->finishInStrand();
+            }
+        );
+        ASSERT_TRUE(written) << written.error().toString();
+        closeOnThread(stream);
+        EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{"def"});
+    }
+
+    TEST_P(FtpFileStreamTests, AContinuedUploadRestartsWhereTheServerRefusesToTellTheSize)
+    {
+        // The part is there, REST writes at its offset whatever the server says of its size.
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        restartedBehindSize(transfer, "550 /dir/part: Permission denied").expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/part", RemoteIo::OpenMode::Write);
+        const auto written = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto sought = stream->seekInStrand(3u); !sought)
+                    return sought;
+                if (auto rest = stream->writeInStrand("def"); !rest)
+                    return rest;
+                return stream->finishInStrand();
+            }
+        );
+        ASSERT_TRUE(written) << written.error().toString();
+        closeOnThread(stream);
+        EXPECT_EQ(uploadedContent(server_->transcript()), std::optional<std::string>{"def"});
+    }
+
+    TEST_P(FtpFileStreamTests, AContinuedUploadIsRefusedWhereThePartIsMissing)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        transfer.expect("SIZE", "/dir/part").reply("550 /dir/part: No such file or directory").expectDisconnect();
+        connectWith(std::move(metadata), std::move(transfer));
+
+        const auto stream = open("/dir/part", RemoteIo::OpenMode::Write);
+        const auto written = onThread(
+            [stream]() -> std::expected<void, RemoteIo::RemoteError>
+            {
+                if (auto sought = stream->seekInStrand(3u); !sought)
+                    return sought;
+                return stream->writeInStrand("def");
+            }
+        );
+        ASSERT_FALSE(written) << "restarted behind the end of a part that is gone";
+        EXPECT_EQ(written.error().kind, RemoteIo::RemoteErrorKind::NoSuchFile) << written.error().toString();
         closeOnThread(stream);
     }
 
