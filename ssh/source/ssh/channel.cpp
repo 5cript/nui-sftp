@@ -69,7 +69,7 @@ namespace SecureShell
         }
         return promise->get_future();
     }
-    int Channel::onData(ssh_session, ssh_channel, void* data, uint32_t length, int isStderr, void* self)
+    int Channel::onData(ssh_session, ssh_channel, void* data, uint32_t length, int isStderr, void* self) noexcept
     {
         auto* channel = static_cast<Channel*>(self);
         if (channel->closing_)
@@ -81,7 +81,7 @@ namespace SecureShell
             channel->onStdout_(text);
         return static_cast<int>(length);
     }
-    void Channel::onEnd(ssh_session, ssh_channel, void* self)
+    void Channel::onEnd(ssh_session, ssh_channel, void* self) noexcept
     {
         // Seen while another task read the socket: the read task reports it in the next cycle.
         static_cast<Channel*>(self)->strand_->wake();

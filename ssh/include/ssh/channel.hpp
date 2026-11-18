@@ -72,8 +72,8 @@ namespace SecureShell
          * Output reaches the handlers as libssh processes it, whichever call on the session read it from the
          * socket, so the processing thread can sleep until the socket has data.
          *
-         * @param onStdout Called on the processing thread with output.
-         * @param onStderr Called on the processing thread with error output.
+         * @param onStdout Called on the processing thread with output. Must not throw, libssh may be its caller.
+         * @param onStderr Called on the processing thread with error output. Must not throw either.
          * @param onExit Called on the processing thread when the channel or the connection ends, unless closed.
          */
         void startReading(
@@ -86,8 +86,13 @@ namespace SecureShell
         RemoteIo::ProcessingThread::PermanentTaskStatus readTask();
         void registerCallbacks();
         void removeCallbacks();
-        static int onData(ssh_session session, ssh_channel channel, void* data, uint32_t length, int isStderr, void* self);
-        static void onEnd(ssh_session session, ssh_channel channel, void* self);
+        /**
+         * @brief libssh calls these from its packet handling, where an exception must not pass: one that escapes the
+         *        output handlers ends the program.
+         */
+        static int
+        onData(ssh_session session, ssh_channel channel, void* data, uint32_t length, int isStderr, void* self) noexcept;
+        static void onEnd(ssh_session session, ssh_channel channel, void* self) noexcept;
 
       private:
         Session* owner_;
