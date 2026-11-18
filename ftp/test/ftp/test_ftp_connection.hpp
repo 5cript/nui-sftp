@@ -566,6 +566,44 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
     }
 
+    TEST_P(FtpConnectionTests, ATaskThatThrowsFailsTheSessionAndReportsItLost)
+    {
+        serve();
+        const auto losses = std::make_shared<RecordedLosses>();
+        connectAndLogIn(
+            1u,
+            [losses](RemoteIo::RemoteError const& error)
+            {
+                losses->record(error);
+            }
+        );
+        connection_->start();
+        const auto fileSystem = openFileSystem();
+        ASSERT_TRUE(list(fileSystem, "/dir"));
+        const auto processingThread = processingThreadOf(fileSystem);
+
+        ASSERT_TRUE(fileSystem->strand()->pushTask(
+            []()
+            {
+                throw std::runtime_error{"boom"};
+            }
+        ));
+
+        ASSERT_EQ(losses->first.get_future().wait_for(10s), std::future_status::ready);
+        const auto recorded = losses->recorded();
+        ASSERT_EQ(recorded.size(), 1u);
+        EXPECT_EQ(recorded.front().kind, RemoteErrorKind::ConnectionLost) << recorded.front().toString();
+        EXPECT_NE(recorded.front().message.find("boom"), std::string::npos) << recorded.front().toString();
+        {
+            std::scoped_lock lock{losses->mutex};
+            EXPECT_EQ(losses->threads.front(), processingThread);
+        }
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal) << "a failed session opened a file system";
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
+        EXPECT_FALSE(list(fileSystem, "/dir"));
+    }
+
     TEST_P(FtpConnectionTests, ALossBeforeTheStartIsReportedByTheStart)
     {
         tree_ = std::make_shared<ServedTree>(servedRoot());

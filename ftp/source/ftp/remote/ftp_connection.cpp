@@ -179,6 +179,16 @@ namespace FileTransferProtocol
               }
           )}
     {
+        // The lost handler is a task of the thread, which takes none any more: the loss is reported from here.
+        thread_->onFailure(
+            [shared = shared_, weakEngine = std::weak_ptr{engine_}](std::string const& reason)
+            {
+                const auto what = fmt::format("its processing thread ended on an exception: {}", reason);
+                if (const auto engine = weakEngine.lock())
+                    engine->fail(what);
+                shared->lost(errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", what)));
+            }
+        );
         thread_->start();
     }
 

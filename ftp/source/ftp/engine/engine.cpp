@@ -350,28 +350,32 @@ namespace FileTransferProtocol
 
     void Engine::handlerThrew(std::exception_ptr exception)
     {
+        fail(describe(exception));
+    }
+
+    void Engine::fail(std::string reason)
+    {
+        if (failed_.exchange(true))
+            return;
+        Log::error("FTP: The session fails: {}", reason);
         if (strand_.running_in_this_thread())
         {
-            fail(exception);
+            failOnStrand(reason);
             return;
         }
         postAlways(
-            [self = shared_from_this(), exception]()
+            [self = shared_from_this(), reason = std::move(reason)]()
             {
-                self->fail(exception);
+                self->failOnStrand(reason);
             }
         );
     }
 
-    void Engine::fail(std::exception_ptr exception)
+    void Engine::failOnStrand(std::string const& reason)
     {
-        if (failed_.exchange(true))
-            return;
-        const auto what = describe(exception);
-        Log::error("FTP: A handler of the session threw, the session fails: {}", what);
         // The pool's end closes every connection, and ends the waits and the logins in the background.
         pool_.reset();
-        const auto error = errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", what));
+        const auto error = errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", reason));
         failCalls(error);
         reportLost(error);
     }
