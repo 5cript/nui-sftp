@@ -69,21 +69,25 @@ namespace RemoteIo
     void ProcessingThread::start(std::chrono::milliseconds const& pollInterval)
     {
         assert(!thread_.joinable() && "ProcessingThread::start() needs stop() after a previous start()");
+        // The thread comes first and waits for the state: a thread that cannot be created leaves nothing changed.
+        std::promise<void> awaitThreadStart{};
+        std::promise<void> stateIsSet{};
+        thread_ = std::thread(
+            [this, &awaitThreadStart, stateSet = stateIsSet.get_future(), pollInterval]
+            {
+                awaitThreadStart.set_value();
+                stateSet.wait();
+                processingThreadId_.store(std::this_thread::get_id());
+                run(pollInterval);
+            }
+        );
         {
             std::lock_guard cleanupLock{cleanupMutex_};
             std::lock_guard lock{taskMutex_};
             running_ = true;
             intake_ = Intake::Open;
         }
-        std::promise<void> awaitThreadStart{};
-        thread_ = std::thread(
-            [this, &awaitThreadStart, pollInterval]
-            {
-                awaitThreadStart.set_value();
-                processingThreadId_.store(std::this_thread::get_id());
-                run(pollInterval);
-            }
-        );
+        stateIsSet.set_value();
         awaitThreadStart.get_future().wait();
     }
     void ProcessingThread::stop()
