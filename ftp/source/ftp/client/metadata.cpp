@@ -974,8 +974,11 @@ namespace FileTransferProtocol
             }
             auto error = setterError(*reply, command.verb);
             const auto probing = learned == ModificationTimeSetter::Unknown;
-            // 501: arguments in a form the server does not know.
-            if (probing && (lacksTheCommand(error) || reply->code == 501))
+            // A server that has MFMT refused this time (MFMT draft 3.2), the next time is asked the same way.
+            if (probing && setter == ModificationTimeSetter::ModifyFact && reply->code == 501)
+                co_return std::unexpected(std::move(error));
+            // A 501 to another form: arguments in a form the server does not know.
+            if (probing && lacksTheCommand(error))
                 continue;
             if (probing && setter == ModificationTimeSetter::ModificationTimeWithTime && reply->code == 550)
             {

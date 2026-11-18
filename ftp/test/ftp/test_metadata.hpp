@@ -773,6 +773,28 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(second) << second.error().toString();
     }
 
+    TEST_F(MetadataTests, ATimeRefusedByAnUnknownSetterLeavesTheNextTimeItsSetters)
+    {
+        // MFMT draft 3.2: a 501 refuses the time, the server has the command.
+        Script script{};
+        script.reply("220 Ready")
+            .expect("MFMT")
+            .reply("501 Invalid time.")
+            .expect("MFMT")
+            .reply("213 Modify=20200102030405; /b")
+            .expectDisconnect();
+        const auto connection = plainConnection(std::move(script));
+
+        const auto refused = setTimeIn(connection, "/a", someTime());
+        ASSERT_FALSE(refused) << "set a time the server refused";
+        EXPECT_EQ(refused.error().kind, RemoteIo::RemoteErrorKind::Unsupported) << refused.error().toString();
+        EXPECT_EQ(refused.error().protocolCode, 501);
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::Unknown);
+        const auto set = setTimeIn(connection, "/b", someTime());
+        ASSERT_TRUE(set) << set.error().toString();
+        EXPECT_EQ(dialect_->modificationTimeSetter(), ModificationTimeSetter::ModifyFact);
+    }
+
     TEST_F(MetadataTests, AServerThatSetsNoTimeIsAskedOnce)
     {
         Script script{};
