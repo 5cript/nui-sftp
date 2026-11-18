@@ -1369,8 +1369,14 @@ namespace FileTransferProtocol::Test
             co_return std::pair{transferEnd ? transferEnd->code : 0, abortReply ? abortReply->code : 0};
         }
 
-        /** @brief Far more replies than a command holds undelivered. */
-        constexpr std::size_t tooManyReplies = 40u;
+        /** @brief @p reply as often as @p count, each with its CRLF. */
+        std::string repeated(std::string_view reply, std::size_t count)
+        {
+            std::string replies{};
+            for (std::size_t index = 0u; index < count; ++index)
+                replies.append(reply).append("\r\n");
+            return replies;
+        }
 
         /**
          * @brief A RETR answered by 150 whose ABOR gets @p replies before the marker's 257, then a NOOP.
@@ -1425,11 +1431,24 @@ namespace FileTransferProtocol::Test
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
+    TEST_F(ControlConnectionTests, AsManyRepliesBehindAbortAsItCanHoldAreTaken)
+    {
+        server_->addConnection(abortAnsweredWith(repeated("426 Transfer aborted", PendingCommand::maximumHeldReplies)));
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto codes =
+            run(connection,
+                [connection]()
+                {
+                    return abortedRetrieve(connection);
+                });
+        EXPECT_EQ(codes, (std::pair{426, 426}));
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+    }
+
     TEST_F(ControlConnectionTests, MoreRepliesBehindAbortThanItCanHoldEndTheConnection)
     {
-        std::string replies{};
-        for (std::size_t index = 0u; index < tooManyReplies; ++index)
-            replies += "426 Transfer aborted\r\n";
+        auto replies = repeated("426 Transfer aborted", PendingCommand::maximumHeldReplies + 1u);
         server_->addConnection(
             Script{}
                 .reply("220 Ready")
@@ -1454,11 +1473,41 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(ended->kind, RemoteErrorKind::ProtocolViolation) << ended->toString();
     }
 
+    TEST_F(ControlConnectionTests, AsManyRepliesAsACommandCanHoldAreKeptForIt)
+    {
+        server_->addConnection(
+            Script{}
+                .reply("220 Ready")
+                .expect("RETR", "file")
+                .replyRaw(
+                    repeated("150 Opening", PendingCommand::maximumHeldReplies - 1u) + "226 Transfer complete\r\n"
+                )
+                .expect("NOOP")
+                .reply("200 Fine")
+                .expectDisconnect()
+        );
+        const auto connection = makeConnection();
+        connect(connection);
+        // Nobody reads the replies of the RETR before the NOOP behind it was answered.
+        const auto retrieve =
+            run(connection,
+                [connection]() -> asio::awaitable<std::shared_ptr<PendingCommand>>
+                {
+                    co_return connection->send(command(Verb::Retrieve, "file")).value();
+                });
+        expectReply(execute(connection, command(Verb::Noop)), 200);
+        const auto transferEnd =
+            run(connection,
+                [retrieve]()
+                {
+                    return retrieve->finalReply();
+                });
+        expectReply(transferEnd, 226);
+    }
+
     TEST_F(ControlConnectionTests, MorePreliminaryRepliesThanACommandCanHoldEndTheConnection)
     {
-        std::string replies{};
-        for (std::size_t index = 0u; index < tooManyReplies; ++index)
-            replies += "150 Opening\r\n";
+        auto replies = repeated("150 Opening", PendingCommand::maximumHeldReplies + 1u);
         server_->addConnection(
             Script{}.reply("220 Ready").expect("RETR", "file").replyRaw(std::move(replies)).expectDisconnect()
         );
