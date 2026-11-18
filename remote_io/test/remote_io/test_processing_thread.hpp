@@ -1124,6 +1124,121 @@ namespace RemoteIo::Test
         EXPECT_FALSE(processingThread.isRunning());
     }
 
+    TEST_F(ProcessingThreadTest, ThrowingTaskTellsTheFailureHandlerWhyTheThreadEnded)
+    {
+        std::promise<std::string> reported{};
+        std::atomic_bool refusedInHandler = false;
+        std::atomic_bool cleanupRanBeforeHandler = false;
+        std::atomic_bool cleanupRan = false;
+
+        ProcessingThread processingThread;
+        processingThread.onFailure(
+            [&](std::string const& reason)
+            {
+                refusedInHandler = !processingThread.pushTask([] {});
+                cleanupRanBeforeHandler = cleanupRan.load();
+                reported.set_value(reason);
+            }
+        );
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        processingThread.pushCleanupTask(
+            [&cleanupRan]
+            {
+                cleanupRan = true;
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+
+        auto reason = reported.get_future();
+        ASSERT_EQ(reason.wait_for(5s), std::future_status::ready);
+        EXPECT_EQ(reason.get(), "boom");
+        EXPECT_TRUE(refusedInHandler.load());
+        EXPECT_TRUE(cleanupRanBeforeHandler.load());
+    }
+
+    TEST_F(ProcessingThreadTest, FailureHandlerLearnsOfAnExceptionOfAnUnknownType)
+    {
+        std::promise<std::string> reported{};
+
+        ProcessingThread processingThread;
+        processingThread.onFailure(
+            [&reported](std::string const& reason)
+            {
+                reported.set_value(reason);
+            }
+        );
+        processingThread.pushPermanentTask(
+            std::function<bool(ProcessingThread::PermanentTaskId)>{
+                [](ProcessingThread::PermanentTaskId) -> bool
+                {
+                    throw 42;
+                }
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+
+        auto reason = reported.get_future();
+        ASSERT_EQ(reason.wait_for(5s), std::future_status::ready);
+        EXPECT_EQ(reason.get(), "an exception of an unknown type");
+    }
+
+    TEST_F(ProcessingThreadTest, FailureHandlerMayStopTheThreadFromAnotherThread)
+    {
+        // The owner ends its session on the report, which stops the thread while the handler still runs.
+        std::promise<void> handlerEntered{};
+        std::promise<void> stopCalled{};
+
+        ProcessingThread processingThread;
+        processingThread.onFailure(
+            [&handlerEntered, stopping = stopCalled.get_future().share()](std::string const&)
+            {
+                handlerEntered.set_value();
+                stopping.wait();
+            }
+        );
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+
+        ASSERT_EQ(handlerEntered.get_future().wait_for(5s), std::future_status::ready);
+        auto stopped = std::async(
+            std::launch::async,
+            [&processingThread]
+            {
+                processingThread.stop();
+            }
+        );
+        stopCalled.set_value();
+        EXPECT_EQ(stopped.wait_for(5s), std::future_status::ready);
+    }
+
+    TEST_F(ProcessingThreadTest, StoppedThreadDoesNotCallTheFailureHandler)
+    {
+        std::atomic_bool reported = false;
+
+        ProcessingThread processingThread;
+        processingThread.onFailure(
+            [&reported](std::string const&)
+            {
+                reported = true;
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+        ASSERT_TRUE(processingThread.awaitCycle());
+        processingThread.stop();
+
+        EXPECT_FALSE(reported.load());
+    }
+
     TEST(ProcessingThreadDeathTests, StartingTwiceWithoutStopIsACodingError)
     {
         GTEST_FLAG_SET(death_test_style, "threadsafe");

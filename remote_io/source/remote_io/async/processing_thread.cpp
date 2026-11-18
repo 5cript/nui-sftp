@@ -1,10 +1,13 @@
 #include <remote_io/async/processing_thread.hpp>
 #include <remote_io/async/processing_strand.hpp>
+#include <log/log.hpp>
 
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <exception>
 #include <future>
+#include <string>
 #include <thread>
 
 namespace RemoteIo
@@ -40,6 +43,22 @@ namespace RemoteIo
          *        benchmark.
          */
         constexpr std::chrono::microseconds spinBeforeParking{50};
+
+        std::string describe(std::exception_ptr exception)
+        {
+            try
+            {
+                std::rethrow_exception(exception);
+            }
+            catch (std::exception const& error)
+            {
+                return error.what();
+            }
+            catch (...)
+            {
+                return "an exception of an unknown type";
+            }
+        }
 
         /**
          * @brief Tells the processor that the thread spins, so a sibling hardware thread runs meanwhile.
@@ -479,26 +498,48 @@ namespace RemoteIo
         }
         catch (...)
         {
-            // Cleanup tasks pushed from now on run on their caller, after the queued ones ran here.
-            std::lock_guard cleanupLock{cleanupMutex_};
-            std::deque<QueuedTask> pending{};
-            {
-                std::lock_guard lock{taskMutex_};
-                running_ = false;
-                // stop() drains what is queued once it joined this thread, and closes intake afterwards.
-                if (intake_ == Intake::Draining)
-                    return;
-                intake_ = Intake::Closed;
-                pending = std::exchange(tasks_, {});
-            }
-            // Queued tasks would run only when stop() drains, which the threads waiting for them may never reach.
-            // Dropped promise tasks complete with their unfinished result, cleanup tasks still run.
-            for (auto& task : pending)
-            {
-                if (task.kind == TaskKind::Cleanup)
-                    runContained(task.run);
-            }
+            const auto reason = describe(std::current_exception());
+            Log::error("A task of a processing thread threw, the thread ends: {}", reason);
+            closeAfterException();
+            reportFailure(reason);
         }
+    }
+    void ProcessingThread::closeAfterException()
+    {
+        // Cleanup tasks pushed from now on run on their caller, after the queued ones ran here.
+        std::lock_guard cleanupLock{cleanupMutex_};
+        std::deque<QueuedTask> pending{};
+        {
+            std::lock_guard lock{taskMutex_};
+            running_ = false;
+            // stop() drains what is queued once it joined this thread, and closes intake afterwards.
+            if (intake_ == Intake::Draining)
+                return;
+            intake_ = Intake::Closed;
+            pending = std::exchange(tasks_, {});
+        }
+        // Queued tasks would run only when stop() drains, which the threads waiting for them may never reach.
+        // Dropped promise tasks complete with their unfinished result, cleanup tasks still run.
+        for (auto& task : pending)
+        {
+            if (task.kind == TaskKind::Cleanup)
+                runContained(task.run);
+        }
+    }
+    void ProcessingThread::onFailure(FailureHandler handler)
+    {
+        std::lock_guard lock{taskMutex_};
+        failureHandler_ = std::move(handler);
+    }
+    void ProcessingThread::reportFailure(std::string const& reason) noexcept
+    {
+        FailureHandler handler{};
+        {
+            std::lock_guard lock{taskMutex_};
+            handler = failureHandler_;
+        }
+        if (handler)
+            handler(reason);
     }
     void ProcessingThread::waitForWork(CycleNeeds const& needs)
     {

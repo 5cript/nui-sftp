@@ -13,6 +13,7 @@
 #include <optional>
 #include <future>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -144,6 +145,11 @@ namespace RemoteIo
             Idle,
         };
 
+        /**
+         * @brief Told why the thread ended: what the exception of a task said. Must not throw.
+         */
+        using FailureHandler = std::function<void(std::string const& reason)>;
+
         ProcessingThread();
         ~ProcessingThread();
         ProcessingThread(ProcessingThread const&) = delete;
@@ -161,6 +167,13 @@ namespace RemoteIo
          * @param pollInterval How long the thread sleeps at most while a permanent task polls.
          */
         void start(std::chrono::milliseconds const& pollInterval = std::chrono::milliseconds{0});
+
+        /**
+         * @brief Sets what runs when a task threw, which ends the thread: once on the ending thread, after the queued
+         *        cleanup tasks ran and outside every lock of the thread. From then on pushes are refused, so the owner
+         *        ends what depends on the thread. Set before start().
+         */
+        void onFailure(FailureHandler handler);
 
         /**
          * @brief Wakes the thread for a cycle, for a permanent task whose state changed from outside.
@@ -331,6 +344,14 @@ namespace RemoteIo
         void run(std::chrono::milliseconds const& pollInterval);
 
         /**
+         * @brief Ends the loop behind a task that threw: closes the intake, drops the queued tasks and runs the
+         *        cleanup tasks among them. While stop() drains, the drain does that.
+         */
+        void closeAfterException();
+
+        void reportFailure(std::string const& reason) noexcept;
+
+        /**
          * @brief Queues a promise task like pushTask. While stop() drains it is queued refused instead: the drain
          *        drops it in order, so its future completes after the tasks queued before it.
          */
@@ -432,6 +453,8 @@ namespace RemoteIo
         /** @brief Under taskMutex_: the thread sleeps in socketWait_, so a wake must go through it. */
         bool waitingOnSocket_{false};
         std::function<SocketWait::Watched()> watchedSocket_{};
+        /** @brief Under taskMutex_. */
+        FailureHandler failureHandler_{};
         std::unique_ptr<SocketWait> socketWait_{};
 
         std::deque<QueuedTask> tasks_{};
