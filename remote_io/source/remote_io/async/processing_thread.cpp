@@ -2,8 +2,8 @@
 #include <remote_io/async/processing_strand.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
-#include <stdexcept>
 #include <future>
 #include <thread>
 
@@ -68,10 +68,7 @@ namespace RemoteIo
     }
     void ProcessingThread::start(std::chrono::milliseconds const& pollInterval)
     {
-        if (thread_.joinable())
-            throw std::logic_error(
-                "ProcessingThread::start called while a previous thread is still joinable; call stop() first."
-            );
+        assert(!thread_.joinable() && "ProcessingThread::start() needs stop() after a previous start()");
         {
             std::lock_guard cleanupLock{cleanupMutex_};
             std::lock_guard lock{taskMutex_};
@@ -138,10 +135,7 @@ namespace RemoteIo
     }
     bool ProcessingThread::pushTask(std::function<void()>&& task)
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
 
         bool interruptSocketWait = false;
         {
@@ -177,10 +171,7 @@ namespace RemoteIo
     }
     void ProcessingThread::pushCleanupTask(std::function<void()> task)
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
 
         // Held while the task runs here, so cleanup tasks run one at a time and never alongside a restarted thread.
         std::lock_guard cleanupLock{cleanupMutex_};
@@ -244,10 +235,7 @@ namespace RemoteIo
         std::optional<std::chrono::milliseconds> pollInterval
     )
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
         return pushPermanentTask(
             std::function<PermanentTaskStatus(PermanentTaskId)>{
                 [task = std::move(task)](PermanentTaskId id)
@@ -263,10 +251,7 @@ namespace RemoteIo
         std::optional<std::chrono::milliseconds> pollInterval
     )
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
 
         PermanentTaskId id{-1};
         bool interruptSocketWait = false;
@@ -466,13 +451,7 @@ namespace RemoteIo
 
                     for (auto const& task : tasks)
                     {
-                        // Task is checked before adding, shouldnt possibly be empty:
-#ifndef NDEBUG
-                        if (!task.run)
-                        {
-                            throw std::runtime_error("Task must not be empty.");
-                        }
-#endif
+                        assert(task.run && "A task of the ProcessingThread must not be empty");
                         // Pushed while stop() drains, completed when the batch is gone.
                         if (task.kind == TaskKind::Refused)
                             continue;

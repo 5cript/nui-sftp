@@ -1124,11 +1124,34 @@ namespace RemoteIo::Test
         EXPECT_FALSE(processingThread.isRunning());
     }
 
-    TEST_F(ProcessingThreadTest, StartingTwiceWithoutStopThrows)
+    TEST(ProcessingThreadDeathTests, StartingTwiceWithoutStopIsACodingError)
     {
-        ProcessingThread processingThread;
-        processingThread.start(std::chrono::milliseconds{1});
-        EXPECT_THROW(processingThread.start(std::chrono::milliseconds{1}), std::logic_error);
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        // A release build has no assert, there the second thread cannot replace the first that still runs.
+        EXPECT_DEATH(
+            {
+                ProcessingThread processingThread;
+                processingThread.start(std::chrono::milliseconds{1});
+                processingThread.start(std::chrono::milliseconds{1});
+            },
+            ""
+        );
+    }
+
+    TEST(ProcessingThreadDeathTests, AnEmptyTaskIsACodingError)
+    {
+#ifdef NDEBUG
+        GTEST_SKIP() << "Only the assert catches it, a release build has none";
+#else
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_DEATH(
+            {
+                ProcessingThread processingThread;
+                processingThread.pushTask(std::function<void()>{});
+            },
+            "must not be empty"
+        );
+#endif
     }
 
     TEST_F(ProcessingThreadTest, PermanentTasksStartAtARotatingPositionEachCycle)
