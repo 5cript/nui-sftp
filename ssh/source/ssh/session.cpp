@@ -66,6 +66,13 @@ namespace SecureShell
 
     void Session::start()
     {
+        // Without its thread the session runs nothing more, which the owner learns as a lost connection.
+        processingThread_.onFailure(
+            [this](std::string const&)
+            {
+                reportConnectionLoss();
+            }
+        );
         processingThread_.start(std::chrono::milliseconds{1});
         // Asked on the processing thread before every wait, libssh closes the socket on a fatal error.
         const auto watching = processingThread_.watchSocket(
