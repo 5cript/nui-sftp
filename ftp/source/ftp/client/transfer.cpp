@@ -7,7 +7,6 @@
 
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/post.hpp>
@@ -168,11 +167,20 @@ namespace FileTransferProtocol
                 end.data->reset();
                 return true;
             }
-            const auto strand = end.control->strand();
+            const auto control = end.control;
+            const auto data = end.data;
             asio::co_spawn(
-                strand,
+                control->strand(),
                 endedCleanly(std::move(end.data), end.control, std::move(end.store), end.finalReplyTimeout),
-                asio::detached
+                // Nothing limits the final reply of the upload then, the end of the connection answers it.
+                Detail::endingOnException(
+                    "The end of an upload's data connection",
+                    [control, data]()
+                    {
+                        data->close();
+                        control->close();
+                    }
+                )
             );
             return false;
         }
