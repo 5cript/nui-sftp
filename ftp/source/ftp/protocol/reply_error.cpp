@@ -117,14 +117,15 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief A transfer refused for the protection level of its data connection: 521 (RFC 4217 10.2), as vsftpd's
-         *        "Data connections must be encrypted", or 534 (RFC 2228 6).
+         * @brief A transfer refused for the protection level of its data connection: 521 (RFC 4217 10.2), 522 as
+         *        vsftpd's "Data connections must be encrypted" and proftpd's "SSL/TLS required on the data channel",
+         *        or 534 (RFC 2228 6).
          */
         bool refusesDataProtection(int code, std::optional<Verb> verb)
         {
             const auto transfer = verb == Verb::Retrieve || verb == Verb::Store || verb == Verb::Append ||
                 verb == Verb::List || verb == Verb::NameList || verb == Verb::MachineListDirectory;
-            return transfer && (code == 521 || code == 534);
+            return transfer && (code == 521 || code == 522 || code == 534);
         }
 
         RemoteErrorKind kindOf(int code, std::string_view text, std::optional<Verb> verb)

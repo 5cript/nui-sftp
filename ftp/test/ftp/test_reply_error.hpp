@@ -188,7 +188,11 @@ namespace FileTransferProtocol::Test
             kindOf(521, "Data connection cannot be opened with this PROT setting.", Verb::Retrieve),
             RemoteErrorKind::NoSecureConnection
         );
-        EXPECT_EQ(kindOf(521, "Data connections must be encrypted.", Verb::List), RemoteErrorKind::NoSecureConnection);
+        // What vsftpd and proftpd send.
+        EXPECT_EQ(kindOf(522, "Data connections must be encrypted.", Verb::List), RemoteErrorKind::NoSecureConnection);
+        EXPECT_EQ(
+            kindOf(522, "SSL/TLS required on the data channel", Verb::Store), RemoteErrorKind::NoSecureConnection
+        );
         EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Store), RemoteErrorKind::NoSecureConnection);
         EXPECT_EQ(kindOf(534, "Request denied for policy reasons.", Verb::Delete), RemoteErrorKind::PermissionDenied);
     }

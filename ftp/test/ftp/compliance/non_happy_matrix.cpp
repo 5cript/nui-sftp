@@ -1715,7 +1715,13 @@ namespace FileTransferProtocol::Test
                 refused(route, "500 Syntax error, command unrecognized.", RemoteErrorKind::Unsupported),
                 refused(route, "501 Syntax error in parameters or arguments.", RemoteErrorKind::Failure),
                 // The data connection would need another protection level, RFC 4217 10.2 and RFC 2228 6.
-                refused(route, "521 Data connections must be encrypted.", RemoteErrorKind::NoSecureConnection),
+                refused(
+                    route,
+                    "521 Data connection cannot be opened with this PROT setting.",
+                    RemoteErrorKind::NoSecureConnection
+                ),
+                // What vsftpd sends.
+                refused(route, "522 Data connections must be encrypted.", RemoteErrorKind::NoSecureConnection),
                 refused(route, "530 Not logged in.", RemoteErrorKind::AuthenticationFailed),
                 refused(route, "534 Request denied for policy reasons.", RemoteErrorKind::NoSecureConnection),
             };
