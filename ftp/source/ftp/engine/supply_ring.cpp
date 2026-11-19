@@ -24,7 +24,7 @@ namespace FileTransferProtocol
 
     /**
      * @brief One fill, owned by its task. Hands the slot back when the task ends, as lost unless the fill ended: when
-     *        the source threw, or the ProcessingThread dropped the task unrun, a refused push among them.
+     *        the ProcessingThread dropped the task unrun, a refused push among them.
      */
     class SupplyRing::FillTask
     {
@@ -130,16 +130,7 @@ namespace FileTransferProtocol
         std::size_t count{0u};
         while (!closed_ && !sourceEnded_ && !sourceFailed_ && count < bytes.size())
         {
-            std::expected<std::size_t, RemoteIo::RemoteError> got{};
-            try
-            {
-                got = source_(std::span<char>{bytes.data() + count, bytes.size() - count});
-            }
-            catch (...)
-            {
-                sourceFailed_ = true;
-                throw;
-            }
+            auto got = source_(std::span<char>{bytes.data() + count, bytes.size() - count});
             if (!got)
             {
                 sourceFailed_ = true;

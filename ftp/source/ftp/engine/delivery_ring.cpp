@@ -20,11 +20,53 @@ namespace FileTransferProtocol
         {
             return errorOf(RemoteErrorKind::ConnectionLost, "The session's thread takes no more deliveries");
         }
+
+        /**
+         * @brief A free slot taken to be filled. It goes back to the free ones when the fill ends, also on an
+         *        exception of the source, unless a delivery took it over.
+         */
+        class SlotLoan
+        {
+          public:
+            explicit SlotLoan(std::deque<std::size_t>& free)
+                : free_{&free}
+                , slot_{free.front()}
+            {
+                free.pop_front();
+            }
+            ~SlotLoan()
+            {
+                if (free_ != nullptr)
+                    free_->push_back(slot_);
+            }
+            SlotLoan(SlotLoan const&) = delete;
+            SlotLoan& operator=(SlotLoan const&) = delete;
+            SlotLoan(SlotLoan&&) = delete;
+            SlotLoan& operator=(SlotLoan&&) = delete;
+
+            std::size_t slot() const
+            {
+                return slot_;
+            }
+
+            /**
+             * @return The slot, which its delivery gives back from now on.
+             */
+            std::size_t handOver()
+            {
+                free_ = nullptr;
+                return slot_;
+            }
+
+          private:
+            std::deque<std::size_t>* free_;
+            std::size_t slot_;
+        };
     }
 
     /**
      * @brief One delivery, owned by its task. Gives the slot back when the task ends, as lost unless the delivery
-     *        ended: when the sink threw, or the ProcessingThread dropped the task unrun, a refused push among them.
+     *        ended: when the ProcessingThread dropped the task unrun, a refused push among them.
      */
     class DeliveryRing::DeliveryTask
     {
@@ -91,46 +133,26 @@ namespace FileTransferProtocol
             if (stopped_)
                 co_return std::unexpected(stopReason());
 
-            const auto slot = free_.front();
-            free_.pop_front();
-            const auto bytes = bytesOf(slot);
+            SlotLoan loan{free_};
+            const auto bytes = bytesOf(loan.slot());
             std::size_t filled{0u};
             while (!ended && filled < bytes.size())
             {
-                std::expected<std::size_t, RemoteIo::RemoteError> received{};
-                try
-                {
-                    received = co_await source(asio::buffer(bytes.data() + filled, bytes.size() - filled));
-                }
-                catch (...)
-                {
-                    // Every slot must come back before the ring lets go of the sink.
-                    free_.push_back(slot);
-                    throw;
-                }
+                const auto received = co_await source(asio::buffer(bytes.data() + filled, bytes.size() - filled));
                 if (!received)
-                {
-                    free_.push_back(slot);
                     co_return std::unexpected(received.error());
-                }
                 assert(*received <= bytes.size() - filled && "A source put more bytes into the buffer than it holds");
                 ended = *received == 0u;
                 filled += *received;
                 if (isCancelled(co_await asio::this_coro::cancellation_state))
                     stopped_ = true;
                 if (stopped_)
-                {
-                    free_.push_back(slot);
                     co_return std::unexpected(stopReason());
-                }
             }
             if (filled == 0u)
-            {
-                free_.push_back(slot);
                 continue;
-            }
             const auto pushed = engine_->pushTask(
-                [delivery = std::make_shared<DeliveryTask>(self, slot, filled)]() mutable
+                [delivery = std::make_shared<DeliveryTask>(self, loan.handOver(), filled)]() mutable
                 {
                     // Ends with the delivery, the thread keeps a task until its batch ran.
                     const auto ending = std::move(delivery);
@@ -148,18 +170,7 @@ namespace FileTransferProtocol
     {
         if (closed_)
             return;
-        auto accepted = false;
-        try
-        {
-            accepted = sink_(bytesOf(slot).first(filled));
-        }
-        catch (...)
-        {
-            // The deliveries behind this one would follow a gap.
-            closed_ = true;
-            throw;
-        }
-        if (!accepted)
+        if (!sink_(bytesOf(slot).first(filled)))
             close();
     }
 

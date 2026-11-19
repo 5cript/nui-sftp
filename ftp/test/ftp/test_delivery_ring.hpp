@@ -179,7 +179,7 @@ namespace FileTransferProtocol::Test
       protected:
         DeliveryRing::Sink sinkInto(std::shared_ptr<Received> received)
         {
-            return [received, gate = gate_](std::span<char const> bytes)
+            return [received, gate = gate_](std::span<char const> bytes) noexcept
             {
                 ++received->deliveries;
                 received->allOnTheProcessingThread = received->allOnTheProcessingThread && gate->onProcessingThread();
@@ -361,7 +361,7 @@ namespace FileTransferProtocol::Test
             ring->run(
                 sourceOf(download),
                 // Holds the ring as a stream's sink does, the ring lets go of it once it ended.
-                [ring, deliveries](std::span<char const>)
+                [ring, deliveries](std::span<char const>) noexcept
                 {
                     ++*deliveries;
                     ring->close();
@@ -401,7 +401,7 @@ namespace FileTransferProtocol::Test
             connectionStrand_,
             ring->run(
                 sourceOf(download),
-                [deliveries](std::span<char const>)
+                [deliveries](std::span<char const>) noexcept
                 {
                     ++*deliveries;
                     return false;
@@ -517,7 +517,7 @@ namespace FileTransferProtocol::Test
             connectionStrand_,
             ring->run(
                 sourceOf(download),
-                [sawACall, sink = sinkInto(received)](std::span<char const> bytes)
+                [sawACall, sink = sinkInto(received)](std::span<char const> bytes) noexcept
                 {
                     *sawACall = *sawACall || insideACall;
                     return sink(bytes);
@@ -552,7 +552,7 @@ namespace FileTransferProtocol::Test
             connectionStrand_,
             ring->run(
                 sourceOf(download),
-                [held = std::move(held)](std::span<char const>)
+                [held = std::move(held)](std::span<char const>) noexcept
                 {
                     return true;
                 }
@@ -589,7 +589,7 @@ namespace FileTransferProtocol::Test
             connectionStrand_,
             ring->run(
                 sourceOf(download),
-                [held = std::move(held), deliveries](std::span<char const>)
+                [held = std::move(held), deliveries](std::span<char const>) noexcept
                 {
                     ++*deliveries;
                     return true;
@@ -613,47 +613,18 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(sinkState.expired()) << "the ring kept the sink after its deliveries were dropped";
     }
 
-    TEST_P(DeliveryRingTests, ASinkThatThrowsGetsNoLaterBytesAndEndsTheRingAsLost)
+    TEST(DeliveryRingSinkTests, OnlyASinkDeclaredNoexceptIsTaken)
     {
-        const auto engine = makeEngine();
-        const auto ring = DeliveryRing::create(engine, connectionStrand_, options_);
-        const auto download = std::make_shared<FakeDownload>();
-        download->size = std::numeric_limits<std::size_t>::max();
-        download->piece = options_.chunkSize;
-        std::promise<void> twoPushed{};
-        auto pushed = twoPushed.get_future();
-        download->beforeRead = [&twoPushed](std::size_t number)
+        const auto mayThrow = [](std::span<char const>)
         {
-            // One read fills one slot, so before the third read two deliveries were pushed.
-            if (number == 2u)
-                twoPushed.set_value();
+            return true;
         };
-        auto held = std::make_shared<int>(0);
-        const std::weak_ptr<int> sinkState = held;
-        const auto deliveries = std::make_shared<std::atomic<std::size_t>>(0u);
-        std::promise<void> release{};
-        ASSERT_NO_FATAL_FAILURE(holdTheProcessingThread(release.get_future().share()));
-        auto ran = asio::co_spawn(
-            connectionStrand_,
-            ring->run(
-                sourceOf(download),
-                [held = std::move(held), deliveries](std::span<char const>) -> bool
-                {
-                    ++*deliveries;
-                    throw std::runtime_error{"The sink broke"};
-                }
-            ),
-            asio::use_future
-        );
-        valueOf(pushed);
-        release.set_value();
-
-        const auto outcome = valueOf(ran);
-        ASSERT_FALSE(outcome);
-        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
-        settleTasks();
-        EXPECT_EQ(deliveries->load(), 1u) << "the sink got bytes behind the ones it threw on";
-        EXPECT_TRUE(sinkState.expired()) << "the ring kept the sink after it threw";
+        const auto declared = [](std::span<char const>) noexcept
+        {
+            return true;
+        };
+        EXPECT_FALSE((std::is_constructible_v<DeliveryRing::Sink, decltype(mayThrow)>));
+        EXPECT_TRUE((std::is_constructible_v<DeliveryRing::Sink, decltype(declared)>));
     }
 
     TEST_P(DeliveryRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)
@@ -701,6 +672,50 @@ namespace FileTransferProtocol::Test
         }
     );
 
+    namespace
+    {
+        /** @brief Throws out of a sink that is declared noexcept, behind a call the compiler does not warn about. */
+        [[noreturn]] void breakTheSink()
+        {
+            throw std::runtime_error{"The sink broke"};
+        }
+    }
+
+    TEST(DeliveryRingDeathTests, ASinkThatThrowsEndsTheProgram)
+    {
+        EXPECT_DEATH(
+            {
+                asio::io_context context{};
+                RemoteIo::ProcessingThread thread{};
+                thread.start();
+                const auto engine = Engine::create(
+                    context.get_executor(), std::make_shared<Resolver>(), std::make_shared<TaskGate>(thread), {}
+                );
+                const auto strand = asio::make_strand(context.get_executor());
+                const auto ring = DeliveryRing::create(engine, strand, RingOptions{.slots = 2u, .chunkSize = 4u});
+                asio::co_spawn(
+                    strand,
+                    ring->run(
+                        [reads = 0u](asio::mutable_buffer buffer) mutable
+                            -> asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>
+                        {
+                            co_return reads++ == 0u ? buffer.size() : 0u;
+                        },
+                        [](std::span<char const>) noexcept -> bool
+                        {
+                            breakTheSink();
+                        }
+                    ),
+                    asio::detached
+                );
+                context.run();
+                // Runs the delivery at the latest.
+                thread.stop();
+            },
+            ""
+        );
+    }
+
     TEST(DeliveryRingDeathTests, ASourceThatReportsMoreThanItsBufferIsACodingError)
     {
 #ifdef NDEBUG
@@ -725,7 +740,7 @@ namespace FileTransferProtocol::Test
                         {
                             co_return reads++ == 0u ? buffer.size() + 1u : 0u;
                         },
-                        [](std::span<char const>)
+                        [](std::span<char const>) noexcept
                         {
                             return true;
                         }

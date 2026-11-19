@@ -271,7 +271,7 @@ namespace FileTransferProtocol
         DeliveryRing::Sink sink = [context,
                                       buffer,
                                       size = static_cast<std::size_t>(bufferSize),
-                                      onRead = std::move(onRead)](std::span<char const> bytes)
+                                      onRead = std::move(onRead)](std::span<char const> bytes) noexcept
         {
             return deliver(*context, buffer, size, onRead, bytes);
         };
@@ -310,7 +310,7 @@ namespace FileTransferProtocol
                                         buffer,
                                         bufferSize,
                                         doRead = std::move(doRead),
-                                        remaining = totalFileSize](std::span<char> slot) mutable
+                                        remaining = totalFileSize](std::span<char> slot) mutable noexcept
         {
             return fill(*context, buffer, bufferSize, doRead, remaining, slot);
         };

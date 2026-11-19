@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/noexcept_function.hpp>
 #include <ftp/engine/ring.hpp>
 #include <ftp/engine/ring_options.hpp>
 #include <remote_io/remote_error.hpp>
@@ -24,8 +25,8 @@ namespace FileTransferProtocol
      * Deliveries keep the ring alive, and the end of run() is pushed after the last of them, so a completion task the
      * caller pushes then runs after every delivery. The ring lets go of the sink once it ended and every slot is back,
      * so the sink may hold what holds the ring. Stop the ring before the engine refuses posts. close() ends the sink:
-     * later deliveries drop their bytes and give the slot back. A delivery gives its slot back also when its sink
-     * throws or the ProcessingThread drops it unrun, which ends the ring as lost, and the sink gets no later bytes.
+     * later deliveries drop their bytes and give the slot back. A delivery gives its slot back also when the
+     * ProcessingThread drops it unrun, which ends the ring as lost, and the sink gets no later bytes.
      */
     class DeliveryRing : public Ring
     {
@@ -36,8 +37,11 @@ namespace FileTransferProtocol
         /** @brief Reads the next bytes into the buffer, 0 once the data ended. Called on the connection strand. */
         using Source = std::function<
             boost::asio::awaitable<std::expected<std::size_t, RemoteIo::RemoteError>>(boost::asio::mutable_buffer)>;
-        /** @brief Takes the bytes of one slot on the ProcessingThread, false refuses them and stops the ring. */
-        using Sink = std::function<bool(std::span<char const>)>;
+        /**
+         * @brief Takes the bytes of one slot on the ProcessingThread, false refuses them and stops the ring. Declared
+         *        noexcept: a failure is a false, a throw ends the program.
+         */
+        using Sink = NoexceptFunction<bool(std::span<char const>)>;
 
         static std::shared_ptr<DeliveryRing>
         create(std::shared_ptr<Engine> engine, Strand connectionStrand, RingOptions options = {});
@@ -56,8 +60,7 @@ namespace FileTransferProtocol
          * @param paused Asked before each slot, the ring waits while it is true. Call wake() when it turns false.
          * @return Nothing once the data ended and every filled slot was handed over; the error of a failed read;
          *         Cancelled after stop(), close() or a refused delivery; ConnectionLost when the ProcessingThread takes
-         *         no more tasks, dropped a delivery, or the sink threw. A slot that was not full yet is dropped with
-         *         the error.
+         *         no more tasks or dropped a delivery. A slot that was not full yet is dropped with the error.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
         run(Source source, Sink sink, Paused paused = {});
