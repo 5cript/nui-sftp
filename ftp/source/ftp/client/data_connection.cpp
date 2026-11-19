@@ -1,4 +1,5 @@
 #include <ftp/client/data_connection.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 #include <log/log.hpp>
 #include "client_support.hpp"
@@ -350,7 +351,7 @@ namespace FileTransferProtocol
             strand_,
             [self = shared_from_this()]()
             {
-                return self->awaitAnswer();
+                return Detail::withoutThrowing(self->awaitAnswer());
             },
             Detail::endingOnException(
                 "The wait for the answer on a data connection",

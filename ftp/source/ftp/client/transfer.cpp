@@ -1,4 +1,5 @@
 #include <ftp/client/transfer.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
@@ -32,6 +33,7 @@ namespace FileTransferProtocol
         using Detail::refused;
         using Detail::succeeded;
         using Detail::useTuple;
+        using Detail::withoutThrowing;
 
         /** @brief The bytes of listing data read at once. */
         constexpr std::size_t listingReadSize{64u * 1024u};
@@ -171,7 +173,9 @@ namespace FileTransferProtocol
             const auto data = end.data;
             asio::co_spawn(
                 control->strand(),
-                endedCleanly(std::move(end.data), end.control, std::move(end.store), end.finalReplyTimeout),
+                withoutThrowing(
+                    endedCleanly(std::move(end.data), end.control, std::move(end.store), end.finalReplyTimeout)
+                ),
                 // Nothing limits the final reply of the upload then, the end of the connection answers it.
                 Detail::endingOnException(
                     "The end of an upload's data connection",
@@ -297,8 +301,12 @@ namespace FileTransferProtocol
             {
                 auto [order, secureException, secureResult, replyException, replyResult] =
                     co_await asio::experimental::make_parallel_group(
-                        asio::co_spawn(control->strand(), secureData(data, control, *session.tls), asio::deferred),
-                        asio::co_spawn(control->strand(), firstReply(*command, data), asio::deferred)
+                        asio::co_spawn(
+                            control->strand(), withoutThrowing(secureData(data, control, *session.tls)), asio::deferred
+                        ),
+                        asio::co_spawn(
+                            control->strand(), withoutThrowing(firstReply(*command, data)), asio::deferred
+                        )
                     )
                         .async_wait(asio::experimental::wait_for_all(), asio::use_awaitable);
                 if (secureException)
@@ -727,7 +735,9 @@ namespace FileTransferProtocol
     {
         // A server that refused the rest, for a full disk say, may close the data connection before its reply comes.
         const auto [exception, reply] = co_await asio::co_spawn(
-            session_.control->strand(), store_->finalReply(), asio::cancel_after(options_.refusalWait, useTuple)
+            session_.control->strand(),
+            withoutThrowing(store_->finalReply()),
+            asio::cancel_after(options_.refusalWait, useTuple)
         );
         if (exception || !reply)
             co_return std::nullopt;

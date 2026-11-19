@@ -1,4 +1,5 @@
 #include <ftp/engine/engine.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
 
@@ -79,7 +80,7 @@ namespace FileTransferProtocol
             return false;
         asio::co_spawn(
             strand_,
-            std::move(coroutine),
+            Detail::withoutThrowing(std::move(coroutine)),
             [self = shared_from_this(), token = work()](std::exception_ptr exception)
             {
                 if (exception)

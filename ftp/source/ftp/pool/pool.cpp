@@ -1,4 +1,5 @@
 #include <ftp/pool/pool.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <ftp/protocol/command.hpp>
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
@@ -25,9 +26,11 @@ namespace FileTransferProtocol
         namespace asio = boost::asio;
         using Clock = std::chrono::steady_clock;
         using RemoteIo::RemoteErrorKind;
+        using Detail::describe;
         using Detail::errorOf;
         using Detail::isCancelled;
         using Detail::useTuple;
+        using Detail::withoutThrowing;
         using LoginOutcome =
             std::pair<std::expected<LoginResult, RemoteIo::RemoteError>, std::optional<CertificateInfo>>;
 
@@ -73,7 +76,9 @@ namespace FileTransferProtocol
         asio::awaitable<void> quit(std::shared_ptr<ControlConnection> control, std::chrono::milliseconds timeout)
         {
             co_await asio::co_spawn(
-                control->strand(), control->execute(Command{.verb = Verb::Quit}), asio::cancel_after(timeout, useTuple)
+                control->strand(),
+                withoutThrowing(control->execute(Command{.verb = Verb::Quit})),
+                asio::cancel_after(timeout, useTuple)
             );
             control->close();
         }
@@ -326,7 +331,7 @@ namespace FileTransferProtocol
     {
         auto [exception, found] = co_await asio::co_spawn(
             strand_,
-            resolver_->resolve(options_.host, options_.port, asio::use_awaitable),
+            withoutThrowing(resolver_->resolve(options_.host, options_.port, asio::use_awaitable)),
             asio::cancel_after(options_.resolveTimeout, useTuple)
         );
         const auto cancelledHere = isCancelled(co_await asio::this_coro::cancellation_state);
@@ -369,6 +374,8 @@ namespace FileTransferProtocol
             control->strand(),
             [control, endpoints = endpoints_, options = options_.login]() -> asio::awaitable<LoginOutcome>
             {
+                // As withoutThrowing(), which cannot wrap a coroutine that lives in its lambda.
+                co_await asio::this_coro::throw_if_cancelled(false);
                 auto loggedIn = co_await logIn(control, endpoints, options);
                 std::optional<CertificateInfo> refused{};
                 if (!loggedIn && loggedIn.error().kind == RemoteErrorKind::TrustRequired)
@@ -381,9 +388,9 @@ namespace FileTransferProtocol
         if (exception)
         {
             control->close();
-            if (isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(cancelled("The login"));
-            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The login ended with an exception"));
+            co_return std::unexpected(errorOf(
+                RemoteErrorKind::Failure, fmt::format("The login ended with an exception: {}", describe(exception))
+            ));
         }
         auto& [loggedIn, refused] = outcome;
         if (refused)
@@ -581,7 +588,9 @@ namespace FileTransferProtocol
         // A connection that ended reports through the release.
         const Lease held{weak_from_this(), connection};
         const auto control = connection->control;
-        co_await asio::co_spawn(control->strand(), control->execute(Command{.verb = Verb::Noop}), useTuple);
+        co_await asio::co_spawn(
+            control->strand(), withoutThrowing(control->execute(Command{.verb = Verb::Noop})), useTuple
+        );
     }
 
     asio::awaitable<void> Pool::quitAll(std::vector<std::shared_ptr<PooledConnection>> connections)
@@ -603,7 +612,7 @@ namespace FileTransferProtocol
         {
             asio::co_spawn(
                 strand_,
-                quit(connection->control, options_.quitTimeout),
+                withoutThrowing(quit(connection->control, options_.quitTimeout)),
                 asio::bind_executor(
                     strand_,
                     [countdown](std::exception_ptr)
@@ -621,7 +630,7 @@ namespace FileTransferProtocol
     {
         asio::co_spawn(
             strand_,
-            std::move(work),
+            withoutThrowing(std::move(work)),
             asio::bind_executor(
                 strand_,
                 [self = shared_from_this()](std::exception_ptr exception)

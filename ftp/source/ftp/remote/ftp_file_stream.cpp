@@ -774,7 +774,7 @@ namespace FileTransferProtocol
     {
         auto [exception, outcome] = co_await asio::co_spawn(
             control->strand(),
-            Detail::withoutThrowing<void>(std::move(ringSide)),
+            Detail::withoutThrowing(std::move(ringSide)),
             asio::as_tuple(asio::use_awaitable)
         );
         // Fails the session, see Engine::spawn().
