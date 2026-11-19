@@ -40,6 +40,47 @@ namespace FileTracking
         }
 
         /**
+         * @brief Locks the new @p instanceDirectory.
+         *
+         * @throws std::runtime_error When the lock cannot be taken. The directory is removed again then: no cleanup
+         *         of orphans takes one without a lock file.
+         */
+        InstanceLock lockOrRemove(std::filesystem::path const& instanceDirectory)
+        {
+            class RemovesUnlessKept
+            {
+              public:
+                explicit RemovesUnlessKept(std::filesystem::path const& directory)
+                    : directory_{&directory}
+                {}
+                ~RemovesUnlessKept()
+                {
+                    if (directory_ == nullptr)
+                        return;
+                    std::error_code ignored{};
+                    Utility::removeAllNoFollow(*directory_, ignored);
+                }
+                RemovesUnlessKept(RemovesUnlessKept const&) = delete;
+                RemovesUnlessKept& operator=(RemovesUnlessKept const&) = delete;
+                RemovesUnlessKept(RemovesUnlessKept&&) = delete;
+                RemovesUnlessKept& operator=(RemovesUnlessKept&&) = delete;
+
+                void keep()
+                {
+                    directory_ = nullptr;
+                }
+
+              private:
+                std::filesystem::path const* directory_;
+            };
+
+            RemovesUnlessKept removing{instanceDirectory};
+            InstanceLock lock{bookkeepingPaths(instanceDirectory).lock};
+            removing.keep();
+            return lock;
+        }
+
+        /**
          * @brief Reads the metadata of @p instanceDirectory, lets @p change update it and writes it back with every
          *        other field kept. Metadata that is missing or no object starts over with the instance id.
          */
@@ -86,7 +127,7 @@ namespace FileTracking
             : config{std::move(cfg)}
             , instanceId{std::move(instId)}
             , instanceDir{prepareInstanceDir(config.tempRootDir / instanceId)}
-            , lock{std::in_place, bookkeepingPaths(instanceDir).lock}
+            , lock{lockOrRemove(instanceDir)}
             , strand{std::move(strd)}
             , watcher{}
             , valid{false}
