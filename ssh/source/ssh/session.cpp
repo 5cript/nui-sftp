@@ -115,7 +115,7 @@ namespace SecureShell
             return;
         }
 
-        hiddenChannel_->startReading(
+        const auto reading = hiddenChannel_->startReading(
             [](auto const&)
             {
                 // not yet needed
@@ -129,6 +129,8 @@ namespace SecureShell
                 reportConnectionLoss();
             }
         );
+        if (!reading)
+            Log::error("Failed to read the control/monitoring channel: {}", reading.error());
     }
 
     int Session::setCallTimeout(std::chrono::microseconds timeout)

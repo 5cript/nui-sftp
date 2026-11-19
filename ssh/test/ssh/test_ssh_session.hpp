@@ -544,8 +544,9 @@ namespace SecureShell::Test
 
         channel->close();
 
-        std::promise<void> awaiter{};
-        EXPECT_THROW(channelStartReading(channel, awaiter), std::runtime_error);
+        const auto reading = channel->startReading([](std::string const&) {}, [](std::string const&) {}, []() {});
+        ASSERT_FALSE(reading) << "a closed channel is read";
+        EXPECT_FALSE(reading.error().empty());
     }
 
     TEST_F(SshSessionTests, CannotWriteAfterChannelClose)

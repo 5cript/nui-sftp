@@ -150,7 +150,7 @@ namespace SecureShell
         // Without callbacks output read by other calls waits in the buffer, which only polling finds.
         return callbacksRegistered_ ? AwaitInput : Poll;
     }
-    void Channel::startReading(
+    std::expected<void, std::string> Channel::startReading(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
         std::function<void()> onExit
@@ -169,9 +169,7 @@ namespace SecureShell
             }
         );
         if (!success)
-        {
-            // TODO: Do I want to throw here?
-            throw std::runtime_error("Failed to start reading.");
-        }
+            return std::unexpected{std::string{"The task that reads the channel was refused"}};
+        return {};
     }
 }

@@ -11,6 +11,7 @@
 #include <functional>
 #include <string>
 #include <chrono>
+#include <expected>
 #include <future>
 
 namespace SecureShell
@@ -75,8 +76,10 @@ namespace SecureShell
          * @param onStdout Called on the processing thread with output. Must not throw, libssh may be its caller.
          * @param onStderr Called on the processing thread with error output. Must not throw either.
          * @param onExit Called on the processing thread when the channel or the connection ends, unless closed.
+         * @return Why nothing is read: the task that reads was refused, as after the close of the channel or the end
+         *         of the thread of the session.
          */
-        void startReading(
+        [[nodiscard]] std::expected<void, std::string> startReading(
             std::function<void(std::string const&)> onStdout,
             std::function<void(std::string const&)> onStderr,
             std::function<void()> onExit
