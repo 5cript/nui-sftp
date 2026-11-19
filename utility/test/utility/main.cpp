@@ -20,6 +20,7 @@
 #include "test_link_safe_remove.hpp"
 #include "test_shared_input_file_stream.hpp"
 #include "test_shell_integration.hpp"
+#include "test_temporary_directory.hpp"
 #include "test_typed_line_buffer.hpp"
 #include "test_user_directories.hpp"
 #include "test_utf8.hpp"
