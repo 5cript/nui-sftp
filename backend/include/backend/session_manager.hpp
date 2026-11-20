@@ -31,6 +31,14 @@
 #include <string>
 #include <thread>
 
+/**
+ * @brief The engine a SessionManager::connect call asks for: SSH without "engineType", else the one it names, SSH or
+ *        FTP.
+ *
+ * @return Why it names none of them.
+ */
+std::expected<Persistence::TerminalEngineType, std::string> connectedEngineOf(nlohmann::json const& parameters);
+
 class SessionManager
     : public std::enable_shared_from_this<SessionManager>
     , public RpcHelper::StrandRpc
@@ -103,6 +111,26 @@ class SessionManager
      *        prompt the user cancelled or no provider answered.
      */
     Connect noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool> passwordDeclined);
+
+    /**
+     * @brief What a SessionManager::connect call connects with.
+     */
+    struct ConnectRequest
+    {
+        Persistence::TerminalEngineType engine{Persistence::TerminalEngineType::ssh};
+        Connect connect{};
+        /** @brief The transfer options of the session. */
+        Persistence::SftpOptions sftpOptions{};
+    };
+
+    /**
+     * @brief The connect that the parameters of a SessionManager::connect call ask for, see
+     *        registerRpcSessionConnect(). Its connect sets @p passwordDeclined, see noticingDeclinedPasswords().
+     *
+     * @return Why the parameters name no engine to connect with or no options it can read.
+     */
+    std::expected<ConnectRequest, std::string>
+    connectRequestOf(nlohmann::json const& parameters, std::shared_ptr<bool> passwordDeclined);
 
     /**
      * @brief Cancels pending and later password prompts, closes every session and refuses new ones, and waits until

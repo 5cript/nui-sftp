@@ -17,6 +17,7 @@
 #include <boost/asio/thread_pool.hpp>
 #include <fmt/format.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -951,13 +952,15 @@ namespace Test
             FtpConnectTests::TearDown();
         }
 
-        Connected connectThroughManager(Persistence::FtpSessionOptions options)
+        /**
+         * @brief Adds a session through @p connect, the result comes once the connect ended.
+         */
+        std::future<Connected> startConnect(SessionManager::Connect connect, Persistence::SftpOptions transfers)
         {
             auto completed = std::make_shared<std::promise<Connected>>();
             auto future = completed->get_future();
-            auto transfers = options.sftpOptions.value();
             manager_->addSession(
-                manager_->ftpConnect(std::move(options)),
+                std::move(connect),
                 std::move(transfers),
                 Log::Toast::Skip,
                 [completed](std::optional<Ids::SessionId> const& id, std::optional<std::string> const& error)
@@ -965,9 +968,21 @@ namespace Test
                     completed->set_value({.id = id, .error = error});
                 }
             );
-            if (future.wait_for(std::chrono::seconds{60}) != std::future_status::ready)
+            return future;
+        }
+
+        static Connected awaitConnect(std::future<Connected>& connecting)
+        {
+            if (connecting.wait_for(std::chrono::seconds{60}) != std::future_status::ready)
                 throw std::runtime_error{"the connect did not complete within 60 s"};
-            return future.get();
+            return connecting.get();
+        }
+
+        Connected connectThroughManager(Persistence::FtpSessionOptions options)
+        {
+            auto transfers = options.sftpOptions.value();
+            auto connecting = startConnect(manager_->ftpConnect(std::move(options)), std::move(transfers));
+            return awaitConnect(connecting);
         }
 
         boost::asio::thread_pool strandPool_{2};
@@ -1079,5 +1094,85 @@ namespace Test
         const auto refused = connectThroughManager(Persistence::FtpSessionOptions{});
         EXPECT_FALSE(refused.id);
         EXPECT_FALSE(fileSystem->close()) << "the lost session was not removed, its file system is still open";
+    }
+
+    TEST_F(FtpSessionManagerTests, AConnectCallForTheFtpEngineLogsInToTheFtpServer)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(loggingIn(tree_, "alice", "s3cret"));
+        AnsweringProvider provider{"s3cret"};
+        manager_->addPasswordProvider(0, &provider);
+        auto options = session();
+        options.sftpOptions.value().concurrency = 2;
+        const nlohmann::json parameters{{"engineType", "ftp"}, {"engineOptions", options}, {"showFailureToast", false}};
+        const auto passwordDeclined = std::make_shared<bool>(true);
+
+        auto request = manager_->connectRequestOf(parameters, passwordDeclined);
+        ASSERT_TRUE(request) << request.error();
+        EXPECT_EQ(request->engine, Persistence::TerminalEngineType::ftp);
+        EXPECT_EQ(request->sftpOptions.concurrency, 2);
+        auto connecting = startConnect(std::move(request->connect), std::move(request->sftpOptions));
+        const auto connected = awaitConnect(connecting);
+        ASSERT_TRUE(connected.id) << connected.error.value_or("no error");
+        EXPECT_FALSE(*passwordDeclined);
+        const auto questions = provider.questions();
+        ASSERT_EQ(questions.size(), 1u);
+        EXPECT_EQ(questions.front().prompt, fmt::format("Password for alice@{}:", server_->address()));
+    }
+
+    TEST_F(FtpSessionManagerTests, AConnectCallWithoutAnEngineOrOptionsToConnectWithIsRefused)
+    {
+        const auto passwordDeclined = std::make_shared<bool>(false);
+        const auto refusalOf = [this, &passwordDeclined](nlohmann::json const& parameters)
+        {
+            const auto request = manager_->connectRequestOf(parameters, passwordDeclined);
+            if (request)
+                return std::string{};
+            return request.error();
+        };
+        EXPECT_NE(refusalOf({{"engineType", "ftp"}}).find("engineOptions"), std::string::npos);
+        EXPECT_NE(
+            refusalOf({{"engineType", "ftp"}, {"engineOptions", "not options"}}).find("no object"), std::string::npos
+        );
+        EXPECT_NE(
+            refusalOf({{"engineType", "shell"}, {"engineOptions", Persistence::FtpSessionOptions{}}}).find("shell"),
+            std::string::npos
+        );
+
+        // Without an engine type a connect is SSH, as before FTP.
+        const auto secureShell =
+            manager_->connectRequestOf({{"engineOptions", Persistence::SshSessionOptions{}}}, passwordDeclined);
+        ASSERT_TRUE(secureShell) << secureShell.error();
+        EXPECT_EQ(secureShell->engine, Persistence::TerminalEngineType::ssh);
+        EXPECT_TRUE(secureShell->connect);
+    }
+
+    TEST(ConnectRequestTests, AConnectIsSshWithoutAnEngineTypeAndElseSshOrFtp)
+    {
+        using Persistence::TerminalEngineType;
+        const auto engineOf = [](nlohmann::json const& parameters) -> std::optional<TerminalEngineType>
+        {
+            const auto engine = connectedEngineOf(parameters);
+            if (!engine)
+                return std::nullopt;
+            return *engine;
+        };
+        EXPECT_EQ(engineOf(nlohmann::json::object()), TerminalEngineType::ssh);
+        EXPECT_EQ(engineOf({{"engineType", "ssh"}}), TerminalEngineType::ssh);
+        EXPECT_EQ(engineOf({{"engineType", "ftp"}}), TerminalEngineType::ftp);
+        for (
+            auto const& refused : std::vector<nlohmann::json>{
+                {{"engineType", "shell"}},
+                {{"engineType", "telnet"}},
+                {{"engineType", 42}},
+                {{"engineType", nullptr}},
+            }
+        )
+        {
+            const auto engine = connectedEngineOf(refused);
+            ASSERT_FALSE(engine) << refused.dump();
+            EXPECT_FALSE(engine.error().empty());
+        }
     }
 }

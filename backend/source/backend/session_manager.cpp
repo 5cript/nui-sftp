@@ -72,20 +72,26 @@ namespace
     }
 
     /**
-     * @brief The engine a connect asks for: SSH without "engineType", else the one it names, SSH or FTP.
+     * @brief The engineOptions of a connect as @p OptionsT.
      */
-    std::expected<Persistence::TerminalEngineType, std::string> connectedEngineOf(nlohmann::json const& parameters)
+    template <typename OptionsT>
+    std::expected<OptionsT, std::string> engineOptionsOf(nlohmann::json const& parameters)
     {
-        const auto found = parameters.find("engineType");
+        const auto found = parameters.find("engineOptions");
         if (found == parameters.end())
-            return Persistence::TerminalEngineType::ssh;
-        if (!found->is_string())
-            return std::unexpected("The engineType of a connect is not a string.");
-        const auto name = found->get<std::string>();
-        const auto type = Persistence::terminalEngineTypeFromName(name);
-        if (!type || *type == Persistence::TerminalEngineType::shell)
-            return std::unexpected(fmt::format("Cannot connect to a server with the engine '{}'.", name));
-        return *type;
+            return std::unexpected("A connect needs engineOptions.");
+        if (!found->is_object())
+            return std::unexpected("The engineOptions of a connect are no object.");
+        try
+        {
+            return found->get<OptionsT>();
+        }
+        catch (std::exception const& exception)
+        {
+            return std::unexpected(
+                fmt::format("The engineOptions of a connect cannot be read: {}", Utility::errorMessage(exception))
+            );
+        }
     }
 
     /**
@@ -97,6 +103,20 @@ namespace
             return "FTP";
         return "SSH";
     }
+}
+
+std::expected<Persistence::TerminalEngineType, std::string> connectedEngineOf(nlohmann::json const& parameters)
+{
+    const auto found = parameters.find("engineType");
+    if (found == parameters.end())
+        return Persistence::TerminalEngineType::ssh;
+    if (!found->is_string())
+        return std::unexpected("The engineType of a connect is not a string.");
+    const auto name = found->get<std::string>();
+    const auto type = Persistence::terminalEngineTypeFromName(name);
+    if (!type || *type == Persistence::TerminalEngineType::shell)
+        return std::unexpected(fmt::format("Cannot connect to a server with the engine '{}'.", name));
+    return *type;
 }
 
 int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, void* userdata) noexcept
@@ -492,36 +512,77 @@ void SessionManager::registerRpcStopFileTracking()
         );
 }
 
+std::expected<SessionManager::ConnectRequest, std::string>
+SessionManager::connectRequestOf(nlohmann::json const& parameters, std::shared_ptr<bool> passwordDeclined)
+{
+    return connectedEngineOf(parameters)
+        .and_then(
+            [this,
+                &parameters,
+                &passwordDeclined](Persistence::TerminalEngineType engine) -> std::expected<ConnectRequest, std::string>
+            {
+                if (engine == Persistence::TerminalEngineType::ftp)
+                {
+                    return engineOptionsOf<Persistence::FtpSessionOptions>(parameters)
+                        .transform(
+                            [this, &passwordDeclined](Persistence::FtpSessionOptions sessionOptions)
+                            {
+                                // Not logged as a whole.
+                                Log::info(
+                                    "Connecting to FTP server {}:{}",
+                                    sessionOptions.host,
+                                    sessionOptions.effectivePort()
+                                );
+                                auto sftpOptions = sessionOptions.sftpOptions.value();
+                                return ConnectRequest{
+                                    .engine = Persistence::TerminalEngineType::ftp,
+                                    .connect = noticingDeclinedPasswords(
+                                        ftpConnect(std::move(sessionOptions)), std::move(passwordDeclined)
+                                    ),
+                                    .sftpOptions = std::move(sftpOptions),
+                                };
+                            }
+                        );
+                }
+                Log::info("Connecting to ssh server with parameters: {}", parameters.dump(4));
+                return engineOptionsOf<Persistence::SshSessionOptions>(parameters)
+                    .transform(
+                        [this, &passwordDeclined](Persistence::SshSessionOptions sessionOptions)
+                        {
+                            auto sftpOptions = sessionOptions.sftpOptions.value();
+                            return ConnectRequest{
+                                .engine = Persistence::TerminalEngineType::ssh,
+                                .connect = noticingDeclinedPasswords(
+                                    secureShellConnect(std::move(sessionOptions)), std::move(passwordDeclined)
+                                ),
+                                .sftpOptions = std::move(sftpOptions),
+                            };
+                        }
+                    );
+            }
+        );
+}
+
 void SessionManager::registerRpcSessionConnect()
 {
     on("SessionManager::connect")
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                const auto engineType = connectedEngineOf(parameters);
-                if (!engineType)
+                auto passwordDeclined = std::make_shared<bool>(false);
+                auto request = connectRequestOf(parameters, passwordDeclined);
+                if (!request)
                 {
-                    Log::error("Cannot connect: {}", engineType.error());
-                    return reply.error(engineType.error());
-                }
-                // The FTP parameters are not logged as a whole.
-                if (*engineType == Persistence::TerminalEngineType::ssh)
-                    Log::info("Connecting to ssh server with parameters: {}", parameters.dump(4));
-
-                if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::connect", parameters}.hasValueDeep(
-                        "engineOptions"
-                    ))
-                {
-                    return;
+                    Log::error("Cannot connect: {}", request.error());
+                    return reply.error(request.error());
                 }
 
                 const auto failureToast = failureToastOf(parameters);
-                auto passwordDeclined = std::make_shared<bool>(false);
                 auto onComplete = rpcSafe(
                     std::move(reply),
-                    [failureToast, engineName = engineNameOf(*engineType), passwordDeclined](
-                        auto const& reply, auto const& maybeId, auto const& maybeErrorMessage
-                    )
+                    [failureToast,
+                        engineName = engineNameOf(request->engine),
+                        passwordDeclined](auto const& reply, auto const& maybeId, auto const& maybeErrorMessage)
                     {
                         if (!maybeId)
                         {
@@ -543,26 +604,8 @@ void SessionManager::registerRpcSessionConnect()
                     }
                 );
 
-                if (*engineType == Persistence::TerminalEngineType::ftp)
-                {
-                    auto sessionOptions = parameters["engineOptions"].get<Persistence::FtpSessionOptions>();
-                    Log::info("Connecting to FTP server {}:{}", sessionOptions.host, sessionOptions.effectivePort());
-                    auto sftpOptions = sessionOptions.sftpOptions.value();
-                    return addSession(
-                        noticingDeclinedPasswords(ftpConnect(std::move(sessionOptions)), passwordDeclined),
-                        std::move(sftpOptions),
-                        failureToast,
-                        std::move(onComplete)
-                    );
-                }
-
-                auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
-                auto sftpOptions = sessionOptions.sftpOptions.value();
                 addSession(
-                    noticingDeclinedPasswords(secureShellConnect(std::move(sessionOptions)), passwordDeclined),
-                    std::move(sftpOptions),
-                    failureToast,
-                    std::move(onComplete)
+                    std::move(request->connect), std::move(request->sftpOptions), failureToast, std::move(onComplete)
                 );
             }
         );
