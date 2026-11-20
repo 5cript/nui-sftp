@@ -674,6 +674,7 @@ settings:
   localFilesystemOptionsGroupHeader: "Local Filesystem Options"
   fileTrackingOptionsGroupHeader: "File Tracking Defaults"
   layoutsGroupHeader: "Layouts"
+  connectionsGroupHeader: "Connections"
   errorLoadingSettings: "Error occured while loading in the settings menu."
   errorSavingSettingsHeader: "Could not save settings"
   errorSavingSettings: "Error occured while saving in the settings menu."
@@ -1206,11 +1207,17 @@ settings:
       deleteRemoteOnLocalDeleteHelpText: "Default for new tracked entries: when a tracked file is deleted locally, also delete it on the remote."
       checkRemoteChanges: "Check Remote Before Reupload"
       checkRemoteChangesHelpText: "Default for new tracked entries: before re-uploading an edited file, check whether the remote copy changed since it was opened or last uploaded, and ask before replacing it."
+    connections:
+      ftpEngineThreads: "FTP Engine Threads"
+      ftpEngineThreadsHelpText: "The threads that run the connections of all FTP sessions, 2 when not set and at least 1. More threads help when many sessions transfer at once. Takes effect after the application is restarted."
+      ftpEngineThreadsSearchTags: "ftp, threads, performance"
     layouts:
       ssh: "SSH Layouts"
       sshHelpText: "Layouts shared by all SSH servers. Saving takes the layout of the open SSH tab."
       shell: "Local Shell Layouts"
       shellHelpText: "Layouts shared by all local shells. Saving takes the layout of the open local shell tab."
+      ftp: "FTP Layouts"
+      ftpHelpText: "Layouts shared by all FTP servers. Saving takes the layout of the open FTP tab."
   colorSetting:
     pickButton: "Pick"
 persistence:

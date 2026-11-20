@@ -157,6 +157,7 @@ struct Settings::Implementation
         std::optional<std::filesystem::path> temporaryDownloadsDirectory;
         std::optional<int> concurrency;
         std::optional<int> bulkConcurrency;
+        std::optional<int> ftpEngineThreads;
     };
     Nui::Observed<bool> requiresRestart{false};
     RestartCriticalBaseline restartBaseline{};
@@ -173,6 +174,7 @@ struct Settings::Implementation
             .temporaryDownloadsDirectory = generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value(),
             .concurrency = sftpOptions.concurrency.value(),
             .bulkConcurrency = sftpOptions.bulkConcurrency.value(),
+            .ftpEngineThreads = generalSettings.connections.ftpEngineThreads.value(),
         };
         requiresRestart = false;
     }
@@ -187,7 +189,8 @@ struct Settings::Implementation
             generalSettings.localFilesystemOptions.temporaryDownloadsDirectory.value() !=
                 restartBaseline.temporaryDownloadsDirectory ||
             sftpOptions.concurrency.value() != restartBaseline.concurrency ||
-            sftpOptions.bulkConcurrency.value() != restartBaseline.bulkConcurrency;
+            sftpOptions.bulkConcurrency.value() != restartBaseline.bulkConcurrency ||
+            generalSettings.connections.ftpEngineThreads.value() != restartBaseline.ftpEngineThreads;
     }
 
     Implementation(

@@ -47,6 +47,11 @@ struct GeneralSettings
      */
     SettingFactory layoutsFactory_;
 
+    /**
+     * @brief Creates the identities of the connection settings.
+     */
+    SettingFactory connectionsFactory_;
+
   public:
     struct Collapsibles
     {
@@ -56,6 +61,7 @@ struct GeneralSettings
         Nui::Observed<bool> localFilesystemOptions{true};
         Nui::Observed<bool> fileTrackingOptions{true};
         Nui::Observed<bool> layouts{true};
+        Nui::Observed<bool> connections{true};
     } collapsibleStates;
 
     struct Localization
@@ -104,7 +110,16 @@ struct GeneralSettings
     {
         LayoutSetting ssh;
         LayoutSetting shell;
+        LayoutSetting ftp;
     } layouts;
+
+    struct Connections
+    {
+        /**
+         * @brief Read once at startup, so a change applies after a restart.
+         */
+        NumberSetting<int, true> ftpEngineThreads;
+    } connections;
 
     LogOptions logOptions;
     Nui::ListenRemover<decltype(AppWideEvents::availableThemes)> availableThemesListener;
