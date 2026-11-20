@@ -5,6 +5,7 @@
 
 #include <boost/asio/this_coro.hpp>
 
+#include <tuple>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -125,6 +126,34 @@ namespace FileTransferProtocol
             co_return parsePathReply(*reply, Verb::PrintWorkingDirectory);
         }
 
+        /**
+         * @brief Connects, waits for the greeting and makes the TLS handshake of @p options, all before credentials.
+         */
+        asio::awaitable<std::expected<Reached, RemoteIo::RemoteError>> secure(
+            std::shared_ptr<ControlConnection> const& connection,
+            std::vector<asio::ip::tcp::endpoint> endpoints,
+            LoginOptions const& options
+        )
+        {
+            if (options.tlsMode != TlsMode::None && !options.tls)
+                co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "TLS was asked for without its settings"));
+
+            Reached reached{};
+            auto implicitTls = options.tlsMode == TlsMode::Implicit ? options.tls : std::nullopt;
+            auto greeting = co_await connection->connect(std::move(endpoints), std::move(implicitTls));
+            if (!greeting)
+                co_return std::unexpected(greeting.error());
+            reached.greeting = std::move(*greeting);
+
+            if (options.tlsMode == TlsMode::Explicit)
+            {
+                if (const auto trusted = co_await connection->startTls(*options.tls); !trusted)
+                    co_return std::unexpected(trusted.error());
+            }
+            reached.certificate = connection->trustedCertificate();
+            co_return reached;
+        }
+
         asio::awaitable<std::expected<LoginResult, RemoteIo::RemoteError>> establish(
             std::shared_ptr<ControlConnection> const& connection,
             std::vector<asio::ip::tcp::endpoint> endpoints,
@@ -132,22 +161,12 @@ namespace FileTransferProtocol
         )
         {
             const bool secured = options.tlsMode != TlsMode::None;
-            if (secured && !options.tls)
-                co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "TLS was asked for without its settings"));
-
+            auto reached = co_await secure(connection, std::move(endpoints), options);
+            if (!reached)
+                co_return std::unexpected(reached.error());
             LoginResult result{};
-            auto implicitTls = options.tlsMode == TlsMode::Implicit ? options.tls : std::nullopt;
-            auto greeting = co_await connection->connect(std::move(endpoints), std::move(implicitTls));
-            if (!greeting)
-                co_return std::unexpected(greeting.error());
-            result.greeting = std::move(*greeting);
-
-            if (options.tlsMode == TlsMode::Explicit)
-            {
-                if (const auto trusted = co_await connection->startTls(*options.tls); !trusted)
-                    co_return std::unexpected(trusted.error());
-            }
-            result.certificate = connection->trustedCertificate();
+            result.greeting = std::move(reached->greeting);
+            result.certificate = std::move(reached->certificate);
 
             if (const auto authenticated = co_await authenticate(*connection, options.credentials); !authenticated)
                 co_return std::unexpected(authenticated.error());
@@ -191,5 +210,18 @@ namespace FileTransferProtocol
         if (!result)
             connection->close();
         co_return result;
+    }
+
+    asio::awaitable<std::expected<Reached, RemoteIo::RemoteError>> reach(
+        std::shared_ptr<ControlConnection> connection,
+        std::vector<asio::ip::tcp::endpoint> endpoints,
+        LoginOptions options
+    )
+    {
+        auto reached = co_await secure(connection, std::move(endpoints), options);
+        if (reached)
+            std::ignore = co_await ask(*connection, Command{.verb = Verb::Quit});
+        connection->close();
+        co_return reached;
     }
 }
