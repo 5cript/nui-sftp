@@ -39,7 +39,7 @@ ProtoSession::ProtoSession(Params params)
     // rebinds this on adoption via FrontendSessionManager::setLockedUserInputHandler.
     auto noopLockedInput = [](Ids::ChannelId, std::string const&) {};
 
-    // onConnectionLoss is left unbound here — if the transport drops
+    // onConnectionLoss is left unbound here: if the transport drops
     // between open() and adoption the probe fails cleanly via onOpen,
     // and after adoption Session::Session rebinds this to route into
     // the lost-connection overlay.

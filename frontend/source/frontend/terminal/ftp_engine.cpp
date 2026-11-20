@@ -26,11 +26,11 @@ namespace
     /**
      * @brief Ends a session whose connect finished after its engine was gone.
      */
-    void disconnectOrphan(std::string const& sessionId)
+    void disconnectOrphan(Ids::SessionId const& sessionId)
     {
-        Log::info("Disconnecting FTP session '{}', its engine is gone", sessionId);
+        Log::info("Disconnecting FTP session '{}', its engine is gone", sessionId.value());
         Nui::val parameters = Nui::val::object();
-        parameters.set("sessionId", sessionId);
+        parameters.set("sessionId", sessionId.value());
         Nui::RpcClient::callWithBackChannel("SessionManager::disconnect", [](Nui::val) {}, parameters);
     }
 }
@@ -84,7 +84,7 @@ void FtpTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
             if (alive.expired() || impl_->wasDisposed)
             {
                 if (reply.hasOwnProperty("id"))
-                    disconnectOrphan(reply["id"].as<std::string>());
+                    disconnectOrphan(Ids::makeSessionId(reply["id"].as<std::string>()));
                 return;
             }
             if (!reply.hasOwnProperty("id"))
