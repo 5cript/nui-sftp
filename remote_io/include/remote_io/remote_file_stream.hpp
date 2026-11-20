@@ -71,7 +71,7 @@ namespace RemoteIo
          * @param buffer Receives the bytes, used only by the transfer until it ended.
          * @param bufferSize The size of @p buffer.
          * @param onRead Gets how many bytes @p buffer holds now, returns false to fail the transfer. Must not throw:
-         *        an exception ends the thread of the session, over FTP the program.
+         *        an exception ends the session.
          */
         virtual std::expected<std::shared_ptr<AsyncTransferContext>, RemoteError> readAsyncInStrand(
             SignedSizeType totalFileSize,

@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
+#include <memory>
 #include <utility>
 
 namespace FileTransferProtocol
@@ -50,6 +52,20 @@ namespace FileTransferProtocol
             if (error.kind == RemoteErrorKind::Unsupported)
                 return false;
             return appends || error.protocolCode == 0 || error.kind == RemoteErrorKind::NoSuchFile;
+        }
+
+        /**
+         * @brief Fails the session of @p engine for @p exception, which a callback of a transfer threw: nothing tells
+         *        what the callback left behind.
+         *
+         * @return The error the transfer ends with.
+         */
+        RemoteIo::RemoteError failedByCallback(std::weak_ptr<Engine> const& engine, std::exception_ptr exception)
+        {
+            const auto reason = fmt::format("a callback of a transfer threw: {}", Utility::errorMessage(exception));
+            if (const auto locked = engine.lock())
+                locked->fail(reason);
+            return errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", reason));
         }
     }
 
@@ -271,9 +287,18 @@ namespace FileTransferProtocol
         DeliveryRing::Sink sink = [context,
                                       buffer,
                                       size = static_cast<std::size_t>(bufferSize),
-                                      onRead = std::move(onRead)](std::span<char const> bytes) noexcept
+                                      onRead = std::move(onRead),
+                                      engine = std::weak_ptr{session_.engine}](std::span<char const> bytes) noexcept
         {
-            return deliver(*context, buffer, size, onRead, bytes);
+            try
+            {
+                return deliver(*context, buffer, size, onRead, bytes);
+            }
+            catch (...)
+            {
+                context->fail(failedByCallback(engine, std::current_exception()));
+                return false;
+            }
         };
         const auto spawned = session_.engine->spawn(runAsync(
             weak_from_this(),
@@ -306,13 +331,22 @@ namespace FileTransferProtocol
         auto const& control = transfer_->session.control;
         const auto ring = SupplyRing::create(session_.engine, control->strand(), options_.ring);
         auto context = makeContext(ring);
-        SupplyRing::Source source = [context,
-                                        buffer,
-                                        bufferSize,
-                                        doRead = std::move(doRead),
-                                        remaining = totalFileSize](std::span<char> slot) mutable noexcept
+        SupplyRing::Source source =
+            [context,
+                buffer,
+                bufferSize,
+                doRead = std::move(doRead),
+                remaining = totalFileSize,
+                engine = std::weak_ptr{session_.engine}](std::span<char> slot) mutable noexcept -> Result<std::size_t>
         {
-            return fill(*context, buffer, bufferSize, doRead, remaining, slot);
+            try
+            {
+                return fill(*context, buffer, bufferSize, doRead, remaining, slot);
+            }
+            catch (...)
+            {
+                return std::unexpected(failedByCallback(engine, std::current_exception()));
+            }
         };
         const auto spawned = session_.engine->spawn(runAsync(
             weak_from_this(),
