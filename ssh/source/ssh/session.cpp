@@ -66,6 +66,13 @@ namespace SecureShell
 
     void Session::start()
     {
+        // Without its thread the session runs nothing more, which the owner learns as a lost connection.
+        processingThread_.onFailure(
+            [this](std::string const&)
+            {
+                reportConnectionLoss();
+            }
+        );
         processingThread_.start(std::chrono::milliseconds{1});
         // Asked on the processing thread before every wait, libssh closes the socket on a fatal error.
         const auto watching = processingThread_.watchSocket(
@@ -108,7 +115,7 @@ namespace SecureShell
             return;
         }
 
-        hiddenChannel_->startReading(
+        const auto reading = hiddenChannel_->startReading(
             [](auto const&)
             {
                 // not yet needed
@@ -122,6 +129,8 @@ namespace SecureShell
                 reportConnectionLoss();
             }
         );
+        if (!reading)
+            Log::error("Failed to read the control/monitoring channel: {}", reading.error());
     }
 
     int Session::setCallTimeout(std::chrono::microseconds timeout)

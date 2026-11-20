@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <exception>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -53,6 +54,17 @@ namespace Utility::Test
         const std::filesystem::filesystem_error filesystemError{"remove", Paths::nativeFromUtf8("/x/ü"), code};
         std::exception const& asException = filesystemError;
         EXPECT_EQ(errorMessage(asException), errorMessage(filesystemError));
+    }
+
+    TEST(ErrorMessageTests, AHeldExceptionTellsWhatItSaysOrThatItsTypeIsUnknown)
+    {
+        EXPECT_EQ(errorMessage(std::make_exception_ptr(std::runtime_error{"bad \xFF"})), "bad \xEF\xBF\xBD");
+
+        const auto code = std::make_error_code(std::errc::permission_denied);
+        const std::filesystem::filesystem_error filesystemError{"remove", Paths::nativeFromUtf8("/x/ü"), code};
+        EXPECT_EQ(errorMessage(std::make_exception_ptr(filesystemError)), errorMessage(filesystemError));
+
+        EXPECT_EQ(errorMessage(std::make_exception_ptr(42)), "an exception of an unknown type");
     }
 
 #ifndef _WIN32

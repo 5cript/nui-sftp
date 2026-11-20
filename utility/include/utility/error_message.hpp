@@ -24,4 +24,10 @@ namespace Utility
      *        that is not UTF-8 replaced by U+FFFD.
      */
     std::string errorMessage(std::exception const& error);
+
+    /**
+     * @brief The text of the exception @p exception holds, as above. One that is no std::exception is told as an
+     *        exception of an unknown type.
+     */
+    std::string errorMessage(std::exception_ptr const& exception);
 }

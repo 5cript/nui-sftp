@@ -80,7 +80,8 @@ namespace FileTransferProtocol
         /**
          * @param executor The application's executor, the engine makes its strands on it and never runs it.
          * @param resolver The application's resolver.
-         * @param onLost Runs on the processing thread, for a loss before start() in start().
+         * @param onLost Runs on the processing thread, for a loss before start() in start(). A processing thread
+         *        that ended on the exception of a task fails the session and reports that loss as its last act.
          */
         FtpConnection(
             boost::asio::any_io_executor executor,

@@ -59,8 +59,7 @@ namespace FileTransferProtocol
 
         /**
          * @brief Runs @p transfer once, on the connection strand, with @p self in the coroutine frame, which may start
-         *        after its caller let go of the ring. Afterwards, also when @p transfer threw, the pause is dropped and
-         *        letGoWhenIdle() runs.
+         *        after its caller let go of the ring. Afterwards, also when @p transfer threw, endRun() runs.
          */
         static boost::asio::awaitable<Outcome>
         runHolding(std::shared_ptr<Ring> self, Paused paused, boost::asio::awaitable<Outcome> transfer);
@@ -100,6 +99,12 @@ namespace FileTransferProtocol
         bool closed_{false};
 
       private:
+        /**
+         * @brief Ends the run: drops the pause and lets go of what is idle. The pause and the ProcessingThread side
+         *        may hold what holds the ring.
+         */
+        void endRun();
+
         const std::size_t chunkSize_;
         std::vector<std::unique_ptr<char[]>> slots_{};
         bool running_{false};

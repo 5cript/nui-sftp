@@ -106,7 +106,7 @@ namespace FileTransferProtocol
 
         std::optional<Sha256Digest> publicKeyDigest(X509* certificate)
         {
-            X509_PUBKEY* const key = X509_get_X509_PUBKEY(certificate);
+            X509_PUBKEY const* const key = X509_get_X509_PUBKEY(certificate);
             const int length = i2d_X509_PUBKEY(key, nullptr);
             if (length <= 0)
                 return std::nullopt;

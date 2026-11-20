@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ftp/engine/engine.hpp>
+#include <ftp/engine/noexcept_function.hpp>
 #include <ftp/engine/ring.hpp>
 #include <ftp/engine/ring_options.hpp>
 #include <remote_io/remote_error.hpp>
@@ -26,8 +27,8 @@ namespace FileTransferProtocol
      *
      * Fills keep the ring alive. The ring lets go of the source once it ended and every fill came back, so the source
      * may hold what holds the ring. Stop the ring before the engine refuses posts. close() ends the source, a write
-     * under way ends before run() does. A fill comes back also when its source throws or the ProcessingThread drops it
-     * unrun, which ends the ring as lost, and the source is not called again.
+     * under way ends before run() does. A fill comes back also when the ProcessingThread drops it unrun, which ends
+     * the ring as lost, and the source is not called again.
      */
     class SupplyRing : public Ring
     {
@@ -35,8 +36,11 @@ namespace FileTransferProtocol
         {};
 
       public:
-        /** @brief Puts the next bytes into the span, 0 once the data ended. Called on the ProcessingThread. */
-        using Source = std::function<std::expected<std::size_t, RemoteIo::RemoteError>(std::span<char>)>;
+        /**
+         * @brief Puts the next bytes into the span, 0 once the data ended. Called on the ProcessingThread. Declared
+         *        noexcept: a failure is an error value, a throw ends the program.
+         */
+        using Source = NoexceptFunction<std::expected<std::size_t, RemoteIo::RemoteError>(std::span<char>)>;
         /** @brief Writes all of the buffer, on the connection strand. */
         using Sink = std::function<
             boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>(boost::asio::const_buffer)>;
@@ -58,8 +62,8 @@ namespace FileTransferProtocol
          * @param paused Asked before each fill and write, the ring waits while it is true. Call wake() when it turns
          *        false.
          * @return Nothing once every byte of the source was written; the error of a failed fill or write; Cancelled
-         *         after stop() or close(); ConnectionLost when the ProcessingThread takes no more tasks, dropped a
-         *         fill, or the source threw.
+         *         after stop() or close(); ConnectionLost when the ProcessingThread takes no more tasks or dropped a
+         *         fill.
          */
         boost::asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
         run(Source source, Sink sink, Paused paused = {});
@@ -113,7 +117,7 @@ namespace FileTransferProtocol
         Source source_{};
         /** @brief The source returned the end, later fills do not call it. The ProcessingThread's. */
         bool sourceEnded_{false};
-        /** @brief The source returned an error or threw, later fills do not call it. The ProcessingThread's. */
+        /** @brief The source returned an error, later fills do not call it. The ProcessingThread's. */
         bool sourceFailed_{false};
     };
 }

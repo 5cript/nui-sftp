@@ -1,11 +1,11 @@
 #include <ftp/client/data_connection.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <ftp/protocol/reply_parsers.hpp>
 #include <log/log.hpp>
 #include "client_support.hpp"
 
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio/ssl/error.hpp>
@@ -351,9 +351,15 @@ namespace FileTransferProtocol
             strand_,
             [self = shared_from_this()]()
             {
-                return self->awaitAnswer();
+                return Detail::withoutThrowing(self->awaitAnswer());
             },
-            asio::detached
+            Detail::endingOnException(
+                "The wait for the answer on a data connection",
+                [self = shared_from_this()]()
+                {
+                    self->close();
+                }
+            )
         );
     }
 

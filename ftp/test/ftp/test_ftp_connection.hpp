@@ -201,6 +201,62 @@ namespace FileTransferProtocol::Test
         }
 
         /**
+         * @brief Starts an asynchronous read of the whole file whose callback throws, on the processing thread.
+         */
+        std::expected<void, RemoteIo::RemoteError> startReadingWithACallbackThatThrows(StreamPointer const& stream)
+        {
+            using Size = RemoteIo::IRemoteFileStream::SignedSizeType;
+            const auto buffer = std::make_shared<std::vector<char>>(64u * 1024u);
+            const auto started = stream->readAsyncInStrand(
+                static_cast<Size>(256u * 1024u),
+                buffer->data(),
+                static_cast<Size>(buffer->size()),
+                [buffer](Size) -> bool
+                {
+                    throw std::runtime_error{"boom"};
+                }
+            );
+            if (!started)
+                return std::unexpected(started.error());
+            return {};
+        }
+
+        /**
+         * @brief Starts an asynchronous write whose callback throws, on the processing thread.
+         */
+        std::expected<void, RemoteIo::RemoteError> startWritingWithACallbackThatThrows(StreamPointer const& stream)
+        {
+            using Size = RemoteIo::IRemoteFileStream::SignedSizeType;
+            const auto buffer = std::make_shared<std::vector<char>>(64u * 1024u);
+            const auto started = stream->writeAsyncInStrand(
+                static_cast<Size>(256u * 1024u),
+                buffer->data(),
+                static_cast<Size>(buffer->size()),
+                [buffer](Size) -> Size
+                {
+                    throw std::runtime_error{"boom"};
+                }
+            );
+            if (!started)
+                return std::unexpected(started.error());
+            return {};
+        }
+
+        /**
+         * @brief The server takes the upload of /dir/new, and whatever else slowCorner() answers.
+         */
+        std::optional<Script> takingAnUpload(std::string_view line)
+        {
+            if (line == "STOR /dir/new")
+            {
+                Script script{};
+                script.reply("150 Ok to send data.").beginData(DataPlan{});
+                return script;
+            }
+            return slowCorner(line);
+        }
+
+        /**
          * @brief The losses a handler was called with and the thread it ran on.
          */
         struct RecordedLosses
@@ -563,6 +619,118 @@ namespace FileTransferProtocol::Test
         }
         const auto refusal = refusalOfAFileSystem();
         ASSERT_TRUE(refusal) << "a lost session opened a file system";
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
+    }
+
+    TEST_P(FtpConnectionTests, ATaskThatThrowsFailsTheSessionAndReportsItLost)
+    {
+        serve();
+        const auto losses = std::make_shared<RecordedLosses>();
+        connectAndLogIn(
+            1u,
+            [losses](RemoteIo::RemoteError const& error)
+            {
+                losses->record(error);
+            }
+        );
+        connection_->start();
+        const auto fileSystem = openFileSystem();
+        ASSERT_TRUE(list(fileSystem, "/dir"));
+        const auto processingThread = processingThreadOf(fileSystem);
+
+        ASSERT_TRUE(fileSystem->strand()->pushTask(
+            []()
+            {
+                throw std::runtime_error{"boom"};
+            }
+        ));
+
+        ASSERT_EQ(losses->first.get_future().wait_for(10s), std::future_status::ready);
+        const auto recorded = losses->recorded();
+        ASSERT_EQ(recorded.size(), 1u);
+        EXPECT_EQ(recorded.front().kind, RemoteErrorKind::ConnectionLost) << recorded.front().toString();
+        EXPECT_NE(recorded.front().message.find("boom"), std::string::npos) << recorded.front().toString();
+        {
+            std::scoped_lock lock{losses->mutex};
+            EXPECT_EQ(losses->threads.front(), processingThread);
+        }
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal) << "a failed session opened a file system";
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
+        EXPECT_FALSE(list(fileSystem, "/dir"));
+    }
+
+    TEST_P(FtpConnectionTests, AReadCallbackThatThrowsFailsTheSessionAndReportsItLost)
+    {
+        serve();
+        const auto losses = std::make_shared<RecordedLosses>();
+        connectAndLogIn(
+            2u,
+            [losses](RemoteIo::RemoteError const& error)
+            {
+                losses->record(error);
+            }
+        );
+        connection_->start();
+        const auto fileSystem = openFileSystem();
+        const auto stream = openForReading(fileSystem, "/data/big");
+
+        auto started = fileSystem->performPromise(
+            [stream]()
+            {
+                return startReadingWithACallbackThatThrows(stream);
+            }
+        );
+        const auto reading = valueOf(started);
+        ASSERT_TRUE(reading) << reading.error().toString();
+
+        ASSERT_EQ(losses->first.get_future().wait_for(10s), std::future_status::ready);
+        const auto recorded = losses->recorded();
+        ASSERT_EQ(recorded.size(), 1u);
+        EXPECT_EQ(recorded.front().kind, RemoteErrorKind::ConnectionLost) << recorded.front().toString();
+        EXPECT_NE(recorded.front().message.find("boom"), std::string::npos) << recorded.front().toString();
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal) << "a failed session opened a file system";
+        EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
+    }
+
+    TEST_P(FtpConnectionTests, AWriteCallbackThatThrowsFailsTheSessionAndReportsItLost)
+    {
+        serve(4u, takingAnUpload);
+        const auto losses = std::make_shared<RecordedLosses>();
+        connectAndLogIn(
+            2u,
+            [losses](RemoteIo::RemoteError const& error)
+            {
+                losses->record(error);
+            }
+        );
+        connection_->start();
+        const auto fileSystem = openFileSystem();
+        auto opening = fileSystem->later(
+            RemoteIo::OpenFile{.path = connectionPath("/dir/new"), .mode = RemoteIo::OpenMode::Write}
+        );
+        const auto opened = valueOf(opening);
+        ASSERT_TRUE(opened) << opened.error().toString();
+        const auto stream = opened->lock();
+        ASSERT_TRUE(stream);
+
+        auto started = fileSystem->performPromise(
+            [stream]()
+            {
+                return startWritingWithACallbackThatThrows(stream);
+            }
+        );
+        const auto writing = valueOf(started);
+        ASSERT_TRUE(writing) << writing.error().toString();
+
+        ASSERT_EQ(losses->first.get_future().wait_for(10s), std::future_status::ready);
+        const auto recorded = losses->recorded();
+        ASSERT_EQ(recorded.size(), 1u);
+        EXPECT_EQ(recorded.front().kind, RemoteErrorKind::ConnectionLost) << recorded.front().toString();
+        EXPECT_NE(recorded.front().message.find("boom"), std::string::npos) << recorded.front().toString();
+        const auto refusal = refusalOfAFileSystem();
+        ASSERT_TRUE(refusal) << "a failed session opened a file system";
         EXPECT_EQ(refusal->kind, RemoteErrorKind::ConnectionLost) << refusal->toString();
     }
 

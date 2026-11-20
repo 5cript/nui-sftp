@@ -64,23 +64,24 @@ namespace FileTransferProtocol
         assert(self->strand_.running_in_this_thread() && !self->running_ && "A ring runs once, on its strand");
         self->running_ = true;
         self->paused_ = std::move(paused);
-        Outcome outcome{};
-        std::exception_ptr thrown{};
-        try
+        struct EndsRun
         {
-            outcome = co_await std::move(transfer);
-        }
-        catch (...)
-        {
-            thrown = std::current_exception();
-        }
-        // The pause and the ProcessingThread side may hold what holds the ring, also when the transfer threw.
-        self->finished_ = true;
-        self->paused_ = nullptr;
-        self->letGoWhenIdle();
-        if (thrown)
-            std::rethrow_exception(thrown);
-        co_return outcome;
+            Ring& ring;
+
+            ~EndsRun()
+            {
+                ring.endRun();
+            }
+        };
+        const EndsRun endsRun{*self};
+        co_return co_await std::move(transfer);
+    }
+
+    void Ring::endRun()
+    {
+        finished_ = true;
+        paused_ = nullptr;
+        letGoWhenIdle();
     }
 
     bool Ring::isPaused() const

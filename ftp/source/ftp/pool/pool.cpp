@@ -1,4 +1,5 @@
 #include <ftp/pool/pool.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <ftp/protocol/command.hpp>
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
@@ -28,6 +29,7 @@ namespace FileTransferProtocol
         using Detail::errorOf;
         using Detail::isCancelled;
         using Detail::useTuple;
+        using Detail::withoutThrowing;
         using LoginOutcome =
             std::pair<std::expected<LoginResult, RemoteIo::RemoteError>, std::optional<CertificateInfo>>;
 
@@ -73,7 +75,9 @@ namespace FileTransferProtocol
         asio::awaitable<void> quit(std::shared_ptr<ControlConnection> control, std::chrono::milliseconds timeout)
         {
             co_await asio::co_spawn(
-                control->strand(), control->execute(Command{.verb = Verb::Quit}), asio::cancel_after(timeout, useTuple)
+                control->strand(),
+                withoutThrowing(control->execute(Command{.verb = Verb::Quit})),
+                asio::cancel_after(timeout, useTuple)
             );
             control->close();
         }
@@ -326,13 +330,21 @@ namespace FileTransferProtocol
     {
         auto [exception, found] = co_await asio::co_spawn(
             strand_,
-            resolver_->resolve(options_.host, options_.port, asio::use_awaitable),
+            withoutThrowing(resolver_->resolve(options_.host, options_.port, asio::use_awaitable)),
             asio::cancel_after(options_.resolveTimeout, useTuple)
         );
+        // A cancel and the timeout end the lookup with an error value, an exception is neither.
+        if (exception)
+        {
+            co_return std::unexpected(errorOf(
+                RemoteErrorKind::Failure,
+                fmt::format("The lookup of the server ended with an exception: {}", Utility::errorMessage(exception))
+            ));
+        }
         const auto cancelledHere = isCancelled(co_await asio::this_coro::cancellation_state);
-        if (cancelledHere && (exception || !found))
+        if (cancelledHere && !found)
             co_return std::unexpected(cancelled("The lookup of the server"));
-        if (exception || (!found && found.error().kind == RemoteErrorKind::Cancelled))
+        if (!found && found.error().kind == RemoteErrorKind::Cancelled)
             co_return std::unexpected(errorOf(RemoteErrorKind::TimedOut, "The lookup of the server took too long"));
         co_return std::move(found);
     }
@@ -369,6 +381,8 @@ namespace FileTransferProtocol
             control->strand(),
             [control, endpoints = endpoints_, options = options_.login]() -> asio::awaitable<LoginOutcome>
             {
+                // As withoutThrowing(), which cannot wrap a coroutine that lives in its lambda.
+                co_await asio::this_coro::throw_if_cancelled(false);
                 auto loggedIn = co_await logIn(control, endpoints, options);
                 std::optional<CertificateInfo> refused{};
                 if (!loggedIn && loggedIn.error().kind == RemoteErrorKind::TrustRequired)
@@ -381,9 +395,10 @@ namespace FileTransferProtocol
         if (exception)
         {
             control->close();
-            if (isCancelled(co_await asio::this_coro::cancellation_state))
-                co_return std::unexpected(cancelled("The login"));
-            co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The login ended with an exception"));
+            co_return std::unexpected(errorOf(
+                RemoteErrorKind::Failure,
+                fmt::format("The login ended with an exception: {}", Utility::errorMessage(exception))
+            ));
         }
         auto& [loggedIn, refused] = outcome;
         if (refused)
@@ -448,7 +463,10 @@ namespace FileTransferProtocol
             useTuple
         );
         connection->checking = false;
-        const auto open = !exception && !failure;
+        // Ends the session with the operation or the work of the pool that asked.
+        if (exception)
+            std::rethrow_exception(exception);
+        const auto open = !failure;
         const auto cancelledCheck = isCancelled(co_await asio::this_coro::cancellation_state);
         if (open && !cancelledCheck)
             co_return LeaseResult{Lease{weak_from_this(), std::move(connection)}};
@@ -459,9 +477,7 @@ namespace FileTransferProtocol
         }
         // It ended while idle.
         connection->leased = false;
-        lose(
-            connection, failure.value_or(errorOf(RemoteErrorKind::Failure, "The check of a connection failed")), false
-        );
+        lose(connection, *failure, false);
         if (cancelledCheck)
             co_return LeaseResult{std::unexpected(cancelled("The wait for a connection"))};
         co_return std::nullopt;
@@ -581,7 +597,15 @@ namespace FileTransferProtocol
         // A connection that ended reports through the release.
         const Lease held{weak_from_this(), connection};
         const auto control = connection->control;
-        co_await asio::co_spawn(control->strand(), control->execute(Command{.verb = Verb::Noop}), useTuple);
+        const auto [exception, reply] = co_await asio::co_spawn(
+            control->strand(), withoutThrowing(control->execute(Command{.verb = Verb::Noop})), useTuple
+        );
+        if (exception)
+        {
+            // Loses the session, see spawn(). Nothing tells what state the connection is in, so it does not go back.
+            control->close();
+            std::rethrow_exception(exception);
+        }
     }
 
     asio::awaitable<void> Pool::quitAll(std::vector<std::shared_ptr<PooledConnection>> connections)
@@ -603,7 +627,7 @@ namespace FileTransferProtocol
         {
             asio::co_spawn(
                 strand_,
-                quit(connection->control, options_.quitTimeout),
+                withoutThrowing(quit(connection->control, options_.quitTimeout)),
                 asio::bind_executor(
                     strand_,
                     [countdown](std::exception_ptr)
@@ -621,25 +645,21 @@ namespace FileTransferProtocol
     {
         asio::co_spawn(
             strand_,
-            std::move(work),
+            withoutThrowing(std::move(work)),
             asio::bind_executor(
                 strand_,
                 [self = shared_from_this()](std::exception_ptr exception)
                 {
                     if (!exception)
                         return;
-                    try
-                    {
-                        std::rethrow_exception(exception);
-                    }
-                    catch (std::exception const& error)
-                    {
-                        Log::error("FTP: Work of the connection pool ended with an exception: {}", error.what());
-                    }
-                    catch (...)
-                    {
-                        Log::error("FTP: Work of the connection pool ended with an exception");
-                    }
+                    // The work may have ended halfway, nothing else brings the pool back to a state it can go on from.
+                    const auto what = Utility::errorMessage(exception);
+                    Log::error("FTP: Work of the connection pool ended with an exception, the session is lost: {}", what);
+                    if (!self->closed_)
+                        self->loseSession(errorOf(
+                            RemoteErrorKind::ConnectionLost,
+                            fmt::format("Work of the connection pool ended with an exception: {}", what)
+                        ));
                 }
             )
         );
@@ -782,8 +802,35 @@ namespace FileTransferProtocol
     {
         // A wake may be what lets go of the pool.
         const auto wakes = std::exchange(wakes_, {});
+        std::exception_ptr thrown{};
         for (auto wake = wakes.begin(); wake != wakes.end() && !abandoned_; ++wake)
-            (*wake)();
+        {
+            try
+            {
+                (*wake)();
+            }
+            catch (...)
+            {
+                // The wakes behind it still run, nothing else wakes what waits for them.
+                if (!thrown)
+                    thrown = std::current_exception();
+            }
+        }
+        if (thrown && !abandoned_)
+            wakeThrew(thrown);
+    }
+
+    void Pool::wakeThrew(std::exception_ptr exception)
+    {
+        const auto what = Utility::errorMessage(exception);
+        Log::error("FTP: A wake of the connection pool threw, the session is lost: {}", what);
+        // Nothing tells what the caller of the wake goes on with.
+        if (!closed_)
+        {
+            loseSession(
+                errorOf(RemoteErrorKind::ConnectionLost, fmt::format("A wake for a free connection threw: {}", what))
+            );
+        }
     }
 
     void Pool::abandon()

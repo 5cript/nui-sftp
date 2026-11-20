@@ -50,7 +50,7 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_sanitized_remote_io_test(
         tsan
         Tsan
-        "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1"
+        "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1 suppressions=${CMAKE_SOURCE_DIR}/_cmake/tsan_suppressions.txt"
         -fsanitize=thread -fno-omit-frame-pointer
     )
 

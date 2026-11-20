@@ -92,7 +92,7 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     gtest_discover_tests(
         nui-sftp-ssh-tsan-test
         TEST_PREFIX "Tsan."
-        PROPERTIES ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1"
+        PROPERTIES ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1 suppressions=${CMAKE_SOURCE_DIR}/_cmake/tsan_suppressions.txt"
         DISCOVERY_TIMEOUT 60
     )
 endif()

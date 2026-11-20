@@ -1,4 +1,5 @@
 #include <ftp/engine/engine.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
 
@@ -26,22 +27,6 @@ namespace FileTransferProtocol
             TeardownOptions{}.quitBackstop > PoolOptions{}.quitTimeout,
             "The pool ends a QUIT without an answer before the backstop of the close cancels it"
         );
-
-        std::string describe(std::exception_ptr exception)
-        {
-            try
-            {
-                std::rethrow_exception(exception);
-            }
-            catch (std::exception const& error)
-            {
-                return error.what();
-            }
-            catch (...)
-            {
-                return "an exception of an unknown type";
-            }
-        }
     }
 
     std::shared_ptr<Engine> Engine::create(
@@ -94,7 +79,7 @@ namespace FileTransferProtocol
             return false;
         asio::co_spawn(
             strand_,
-            std::move(coroutine),
+            Detail::withoutThrowing(std::move(coroutine)),
             [self = shared_from_this(), token = work()](std::exception_ptr exception)
             {
                 if (exception)
@@ -350,28 +335,32 @@ namespace FileTransferProtocol
 
     void Engine::handlerThrew(std::exception_ptr exception)
     {
+        fail(Utility::errorMessage(exception));
+    }
+
+    void Engine::fail(std::string reason)
+    {
+        if (failed_.exchange(true))
+            return;
+        Log::error("FTP: The session fails: {}", reason);
         if (strand_.running_in_this_thread())
         {
-            fail(exception);
+            failOnStrand(reason);
             return;
         }
         postAlways(
-            [self = shared_from_this(), exception]()
+            [self = shared_from_this(), reason = std::move(reason)]()
             {
-                self->fail(exception);
+                self->failOnStrand(reason);
             }
         );
     }
 
-    void Engine::fail(std::exception_ptr exception)
+    void Engine::failOnStrand(std::string const& reason)
     {
-        if (failed_.exchange(true))
-            return;
-        const auto what = describe(exception);
-        Log::error("FTP: A handler of the session threw, the session fails: {}", what);
         // The pool's end closes every connection, and ends the waits and the logins in the background.
         pool_.reset();
-        const auto error = errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", what));
+        const auto error = errorOf(RemoteErrorKind::ConnectionLost, fmt::format("The FTP session failed: {}", reason));
         failCalls(error);
         reportLost(error);
     }

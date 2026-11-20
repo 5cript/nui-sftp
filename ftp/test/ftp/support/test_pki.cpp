@@ -32,6 +32,7 @@ namespace FileTransferProtocol::Test
         };
         using Key = std::unique_ptr<EVP_PKEY, Release<EVP_PKEY_free>>;
         using Certificate = std::unique_ptr<X509, Release<X509_free>>;
+        using Name = std::unique_ptr<X509_NAME, Release<X509_NAME_free>>;
         using Extension = std::unique_ptr<X509_EXTENSION, Release<X509_EXTENSION_free>>;
         using MemoryBio = std::unique_ptr<BIO, Release<BIO_free_all>>;
 
@@ -90,7 +91,10 @@ namespace FileTransferProtocol::Test
             if (!certificate)
                 return openSslFailure("Creating a certificate");
 
-            X509_NAME* subject = X509_get_subject_name(certificate.get());
+            // The certificate copies the name, the one it holds is not to be changed.
+            const Name subject{X509_NAME_new()};
+            if (!subject)
+                return openSslFailure("Creating the name of a certificate");
             const std::string commonName{request.commonName};
             const bool valid = X509_set_version(certificate.get(), X509_VERSION_3) == 1 &&
                 ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), nextSerial++) == 1 &&
@@ -104,10 +108,17 @@ namespace FileTransferProtocol::Test
                 ) != nullptr &&
                 X509_set_pubkey(certificate.get(), key) == 1 &&
                 X509_NAME_add_entry_by_txt(
-                    subject, "CN", MBSTRING_ASC, reinterpret_cast<unsigned char const*>(commonName.c_str()), -1, -1, 0
+                    subject.get(),
+                    "CN",
+                    MBSTRING_ASC,
+                    reinterpret_cast<unsigned char const*>(commonName.c_str()),
+                    -1,
+                    -1,
+                    0
                 ) == 1 &&
+                X509_set_subject_name(certificate.get(), subject.get()) == 1 &&
                 X509_set_issuer_name(
-                    certificate.get(), issuer ? X509_get_subject_name(issuer->certificate.get()) : subject
+                    certificate.get(), issuer ? X509_get_subject_name(issuer->certificate.get()) : subject.get()
                 ) == 1;
             if (!valid)
                 return openSslFailure("Filling a certificate");

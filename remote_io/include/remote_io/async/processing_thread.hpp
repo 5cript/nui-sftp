@@ -13,6 +13,7 @@
 #include <optional>
 #include <future>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -144,6 +145,11 @@ namespace RemoteIo
             Idle,
         };
 
+        /**
+         * @brief Told why the thread ended: what the exception of a task said. Must not throw.
+         */
+        using FailureHandler = std::function<void(std::string const& reason)>;
+
         ProcessingThread();
         ~ProcessingThread();
         ProcessingThread(ProcessingThread const&) = delete;
@@ -163,6 +169,15 @@ namespace RemoteIo
         void start(std::chrono::milliseconds const& pollInterval = std::chrono::milliseconds{0});
 
         /**
+         * @brief Sets what runs when a task threw, which ends the thread: once on the ending thread, outside every
+         *        lock of the thread, after the queued cleanup tasks ran unless stop() drains them at that time. From
+         *        then on pushes are refused, so the owner ends what depends on the thread. A task that throws in the
+         *        drain of stop() is told at the end of the drain, on the thread that stops, unless the loop told of
+         *        one before. Set before start().
+         */
+        void onFailure(FailureHandler handler);
+
+        /**
          * @brief Wakes the thread for a cycle, for a permanent task whose state changed from outside.
          */
         void wake();
@@ -178,7 +193,8 @@ namespace RemoteIo
 
         /**
          * @brief Stops the processing thread. Executes all pending tasks, on this thread acting as the processing
-         *        thread. Refuses pushes from now until the next start.
+         *        thread: one that throws does not keep the others from running, the failure handler learns of the
+         *        first. Refuses pushes from now until the next start.
          */
         void stop();
 
@@ -331,6 +347,17 @@ namespace RemoteIo
         void run(std::chrono::milliseconds const& pollInterval);
 
         /**
+         * @brief Ends the loop behind a task that threw: closes the intake, drops the queued tasks and runs the
+         *        cleanup tasks among them. While stop() drains, the drain does that.
+         */
+        void closeAfterException();
+
+        /**
+         * @brief Tells the failure handler @p reason, the first time since start() only.
+         */
+        void reportFailure(std::string const& reason) noexcept;
+
+        /**
          * @brief Queues a promise task like pushTask. While stop() drains it is queued refused instead: the drain
          *        drops it in order, so its future completes after the tasks queued before it.
          */
@@ -338,8 +365,10 @@ namespace RemoteIo
 
         /**
          * @brief Runs a task outside the loop, where a throwing task must not keep the others from running.
+         *
+         * @return What the task threw, nothing when it returned.
          */
-        static void runContained(std::function<void()> const& task);
+        [[nodiscard]] static std::optional<std::string> runContained(std::function<void()> const& task);
 
         /**
          * @brief What the permanent tasks of one cycle need from the wait after it.
@@ -432,6 +461,10 @@ namespace RemoteIo
         /** @brief Under taskMutex_: the thread sleeps in socketWait_, so a wake must go through it. */
         bool waitingOnSocket_{false};
         std::function<SocketWait::Watched()> watchedSocket_{};
+        /** @brief Under taskMutex_. */
+        FailureHandler failureHandler_{};
+        /** @brief Under taskMutex_: the handler was told since start(), it is told once. */
+        bool failureReported_{false};
         std::unique_ptr<SocketWait> socketWait_{};
 
         std::deque<QueuedTask> tasks_{};

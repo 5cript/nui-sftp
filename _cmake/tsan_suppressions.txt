@@ -1,0 +1,3 @@
+# OpenSSL is not instrumented: ThreadSanitizer sees its memory accesses through the interceptors but not the atomics of
+# its caches that order them, and reports races between them.
+race:libcrypto.so

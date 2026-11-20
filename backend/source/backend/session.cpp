@@ -525,7 +525,7 @@ void Session::registerRpcStartChannelRead()
 
                 // Do not use this in these functions, because they are called from a different thread,
                 // unless within_strand_do is used!
-                locked->startReading(
+                const auto reading = locked->startReading(
                     // Stdout
                     [sessionId = self->id_,
                         channelId,
@@ -573,6 +573,12 @@ void Session::registerRpcStartChannelRead()
                         self->removeChannel(channelId);
                     }
                 );
+
+                if (!reading)
+                {
+                    Log::error("Cannot read the channel with id {}: {}", channelId.value(), reading.error());
+                    return reply.error(reading.error());
+                }
 
                 return reply({{"success", true}});
             }

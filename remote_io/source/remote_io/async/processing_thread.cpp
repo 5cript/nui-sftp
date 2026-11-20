@@ -1,11 +1,18 @@
 #include <remote_io/async/processing_thread.hpp>
 #include <remote_io/async/processing_strand.hpp>
+#include <log/log.hpp>
+#include <utility/error_message.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
-#include <stdexcept>
+#include <exception>
 #include <future>
+#include <optional>
+#include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 
 namespace RemoteIo
 {
@@ -68,25 +75,27 @@ namespace RemoteIo
     }
     void ProcessingThread::start(std::chrono::milliseconds const& pollInterval)
     {
-        if (thread_.joinable())
-            throw std::logic_error(
-                "ProcessingThread::start called while a previous thread is still joinable; call stop() first."
-            );
+        assert(!thread_.joinable() && "ProcessingThread::start() needs stop() after a previous start()");
+        // The thread comes first and waits for the state: a thread that cannot be created leaves nothing changed.
+        std::promise<void> awaitThreadStart{};
+        std::promise<void> stateIsSet{};
+        thread_ = std::thread(
+            [this, &awaitThreadStart, stateSet = stateIsSet.get_future(), pollInterval]
+            {
+                awaitThreadStart.set_value();
+                stateSet.wait();
+                processingThreadId_.store(std::this_thread::get_id());
+                run(pollInterval);
+            }
+        );
         {
             std::lock_guard cleanupLock{cleanupMutex_};
             std::lock_guard lock{taskMutex_};
             running_ = true;
             intake_ = Intake::Open;
+            failureReported_ = false;
         }
-        std::promise<void> awaitThreadStart{};
-        thread_ = std::thread(
-            [this, &awaitThreadStart, pollInterval]
-            {
-                awaitThreadStart.set_value();
-                processingThreadId_.store(std::this_thread::get_id());
-                run(pollInterval);
-            }
-        );
+        stateIsSet.set_value();
         awaitThreadStart.get_future().wait();
     }
     void ProcessingThread::stop()
@@ -110,6 +119,7 @@ namespace RemoteIo
         // caller meanwhile.
         std::unique_lock lock{taskMutex_};
         processingThreadId_.store(std::this_thread::get_id());
+        std::optional<std::string> failure{};
         while (!tasks_.empty())
         {
             {
@@ -117,31 +127,40 @@ namespace RemoteIo
                 tasks_.pop_front();
                 lock.unlock();
                 if (task.kind != TaskKind::Refused)
-                    runContained(task.run);
+                {
+                    auto threw = runContained(task.run);
+                    if (!failure)
+                        failure = std::move(threw);
+                }
             }
             lock.lock();
         }
         // The id of the joined thread may be reused.
         processingThreadId_.store({});
         intake_ = Intake::Closed;
+        lock.unlock();
+        // As for a task that throws in the loop: the batch runs on, then the owner learns why.
+        if (failure)
+            reportFailure(*failure);
     }
-    void ProcessingThread::runContained(std::function<void()> const& task)
+    std::optional<std::string> ProcessingThread::runContained(std::function<void()> const& task)
     {
         try
         {
             task();
+            return std::nullopt;
         }
         catch (...)
         {
-            // Outside the loop no task ends anything, a promise task completes with its unfinished result.
+            // The tasks behind it still run, a promise task completes with its unfinished result.
+            auto reason = Utility::errorMessage(std::current_exception());
+            Log::error(Log::Toast::Skip, "A task threw behind the end of its processing thread: {}", reason);
+            return reason;
         }
     }
     bool ProcessingThread::pushTask(std::function<void()>&& task)
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
 
         bool interruptSocketWait = false;
         {
@@ -177,10 +196,7 @@ namespace RemoteIo
     }
     void ProcessingThread::pushCleanupTask(std::function<void()> task)
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
 
         // Held while the task runs here, so cleanup tasks run one at a time and never alongside a restarted thread.
         std::lock_guard cleanupLock{cleanupMutex_};
@@ -202,7 +218,7 @@ namespace RemoteIo
             return;
         }
         const ActingProcessingThread acting{processingThreadId_};
-        runContained(task);
+        std::ignore = runContained(task);
     }
     void ProcessingThread::wake()
     {
@@ -244,10 +260,7 @@ namespace RemoteIo
         std::optional<std::chrono::milliseconds> pollInterval
     )
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
         return pushPermanentTask(
             std::function<PermanentTaskStatus(PermanentTaskId)>{
                 [task = std::move(task)](PermanentTaskId id)
@@ -263,10 +276,7 @@ namespace RemoteIo
         std::optional<std::chrono::milliseconds> pollInterval
     )
     {
-        if (!task)
-        {
-            throw std::invalid_argument("Task must not be empty.");
-        }
+        assert(task && "A task of the ProcessingThread must not be empty");
 
         PermanentTaskId id{-1};
         bool interruptSocketWait = false;
@@ -466,13 +476,7 @@ namespace RemoteIo
 
                     for (auto const& task : tasks)
                     {
-                        // Task is checked before adding, shouldnt possibly be empty:
-#ifndef NDEBUG
-                        if (!task.run)
-                        {
-                            throw std::runtime_error("Task must not be empty.");
-                        }
-#endif
+                        assert(task.run && "A task of the ProcessingThread must not be empty");
                         // Pushed while stop() drains, completed when the batch is gone.
                         if (task.kind == TaskKind::Refused)
                             continue;
@@ -496,26 +500,51 @@ namespace RemoteIo
         }
         catch (...)
         {
-            // Cleanup tasks pushed from now on run on their caller, after the queued ones ran here.
-            std::lock_guard cleanupLock{cleanupMutex_};
-            std::deque<QueuedTask> pending{};
-            {
-                std::lock_guard lock{taskMutex_};
-                running_ = false;
-                // stop() drains what is queued once it joined this thread, and closes intake afterwards.
-                if (intake_ == Intake::Draining)
-                    return;
-                intake_ = Intake::Closed;
-                pending = std::exchange(tasks_, {});
-            }
-            // Queued tasks would run only when stop() drains, which the threads waiting for them may never reach.
-            // Dropped promise tasks complete with their unfinished result, cleanup tasks still run.
-            for (auto& task : pending)
-            {
-                if (task.kind == TaskKind::Cleanup)
-                    runContained(task.run);
-            }
+            const auto reason = Utility::errorMessage(std::current_exception());
+            // The failure handler is the report the user sees, its owner ends the session.
+            Log::error(Log::Toast::Skip, "A task of a processing thread threw, the thread ends: {}", reason);
+            closeAfterException();
+            reportFailure(reason);
         }
+    }
+    void ProcessingThread::closeAfterException()
+    {
+        // Cleanup tasks pushed from now on run on their caller, after the queued ones ran here.
+        std::lock_guard cleanupLock{cleanupMutex_};
+        std::deque<QueuedTask> pending{};
+        {
+            std::lock_guard lock{taskMutex_};
+            running_ = false;
+            // stop() drains what is queued once it joined this thread, and closes intake afterwards.
+            if (intake_ == Intake::Draining)
+                return;
+            intake_ = Intake::Closed;
+            pending = std::exchange(tasks_, {});
+        }
+        // Queued tasks would run only when stop() drains, which the threads waiting for them may never reach.
+        // Dropped promise tasks complete with their unfinished result, cleanup tasks still run.
+        for (auto& task : pending)
+        {
+            if (task.kind == TaskKind::Cleanup)
+                std::ignore = runContained(task.run);
+        }
+    }
+    void ProcessingThread::onFailure(FailureHandler handler)
+    {
+        std::lock_guard lock{taskMutex_};
+        failureHandler_ = std::move(handler);
+    }
+    void ProcessingThread::reportFailure(std::string const& reason) noexcept
+    {
+        FailureHandler handler{};
+        {
+            std::lock_guard lock{taskMutex_};
+            if (std::exchange(failureReported_, true))
+                return;
+            handler = failureHandler_;
+        }
+        if (handler)
+            handler(reason);
     }
     void ProcessingThread::waitForWork(CycleNeeds const& needs)
     {

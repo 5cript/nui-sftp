@@ -3,6 +3,7 @@
 #include <ftp/client/control_connection.hpp>
 #include <ftp/client/metadata.hpp>
 #include <ftp/client/transfer.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <ftp/engine/call.hpp>
 #include <ftp/engine/engine.hpp>
 #include <ftp/engine/ring_options.hpp>
@@ -81,18 +82,6 @@ namespace FileTransferProtocol
     namespace Detail
     {
         /**
-         * @brief @p work with throw_if_cancelled(false): a cancel that no operation under way took must not throw at
-         *        the next step.
-         */
-        template <typename ValueT>
-        boost::asio::awaitable<std::expected<ValueT, RemoteIo::RemoteError>>
-        withoutThrowing(boost::asio::awaitable<std::expected<ValueT, RemoteIo::RemoteError>> work)
-        {
-            co_await boost::asio::this_coro::throw_if_cancelled(false);
-            co_return co_await std::move(work);
-        }
-
-        /**
          * @brief Runs @p work on the strand of @p control and touches it in @p scope, from the session strand. An
          *        exception fails the session, see Engine::run().
          */
@@ -106,7 +95,7 @@ namespace FileTransferProtocol
             scope->touch(control);
             auto [exception, result] = co_await boost::asio::co_spawn(
                 control->strand(),
-                withoutThrowing<ValueT>(std::move(work)),
+                withoutThrowing(std::move(work)),
                 boost::asio::as_tuple(boost::asio::use_awaitable)
             );
             if (exception)

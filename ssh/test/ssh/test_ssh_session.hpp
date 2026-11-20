@@ -2,6 +2,7 @@
 
 #include "common_fixture.hpp"
 #include <ssh/session.hpp>
+#include <ssh/sftp_session.hpp>
 #include <paths/native.hpp>
 #include <nui/utility/scope_exit.hpp>
 
@@ -543,8 +544,9 @@ namespace SecureShell::Test
 
         channel->close();
 
-        std::promise<void> awaiter{};
-        EXPECT_THROW(channelStartReading(channel, awaiter), std::runtime_error);
+        const auto reading = channel->startReading([](std::string const&) {}, [](std::string const&) {}, []() {});
+        ASSERT_FALSE(reading) << "a closed channel is read";
+        EXPECT_FALSE(reading.error().empty());
     }
 
     TEST_F(SshSessionTests, CannotWriteAfterChannelClose)
@@ -779,6 +781,90 @@ namespace SecureShell::Test
         channel->write("\r");
         EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
         EXPECT_EQ(exited.get_future().wait_for(5s), std::future_status::ready);
+    }
+
+    TEST_F(SshSessionTests, ATaskThatThrowsEndsTheSessionAsALostConnection)
+    {
+        auto [result, processThread] = createSftpServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        std::promise<void> lost{};
+        std::atomic_bool reported{false};
+        auto expectedSession = makePasswordTestSession(
+            result->port,
+            [&lost, &reported]()
+            {
+                if (!reported.exchange(true))
+                    lost.set_value();
+            }
+        );
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedSftp = session->createSftpSession().get();
+        ASSERT_TRUE(expectedSftp.has_value());
+        const auto sftp = expectedSftp.value().lock();
+        ASSERT_TRUE(sftp);
+
+        ASSERT_TRUE(sftp->strand()->pushTask(
+            []()
+            {
+                throw std::runtime_error("boom");
+            }
+        ));
+        EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
+        // The session's thread is gone, the next task is refused.
+        EXPECT_FALSE(sftp->strand()->pushTask([]() {}));
+    }
+
+    TEST_F(SshSessionTests, AnOutputHandlerThatThrowsEndsTheSessionAsALostConnection)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        std::promise<void> lost{};
+        std::atomic_bool reported{false};
+        auto expectedSession = makePasswordTestSession(
+            result->port,
+            [&lost, &reported]()
+            {
+                if (!reported.exchange(true))
+                    lost.set_value();
+            }
+        );
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        const auto channel = expectedChannel.value().lock();
+        ASSERT_TRUE(channel);
+        // The shell greets, whichever call of libssh reads that hands it to the handler.
+        channelStartReading(
+            channel,
+            [](std::string const&)
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+
+        EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
+        // The session's thread is gone, the next task is refused.
+        EXPECT_FALSE(channel->write("exit\r"));
     }
 
     TEST_F(SshSessionTests, ClosingATerminalWhileTheThreadWaitsOnTheConnectionReturns)

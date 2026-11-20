@@ -25,6 +25,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -202,7 +203,14 @@ namespace FileTransferProtocol
         bool stopping() const;
 
         /**
-         * @brief An exception escaped a handler or coroutine of the session. Thread-safe.
+         * @brief Fails the session for @p reason, as an exception that escapes a handler does: later operations are
+         *        refused at once, then the pool closes its connections, the operations in flight end as lost and the
+         *        lost handler is queued. Only the first failure counts. Thread-safe.
+         */
+        void fail(std::string reason);
+
+        /**
+         * @brief The session failed: an exception escaped a handler or coroutine, or fail() ran. Thread-safe.
          */
         bool failed() const;
 
@@ -411,7 +419,11 @@ namespace FileTransferProtocol
          */
         void endSession();
         void handlerThrew(std::exception_ptr exception);
-        void fail(std::exception_ptr exception);
+        /**
+         * @brief Ends the pool and the operations in flight of a failed session and reports it lost, on the session
+         *        strand.
+         */
+        void failOnStrand(std::string const& reason);
         void reportLost(RemoteIo::RemoteError error);
 
         const Strand strand_;

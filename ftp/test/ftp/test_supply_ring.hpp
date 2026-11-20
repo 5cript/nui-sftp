@@ -54,7 +54,7 @@ namespace FileTransferProtocol::Test
 
         SupplyRing::Source sourceOf(std::shared_ptr<FakeFile> file, std::shared_ptr<TaskGate> gate)
         {
-            return [file, gate](std::span<char> bytes) -> std::expected<std::size_t, RemoteIo::RemoteError>
+            return [file, gate](std::span<char> bytes) noexcept -> std::expected<std::size_t, RemoteIo::RemoteError>
             {
                 const auto number = file->reads++;
                 file->allOnTheProcessingThread = file->allOnTheProcessingThread && gate->onProcessingThread();
@@ -295,7 +295,7 @@ namespace FileTransferProtocol::Test
             connectionStrand_,
             ring->run(
                 // Holds the ring as a stream's source does, the ring lets go of it once it ended.
-                [ring, read = sourceOf(file, gate_)](std::span<char> bytes)
+                [ring, read = sourceOf(file, gate_)](std::span<char> bytes) noexcept
                 {
                     auto got = read(bytes);
                     ring->close();
@@ -398,7 +398,7 @@ namespace FileTransferProtocol::Test
         auto ran = asio::co_spawn(
             connectionStrand_,
             ring->run(
-                [held = std::move(held), read = sourceOf(file, gate_)](std::span<char> bytes)
+                [held = std::move(held), read = sourceOf(file, gate_)](std::span<char> bytes) noexcept
                 {
                     return read(bytes);
                 },
@@ -431,7 +431,7 @@ namespace FileTransferProtocol::Test
         auto ran = asio::co_spawn(
             connectionStrand_,
             ring->run(
-                [held = std::move(held), read = sourceOf(file, gate_)](std::span<char> bytes)
+                [held = std::move(held), read = sourceOf(file, gate_)](std::span<char> bytes) noexcept
                 {
                     return read(bytes);
                 },
@@ -451,37 +451,18 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(sourceState.expired()) << "the ring kept the source after its fills were dropped";
     }
 
-    TEST_P(SupplyRingTests, ASourceThatThrowsIsNotReadAgainAndEndsTheRingAsLost)
+    TEST(SupplyRingSourceTests, OnlyASourceDeclaredNoexceptIsTaken)
     {
-        const auto engine = makeEngine();
-        const auto ring = SupplyRing::create(engine, connectionStrand_, options_);
-        auto held = std::make_shared<int>(0);
-        const std::weak_ptr<int> sourceState = held;
-        const auto reads = std::make_shared<std::atomic<std::size_t>>(0u);
-        std::promise<void> release{};
-        ASSERT_NO_FATAL_FAILURE(holdTheProcessingThread(release.get_future().share()));
-        auto ran = asio::co_spawn(
-            connectionStrand_,
-            ring->run(
-                [held = std::move(held), reads](std::span<char>) -> std::expected<std::size_t, RemoteIo::RemoteError>
-                {
-                    ++*reads;
-                    throw std::runtime_error{"The source broke"};
-                },
-                sinkInto(std::make_shared<Written>(), connectionStrand_)
-            ),
-            asio::use_future
-        );
-        // The ring hands out its slots in its first run on the strand, so every fill waits behind the held task.
-        flushStrand();
-        release.set_value();
-
-        const auto outcome = valueOf(ran);
-        ASSERT_FALSE(outcome);
-        EXPECT_EQ(outcome.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << outcome.error().toString();
-        settleTasks();
-        EXPECT_EQ(reads->load(), 1u) << "a fill read from the source after it threw";
-        EXPECT_TRUE(sourceState.expired()) << "the ring kept the source after it threw";
+        const auto mayThrow = [](std::span<char>) -> std::expected<std::size_t, RemoteIo::RemoteError>
+        {
+            return 0u;
+        };
+        const auto declared = [](std::span<char>) noexcept -> std::expected<std::size_t, RemoteIo::RemoteError>
+        {
+            return 0u;
+        };
+        EXPECT_FALSE((std::is_constructible_v<SupplyRing::Source, decltype(mayThrow)>));
+        EXPECT_TRUE((std::is_constructible_v<SupplyRing::Source, decltype(declared)>));
     }
 
     TEST_P(SupplyRingTests, RunsWhenOnlyItsCoroutineHoldsTheRing)
