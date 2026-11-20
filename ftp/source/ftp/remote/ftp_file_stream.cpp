@@ -511,6 +511,22 @@ namespace FileTransferProtocol
     {
         if (!transfer->download)
             co_return Result<void>{};
+        // A caller that read the size it knew stopped before the end of the data, one more read has to find it.
+        if (!transfer->download->dataEnded())
+        {
+            constexpr std::size_t endProbe = 64u;
+            if (transfer->readBuffer.size() < endProbe)
+                transfer->readBuffer.resize(endProbe);
+            const auto read =
+                co_await transfer->download->readSome(asio::buffer(transfer->readBuffer.data(), endProbe));
+            if (!read)
+                co_return std::unexpected(read.error());
+            if (*read > 0u)
+            {
+                transfer->download->abort();
+                co_return std::unexpected(errorOf(RemoteErrorKind::Failure, "The file has more data than was read"));
+            }
+        }
         co_return (co_await transfer->download->finish()).transform([](TransferResult const&) {});
     }
 

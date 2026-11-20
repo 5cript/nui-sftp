@@ -461,6 +461,11 @@ namespace FileTransferProtocol
         return announced_;
     }
 
+    bool Download::dataEnded() const
+    {
+        return dataEnded_;
+    }
+
     std::shared_ptr<DataConnection> const& Download::dataConnection() const
     {
         return data_;
