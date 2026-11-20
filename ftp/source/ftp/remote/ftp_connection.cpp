@@ -1,11 +1,18 @@
 #include <ftp/remote/ftp_connection.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancel_after.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
@@ -34,6 +41,53 @@ namespace FileTransferProtocol
          */
         constexpr auto loginReplies = 12;
 
+        LoginFailure failureOf(RemoteError error)
+        {
+            return LoginFailure{.error = std::move(error)};
+        }
+
+        LoginFailure exceptionFailure(std::string const& what, std::exception_ptr const& exception)
+        {
+            return failureOf(errorOf(
+                RemoteErrorKind::Failure,
+                fmt::format("{} ended with an exception: {}", what, Utility::errorMessage(exception))
+            ));
+        }
+
+        /**
+         * @brief Looks up the server of @p pool and reaches it, on the strand this runs on.
+         */
+        asio::awaitable<Reachability> lookUpAndReach(std::shared_ptr<Resolver> resolver, PoolOptions pool)
+        {
+            const auto executor = co_await asio::this_coro::executor;
+            auto [lookupException, found] = co_await asio::co_spawn(
+                executor,
+                Detail::withoutThrowing(resolver->resolve(pool.host, pool.port, asio::use_awaitable)),
+                asio::cancel_after(pool.resolveTimeout, Detail::useTuple)
+            );
+            if (lookupException)
+                co_return std::unexpected(exceptionFailure("The lookup of the server", lookupException));
+            if (!found)
+                co_return std::unexpected(failureOf(std::move(found).error()));
+
+            const auto connection = ControlConnection::create(executor, pool.control);
+            auto [reachException, reached] = co_await asio::co_spawn(
+                connection->strand(),
+                Detail::withoutThrowing(reach(connection, *std::move(found), std::move(pool.login))),
+                Detail::useTuple
+            );
+            if (reachException)
+                co_return std::unexpected(exceptionFailure("Reaching the server", reachException));
+            if (!reached)
+            {
+                auto failure = failureOf(std::move(reached).error());
+                if (failure.error.kind == RemoteErrorKind::TrustRequired)
+                    failure.untrustedCertificate = connection->untrustedCertificate();
+                co_return std::unexpected(std::move(failure));
+            }
+            co_return std::move(reached->certificate);
+        }
+
         /**
          * @brief A strand of @p thread that keeps it, for a file system held past its connection.
          */
@@ -57,6 +111,35 @@ namespace FileTransferProtocol
                 2 * (pool.resolveTimeout + pool.control.connectTimeout) + loginReplies * pool.control.commandTimeout,
             .drain = std::chrono::seconds{1},
         };
+    }
+
+    std::future<Reachability>
+    reachServer(asio::any_io_executor executor, std::shared_ptr<Resolver> resolver, PoolOptions pool)
+    {
+        const auto promise = std::make_shared<std::promise<Reachability>>();
+        auto future = promise->get_future();
+        const auto backstop = loginLimitsFor(pool).backstop;
+        asio::co_spawn(
+            asio::make_strand(executor),
+            Detail::withoutThrowing(lookUpAndReach(std::move(resolver), std::move(pool))),
+            asio::cancel_after(
+                backstop,
+                [promise](std::exception_ptr exception, Reachability reachability) noexcept
+                {
+                    if (exception)
+                        return promise->set_value(std::unexpected(exceptionFailure("Reaching the server", exception)));
+                    // The backstop is the only cancel, the server took too long to answer.
+                    if (!reachability && reachability.error().error.kind == RemoteErrorKind::Cancelled)
+                        return promise->set_value(
+                            std::unexpected(
+                                failureOf(errorOf(RemoteErrorKind::TimedOut, "The server did not answer in time"))
+                            )
+                        );
+                    promise->set_value(std::move(reachability));
+                }
+            )
+        );
+        return future;
     }
 
     struct FtpConnection::Shared

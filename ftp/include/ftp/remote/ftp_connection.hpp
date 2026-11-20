@@ -62,6 +62,20 @@ namespace FileTransferProtocol
         std::optional<CertificateInfo> untrustedCertificate{};
     };
 
+    /** @brief The certificate a reached server showed, nothing without TLS, or why it could not be reached. */
+    using Reachability = std::expected<std::optional<TrustedCertificate>, LoginFailure>;
+
+    /**
+     * @brief Looks up the server of @p pool and reaches it on a strand of @p executor, see reach(): whether it answers
+     *        and its certificate is trusted, before anybody is asked for a password. Nothing of the credentials is
+     *        sent. Bounded like a first login, see loginLimitsFor(). Callable from any thread.
+     *
+     * @return Completes with the certificate, or the failure: NoConnection or TimedOut for a server that is not
+     *         there, TrustRequired with the certificate to ask about, the error of the greeting or of TLS.
+     */
+    std::future<Reachability>
+    reachServer(boost::asio::any_io_executor executor, std::shared_ptr<Resolver> resolver, PoolOptions pool);
+
     /**
      * @brief One FTP session as a RemoteIo connection: its ProcessingThread, its engine on an executor of the
      *        application, and the file systems opened on it, which share both.
