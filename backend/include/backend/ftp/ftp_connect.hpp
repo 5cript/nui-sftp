@@ -36,7 +36,8 @@ namespace FtpConnect
     std::string passwordPrompt(std::string const& user, std::string const& host);
 
     /**
-     * @brief The credentials of @p user. The password of an anonymous login is filled in, any other is empty.
+     * @brief The credentials of @p user. The password of an anonymous login is filled in, any other is empty. An empty
+     *        account is none.
      */
     FileTransferProtocol::Credentials credentialsOf(Persistence::FtpUser const& user);
 

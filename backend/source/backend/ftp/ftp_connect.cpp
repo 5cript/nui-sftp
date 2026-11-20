@@ -390,7 +390,8 @@ namespace FtpConnect
     FileTransferProtocol::Credentials credentialsOf(Persistence::FtpUser const& user)
     {
         FileTransferProtocol::Credentials credentials{};
-        credentials.account = user.account;
+        if (user.account && !user.account->empty())
+            credentials.account = user.account;
         if (user.name && !user.name->empty())
             credentials.user = *user.name;
         else

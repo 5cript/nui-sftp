@@ -272,6 +272,8 @@ namespace Test
         EXPECT_EQ(alice.user, "alice");
         EXPECT_TRUE(alice.password.empty());
         EXPECT_EQ(alice.account, "billing");
+        // A cleared settings field.
+        EXPECT_FALSE(FtpConnect::credentialsOf(FtpUser{.name = "alice", .account = ""}).account);
     }
 
     TEST(FtpConnectOptionsTests, ThePromptNamesTheUserAndTheServer)
@@ -743,6 +745,27 @@ namespace Test
             )
         );
         EXPECT_EQ(connected.error().find("s3cret"), std::string::npos);
+    }
+
+    TEST_F(FtpConnectTests, AnEmptyAccountIsNoneWhenTheServerAsksForOne)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        Script script{};
+        script.reply("220 Ready")
+            .expect("USER", "alice")
+            .reply("331 Password required")
+            .expect("PASS", "s3cret")
+            .reply("332 Need account for login.")
+            .expectDisconnect();
+        addConnection(std::move(script));
+        auto options = session();
+        options.users.front().account = "";
+
+        const auto connected = connect(options, answering("s3cret"));
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("refused the login of alice"), std::string::npos) << connected.error();
+        EXPECT_NE(connected.error().find("asks for an account"), std::string::npos) << connected.error();
     }
 
     TEST_F(FtpConnectTests, AnUntrustedCertificateFailsWithItsFingerprint)
