@@ -160,6 +160,8 @@ class ListSetting : public Setting<Disengageable, ListTypeT<std::string>>
             [this](ListType const& list)
             {
                 table_->setRows(buildTableRows(list));
+                // Runs after the event processing, so the new rows need a flush of their own.
+                Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
     }

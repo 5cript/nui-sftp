@@ -127,6 +127,8 @@ class MapSetting : public Setting<Disengageable, std::map<std::string, std::stri
                     );
                 }
                 table->setRows(rows);
+                // Runs after the event processing, so the new rows need a flush of their own.
+                Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
     }
