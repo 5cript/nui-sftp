@@ -9,6 +9,7 @@
 
 #include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -287,6 +288,25 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(codeOf("SIZE /file.txt"), 502);
         EXPECT_EQ(codeOf("MLST /file.txt"), 500);
         EXPECT_EQ(download("/file.txt"), "content");
+    }
+
+    TEST_F(TreeResponderTests, ADownloadStallsWhereTheTreeSaysAndFailsOnceTheClientLeaves)
+    {
+        serve({servedFile("file.txt", "abcdef")});
+        tree_->stallDownloadsAfter(100u);
+        EXPECT_EQ(download("/file.txt"), "abcdef");
+
+        tree_->stallDownloadsAfter(3u);
+        const auto started = startTransfer("RETR /file.txt");
+        ASSERT_TRUE(started.has_value()) << started.error();
+        EXPECT_EQ(*started, 150);
+        client_.closeData();
+        const auto failed = client_.readReply();
+        ASSERT_TRUE(failed.has_value()) << failed.error();
+        EXPECT_EQ(failed->code, 426);
+
+        tree_->stallDownloadsAfter(std::nullopt);
+        EXPECT_EQ(download("/file.txt"), "abcdef");
     }
 
     TEST_F(TreeResponderTests, FeaturesListSizeByDefault)

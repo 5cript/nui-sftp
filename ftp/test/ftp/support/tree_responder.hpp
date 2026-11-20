@@ -160,6 +160,14 @@ namespace FileTransferProtocol::Test
          */
         std::optional<std::string> modifiedOf(std::string_view path);
 
+        /**
+         * @brief Downloads that start from now on send at most @p bytes, then stall until the client goes away and
+         *        fail with 426. Nothing lets them send whole files again.
+         */
+        void stallDownloadsAfter(std::optional<std::uint64_t> bytes);
+
+        std::optional<std::uint64_t> downloadStall() const;
+
         /** @brief The directories listed so far, as directoryAt() gives them. */
         std::vector<std::string> listed() const;
 
@@ -188,6 +196,7 @@ namespace FileTransferProtocol::Test
         std::vector<std::string> removed_{};
         std::vector<std::string> retrieved_{};
         std::vector<std::string> stored_{};
+        std::optional<std::uint64_t> downloadStall_{};
     };
 
     /**

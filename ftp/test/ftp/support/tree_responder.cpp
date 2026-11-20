@@ -498,6 +498,18 @@ namespace FileTransferProtocol::Test
         return stored_;
     }
 
+    void ServedTree::stallDownloadsAfter(std::optional<std::uint64_t> bytes)
+    {
+        std::scoped_lock lock{mutex_};
+        downloadStall_ = bytes;
+    }
+
+    std::optional<std::uint64_t> ServedTree::downloadStall() const
+    {
+        std::scoped_lock lock{mutex_};
+        return downloadStall_;
+    }
+
     TreeResponder::TreeResponder(std::shared_ptr<ServedTree> tree, ServedFeatures features)
         : tree_{std::move(tree)}
         , features_{features}
@@ -639,11 +651,17 @@ namespace FileTransferProtocol::Test
             const auto content = tree_->retrieve(absolute(argument));
             if (!content)
                 return replying("550 Failed to open file.");
+            const auto rest = std::string_view{*content}.substr(std::min<std::size_t>(offset, content->size()));
             Script script{};
-            script.reply(fmt::format("150 Opening BINARY mode data connection ({} bytes).", content->size()))
-                .beginData(DataPlan{}.send(content->substr(std::min<std::size_t>(offset, content->size()))))
-                .awaitData()
-                .reply("226 Transfer complete.");
+            script.reply(fmt::format("150 Opening BINARY mode data connection ({} bytes).", content->size()));
+            if (const auto stall = tree_->downloadStall(); stall && *stall < rest.size())
+            {
+                script.beginData(DataPlan{}.stallAfter(std::string{rest.substr(0u, *stall)}))
+                    .awaitData()
+                    .reply("426 Failure writing network stream.");
+                return script;
+            }
+            script.beginData(DataPlan{}.send(std::string{rest})).awaitData().reply("226 Transfer complete.");
             return script;
         }
         if (verb == "STOR" || verb == "APPE")
