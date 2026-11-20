@@ -102,6 +102,23 @@ namespace Test
         EXPECT_EQ(options.loginUser().name, "bob");
     }
 
+    TEST(FtpSessionOptionsTests, TheUserOfAReconnectIsFoundByNameAndAccount)
+    {
+        Persistence::FtpSessionOptions options{};
+        options.users = {
+            Persistence::FtpUser{.name = "alice"},
+            Persistence::FtpUser{.name = "alice", .account = "billing"},
+        };
+
+        options.selectUserLike(Persistence::FtpUser{.name = "alice", .account = "billing"});
+        EXPECT_EQ(options.loginUser().account, "billing");
+        EXPECT_EQ(options.users.size(), 2u);
+
+        options.selectUserLike(Persistence::FtpUser{.name = "carol"});
+        EXPECT_EQ(options.loginUser().name, "carol");
+        EXPECT_EQ(options.users.size(), 3u);
+    }
+
     TEST(FtpSessionOptionsTests, ReferencedOptionsFillWhatTheSessionLeavesUnset)
     {
         auto state = nlohmann::json{{"sessions", {{"files", ftpServerJson()}}}}.get<Persistence::State>();

@@ -156,6 +156,22 @@ namespace Persistence
         Utility::Algorithm::moveToFront(users, index);
     }
 
+    void FtpSessionOptions::selectUserLike(FtpUser const& user)
+    {
+        const auto iter = std::find_if(
+            users.begin(),
+            users.end(),
+            [&user](FtpUser const& candidate)
+            {
+                return candidate.name == user.name && candidate.account == user.account;
+            }
+        );
+        if (iter == users.end())
+            users.insert(users.begin(), user);
+        else
+            selectUser(static_cast<std::size_t>(std::distance(users.begin(), iter)));
+    }
+
     SessionOptions SessionOptions::create(std::optional<std::string> icon, TerminalEngineType type)
     {
         if (type == TerminalEngineType::ftp)

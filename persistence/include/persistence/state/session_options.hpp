@@ -224,6 +224,12 @@ namespace Persistence
          * @brief Makes the user at the index the one connections log in as. Does nothing for an index out of range.
          */
         void selectUser(std::size_t index);
+
+        /**
+         * @brief Makes the user with the same name and account the one connections log in as, or adds the user in
+         * front when no such user exists anymore.
+         */
+        void selectUserLike(FtpUser const& user);
     };
     BOOST_DESCRIBE_STRUCT(
         FtpSessionOptions,
