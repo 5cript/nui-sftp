@@ -328,7 +328,7 @@ Nui::ElementRenderer NewSessionDialog::ftpServerFields()
             .attributes = {
                 id = impl_->ftpUserInputId,
                 type = "Text",
-                "placeholder"_attr = language->get("newSessionDialog", "ftpUserPlaceholder"),
+                "placeholder"_attr = language->getObserved("newSessionDialog", "ftpUserPlaceholder"),
                 "keydown"_event = textKeyHandler(impl_->ftpUserInputId, [this](std::string const& value) {
                     impl_->ftpUser = value;
                     return true;
