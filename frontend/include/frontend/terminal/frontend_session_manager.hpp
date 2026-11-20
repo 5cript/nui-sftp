@@ -67,7 +67,7 @@ class FrontendSessionManager
      * Must be called before createChannel().  On failure the manager begins
      * disposing itself and calls @p onOpen with the failure and its reason.
      *
-     * @param onOpen  Completion callback — (result, info).
+     * @param onOpen  Completion callback with the result and the reason of a failure.
      * @param failureToast Whether the errors logged when it fails are shown as toasts, see TerminalEngine::open.
      */
     void open(
