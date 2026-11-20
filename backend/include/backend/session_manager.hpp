@@ -2,6 +2,7 @@
 
 #include <backend/session.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
+#include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/password/password_provider.hpp>
@@ -26,6 +27,7 @@
 #include <map>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -34,11 +36,15 @@ class SessionManager
     , public RpcHelper::StrandRpc
 {
   public:
+    /**
+     * @param ftpEngine Runs the FTP sessions, outlives the shutdown() of this manager.
+     */
     SessionManager(
         boost::asio::any_io_executor executor,
         Persistence::StateHolder& stateHolder,
         Nui::Window& wnd,
-        Nui::RpcHub& hub
+        Nui::RpcHub& hub,
+        FtpEngineContext& ftpEngine
     );
     ~SessionManager();
     SessionManager(SessionManager const&) = delete;
@@ -73,7 +79,8 @@ class SessionManager
         std::function<std::expected<SessionConnection, std::string>(std::function<void()> onConnectionLoss)>;
 
     /**
-     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed.
+     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed. Refused once
+     *        shutdown() closed the sessions.
      * @param sftpOptions The transfer options of the session.
      * @param failureToast Whether the error logged when it fails is shown as a toast.
      */
@@ -86,7 +93,14 @@ class SessionManager
     );
 
     /**
-     * @brief Cancels pending and later password prompts and waits until the strand has run its queued work.
+     * @brief Connects to the FTP server of @p sessionOptions, whose references are resolved. Asks the password
+     *        providers for the password unless the login is anonymous.
+     */
+    Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
+
+    /**
+     * @brief Cancels pending and later password prompts, closes every session and refuses new ones, and waits until
+     *        the strand has run its queued work. The FTP engine may go afterwards.
      *
      * Call before the window shuts down, never from within the strand.
      */
@@ -107,9 +121,25 @@ class SessionManager
     Connect secureShellConnect(Persistence::SshSessionOptions sessionOptions);
 
     /**
-     * Handles calls from the frontend to connect to a new ssh server with the following payload:
+     * @brief Asks the password providers in the order of their priority until one answers. On the strand, which it
+     *        blocks until then.
+     *
+     * @param whatFor What the prompt asks for, "password" or "keyPhrase".
+     * @return The password, nothing when every provider declined or prompts are cancelled.
+     */
+    std::optional<std::string> askPassword(std::string const& whatFor, std::string const& prompt);
+
+    /**
+     * @brief Stops and removes every session, later ones are refused. On the strand.
+     */
+    void closeAllSessions();
+
+    /**
+     * Handles calls from the frontend to connect to a new server with the following payload:
      * {
-     *     engine: Persistence::SshTerminalEngine
+     *     engineType: "ssh" or "ftp" (optional, default "ssh"),
+     *     engineOptions: Persistence::SshSessionOptions or Persistence::FtpSessionOptions,
+     *     showFailureToast: bool (optional, default true)
      * }
      */
     void registerRpcSessionConnect();
@@ -124,9 +154,21 @@ class SessionManager
 
     /**
      * @brief Removes a session and closes all its channels. Safe to call from any thread.
-     * @param connectionLost The session lost its connection, its watches tell the frontend why they end.
      */
-    void removeSession(Ids::SessionId sessionId, bool connectionLost = false);
+    void removeSession(Ids::SessionId sessionId);
+
+    /**
+     * @brief Stops the session and removes it. On the strand.
+     * @param connectionLost The session lost its connection, its watches tell the frontend why they end.
+     * @return False when there is no such session.
+     */
+    bool eraseSession(Ids::SessionId const& sessionId, bool connectionLost);
+
+    /**
+     * @brief Removes a session that lost its connection and tells the frontend, unless it was removed before. On the
+     *        strand.
+     */
+    void onSessionLost(Ids::SessionId const& sessionId);
 
     /**
      * @brief Handles "Session::sftp::adoptBulkResume" — pulls saved bulk
@@ -171,6 +213,10 @@ class SessionManager
   private:
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
+    /** @brief Outlives every session, see shutdown(). */
+    FtpEngineContext* ftpEngine_{};
+    /** @brief Set by shutdown() once the sessions are closed, new ones are refused from then on. On the strand. */
+    bool sessionsClosed_{false};
     /** @brief Outlive the sessions, which watch through them. */
     std::unique_ptr<FileTracking::TempDirInstanceManager> temporaryInstances_{};
     std::unique_ptr<FileTracking::LocalWatchManager> localWatches_{};

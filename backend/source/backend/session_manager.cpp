@@ -1,4 +1,5 @@
 #include <backend/session_manager.hpp>
+#include <backend/ftp/ftp_connect.hpp>
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <log/log.hpp>
@@ -8,6 +9,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/asio/dispatch.hpp>
+#include <boost/asio/post.hpp>
 #include <roar/utility/base64.hpp>
 #include <roar/filesystem/special_paths.hpp>
 
@@ -17,6 +19,7 @@
 #include <mutex>
 #include <cstring>
 #include <ranges>
+#include <string_view>
 
 using namespace Detail;
 
@@ -66,6 +69,33 @@ namespace
             return Log::Toast::Skip;
         return Log::Toast::Show;
     }
+
+    /**
+     * @brief The engine a connect asks for: SSH without "engineType", else the one it names, SSH or FTP.
+     */
+    std::expected<Persistence::TerminalEngineType, std::string> connectedEngineOf(nlohmann::json const& parameters)
+    {
+        const auto found = parameters.find("engineType");
+        if (found == parameters.end())
+            return Persistence::TerminalEngineType::ssh;
+        if (!found->is_string())
+            return std::unexpected("The engineType of a connect is not a string.");
+        const auto name = found->get<std::string>();
+        const auto type = Persistence::terminalEngineTypeFromName(name);
+        if (!type || *type == Persistence::TerminalEngineType::shell)
+            return std::unexpected(fmt::format("Cannot connect to a server with the engine '{}'.", name));
+        return *type;
+    }
+
+    /**
+     * @brief The name of a connected engine in log messages.
+     */
+    std::string_view engineNameOf(Persistence::TerminalEngineType type)
+    {
+        if (type == Persistence::TerminalEngineType::ftp)
+            return "FTP";
+        return "SSH";
+    }
 }
 
 int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, void* userdata)
@@ -83,22 +113,7 @@ int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, 
         );
     }
 
-    if (manager->passwordProviders_.empty())
-        return -1;
-
-    const auto request = manager->beginPasswordRequest();
-    if (!request)
-        return -1;
-    const auto endRequest = Nui::ScopeExit(
-        [manager]() noexcept
-        {
-            manager->endPasswordRequest();
-        }
-    );
-
-    askNextProvider(manager->passwordProviders_.begin(), manager->passwordProviders_.end(), request, whatFor, prompt);
-
-    const auto password = request->wait();
+    const auto password = manager->askPassword(whatFor, prompt);
 
     if (password.has_value())
     {
@@ -113,10 +128,12 @@ SessionManager::SessionManager(
     boost::asio::any_io_executor executor,
     Persistence::StateHolder& stateHolder,
     Nui::Window& wnd,
-    Nui::RpcHub& hub
+    Nui::RpcHub& hub,
+    FtpEngineContext& ftpEngine
 )
     : RpcHelper::StrandRpc{executor, wnd, hub}
     , stateHolder_{&stateHolder}
+    , ftpEngine_{&ftpEngine}
     , localOperationQueue_{std::make_shared<LocalOperationQueue>(executor_, strand_, wnd, hub, localDeletionPrevented_)}
 {}
 
@@ -191,12 +208,47 @@ void SessionManager::shutdown()
 
     std::promise<void> strandDrained;
     within_strand_do_no_recurse(
-        [&strandDrained]()
+        [this, &strandDrained]()
         {
-            strandDrained.set_value();
+            const auto drained = Nui::ScopeExit(
+                [&strandDrained]() noexcept
+                {
+                    strandDrained.set_value();
+                }
+            );
+            closeAllSessions();
         }
     );
     strandDrained.get_future().wait();
+}
+
+void SessionManager::closeAllSessions()
+{
+    sessionsClosed_ = true;
+    if (!sessions_.empty())
+        Log::info("Closing all {} session(s).", sessions_.size());
+    for (auto const& session : std::views::values(sessions_))
+        session->stop();
+    sessions_.clear();
+}
+
+std::optional<std::string> SessionManager::askPassword(std::string const& whatFor, std::string const& prompt)
+{
+    if (passwordProviders_.empty())
+        return std::nullopt;
+
+    const auto request = beginPasswordRequest();
+    if (!request)
+        return std::nullopt;
+    const auto endRequest = Nui::ScopeExit(
+        [this]() noexcept
+        {
+            endPasswordRequest();
+        }
+    );
+
+    askNextProvider(passwordProviders_.begin(), passwordProviders_.end(), request, whatFor, prompt);
+    return request->wait();
 }
 
 std::shared_ptr<PasswordRequest> SessionManager::beginPasswordRequest()
@@ -244,6 +296,24 @@ SessionManager::Connect SessionManager::secureShellConnect(Persistence::SshSessi
     };
 }
 
+SessionManager::Connect SessionManager::ftpConnect(Persistence::FtpSessionOptions sessionOptions)
+{
+    return [this, sessionOptions = std::move(sessionOptions)](
+               std::function<void()> onConnectionLoss
+           ) -> std::expected<SessionConnection, std::string>
+    {
+        return FtpConnect::connect(
+            *ftpEngine_,
+            sessionOptions,
+            [this](std::string const& prompt)
+            {
+                return askPassword("password", prompt);
+            },
+            std::move(onConnectionLoss)
+        );
+    };
+}
+
 void SessionManager::addSession(
     Connect connect,
     Persistence::SftpOptions sftpOptions,
@@ -258,37 +328,22 @@ void SessionManager::addSession(
             failureToast,
             onComplete = std::move(onComplete)]()
         {
+            if (sessionsClosed_)
+                return onComplete(std::nullopt, "The application is closing, no session is connected any more.");
+
             const auto sessionId = Ids::SessionId{Ids::generateId()};
 
             auto connection = connect(
-                // Self destruct callback
-                [weak = weak_from_this(), sessionId]()
+                // Self destruct callback, posted: a connection may report its loss from within its start() on the
+                // strand.
+                [weak = weak_from_this(), strand = strand_, sessionId]()
                 {
-                    auto self = weak.lock();
-                    if (!self)
-                        return;
-                    self->removeSession(sessionId, /*connectionLost=*/true);
-
-                    // Notify frontend of session loss:
-                    self->wnd_->runInJavascriptThread(
-                        [hub_ = self->hub_, sessionId]()
+                    boost::asio::post(
+                        *strand,
+                        [weak, sessionId]()
                         {
-                            try
-                            {
-                                RpcHelper::callRemoteSafely(
-                                    *hub_, fmt::format("Session::{}::onDisconnect", sessionId.value())
-                                );
-                            }
-                            catch (const std::exception& e)
-                            {
-                                // There should never anything throw here, but lets log just in case and dont let an
-                                // exception escape out of this lambda.
-                                Log::error(
-                                    "Failed to call Session::{}::onDisconnect: {}.",
-                                    sessionId.value(),
-                                    Utility::errorMessage(e)
-                                );
-                            }
+                            if (auto self = weak.lock(); self)
+                                self->onSessionLost(sessionId);
                         }
                     );
                 }
@@ -336,22 +391,51 @@ void SessionManager::addSession(
     );
 }
 
-void SessionManager::removeSession(Ids::SessionId sessionId, bool connectionLost)
+void SessionManager::removeSession(Ids::SessionId sessionId)
 {
     within_strand_do(
-        [this, sessionId, connectionLost]()
+        [this, sessionId]()
         {
-            if (auto iter = sessions_.find(sessionId); iter != sessions_.end())
+            eraseSession(sessionId, /*connectionLost=*/false);
+        }
+    );
+}
+
+bool SessionManager::eraseSession(Ids::SessionId const& sessionId, bool connectionLost)
+{
+    const auto iter = sessions_.find(sessionId);
+    if (iter == sessions_.end())
+    {
+        Log::warn("Cannot remove session, no session found with id: {}", sessionId.value());
+        return false;
+    }
+    Log::info("Removing session with id: {}", sessionId.value());
+    if (connectionLost)
+        iter->second->onConnectionLost();
+    iter->second->stop();
+    sessions_.erase(iter);
+    return true;
+}
+
+void SessionManager::onSessionLost(Ids::SessionId const& sessionId)
+{
+    if (!eraseSession(sessionId, /*connectionLost=*/true))
+        return;
+
+    wnd_->runInJavascriptThread(
+        [hub = hub_, sessionId]()
+        {
+            try
             {
-                Log::info("Removing session with id: {}", sessionId.value());
-                if (connectionLost)
-                    iter->second->onConnectionLost();
-                iter->second->stop();
-                sessions_.erase(iter);
+                RpcHelper::callRemoteSafely(*hub, fmt::format("Session::{}::onDisconnect", sessionId.value()));
             }
-            else
+            catch (const std::exception& e)
             {
-                Log::warn("Cannot remove session, no session found with id: {}", sessionId.value());
+                // There should never anything throw here, but lets log just in case and dont let an
+                // exception escape out of this lambda.
+                Log::error(
+                    "Failed to call Session::{}::onDisconnect: {}.", sessionId.value(), Utility::errorMessage(e)
+                );
             }
         }
     );
@@ -386,7 +470,15 @@ void SessionManager::registerRpcSessionConnect()
         .perform(
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
-                Log::info("Connecting to ssh server with parameters: {}", parameters.dump(4));
+                const auto engineType = connectedEngineOf(parameters);
+                if (!engineType)
+                {
+                    Log::error("Cannot connect: {}", engineType.error());
+                    return reply.error(engineType.error());
+                }
+                // The FTP parameters are not logged as a whole.
+                if (*engineType == Persistence::TerminalEngineType::ssh)
+                    Log::info("Connecting to ssh server with parameters: {}", parameters.dump(4));
 
                 if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::connect", parameters}.hasValueDeep(
                         "engineOptions"
@@ -398,13 +490,16 @@ void SessionManager::registerRpcSessionConnect()
                 const auto failureToast = failureToastOf(parameters);
                 auto onComplete = rpcSafe(
                     std::move(reply),
-                    [failureToast](auto const& reply, auto const& maybeId, auto const& maybeErrorMessage)
+                    [failureToast, engineName = engineNameOf(*engineType)](
+                        auto const& reply, auto const& maybeId, auto const& maybeErrorMessage
+                    )
                     {
                         if (!maybeId)
                         {
                             Log::error(
                                 failureToast,
-                                "Failed to connect to ssh server: {}",
+                                "Failed to connect to {} server: {}",
+                                engineName,
                                 maybeErrorMessage.value_or("unknown error")
                             );
                             return reply(
@@ -413,10 +508,23 @@ void SessionManager::registerRpcSessionConnect()
                             );
                         }
 
-                        Log::info("Connected to ssh server with id: {}", maybeId->value());
+                        Log::info("Connected to {} server with id: {}", engineName, maybeId->value());
                         return reply({{"id", maybeId->value()}});
                     }
                 );
+
+                if (*engineType == Persistence::TerminalEngineType::ftp)
+                {
+                    auto sessionOptions = parameters["engineOptions"].get<Persistence::FtpSessionOptions>();
+                    Log::info("Connecting to FTP server {}:{}", sessionOptions.host, sessionOptions.effectivePort());
+                    auto sftpOptions = sessionOptions.sftpOptions.value();
+                    return addSession(
+                        ftpConnect(std::move(sessionOptions)),
+                        std::move(sftpOptions),
+                        failureToast,
+                        std::move(onComplete)
+                    );
+                }
 
                 auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
                 auto sftpOptions = sessionOptions.sftpOptions.value();
