@@ -179,10 +179,12 @@ namespace FileTransferProtocol
                 // Nothing limits the final reply of the upload then, the end of the connection answers it.
                 Detail::endingOnException(
                     "The end of an upload's data connection",
-                    [control, data]()
+                    [weakControl = std::weak_ptr{control}, weakData = std::weak_ptr{data}]()
                     {
-                        data->close();
-                        control->close();
+                        if (const auto liveData = weakData.lock())
+                            liveData->close();
+                        if (const auto liveControl = weakControl.lock())
+                            liveControl->close();
                     }
                 )
             );
