@@ -501,7 +501,8 @@ namespace RemoteIo
         catch (...)
         {
             const auto reason = Utility::errorMessage(std::current_exception());
-            Log::error("A task of a processing thread threw, the thread ends: {}", reason);
+            // The failure handler is the report the user sees, its owner ends the session.
+            Log::error(Log::Toast::Skip, "A task of a processing thread threw, the thread ends: {}", reason);
             closeAfterException();
             reportFailure(reason);
         }
