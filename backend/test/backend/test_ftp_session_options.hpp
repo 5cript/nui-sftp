@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 extern std::filesystem::path temporaryRoot;
 
@@ -173,7 +174,7 @@ namespace Test
     }
 
 #ifndef _WIN32
-    TEST(FtpSessionOptionsTests, AConfigWithoutFtpOptionsGetsTheDefaultsWithoutAWarningOfItsOwn)
+    TEST(FtpSessionOptionsTests, AConfigOfAVersionBeforeFtpGetsTheFtpDefaultsWithoutAWarning)
     {
         const auto configHome = temporaryRoot / "ftp_session_options";
         const ScopedVariable configHomeVariable{"XDG_CONFIG_HOME", configHome.string()};
@@ -199,27 +200,41 @@ namespace Test
             holder.clearWarnings();
             return warnings;
         };
-        // A first load writes every default, the config of a version before FTP is that without the FTP options.
+        // A first load writes every default, the config of a version before FTP is that without the FTP members.
         load();
         {
             std::ifstream reader{path, std::ios_base::binary};
             auto earlier = nlohmann::json::parse(reader);
             earlier.erase("ftpOptions");
+            earlier.erase("ftpEngineThreads");
+            earlier["sessionLayouts"].erase("ftp");
+            auto inheritables = nlohmann::json(Persistence::InheritableReferences{});
+            inheritables.erase("ftpOptions");
+            earlier["lastDirectConnectInheritables"] = inheritables;
             std::ofstream writer{path, std::ios_base::binary};
             writer << earlier.dump(4);
         }
 
         const auto warnings = load();
 
-        // A member a version adds is reported like every other missing member, nothing more.
-        ASSERT_EQ(warnings.size(), 1u) << nlohmann::json(warnings).dump();
-        EXPECT_EQ(warnings.front().kind, Persistence::LoadWarningKind::MissingFieldsDefaulted);
-        ASSERT_EQ(warnings.front().arguments.size(), 1u);
-        EXPECT_NE(warnings.front().arguments.front().find("ftpOptions"), std::string::npos);
+        EXPECT_TRUE(warnings.empty()) << nlohmann::json(warnings).dump();
         ASSERT_TRUE(holder.stateCache().ftpOptions.contains("default"));
         EXPECT_EQ(holder.stateCache().ftpOptions.at("default").maxConnections, 4);
+        ASSERT_TRUE(holder.stateCache().lastDirectConnectInheritables.has_value());
+        EXPECT_EQ(holder.stateCache().lastDirectConnectInheritables->ftpOptions, "default");
         std::ifstream reader{path, std::ios_base::binary};
         EXPECT_TRUE(nlohmann::json::parse(reader).contains("ftpOptions"));
+    }
+
+    TEST(FtpSessionOptionsTests, OtherMissingMembersAreStillReported)
+    {
+        auto layouts = nlohmann::json(Persistence::SessionLayouts{});
+        layouts.erase("ssh");
+        layouts.erase("ftp");
+
+        auto read = layouts.get<Persistence::SessionLayouts>();
+
+        EXPECT_EQ(read.collectMissingMembers(read), (std::vector<std::string>{"ssh"}));
     }
 #endif
 }

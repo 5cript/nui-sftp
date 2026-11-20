@@ -16,8 +16,10 @@
 #include <persistence/state/localization_options.hpp>
 #include <persistence/state/log_options.hpp>
 
+#include <array>
 #include <map>
 #include <string>
+#include <string_view>
 
 namespace Persistence
 {
@@ -34,6 +36,9 @@ namespace Persistence
         std::string sftpOptions{"default"};
         std::string ftpOptions{"default"};
 
+        /** @brief Missing in the configs of versions before FTP, see DefaultMissingMember. */
+        static constexpr std::array<std::string_view, 1u> silentlyDefaulted{"ftpOptions"};
+
         /**
          * @brief Points the inheritable options of the session at these groups.
          */
@@ -47,6 +52,9 @@ namespace Persistence
 
     struct State : public DefaultMissingMember
     {
+        /** @brief Missing in the configs of versions before FTP, see DefaultMissingMember. */
+        static constexpr std::array<std::string_view, 1u> silentlyDefaulted{"ftpOptions"};
+
         std::map<std::string, TerminalOptions> terminalOptions{};
         std::map<std::string, Termios> termios{};
         std::map<std::string, SshOptions> sshOptions{};

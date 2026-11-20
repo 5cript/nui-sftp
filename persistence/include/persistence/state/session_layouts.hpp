@@ -5,8 +5,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <map>
 #include <string>
+#include <string_view>
 
 namespace Persistence
 {
@@ -22,6 +24,9 @@ namespace Persistence
          * layout then.
          */
         std::map<std::string, nlohmann::json> ftp{};
+
+        /** @brief Missing in the configs of versions before FTP, see DefaultMissingMember. */
+        static constexpr std::array<std::string_view, 1u> silentlyDefaulted{"ftp"};
 
         /**
          * @brief The layouts shared by the sessions of a type.
