@@ -685,7 +685,7 @@ void FrontendSessionManager::open(
             if (result == EngineOpenResult::Opened)
                 return onOpen(result, info);
             if (result == EngineOpenResult::LoginCancelled)
-                Log::info("The login of the session was cancelled: '{}'", info);
+                Log::debug("The login of the session was cancelled");
             else
                 Log::error(failureToast, "Failed to open session: '{}'", info);
             dispose(

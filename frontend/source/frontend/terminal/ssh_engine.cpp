@@ -66,6 +66,9 @@ void SshTerminalEngine::open(std::function<void(EngineOpenResult, std::string co
         {
             if (!val.hasOwnProperty("id"))
             {
+                // The user cancelled the login, which needs no message.
+                if (const auto result = connectFailureOf(val); result == EngineOpenResult::LoginCancelled)
+                    return onOpen(result, "");
                 Log::error(failureToast, "SessionManager::connect callback did not return an id");
                 std::string error = "";
                 if (val.hasOwnProperty("error"))

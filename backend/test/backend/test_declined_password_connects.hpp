@@ -61,7 +61,6 @@ namespace Test
                     declined
                 ),
                 {},
-                Log::Toast::Skip,
                 [completed, declined](std::optional<Ids::SessionId> const&, std::optional<std::string> const&)
                 {
                     completed->set_value(*declined);

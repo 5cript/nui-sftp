@@ -88,15 +88,13 @@ class SessionManager
         std::function<std::expected<SessionConnection, std::string>(std::function<void()> onConnectionLoss)>;
 
     /**
-     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed. Refused once
-     *        shutdown() closed the sessions.
+     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed and reports it.
+     *        Refused once shutdown() closed the sessions.
      * @param sftpOptions The transfer options of the session.
-     * @param failureToast Whether the error logged when it fails is shown as a toast.
      */
     void addSession(
         Connect connect,
         Persistence::SftpOptions sftpOptions,
-        Log::Toast failureToast,
         std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)>
             onComplete
     );

@@ -88,7 +88,7 @@ void ProtoSession::start()
             }
             if (result == EngineOpenResult::LoginCancelled && impl_->onLoginCancelled)
             {
-                Log::info("ProtoSession: the login was cancelled");
+                Log::debug("ProtoSession: the login was cancelled");
                 return impl_->onLoginCancelled(this);
             }
             Log::warn("ProtoSession: transport open failed: {}", info);

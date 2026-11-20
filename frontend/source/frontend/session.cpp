@@ -649,7 +649,7 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
 
     // Transport is already up: drive the post-open success branch synchronously
     // rather than waiting on an open() callback.
-    onOpenSession(true, "adopted from proto-session");
+    onOpenSession(EngineOpenResult::Opened, "adopted from proto-session");
 }
 
 std::optional<nlohmann::json> Session::getLayout() const
@@ -741,7 +741,7 @@ void Session::createRemoteEngine(std::unique_ptr<TerminalEngine> engine)
     impl_->frontendSessionManager.value()->open(
         [this](EngineOpenResult result, std::string const& info)
         {
-            onOpenSession(result == EngineOpenResult::Opened, info);
+            onOpenSession(result, info);
         }
     );
 }
@@ -771,7 +771,7 @@ void Session::createExecutingEngine()
     impl_->frontendSessionManager.value()->open(
         [this](EngineOpenResult result, std::string const& info)
         {
-            onOpenSession(result == EngineOpenResult::Opened, info);
+            onOpenSession(result, info);
         }
     );
 
@@ -927,10 +927,18 @@ void Session::resumeRemoteSession(std::string const& address)
     impl_->snapshotManager->resetPending();
 }
 
-void Session::onOpenSession(bool success, std::string const& info)
+void Session::onOpenSession(EngineOpenResult result, std::string const& info)
 {
+    const bool success = result == EngineOpenResult::Opened;
     if (impl_->onOpened)
         std::exchange(impl_->onOpened, {})(success, info);
+
+    const bool reconnecting = impl_->snapshotManager && impl_->snapshotManager->hasPending();
+    if (result == EngineOpenResult::LoginCancelled && !reconnecting)
+    {
+        closeSelf();
+        return;
+    }
 
     if (!success)
     {

@@ -367,16 +367,11 @@ SessionManager::Connect SessionManager::ftpConnect(Persistence::FtpSessionOption
 void SessionManager::addSession(
     Connect connect,
     Persistence::SftpOptions sftpOptions,
-    Log::Toast failureToast,
     std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)> onComplete
 )
 {
     within_strand_do(
-        [this,
-            connect = std::move(connect),
-            sftpOptions = std::move(sftpOptions),
-            failureToast,
-            onComplete = std::move(onComplete)]()
+        [this, connect = std::move(connect), sftpOptions = std::move(sftpOptions), onComplete = std::move(onComplete)]()
         {
             if (sessionsClosed_)
                 return onComplete(std::nullopt, "The application is closing, no session is connected any more.");
@@ -434,7 +429,6 @@ void SessionManager::addSession(
             }
             else
             {
-                Log::error(failureToast, "Failed to create session: {}", connection.error());
                 onComplete(std::nullopt, connection.error());
             }
         }
@@ -586,6 +580,16 @@ void SessionManager::registerRpcSessionConnect()
                         engineName = engineNameOf(request->engine),
                         passwordDeclined](auto const& reply, auto const& maybeId, auto const& maybeErrorMessage)
                     {
+                        if (!maybeId && *passwordDeclined)
+                        {
+                            // The user cancelled the password prompt, which is no failure to report.
+                            Log::debug("The login to the {} server ended without a password", engineName);
+                            return reply(
+                                {{"error",
+                                     maybeErrorMessage.value_or("backend.sessionManager.connectFailedUnspecified")},
+                                    {"cancelled", true}}
+                            );
+                        }
                         if (!maybeId)
                         {
                             Log::error(
@@ -606,9 +610,7 @@ void SessionManager::registerRpcSessionConnect()
                     }
                 );
 
-                addSession(
-                    std::move(request->connect), std::move(request->sftpOptions), failureToast, std::move(onComplete)
-                );
+                addSession(std::move(request->connect), std::move(request->sftpOptions), std::move(onComplete));
             }
         );
 }

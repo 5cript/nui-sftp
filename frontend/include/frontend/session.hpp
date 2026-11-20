@@ -17,6 +17,7 @@
 #include <frontend/file_explorer/remote_side_model.hpp>
 #include <frontend/command_store/command_store_client.hpp>
 #include <frontend/session_snapshot.hpp>
+#include <frontend/terminal/terminal_engine.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/dropped_item.hpp>
 #include <ids/ids.hpp>
@@ -187,7 +188,11 @@ class Session
     std::vector<LocalShellAdoption> ejectLocalShellsForHandoff();
 
   private:
-    void onOpenSession(bool success, std::string const& info);
+    /**
+     * @brief Shows the opened session, or tells why it could not open and closes it. A login the user cancelled
+     *        closes it without a word.
+     */
+    void onOpenSession(EngineOpenResult result, std::string const& info);
     void onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string const& info);
 
     /**

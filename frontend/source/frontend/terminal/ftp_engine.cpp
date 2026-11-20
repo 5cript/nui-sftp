@@ -90,10 +90,14 @@ void FtpTerminalEngine::open(std::function<void(EngineOpenResult, std::string co
             }
             if (!reply.hasOwnProperty("id"))
             {
+                const auto result = connectFailureOf(reply);
+                // The user cancelled the login, which needs no message.
+                if (result == EngineOpenResult::LoginCancelled)
+                    return onOpen(result, "");
                 // The backend logged the reason with failureToast already.
                 const auto error = replyError(reply, "The FTP connect returned no session");
                 Log::error(Log::Toast::Skip, "FTP connect failed: {}", error);
-                return onOpen(connectFailureOf(reply), error);
+                return onOpen(result, error);
             }
             impl_->sessionId = Ids::makeSessionId(reply["id"].as<std::string>());
             onSuccessfulOpen();

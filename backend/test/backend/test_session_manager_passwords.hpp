@@ -105,7 +105,6 @@ namespace Test
                     return std::unexpected("asked");
                 },
                 {},
-                Log::Toast::Skip,
                 [completed](std::optional<Ids::SessionId> const&, std::optional<std::string> const&)
                 {
                     completed->set_value();

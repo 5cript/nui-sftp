@@ -962,7 +962,6 @@ namespace Test
             manager_->addSession(
                 std::move(connect),
                 std::move(transfers),
-                Log::Toast::Skip,
                 [completed](std::optional<Ids::SessionId> const& id, std::optional<std::string> const& error)
                 {
                     completed->set_value({.id = id, .error = error});
@@ -1079,7 +1078,6 @@ namespace Test
         manager_->addSession(
             std::move(loseBeforeTheStart),
             {},
-            Log::Toast::Skip,
             [completed](std::optional<Ids::SessionId> const& id, std::optional<std::string> const& error)
             {
                 completed->set_value({.id = id, .error = error});
