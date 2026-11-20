@@ -28,6 +28,7 @@
 #include <optional>
 #include <regex>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -149,6 +150,16 @@ namespace Test
                 .expect("PASS", password)
                 .reply("230 Logged in")
                 .serve(std::make_shared<TroubledTreeResponder>(std::move(tree), std::move(rule)));
+            return script;
+        }
+
+        /**
+         * @brief The greeting, then USER is never answered: a login to a server that went silent.
+         */
+        Script silentAfterTheGreeting()
+        {
+            Script script{};
+            script.reply("220 Ready").expect("USER").checkpoint("login stalled").stall();
             return script;
         }
 
@@ -635,10 +646,11 @@ namespace Test
         std::expected<SessionConnection, std::string> connect(
             Persistence::FtpSessionOptions const& options,
             FtpConnect::PasswordSource const& askPassword,
-            std::function<void()> onConnectionLoss = {}
+            std::function<void()> onConnectionLoss = {},
+            std::stop_token const& stop = {}
         )
         {
-            return FtpConnect::connect(engine_, options, askPassword, std::move(onConnectionLoss));
+            return FtpConnect::connect(engine_, options, askPassword, std::move(onConnectionLoss), stop);
         }
 
         /**
@@ -766,6 +778,44 @@ namespace Test
         ASSERT_FALSE(connected);
         EXPECT_NE(connected.error().find("refused the login of alice"), std::string::npos) << connected.error();
         EXPECT_NE(connected.error().find("asks for an account"), std::string::npos) << connected.error();
+    }
+
+    TEST_F(FtpConnectTests, AStopEndsALoginThatRuns)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(silentAfterTheGreeting());
+        auto options = session();
+        // The login alone would wait a minute for the reply to USER.
+        options.ftpOptions.value().commandTimeoutSeconds = 60;
+        std::stop_source stop{};
+        auto connecting = std::async(
+            std::launch::async,
+            [this, &options, &stop]()
+            {
+                return connect(options, answering("s3cret"), {}, stop.get_token());
+            }
+        );
+        ASSERT_TRUE(server_->waitForCheckpoint("login stalled"));
+
+        const auto start = std::chrono::steady_clock::now();
+        stop.request_stop();
+        ASSERT_EQ(connecting.wait_for(std::chrono::seconds{20}), std::future_status::ready);
+        EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{20});
+        const auto connected = connecting.get();
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("was stopped"), std::string::npos) << connected.error();
+    }
+
+    TEST_F(FtpConnectTests, AStoppedConnectNeitherAsksNorConnects)
+    {
+        startServer();
+        std::stop_source stop{};
+        stop.request_stop();
+        const auto connected = connect(session(), FtpConnectTesting::neverAsked(), {}, stop.get_token());
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("was stopped"), std::string::npos) << connected.error();
+        EXPECT_TRUE(server_->transcript().empty()) << "connected after the stop";
     }
 
     TEST_F(FtpConnectTests, AnUntrustedCertificateFailsWithItsFingerprint)

@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 
 /**
@@ -76,12 +77,14 @@ namespace FtpConnect
      *
      * @param onConnectionLoss Called once when the session is lost after the start of the connection, on its
      *        processing thread, or from within start() for a loss before it.
-     * @return The logged in connection, or why the connect failed.
+     * @param stop Ends the connect, a login that runs within a moment, from any thread.
+     * @return The logged in connection, or why the connect failed or stopped.
      */
     std::expected<SessionConnection, std::string> connect(
         FtpEngineContext& engine,
         Persistence::FtpSessionOptions const& session,
         PasswordSource const& askPassword,
-        std::function<void()> onConnectionLoss
+        std::function<void()> onConnectionLoss,
+        std::stop_token const& stop = {}
     );
 }

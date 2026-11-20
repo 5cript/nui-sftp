@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <limits>
+#include <stop_token>
 #include <string_view>
 #include <utility>
 
@@ -348,13 +350,46 @@ namespace FtpConnect
             return withReason(fmt::format("TLS could not be set up with the FTP server {}", server), reason);
         }
 
+        std::string stoppedMessage(Persistence::FtpSessionOptions const& session)
+        {
+            return fmt::format(
+                "The connect to the FTP server {}:{} was stopped.", session.host, session.effectivePort()
+            );
+        }
+
+        using LoginOutcome = std::expected<FileTransferProtocol::LoginResult, FileTransferProtocol::LoginFailure>;
+
+        /**
+         * @brief How often the wait for a login looks whether the connect is to stop: the result of the login comes as
+         *        a future, which nothing else can wake.
+         */
+        constexpr auto stopCheckInterval = std::chrono::milliseconds{50};
+
+        /**
+         * @brief Waits for @p login until it completes or @p stop is requested.
+         *
+         * @return Nothing after a stop request.
+         */
+        std::optional<LoginOutcome> awaitLogin(std::future<LoginOutcome>& login, std::stop_token const& stop)
+        {
+            while (login.wait_for(stopCheckInterval) == std::future_status::timeout)
+            {
+                if (stop.stop_requested())
+                    return std::nullopt;
+            }
+            return login.get();
+        }
+
         std::expected<SessionConnection, std::string> logIn(
             FtpEngineContext& engine,
             FtpConnectionOptions options,
             Persistence::FtpSessionOptions const& session,
-            std::function<void()> onConnectionLoss
+            std::function<void()> onConnectionLoss,
+            std::stop_token const& stop
         )
         {
+            if (stop.stop_requested())
+                return std::unexpected(stoppedMessage(session));
             auto connection = std::make_unique<FileTransferProtocol::FtpConnection>(
                 engine.executor(),
                 engine.resolver(),
@@ -366,7 +401,12 @@ namespace FtpConnect
                         onConnectionLoss();
                 }
             );
-            const auto loggedIn = connection->logIn().get();
+            auto login = connection->logIn();
+            const auto outcome = awaitLogin(login, stop);
+            // The destructor of the connection fails a login that still runs.
+            if (!outcome)
+                return std::unexpected(stoppedMessage(session));
+            auto const& loggedIn = *outcome;
             if (!loggedIn)
                 return std::unexpected(loginFailureMessage(loggedIn.error(), session));
             Log::info("FTP: Logged in to {}:{}.", session.host, session.effectivePort());
@@ -496,9 +536,12 @@ namespace FtpConnect
         FtpEngineContext& engine,
         Persistence::FtpSessionOptions const& session,
         PasswordSource const& askPassword,
-        std::function<void()> onConnectionLoss
+        std::function<void()> onConnectionLoss,
+        std::stop_token const& stop
     )
     {
+        if (stop.stop_requested())
+            return std::unexpected(stoppedMessage(session));
         return tlsContextOf(session)
             .and_then(
                 [&session](std::shared_ptr<FileTransferProtocol::TlsContext> tlsContext)
@@ -513,9 +556,9 @@ namespace FtpConnect
                 }
             )
             .and_then(
-                [&engine, &session, &onConnectionLoss](FtpConnectionOptions options)
+                [&engine, &session, &onConnectionLoss, &stop](FtpConnectionOptions options)
                 {
-                    return logIn(engine, std::move(options), session, std::move(onConnectionLoss));
+                    return logIn(engine, std::move(options), session, std::move(onConnectionLoss), stop);
                 }
             );
     }
