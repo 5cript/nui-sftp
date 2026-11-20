@@ -173,7 +173,7 @@ namespace Test
     }
 
 #ifndef _WIN32
-    TEST(FtpSessionOptionsTests, AConfigWithoutFtpOptionsGetsTheDefaultsWithoutAWarning)
+    TEST(FtpSessionOptionsTests, AConfigWithoutFtpOptionsGetsTheDefaultsWithoutAWarningOfItsOwn)
     {
         const auto configHome = temporaryRoot / "ftp_session_options";
         const ScopedVariable configHomeVariable{"XDG_CONFIG_HOME", configHome.string()};
@@ -211,7 +211,11 @@ namespace Test
 
         const auto warnings = load();
 
-        EXPECT_TRUE(warnings.empty());
+        // A member a version adds is reported like every other missing member, nothing more.
+        ASSERT_EQ(warnings.size(), 1u) << nlohmann::json(warnings).dump();
+        EXPECT_EQ(warnings.front().kind, Persistence::LoadWarningKind::MissingFieldsDefaulted);
+        ASSERT_EQ(warnings.front().arguments.size(), 1u);
+        EXPECT_NE(warnings.front().arguments.front().find("ftpOptions"), std::string::npos);
         ASSERT_TRUE(holder.stateCache().ftpOptions.contains("default"));
         EXPECT_EQ(holder.stateCache().ftpOptions.at("default").maxConnections, 4);
         std::ifstream reader{path, std::ios_base::binary};
