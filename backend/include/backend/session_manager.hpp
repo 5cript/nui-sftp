@@ -99,6 +99,12 @@ class SessionManager
     Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
 
     /**
+     * @brief @p connect, which also sets @p passwordDeclined to whether a password prompt got no password during it, a
+     *        prompt the user cancelled or no provider answered.
+     */
+    Connect noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool> passwordDeclined);
+
+    /**
      * @brief Cancels pending and later password prompts, closes every session and refuses new ones, and waits until
      *        the strand has run its queued work. The FTP engine may go afterwards.
      *
@@ -142,6 +148,8 @@ class SessionManager
      *     engineOptions: Persistence::SshSessionOptions or Persistence::FtpSessionOptions,
      *     showFailureToast: bool (optional, default true)
      * }
+     * and answers {id} or {error, cancelled}, cancelled when a password prompt got no password, so retrying on its own
+     * would only ask again.
      */
     void registerRpcSessionConnect();
 
@@ -234,6 +242,8 @@ class SessionManager
     /** @brief At most one, askPassDefault only runs within the strand. */
     std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};
     bool passwordPromptsCancelled_{false};
+    /** @brief The prompts askPassword got no password for, counted on the strand. */
+    std::size_t declinedPasswordPrompts_{0u};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};
     /// Backups of bulk operations interrupted by lost connection; consumed

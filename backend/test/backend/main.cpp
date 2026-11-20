@@ -72,6 +72,7 @@
 #include "test_ftp_engine_context.hpp"
 #include "test_ftp_connect.hpp"
 #include "test_session_manager_passwords.hpp"
+#include "test_declined_password_connects.hpp"
 #include "test_rpc_path_parameters.hpp"
 #include "test_logger.hpp"
 

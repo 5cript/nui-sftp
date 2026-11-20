@@ -249,7 +249,10 @@ std::optional<std::string> SessionManager::askPassword(std::string const& whatFo
         );
 
         askNextProvider(passwordProviders_.begin(), passwordProviders_.end(), request, whatFor, prompt);
-        return request->wait();
+        auto password = request->wait();
+        if (!password)
+            ++declinedPasswordPrompts_;
+        return password;
     }
     catch (std::exception const& exception)
     {
@@ -304,6 +307,20 @@ SessionManager::Connect SessionManager::secureShellConnect(Persistence::SshSessi
             std::move(onConnectionLoss)
         )
             .transform(&SessionConnection::fromSecureShell);
+    };
+}
+
+SessionManager::Connect
+SessionManager::noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool> passwordDeclined)
+{
+    return [this, connect = std::move(connect), passwordDeclined = std::move(passwordDeclined)](
+               std::function<void()> onConnectionLoss
+           ) -> std::expected<SessionConnection, std::string>
+    {
+        const auto declinedBefore = declinedPasswordPrompts_;
+        auto connection = connect(std::move(onConnectionLoss));
+        *passwordDeclined = declinedPasswordPrompts_ != declinedBefore;
+        return connection;
     };
 }
 
@@ -499,9 +516,10 @@ void SessionManager::registerRpcSessionConnect()
                 }
 
                 const auto failureToast = failureToastOf(parameters);
+                auto passwordDeclined = std::make_shared<bool>(false);
                 auto onComplete = rpcSafe(
                     std::move(reply),
-                    [failureToast, engineName = engineNameOf(*engineType)](
+                    [failureToast, engineName = engineNameOf(*engineType), passwordDeclined](
                         auto const& reply, auto const& maybeId, auto const& maybeErrorMessage
                     )
                     {
@@ -515,7 +533,8 @@ void SessionManager::registerRpcSessionConnect()
                             );
                             return reply(
                                 {{"error",
-                                    maybeErrorMessage.value_or("backend.sessionManager.connectFailedUnspecified")}}
+                                    maybeErrorMessage.value_or("backend.sessionManager.connectFailedUnspecified")},
+                                    {"cancelled", *passwordDeclined}}
                             );
                         }
 
@@ -530,7 +549,7 @@ void SessionManager::registerRpcSessionConnect()
                     Log::info("Connecting to FTP server {}:{}", sessionOptions.host, sessionOptions.effectivePort());
                     auto sftpOptions = sessionOptions.sftpOptions.value();
                     return addSession(
-                        ftpConnect(std::move(sessionOptions)),
+                        noticingDeclinedPasswords(ftpConnect(std::move(sessionOptions)), passwordDeclined),
                         std::move(sftpOptions),
                         failureToast,
                         std::move(onComplete)
@@ -540,7 +559,7 @@ void SessionManager::registerRpcSessionConnect()
                 auto sessionOptions = parameters["engineOptions"].get<Persistence::SshSessionOptions>();
                 auto sftpOptions = sessionOptions.sftpOptions.value();
                 addSession(
-                    secureShellConnect(std::move(sessionOptions)),
+                    noticingDeclinedPasswords(secureShellConnect(std::move(sessionOptions)), passwordDeclined),
                     std::move(sftpOptions),
                     failureToast,
                     std::move(onComplete)
