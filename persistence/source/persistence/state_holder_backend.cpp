@@ -394,6 +394,28 @@ namespace Persistence
             hasMissingDefaults = true;
         }
 
+        if (!stateCache_.ftpOptions.contains("default"))
+        {
+            // Added without a warning: every config of a version before FTP misses it.
+            Log::info("Config file misses ftp options, adding defaults.");
+            stateCache_.ftpOptions["default"] = FtpOptions{
+                .connectTimeoutSeconds = 15,
+                .commandTimeoutSeconds = 15,
+                .dataInactivityTimeoutSeconds = 30,
+                .transferReplyTimeoutSeconds = 15,
+                .maxConnections = 4,
+                .extendedPassive = FtpExtendedPassive::Automatic,
+                .trustPassiveAddress = false,
+                .keepIdleAlive = false,
+                .idleNoopIntervalSeconds = 60,
+                .keepaliveIdleSeconds = 5,
+                .keepaliveIntervalSeconds = 2,
+                .keepaliveCount = 3,
+                .minimumTlsVersion = FtpTlsVersion::Tls12,
+            };
+            mustSave = true;
+        }
+
         auto queueOptionsDefault = stateCache_.queueOptions.find("default");
         if (queueOptionsDefault == stateCache_.queueOptions.end())
         {

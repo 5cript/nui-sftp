@@ -17,6 +17,11 @@ namespace Persistence
     {
         std::map<std::string, nlohmann::json> ssh{};
         std::map<std::string, nlohmann::json> shell{};
+        /**
+         * @brief Older versions that know no FTP drop these when they save, the FTP sessions start with the default
+         * layout then.
+         */
+        std::map<std::string, nlohmann::json> ftp{};
 
         /**
          * @brief The layouts shared by the sessions of a type.
@@ -32,5 +37,5 @@ namespace Persistence
          */
         std::map<std::string, nlohmann::json> const& of(TerminalEngineType type) const;
     };
-    BOOST_DESCRIBE_STRUCT(SessionLayouts, (), (ssh, shell))
+    BOOST_DESCRIBE_STRUCT(SessionLayouts, (), (ssh, shell, ftp))
 }

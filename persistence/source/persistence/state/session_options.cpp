@@ -35,6 +35,9 @@ namespace Persistence
             case TerminalEngineType::shell:
                 engine = ExecutingSessionOptions{};
                 return;
+            case TerminalEngineType::ftp:
+                engine = FtpSessionOptions{};
+                return;
         }
     }
 
@@ -131,8 +134,46 @@ namespace Persistence
             selectUser(static_cast<std::size_t>(std::distance(users.begin(), iter)));
     }
 
+    int defaultFtpPort(FtpTlsMode tlsMode)
+    {
+        return tlsMode == FtpTlsMode::Implicit ? 990 : 21;
+    }
+
+    int FtpSessionOptions::effectivePort() const
+    {
+        return port.value_or(defaultFtpPort(tlsMode));
+    }
+
+    FtpUser FtpSessionOptions::loginUser() const
+    {
+        if (users.empty())
+            return FtpUser{};
+        return users.front();
+    }
+
+    void FtpSessionOptions::selectUser(std::size_t index)
+    {
+        Utility::Algorithm::moveToFront(users, index);
+    }
+
     SessionOptions SessionOptions::create(std::optional<std::string> icon, TerminalEngineType type)
     {
+        if (type == TerminalEngineType::ftp)
+        {
+            return SessionOptions{
+                .type = TerminalEngineType::ftp,
+                .icon = icon.value_or(""),
+                .engine =
+                    FtpSessionOptions{
+                        .ftpOptions = Reference{"default"},
+                        .sftpOptions = Reference{"default"},
+                    },
+                .terminalOptions = Reference{"default"},
+                .termios = Reference{"default"},
+                .queueOptions = Reference{"default"},
+                .historyOptions = Reference{"default"},
+            };
+        }
         if (type == TerminalEngineType::shell)
         {
             return SessionOptions{

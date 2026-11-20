@@ -2,6 +2,7 @@
 
 #include <persistence/state_core.hpp>
 #include <persistence/state/ssh_options.hpp>
+#include <persistence/state/ftp_options.hpp>
 #include <persistence/state/termios.hpp>
 #include <persistence/state/sftp_options.hpp>
 #include <persistence/state/queue_options.hpp>
@@ -22,9 +23,11 @@ namespace Persistence
     enum class TerminalEngineType
     {
         shell,
-        ssh
+        ssh,
+        /** @brief A file-only session without terminals. */
+        ftp
     };
-    BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, ssh);
+    BOOST_DESCRIBE_ENUM(TerminalEngineType, shell, ssh, ftp);
 
     /**
      * @brief The engine type with exactly this name, none for a type this version does not know.
@@ -141,6 +144,102 @@ namespace Persistence
             sshKeyPublic)
     )
 
+    /**
+     * @brief How an FTP session protects its connections.
+     */
+    enum class FtpTlsMode
+    {
+        /** @brief Plain FTP, nothing is protected. */
+        Plain,
+        /** @brief AUTH TLS on the plain control connection, usually on port 21. */
+        Explicit,
+        /** @brief TLS from the first byte, usually on port 990. */
+        Implicit
+    };
+    BOOST_DESCRIBE_ENUM(FtpTlsMode, Plain, Explicit, Implicit)
+
+    /**
+     * @brief One login of an FTP server. The password is asked for at each connect and never stored.
+     */
+    struct FtpUser : public DefaultMissingMember
+    {
+        /** @brief The user name to log in with, "anonymous" without one. */
+        std::optional<std::string> name{std::nullopt};
+        /** @brief Sent with ACCT when the server asks for an account. */
+        std::optional<std::string> account{std::nullopt};
+    };
+    BOOST_DESCRIBE_STRUCT(FtpUser, (), (name, account))
+
+    /**
+     * @brief The port FTP uses without a configured one: 990 for implicit TLS, 21 otherwise.
+     */
+    int defaultFtpPort(FtpTlsMode tlsMode);
+
+    struct FtpSessionOptions : public DefaultMissingMember
+    {
+        std::string host{};
+        /** @brief Without one, defaultFtpPort() of the TLS mode. */
+        std::optional<int> port{std::nullopt};
+
+        /**
+         * @brief The logins of the server. Connections log in as the first one, so the user picked for a connection
+         * is moved to the front before connecting.
+         */
+        std::vector<FtpUser> users{};
+        FtpTlsMode tlsMode{FtpTlsMode::Explicit};
+        /**
+         * @brief The SHA-256 of the public key of a certificate the user trusted although no authority vouched for
+         * it, as hex. A certificate with this key is accepted.
+         */
+        std::optional<std::string> pinnedPublicKeySha256{std::nullopt};
+        std::vector<std::string> remoteFavorites{};
+
+        /**
+         * @brief Maximum number of automatic reconnect attempts after a transport drop, see
+         *        SshSessionOptions::maxReconnectAttempts.
+         */
+        int maxReconnectAttempts{-1};
+        /**
+         * @brief Cap on the exponential backoff delay between retries, in milliseconds, see
+         *        SshSessionOptions::maxReconnectBackoffMs.
+         */
+        int maxReconnectBackoffMs{16000};
+
+        // Referenceables:
+        Referenceable<FtpOptions> ftpOptions{};
+        /** @brief The transfer options, which are the same for every protocol. */
+        Referenceable<SftpOptions> sftpOptions{};
+
+        /**
+         * @brief The port connections use: the configured one, else defaultFtpPort() of the TLS mode.
+         */
+        int effectivePort() const;
+
+        /**
+         * @brief The login connections use, an empty one when the server has no users.
+         */
+        FtpUser loginUser() const;
+
+        /**
+         * @brief Makes the user at the index the one connections log in as. Does nothing for an index out of range.
+         */
+        void selectUser(std::size_t index);
+    };
+    BOOST_DESCRIBE_STRUCT(
+        FtpSessionOptions,
+        (),
+        (ftpOptions,
+            sftpOptions,
+            host,
+            port,
+            users,
+            tlsMode,
+            pinnedPublicKeySha256,
+            remoteFavorites,
+            maxReconnectAttempts,
+            maxReconnectBackoffMs)
+    )
+
     struct SessionOptions : public DefaultMissingMember
     {
         // Generic options:
@@ -150,7 +249,7 @@ namespace Persistence
         bool startupSession{};
 
         // Engine:
-        std::variant<std::monostate, ExecutingSessionOptions, SshSessionOptions> engine{};
+        std::variant<std::monostate, ExecutingSessionOptions, SshSessionOptions, FtpSessionOptions> engine{};
 
         // Layout:
         std::optional<std::map<std::string, nlohmann::json>> layouts{};

@@ -67,6 +67,11 @@ namespace Persistence
             ssh->sshOptions.ref(Reference{sshOptions});
             ssh->sftpOptions.ref(Reference{sftpOptions});
         }
+        if (auto* ftp = std::get_if<FtpSessionOptions>(&session.engine))
+        {
+            ftp->ftpOptions.ref(Reference{ftpOptions});
+            ftp->sftpOptions.ref(Reference{sftpOptions});
+        }
     }
 
     State State::fullyResolve() const
@@ -98,6 +103,16 @@ namespace Persistence
             fillDefaults(ssh->sshOptions, sshOptions);
             fillDefaults(ssh->sftpOptions, sftpOptions);
         }
+        if (auto* ftp = std::get_if<FtpSessionOptions>(&session.engine))
+        {
+            fillDefaults(ftp->ftpOptions, ftpOptions);
+            fillDefaults(ftp->sftpOptions, sftpOptions);
+        }
+    }
+
+    int ftpEngineThreadsOf(State const& state)
+    {
+        return std::max(1, state.ftpEngineThreads.value_or(2));
     }
 
     void State::writeLegacyUsers()
