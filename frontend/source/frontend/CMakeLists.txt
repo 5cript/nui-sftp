@@ -235,7 +235,9 @@ set(DEPENDANT_LINK_OPTIONS "")
 set(DEPENDANT_COMPILE_OPTIONS "")
 set(PARCEL_ARGS "")
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(DEPENDANT_LINK_OPTIONS "-g1")
+    # The DWARF goes to index.wasm.debug.wasm beside the module, which DevTools loads for debugging: inside it the
+    # module grows past the 1 GiB that V8 instantiates.
+    set(DEPENDANT_LINK_OPTIONS "-g1" "-gseparate-dwarf")
     set(DEPENDANT_COMPILE_OPTIONS "-g1")
     set(PARCEL_ARGS "--no-optimize")
 else()
