@@ -28,6 +28,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -133,8 +134,8 @@ class SessionManager
     connectRequestOf(nlohmann::json const& parameters, std::shared_ptr<bool> passwordDeclined);
 
     /**
-     * @brief Cancels pending and later password prompts, closes every session and refuses new ones, and waits until
-     *        the strand has run its queued work. The FTP engine may go afterwards.
+     * @brief Cancels pending and later password prompts, stops a running FTP login, closes every session and refuses
+     *        new ones, and waits until the strand has run its queued work. The FTP engine may go afterwards.
      *
      * Call before the window shuts down, never from within the strand.
      */
@@ -270,6 +271,8 @@ class SessionManager
     /** @brief At most one, askPassDefault only runs within the strand. */
     std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};
     bool passwordPromptsCancelled_{false};
+    /** @brief Stops the FTP connects, a login that runs among them, once shutdown() begins. Thread-safe. */
+    std::stop_source connectsStop_{};
     /** @brief The prompts askPassword got no password for, counted on the strand. */
     std::size_t declinedPasswordPrompts_{0u};
     std::unique_ptr<std::thread> addSessionThread_{};

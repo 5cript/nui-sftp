@@ -212,6 +212,7 @@ SessionManager::~SessionManager()
 
 void SessionManager::shutdown()
 {
+    connectsStop_.request_stop();
     {
         std::scoped_lock lock{passwordRequestMutex_};
         passwordPromptsCancelled_ = true;
@@ -357,7 +358,8 @@ SessionManager::Connect SessionManager::ftpConnect(Persistence::FtpSessionOption
             {
                 return askPassword("password", prompt);
             },
-            std::move(onConnectionLoss)
+            std::move(onConnectionLoss),
+            connectsStop_.get_token()
         );
     };
 }

@@ -1148,6 +1148,31 @@ namespace Test
         EXPECT_TRUE(secureShell->connect);
     }
 
+    TEST_F(FtpSessionManagerTests, TheShutdownStopsAnFtpLoginThatRuns)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(silentAfterTheGreeting());
+        AnsweringProvider provider{"s3cret"};
+        manager_->addPasswordProvider(0, &provider);
+        auto options = session();
+        // The login alone would wait a minute for the reply to USER.
+        options.ftpOptions.value().commandTimeoutSeconds = 60;
+        auto transfers = options.sftpOptions.value();
+        auto connecting = startConnect(manager_->ftpConnect(std::move(options)), std::move(transfers));
+        ASSERT_TRUE(server_->waitForCheckpoint("login stalled"));
+
+        const auto start = std::chrono::steady_clock::now();
+        manager_->shutdown();
+        EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{20});
+        // The shutdown ran the strand empty, the connect included.
+        ASSERT_EQ(connecting.wait_for(std::chrono::seconds{0}), std::future_status::ready);
+        const auto connected = connecting.get();
+        EXPECT_FALSE(connected.id);
+        ASSERT_TRUE(connected.error);
+        EXPECT_NE(connected.error->find("was stopped"), std::string::npos) << *connected.error;
+    }
+
     TEST(ConnectRequestTests, AConnectIsSshWithoutAnEngineTypeAndElseSshOrFtp)
     {
         using Persistence::TerminalEngineType;
