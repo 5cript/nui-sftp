@@ -13,6 +13,7 @@
 #include <roar/utility/base64.hpp>
 #include <roar/filesystem/special_paths.hpp>
 
+#include <cassert>
 #include <optional>
 #include <thread>
 #include <future>
@@ -98,30 +99,28 @@ namespace
     }
 }
 
-int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, void* userdata)
+int askPassDefault(char const* prompt, char* buf, std::size_t length, int, int, void* userdata) noexcept
 {
     std::pair<SessionManager*, std::string> const* data =
         static_cast<std::pair<SessionManager*, std::string>*>(userdata);
 
     auto* manager = data->first;
-    std::string whatFor = data->second;
+    assert(manager->strand_->running_in_this_thread());
 
-    if (!manager->strand_->running_in_this_thread())
+    try
     {
-        throw std::runtime_error(
-            "askPassDefault called outside of strand - This critical bug will crash the application."
-        );
-    }
-
-    const auto password = manager->askPassword(whatFor, prompt);
-
-    if (password.has_value())
-    {
+        const auto password = manager->askPassword(data->second, prompt);
+        if (!password)
+            return -1;
         std::memset(buf, 0, length);
-        std::strncpy(buf, password.value().c_str(), length - 1);
+        std::strncpy(buf, password->c_str(), length - 1);
         return 0;
     }
-    return -1;
+    catch (...)
+    {
+        // Nothing may unwind through the C frames of libssh.
+        return -1;
+    }
 }
 
 SessionManager::SessionManager(
@@ -232,23 +231,35 @@ void SessionManager::closeAllSessions()
     sessions_.clear();
 }
 
-std::optional<std::string> SessionManager::askPassword(std::string const& whatFor, std::string const& prompt)
+std::optional<std::string> SessionManager::askPassword(std::string const& whatFor, std::string const& prompt) noexcept
 {
     if (passwordProviders_.empty())
         return std::nullopt;
 
-    const auto request = beginPasswordRequest();
-    if (!request)
-        return std::nullopt;
-    const auto endRequest = Nui::ScopeExit(
-        [this]() noexcept
-        {
-            endPasswordRequest();
-        }
-    );
+    try
+    {
+        const auto request = beginPasswordRequest();
+        if (!request)
+            return std::nullopt;
+        const auto endRequest = Nui::ScopeExit(
+            [this]() noexcept
+            {
+                endPasswordRequest();
+            }
+        );
 
-    askNextProvider(passwordProviders_.begin(), passwordProviders_.end(), request, whatFor, prompt);
-    return request->wait();
+        askNextProvider(passwordProviders_.begin(), passwordProviders_.end(), request, whatFor, prompt);
+        return request->wait();
+    }
+    catch (std::exception const& exception)
+    {
+        Log::error("Asking for a password failed: {}", Utility::errorMessage(exception));
+    }
+    catch (...)
+    {
+        Log::error("Asking for a password failed.");
+    }
+    return std::nullopt;
 }
 
 std::shared_ptr<PasswordRequest> SessionManager::beginPasswordRequest()

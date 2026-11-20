@@ -106,7 +106,8 @@ class SessionManager
      */
     void shutdown();
 
-    friend int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);
+    friend int
+    askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata) noexcept;
 
     // void startUpdateDispatching();
     // void stopUpdateDispatching();
@@ -125,9 +126,9 @@ class SessionManager
      *        blocks until then.
      *
      * @param whatFor What the prompt asks for, "password" or "keyPhrase".
-     * @return The password, nothing when every provider declined or prompts are cancelled.
+     * @return The password, nothing when every provider declined, prompts are cancelled or asking failed.
      */
-    std::optional<std::string> askPassword(std::string const& whatFor, std::string const& prompt);
+    std::optional<std::string> askPassword(std::string const& whatFor, std::string const& prompt) noexcept;
 
     /**
      * @brief Stops and removes every session, later ones are refused. On the strand.
@@ -242,4 +243,10 @@ class SessionManager
     std::shared_ptr<KeptTransferRegistry> keptTransferRegistry_{std::make_shared<KeptTransferRegistry>()};
 };
 
-int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);
+/**
+ * @brief The libssh callback that asks the password providers, see SessionManager::askPassword(). Only on the strand of
+ *        the SessionManager in the pair of @p userdata, with what the prompt asks for.
+ *
+ * @return 0 with the password in @p buf, -1 without one.
+ */
+int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata) noexcept;
