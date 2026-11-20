@@ -793,10 +793,14 @@ namespace FileTransferProtocol::Test
                 local_ = transport_.socket().local_endpoint(endpointError).address();
                 server_.record(connection_, Kind::Connected, peer_.to_string());
 
-                if (server_.implicitTls())
-                    co_await secure(server_, connection_, transport_, TlsBehaviour{}, "control");
-
                 bool goesOn = true;
+                if (server_.implicitTls())
+                {
+                    const auto outcome = co_await secure(server_, connection_, transport_, TlsBehaviour{}, "control");
+                    if (outcome == TlsOutcome::Failed)
+                        goesOn = co_await endAfterFailedHandshake();
+                }
+
                 for (; goesOn && !silent_ && step_ < script_.steps.size(); ++step_)
                 {
                     goesOn = co_await std::visit(
@@ -846,9 +850,10 @@ namespace FileTransferProtocol::Test
                     // Only the new bytes and a CR before them can hold the line end, long lines stay linear.
                     const auto searchFrom = received_.empty() ? std::size_t{0u} : received_.size() - 1u;
                     received_.append(chunk.data(), size);
-                    if (error)
+                    // OpenSSL 4 reads nothing and reports no error on a stream that already failed.
+                    if (error || size == 0u)
                     {
-                        endedBy_ = endReason(error);
+                        endedBy_ = error ? endReason(error) : std::string{"nothing read and no error"};
                         server_.record(connection_, Kind::Disconnected, endedBy_);
                         closed_ = true;
                         co_return std::nullopt;
@@ -968,7 +973,17 @@ namespace FileTransferProtocol::Test
                 const auto outcome = co_await secure(server_, connection_, transport_, step.behaviour, "control");
                 if (outcome != TlsOutcome::Failed)
                     co_return true;
-                // A stream whose handshake failed reads nothing more, the script ends with the connection.
+                co_return co_await endAfterFailedHandshake();
+            }
+
+            /**
+             * @brief Ends the connection after its TLS handshake failed: such a stream reads nothing more, so the
+             * script ends with the connection.
+             *
+             * @return Whether the script goes on, which it never does.
+             */
+            asio::awaitable<bool> endAfterFailedHandshake()
+            {
                 closed_ = true;
                 server_.record(connection_, Kind::Disconnected, "the TLS handshake failed");
                 co_await transport_.close(false);
