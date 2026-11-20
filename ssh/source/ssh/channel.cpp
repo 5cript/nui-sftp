@@ -1,6 +1,9 @@
 #include <ssh/channel.hpp>
 #include <ssh/session.hpp>
 
+#include <exception>
+#include <utility>
+
 namespace SecureShell
 {
     Channel::Channel(
@@ -72,14 +75,27 @@ namespace SecureShell
     int Channel::onData(ssh_session, ssh_channel, void* data, uint32_t length, int isStderr, void* self) noexcept
     {
         auto* channel = static_cast<Channel*>(self);
-        if (channel->closing_)
+        if (channel->closing_ || channel->handlerException_)
             return static_cast<int>(length);
-        std::string const text{static_cast<char const*>(data), length};
-        if (isStderr != 0)
-            channel->onStderr_(text);
-        else
-            channel->onStdout_(text);
+        try
+        {
+            std::string const text{static_cast<char const*>(data), length};
+            if (isStderr != 0)
+                channel->onStderr_(text);
+            else
+                channel->onStdout_(text);
+        }
+        catch (...)
+        {
+            channel->handlerException_ = std::current_exception();
+            channel->strand_->wake();
+        }
         return static_cast<int>(length);
+    }
+    void Channel::rethrowHandlerException()
+    {
+        if (handlerException_)
+            std::rethrow_exception(std::exchange(handlerException_, nullptr));
     }
     void Channel::onEnd(ssh_session, ssh_channel, void* self) noexcept
     {
@@ -105,6 +121,7 @@ namespace SecureShell
     RemoteIo::ProcessingThread::PermanentTaskStatus Channel::readTask()
     {
         using enum RemoteIo::ProcessingThread::PermanentTaskStatus;
+        rethrowHandlerException();
         if (!onStdout_ || !onStderr_ || !onExit_ || !channel_)
             return Done;
 
@@ -140,7 +157,10 @@ namespace SecureShell
             return rdy;
         };
 
-        if (readOne(true) < 0 || readOne(false) < 0)
+        const auto ended = readOne(true) < 0 || readOne(false) < 0;
+        // libssh may have called onData() from the reads above.
+        rethrowHandlerException();
+        if (ended)
         {
             removeCallbacks();
             if (!closing_)

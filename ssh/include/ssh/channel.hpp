@@ -11,6 +11,7 @@
 #include <functional>
 #include <string>
 #include <chrono>
+#include <exception>
 #include <expected>
 #include <future>
 
@@ -73,8 +74,8 @@ namespace SecureShell
          * Output reaches the handlers as libssh processes it, whichever call on the session read it from the
          * socket, so the processing thread can sleep until the socket has data.
          *
-         * @param onStdout Called on the processing thread with output. Must not throw, libssh may be its caller.
-         * @param onStderr Called on the processing thread with error output. Must not throw either.
+         * @param onStdout Called on the processing thread with output. An exception of it ends the session.
+         * @param onStderr Called on the processing thread with error output. An exception of it ends the session.
          * @param onExit Called on the processing thread when the channel or the connection ends, unless closed.
          * @return Why nothing is read: the task that reads was refused, as after the close of the channel or the end
          *         of the thread of the session.
@@ -90,8 +91,12 @@ namespace SecureShell
         void registerCallbacks();
         void removeCallbacks();
         /**
-         * @brief libssh calls these from its packet handling, where an exception must not pass: one that escapes the
-         *        output handlers ends the program.
+         * @brief Ends the session with the exception onData() kept, on the processing thread.
+         */
+        void rethrowHandlerException();
+        /**
+         * @brief libssh calls these from its packet handling, where an exception must not pass: onData() keeps one of
+         *        the output handlers for the read task, which ends the session with it.
          */
         static int
         onData(ssh_session session, ssh_channel channel, void* data, uint32_t length, int isStderr, void* self) noexcept;
@@ -106,6 +111,8 @@ namespace SecureShell
         std::function<void()> onExit_{};
         /** @brief Set by close on the caller's thread, so the read task no longer reports the exit it expects. */
         std::atomic_bool closing_{false};
+        /** @brief What an output handler threw while libssh was its caller, only touched on the processing thread. */
+        std::exception_ptr handlerException_{};
         /** @brief Registered with libssh by the first read task, only touched on the processing thread. */
         ssh_channel_callbacks_struct callbacks_{};
         bool callbacksRegistered_{false};

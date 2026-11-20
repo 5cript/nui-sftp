@@ -824,6 +824,49 @@ namespace SecureShell::Test
         EXPECT_FALSE(sftp->strand()->pushTask([]() {}));
     }
 
+    TEST_F(SshSessionTests, AnOutputHandlerThatThrowsEndsTheSessionAsALostConnection)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        std::promise<void> lost{};
+        std::atomic_bool reported{false};
+        auto expectedSession = makePasswordTestSession(
+            result->port,
+            [&lost, &reported]()
+            {
+                if (!reported.exchange(true))
+                    lost.set_value();
+            }
+        );
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        const auto channel = expectedChannel.value().lock();
+        ASSERT_TRUE(channel);
+        // The shell greets, whichever call of libssh reads that hands it to the handler.
+        channelStartReading(
+            channel,
+            [](std::string const&)
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+
+        EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
+        // The session's thread is gone, the next task is refused.
+        EXPECT_FALSE(channel->write("exit\r"));
+    }
+
     TEST_F(SshSessionTests, ClosingATerminalWhileTheThreadWaitsOnTheConnectionReturns)
     {
         auto [result, processThread] = createSshServer();
