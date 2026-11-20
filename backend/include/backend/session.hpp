@@ -127,13 +127,12 @@ class Session
     /**
      * Handles calls from the frontend to create a new channel with the following payload:
      * {
-     *     engine: {
-     *         sshSessionOptions: Persistence::SshSessionOptions,
-     *         environment: std::unordered_map<std::string, std::string>
-     *     },
+     *     engineOptions: Persistence::SshSessionOptions (terminals only),
+     *     termios: Persistence::Termios (terminals only),
      *     fileMode: boolean (optional, default false)
      * }
      *
+     * A session without terminals answers a call without file mode with an error.
      */
     void registerRpcCreateChannel();
 
@@ -188,6 +187,12 @@ class Session
      * }
      */
     void registerRpcSftpHomeDirectory();
+
+    /**
+     * Handles calls from the frontend for what a file system channel can do, with the channel id as its argument.
+     * Answers {success, capabilities: {probeEntries, symlinks, setModificationTime}}.
+     */
+    void registerRpcSftpCapabilities();
 
     /**
      * Handles calls from the frontend to read the remote XDG user directories with the following payload:
