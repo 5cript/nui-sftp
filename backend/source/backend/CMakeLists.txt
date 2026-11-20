@@ -15,6 +15,7 @@ add_library(
         dropped_entry.cpp
         opener_risk.cpp
         program_options.cpp
+        ftp/ftp_engine_context.cpp
         inspector_environment.cpp
         reduced_motion.cpp
         password/password_prompter.cpp
@@ -196,6 +197,7 @@ target_link_libraries(
         log
         persistence
         secure-shell
+        file-transfer-protocol
         ids
         events
         tar-archive
