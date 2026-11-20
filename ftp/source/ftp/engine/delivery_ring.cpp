@@ -50,12 +50,11 @@ namespace FileTransferProtocol
             }
 
             /**
-             * @return The slot, which its delivery gives back from now on.
+             * @brief The delivery of the slot gives it back from now on.
              */
-            std::size_t handOver()
+            void handOver() noexcept
             {
                 free_ = nullptr;
-                return slot_;
             }
 
           private:
@@ -151,8 +150,11 @@ namespace FileTransferProtocol
             }
             if (filled == 0u)
                 continue;
+            // Made before the loan ends: a delivery that cannot be made leaves the slot with the loan.
+            auto delivery = std::make_shared<DeliveryTask>(self, loan.slot(), filled);
+            loan.handOver();
             const auto pushed = engine_->pushTask(
-                [delivery = std::make_shared<DeliveryTask>(self, loan.handOver(), filled)]() mutable
+                [delivery = std::move(delivery)]() mutable
                 {
                     // Ends with the delivery, the thread keeps a task until its batch ran.
                     const auto ending = std::move(delivery);
