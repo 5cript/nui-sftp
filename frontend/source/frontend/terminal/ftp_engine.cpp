@@ -1,4 +1,5 @@
 #include <frontend/terminal/ftp_engine.hpp>
+#include <frontend/terminal/remote_engine_factory.hpp>
 #include <frontend/nlohmann_compat.hpp>
 #include <log/log.hpp>
 
@@ -64,12 +65,12 @@ FtpTerminalEngine::~FtpTerminalEngine()
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(FtpTerminalEngine);
 
-void FtpTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast)
+void FtpTerminalEngine::open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast)
 {
     if (impl_->blockedByDestruction)
     {
         Log::error("Blocked by destruction");
-        return onOpen(false, "Blocked by destruction");
+        return onOpen(EngineOpenResult::Failed, "Blocked by destruction");
     }
 
     Nui::val parameters = Nui::val::object();
@@ -92,11 +93,11 @@ void FtpTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
                 // The backend logged the reason with failureToast already.
                 const auto error = replyError(reply, "The FTP connect returned no session");
                 Log::error(Log::Toast::Skip, "FTP connect failed: {}", error);
-                return onOpen(false, error);
+                return onOpen(connectFailureOf(reply), error);
             }
             impl_->sessionId = Ids::makeSessionId(reply["id"].as<std::string>());
             onSuccessfulOpen();
-            onOpen(true, "");
+            onOpen(EngineOpenResult::Opened, "");
         },
         parameters
     );

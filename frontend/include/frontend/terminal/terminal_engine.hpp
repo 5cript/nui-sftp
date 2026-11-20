@@ -9,14 +9,27 @@
 #include <string>
 #include <functional>
 
+/**
+ * @brief How opening an engine ended.
+ */
+enum class EngineOpenResult
+{
+    Opened,
+    Failed,
+    /**
+     * @brief The login got no password, the user cancelled its prompt. Trying again on its own would only ask again.
+     */
+    LoginCancelled
+};
+
 class TerminalEngine
 {
   public:
     /**
-     * @brief Opens the engine, @p onOpen hears whether it succeeded.
+     * @brief Opens the engine, @p onOpen hears how it ended and why it failed.
      * @param failureToast Whether the errors logged when it fails are shown as toasts.
      */
-    virtual void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) = 0;
+    virtual void open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast) = 0;
     virtual std::string engineName() const = 0;
     virtual void dispose(std::function<void()> onDisposeComplete) = 0;
 

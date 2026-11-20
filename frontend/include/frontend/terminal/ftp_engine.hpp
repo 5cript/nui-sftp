@@ -39,7 +39,7 @@ class FtpTerminalEngine
      * @brief Connects to the server and logs in, see TerminalEngine::open. The backend logs its connect errors with
      *        @p failureToast too.
      */
-    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) override;
+    void open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast) override;
 
     std::string engineName() const override
     {

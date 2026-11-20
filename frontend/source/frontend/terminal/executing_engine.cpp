@@ -43,10 +43,10 @@ ExecutingTerminalEngine::~ExecutingTerminalEngine()
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(ExecutingTerminalEngine);
 
-void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen, Log::Toast)
+void ExecutingTerminalEngine::open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast)
 {
     // Local processes need no prior connection — signal success immediately.
-    onOpen(true, impl_->engineId);
+    onOpen(EngineOpenResult::Opened, impl_->engineId);
 }
 
 void ExecutingTerminalEngine::dispose(std::function<void()> onDisposeComplete)

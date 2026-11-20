@@ -54,6 +54,11 @@ class ProtoSession
         /// FrontendSessionManager::open's contract.
         std::function<void(ProtoSession*, std::string const&)> onFailed{};
         /**
+         * @brief Fired instead of onFailed when the login got no password because the user cancelled its prompt.
+         *        Nothing should retry on its own then, the next attempt would ask again.
+         */
+        std::function<void(ProtoSession*)> onLoginCancelled{};
+        /**
          * @brief Whether the errors logged when the probe fails are shown as toasts. A reconnect attempt that is
          *        retried skips them, the lost-connection overlay shows the attempts.
          */

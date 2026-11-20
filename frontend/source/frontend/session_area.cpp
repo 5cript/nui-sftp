@@ -685,6 +685,10 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
             protoParams.onFailed = [this, tabId](ProtoSession*, std::string const& info) {
                 onProtoFailed(tabId, info);
             };
+            // The next attempt would ask for the password again: the session stays lost until the user reconnects.
+            protoParams.onLoginCancelled = [this, tabId](ProtoSession*) {
+                abortReconnectCycle(tabId);
+            };
             // A failure that is retried shows in the lost-connection overlay, the last one also as a toast.
             protoParams.failureToast = isFinalAttempt(reconnectState) ? Log::Toast::Show : Log::Toast::Skip;
             reconnectState.candidate = std::make_unique<ProtoSession>(std::move(protoParams));

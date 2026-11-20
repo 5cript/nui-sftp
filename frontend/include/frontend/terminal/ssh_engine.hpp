@@ -30,7 +30,7 @@ class SshTerminalEngine
      * @brief Connects to the server, see TerminalEngine::open. The backend logs its connect errors with
      *        @p failureToast too.
      */
-    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) override;
+    void open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast) override;
 
     /**
      * @brief Spawns an SSH shell channel. @p options is unused — SSH reads

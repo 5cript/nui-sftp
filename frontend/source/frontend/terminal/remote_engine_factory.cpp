@@ -24,3 +24,10 @@ makeRemoteTerminalEngine(Persistence::SessionOptions const& options, std::functi
     }
     return nullptr;
 }
+
+EngineOpenResult connectFailureOf(Nui::val const& reply)
+{
+    if (reply.hasOwnProperty("cancelled") && reply["cancelled"].as<bool>())
+        return EngineOpenResult::LoginCancelled;
+    return EngineOpenResult::Failed;
+}

@@ -739,7 +739,10 @@ void Session::createRemoteEngine(std::unique_ptr<TerminalEngine> engine)
     wireCommandCapture();
 
     impl_->frontendSessionManager.value()->open(
-        std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
+        [this](EngineOpenResult result, std::string const& info)
+        {
+            onOpenSession(result == EngineOpenResult::Opened, info);
+        }
     );
 }
 
@@ -766,7 +769,10 @@ void Session::createExecutingEngine()
     wireCommandCapture();
 
     impl_->frontendSessionManager.value()->open(
-        std::bind(&Session::onOpenSession, this, std::placeholders::_1, std::placeholders::_2)
+        [this](EngineOpenResult result, std::string const& info)
+        {
+            onOpenSession(result == EngineOpenResult::Opened, info);
+        }
     );
 
     openLocalFilesystem();
