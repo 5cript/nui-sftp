@@ -237,27 +237,39 @@ namespace FtpConnect
         }
 
         /**
-         * @brief Moves the backstops back by as much as the longest raise of a timeout over its default.
+         * @brief The commands a listing waits for in turn: CWD, EPSV, PASV after a refused EPSV and LIST.
+         */
+        constexpr int commandsOfAnOperation = 4;
+
+        /**
+         * @brief The commands the stream call that opens a transfer waits for in turn: SIZE, EPSV, PASV after a refused
+         *        EPSV, REST and RETR or STOR.
+         */
+        constexpr int commandsOfATransferCall = 5;
+
+        /**
+         * @brief Moves each backstop back by the raises over their defaults of the timeouts its steps run into one
+         *        after another. An operation: the wait for C0 while it logs in again, the commands of a listing, its
+         *        data connection, its data and the final reply. A stream call: the commands that open a transfer, its
+         *        data connection, its data and the final reply.
          */
         void keepBackstopsBehindTimeouts(FtpConnectionOptions& options)
         {
             const FtpConnectionOptions defaults{};
-            const auto raised = std::max({
-                excessOver(options.pool.control.connectTimeout, defaults.pool.control.connectTimeout),
-                excessOver(options.pool.control.commandTimeout, defaults.pool.control.commandTimeout),
-                excessOver(
-                    options.fileSystem.transfer.data.connectTimeout, defaults.fileSystem.transfer.data.connectTimeout
-                ),
-                excessOver(
-                    options.fileSystem.transfer.data.inactivityTimeout,
-                    defaults.fileSystem.transfer.data.inactivityTimeout
-                ),
-                excessOver(
-                    options.fileSystem.transfer.finalReplyTimeout, defaults.fileSystem.transfer.finalReplyTimeout
-                ),
-            });
-            options.fileSystem.operationLimits.backstop += raised;
-            options.fileSystem.transferCallLimits.backstop += raised;
+            auto const& data = options.fileSystem.transfer.data;
+            const auto controlConnect =
+                excessOver(options.pool.control.connectTimeout, defaults.pool.control.connectTimeout);
+            const auto command = excessOver(options.pool.control.commandTimeout, defaults.pool.control.commandTimeout);
+            const auto dataConnect = excessOver(data.connectTimeout, defaults.fileSystem.transfer.data.connectTimeout);
+            const auto dataInactivity =
+                excessOver(data.inactivityTimeout, defaults.fileSystem.transfer.data.inactivityTimeout);
+            const auto finalReply = excessOver(
+                options.fileSystem.transfer.finalReplyTimeout, defaults.fileSystem.transfer.finalReplyTimeout
+            );
+            const auto transferSteps = dataConnect + dataInactivity + finalReply;
+            options.fileSystem.operationLimits.backstop +=
+                controlConnect + commandsOfAnOperation * command + transferSteps;
+            options.fileSystem.transferCallLimits.backstop += commandsOfATransferCall * command + transferSteps;
         }
 
         std::expected<std::shared_ptr<FileTransferProtocol::TlsContext>, std::string>

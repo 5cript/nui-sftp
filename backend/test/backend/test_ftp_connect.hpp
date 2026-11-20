@@ -474,19 +474,52 @@ namespace Test
     TEST(FtpConnectOptionsTests, RaisedTimeoutsMoveTheBackstopsBehindThem)
     {
         using namespace FtpConnectTesting;
+        using std::chrono::seconds;
+        struct Case
+        {
+            Persistence::FtpOptions raised{};
+            seconds operationBackstop{};
+            seconds transferCallBackstop{};
+        };
+        const FtpConnectionOptions defaults{};
+        const auto operationDefault = defaults.fileSystem.operationLimits.backstop;
+        const auto transferCallDefault = defaults.fileSystem.transferCallLimits.backstop;
+        std::vector<Case> cases(3u);
+        // The end of a transfer waits for its data, then for the final reply: 30 s and 45 s over their defaults.
+        cases[0].raised.dataInactivityTimeoutSeconds = 60;
+        cases[0].raised.transferReplyTimeoutSeconds = 60;
+        cases[0].operationBackstop = 75s;
+        cases[0].transferCallBackstop = 75s;
+        // 45 s more for each command a listing and the call that opens a transfer wait for.
+        cases[1].raised.commandTimeoutSeconds = 60;
+        cases[1].operationBackstop = 180s;
+        cases[1].transferCallBackstop = 225s;
+        // 5 s more for each connect: the wait for C0 of an operation and the data connection of both.
+        cases[2].raised.connectTimeoutSeconds = 20;
+        cases[2].operationBackstop = 10s;
+        cases[2].transferCallBackstop = 5s;
+        for (auto const& [raised, operationBackstop, transferCallBackstop] : cases)
+        {
+            auto session = sessionFor("ftp.example.com");
+            session.tlsMode = Persistence::FtpTlsMode::Plain;
+            session.ftpOptions.value() = raised;
+            const auto mapped = FtpConnect::connectionOptionsOf(session, nullptr);
+            ASSERT_TRUE(mapped) << mapped.error();
+            EXPECT_EQ(mapped->fileSystem.operationLimits.backstop, operationDefault + operationBackstop);
+            EXPECT_EQ(mapped->fileSystem.transferCallLimits.backstop, transferCallDefault + transferCallBackstop);
+        }
+
+        // The steps of the examples run within their backstops at their full timeouts.
         auto session = sessionFor("ftp.example.com");
         session.tlsMode = Persistence::FtpTlsMode::Plain;
-        session.ftpOptions.value().commandTimeoutSeconds = 60;
-        session.ftpOptions.value().dataInactivityTimeoutSeconds = 40;
-
-        const auto mapped = FtpConnect::connectionOptionsOf(session, nullptr);
-        ASSERT_TRUE(mapped) << mapped.error();
-        const FtpConnectionOptions defaults{};
-        // The command timeout grew most, by 45 s over its default of 15 s.
-        EXPECT_EQ(mapped->fileSystem.operationLimits.backstop, defaults.fileSystem.operationLimits.backstop + 45s);
-        EXPECT_EQ(
-            mapped->fileSystem.transferCallLimits.backstop, defaults.fileSystem.transferCallLimits.backstop + 45s
-        );
+        session.ftpOptions.value() = cases[0].raised;
+        const auto finish = FtpConnect::connectionOptionsOf(session, nullptr);
+        ASSERT_TRUE(finish) << finish.error();
+        EXPECT_GE(finish->fileSystem.transferCallLimits.backstop, 120s) << "the data and the final reply take 120 s";
+        session.ftpOptions.value() = cases[1].raised;
+        const auto rename = FtpConnect::connectionOptionsOf(session, nullptr);
+        ASSERT_TRUE(rename) << rename.error();
+        EXPECT_GE(rename->fileSystem.operationLimits.backstop, 120s) << "RNFR and RNTO take 120 s";
     }
 
     TEST(FtpConnectOptionsTests, TheTlsContextTrustsTheSystemFromTheMinimumVersion)

@@ -48,7 +48,8 @@ namespace FtpConnect
     /**
      * @brief The client options of @p session, whose references are resolved, logging in as its loginUser() with
      *        credentialsOf() it. Unset options keep the defaults of the client. A timeout raised above its default
-     *        moves the backstops of the operations and the stream calls back by as much, so they end only what hangs.
+     *        moves the backstops of the operations and the stream calls back by as much for each of their steps that
+     *        waits with it, so they end only what hangs.
      *
      * @param tlsContext Checks the certificate of the server, needed unless the session is plain.
      * @return The options, or which saved option is out of range.
