@@ -26,7 +26,6 @@ namespace FileTransferProtocol
         namespace asio = boost::asio;
         using Clock = std::chrono::steady_clock;
         using RemoteIo::RemoteErrorKind;
-        using Detail::describe;
         using Detail::errorOf;
         using Detail::isCancelled;
         using Detail::useTuple;
@@ -389,7 +388,8 @@ namespace FileTransferProtocol
         {
             control->close();
             co_return std::unexpected(errorOf(
-                RemoteErrorKind::Failure, fmt::format("The login ended with an exception: {}", describe(exception))
+                RemoteErrorKind::Failure,
+                fmt::format("The login ended with an exception: {}", Utility::errorMessage(exception))
             ));
         }
         auto& [loggedIn, refused] = outcome;
@@ -638,7 +638,7 @@ namespace FileTransferProtocol
                     if (!exception)
                         return;
                     // The work may have ended halfway, nothing else brings the pool back to a state it can go on from.
-                    const auto what = Detail::describe(exception);
+                    const auto what = Utility::errorMessage(exception);
                     Log::error("FTP: Work of the connection pool ended with an exception, the session is lost: {}", what);
                     if (!self->closed_)
                         self->loseSession(errorOf(

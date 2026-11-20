@@ -1,6 +1,7 @@
 #include <remote_io/async/processing_thread.hpp>
 #include <remote_io/async/processing_strand.hpp>
 #include <log/log.hpp>
+#include <utility/error_message.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -43,22 +44,6 @@ namespace RemoteIo
          *        benchmark.
          */
         constexpr std::chrono::microseconds spinBeforeParking{50};
-
-        std::string describe(std::exception_ptr exception)
-        {
-            try
-            {
-                std::rethrow_exception(exception);
-            }
-            catch (std::exception const& error)
-            {
-                return error.what();
-            }
-            catch (...)
-            {
-                return "an exception of an unknown type";
-            }
-        }
 
         /**
          * @brief Tells the processor that the thread spins, so a sibling hardware thread runs meanwhile.
@@ -157,7 +142,7 @@ namespace RemoteIo
             Log::error(
                 Log::Toast::Skip,
                 "A task threw behind the end of its processing thread: {}",
-                describe(std::current_exception())
+                Utility::errorMessage(std::current_exception())
             );
         }
     }
@@ -503,7 +488,7 @@ namespace RemoteIo
         }
         catch (...)
         {
-            const auto reason = describe(std::current_exception());
+            const auto reason = Utility::errorMessage(std::current_exception());
             Log::error("A task of a processing thread threw, the thread ends: {}", reason);
             closeAfterException();
             reportFailure(reason);

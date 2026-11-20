@@ -4,6 +4,7 @@
 #include <ftp/protocol/reply_code.hpp>
 #include <log/log.hpp>
 #include <remote_io/remote_error.hpp>
+#include <utility/error_message.hpp>
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/cancellation_state.hpp>
@@ -27,25 +28,6 @@ namespace FileTransferProtocol::Detail
     }
 
     /**
-     * @brief What @p exception says, for the log and the error of what it ended.
-     */
-    inline std::string describe(std::exception_ptr exception)
-    {
-        try
-        {
-            std::rethrow_exception(exception);
-        }
-        catch (std::exception const& error)
-        {
-            return error.what();
-        }
-        catch (...)
-        {
-            return "an exception of an unknown type";
-        }
-    }
-
-    /**
      * @brief The completion of a coroutine nothing waits for. An exception it ended with is logged as the end of
      *        @p what, then @p end runs: it ends what the coroutine left halfway, a connection as a rule.
      */
@@ -56,7 +38,7 @@ namespace FileTransferProtocol::Detail
         {
             if (!exception)
                 return;
-            Log::error("FTP: {} ended with an exception: {}", what, describe(exception));
+            Log::error("FTP: {} ended with an exception: {}", what, Utility::errorMessage(exception));
             end();
         };
     }

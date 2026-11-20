@@ -75,4 +75,20 @@ namespace Utility
             return errorMessage(*filesystemError);
         return Paths::sanitizedUtf8(error.what());
     }
+
+    std::string errorMessage(std::exception_ptr const& exception)
+    {
+        try
+        {
+            std::rethrow_exception(exception);
+        }
+        catch (std::exception const& error)
+        {
+            return errorMessage(error);
+        }
+        catch (...)
+        {
+            return "an exception of an unknown type";
+        }
+    }
 }

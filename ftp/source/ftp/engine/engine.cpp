@@ -21,7 +21,6 @@ namespace FileTransferProtocol
     {
         namespace asio = boost::asio;
         using RemoteIo::RemoteErrorKind;
-        using Detail::describe;
         using Detail::errorOf;
 
         static_assert(
@@ -336,7 +335,7 @@ namespace FileTransferProtocol
 
     void Engine::handlerThrew(std::exception_ptr exception)
     {
-        fail(describe(exception));
+        fail(Utility::errorMessage(exception));
     }
 
     void Engine::fail(std::string reason)
