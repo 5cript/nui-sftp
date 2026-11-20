@@ -89,6 +89,7 @@ class Settings
     void loadTermiosSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadSshSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadSftpOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadFtpOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadTerminalOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadQueueOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadHistoryOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);

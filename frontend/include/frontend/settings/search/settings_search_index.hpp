@@ -26,7 +26,10 @@ class SettingsSearchIndex
     {
         std::string htmlId{};
         std::vector<std::vector<std::string>> breadcrumb{};
-        std::optional<Persistence::TerminalEngineType> engineType{};
+        /**
+         * @brief The session engines the setting applies to, empty for every engine.
+         */
+        std::vector<Persistence::TerminalEngineType> engineTypes{};
         Nui::Observed<std::optional<std::string>>* groupKey{nullptr};
         bool rendered{false};
     };

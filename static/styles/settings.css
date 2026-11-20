@@ -253,6 +253,14 @@
     }
 }
 
+.setting-read-only-text {
+    font-family: monospace;
+    overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
+    color: var(--subdued-text);
+}
+
 .setting-colorbox {
     width: 24px;
     height: 24px;

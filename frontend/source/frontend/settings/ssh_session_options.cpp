@@ -106,7 +106,6 @@ SshSessionOptions::SshSessionOptions(
           }
       }
     , sshOptions{factory.within({"sshOptionsGroupName"}), onChange, inputDialog, multiInputDialog}
-    , sftpOptions{factory.within({"sftpOptionsGroupName"}), onChange}
 {}
 
 void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) const
@@ -119,10 +118,8 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
     assignIfValid(state.maxReconnectAttempts, maxReconnectAttempts);
     assignIfValid(state.maxReconnectBackoffMs, maxReconnectBackoffMs);
     sshOptions.applyToState(state.sshOptions.value());
-    sftpOptions.applyToState(state.sftpOptions.value());
 
     state.sshOptions.ref(*sshOptions.groupKey);
-    state.sftpOptions.ref(*sftpOptions.groupKey);
 }
 
 void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& state, bool loadRefs)
@@ -135,21 +132,17 @@ void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& stat
     maxReconnectAttempts.value(state.maxReconnectAttempts);
     maxReconnectBackoffMs.value(state.maxReconnectBackoffMs);
     sshOptions.loadFromState(state.sshOptions.value(), loadRefs);
-    sftpOptions.loadFromState(state.sftpOptions.value(), loadRefs);
 
     if (loadRefs)
     {
         sshOptions.groupKey =
             state.sshOptions.hasReference() ? std::optional<std::string>{state.sshOptions.ref()} : std::nullopt;
-        sftpOptions.groupKey =
-            state.sftpOptions.hasReference() ? std::optional<std::string>{state.sftpOptions.ref()} : std::nullopt;
     }
 }
 
 void SshSessionOptions::assumeDefaultsFrom(Persistence::SshSessionOptions const& state)
 {
     sshOptions.assumeDefaultsFrom(state.sshOptions.value());
-    sftpOptions.assumeDefaultsFrom(state.sftpOptions.value());
 }
 
 Nui::ElementRenderer SshSessionOptions::renderServerSettings(std::function<void()> const& onChange)

@@ -11,6 +11,8 @@
 #include <nui/frontend/attributes.hpp>
 #include <frontend/classes.hpp>
 
+#include <algorithm>
+
 namespace Snc = ScriptNuiComponents;
 using namespace std::string_literals;
 
@@ -137,7 +139,7 @@ Nui::ElementRenderer group(SettingGroupParameters&& params)
         };
 
         auto makeSessionTypeFilteredDiv =
-            [engineTypeFilter = params.engineTypeFilter, engineTypeFilterValue = params.engineTypeFilterValue]()
+            [engineTypeFilter = params.engineTypeFilter, engineTypeFilterValues = params.engineTypeFilterValues]()
         {
             if (engineTypeFilter)
             {
@@ -145,9 +147,12 @@ Nui::ElementRenderer group(SettingGroupParameters&& params)
                     class_ = "settings-group",
                     style = observe(*engineTypeFilter)
                         .generate(
-                            [engineTypeFilterValue](Persistence::TerminalEngineType type)
+                            [engineTypeFilterValues](Persistence::TerminalEngineType type)
                             {
-                                return type == engineTypeFilterValue ? "" : "display: none;";
+                                const bool shown =
+                                    std::find(engineTypeFilterValues.begin(), engineTypeFilterValues.end(), type) !=
+                                    engineTypeFilterValues.end();
+                                return shown ? "" : "display: none;";
                             }
                         ),
                 };

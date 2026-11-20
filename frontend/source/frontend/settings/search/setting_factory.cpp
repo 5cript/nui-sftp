@@ -36,8 +36,13 @@ SettingFactory SettingFactory::within(SettingKeyPath const& titleKey) const
 
 SettingFactory SettingFactory::forEngine(Persistence::TerminalEngineType engineType) const
 {
+    return forEngines({engineType});
+}
+
+SettingFactory SettingFactory::forEngines(std::vector<Persistence::TerminalEngineType> engineTypes) const
+{
     auto result = *this;
-    result.engineType_ = engineType;
+    result.engineTypes_ = std::move(engineTypes);
     return result;
 }
 
@@ -57,7 +62,7 @@ SettingIdentity SettingFactory::identity(SettingKeyPath path, SettingKeyOverride
     result.breadcrumb_ = breadcrumb_;
     result.htmlId_ = fmt::format("setting-{}-{}", settingScopeName(scope_), fmt::join(path, "-"));
     result.scope_ = scope_;
-    result.engineType_ = engineType_;
+    result.engineTypes_ = engineTypes_;
     result.groupKey_ = groupKey_;
     result.index_ = index_;
     result.path_ = std::move(path);

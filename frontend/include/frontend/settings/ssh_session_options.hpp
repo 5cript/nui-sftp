@@ -5,7 +5,6 @@
 #include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/ssh_options.hpp>
-#include <frontend/settings/sftp_options.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 #include <frontend/settings/atomic_setting/map_setting.hpp>
@@ -18,6 +17,10 @@
 
 #include <persistence/state/session_options.hpp>
 
+/**
+ * @brief Edits the server of an SSH session and the overrides of its SSH options. The transfer options are edited by
+ * SessionOptions, which shares them with FTP sessions.
+ */
 struct SshSessionOptions
 {
   private:
@@ -44,7 +47,6 @@ struct SshSessionOptions
     NumberSetting<int, false> maxReconnectBackoffMs;
 
     SshOptions sshOptions;
-    SftpOptions sftpOptions;
 
     /**
      * @param factory Creates the identities of all settings of the SSH session; it carries no group titles yet.
