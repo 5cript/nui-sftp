@@ -10,6 +10,7 @@
 #include <emscripten/val.h>
 
 #include <algorithm>
+#include <expected>
 #include <iterator>
 #include <string_view>
 #include <utility>
@@ -47,6 +48,20 @@ namespace
                                                          : fmt::format("Malformed {} response", function);
         Log::error("(Frontend) {} failed: {}", function, error);
         onComplete({}, error);
+    }
+
+    /**
+     * @brief The capabilities in a capabilities reply, or the reason the reply holds none.
+     */
+    std::expected<FileEngine::Capabilities, std::string> capabilitiesOf(Nui::val const& reply)
+    {
+        if (reply.hasOwnProperty("error"))
+            return std::unexpected{reply["error"].as<std::string>()};
+        if (!reply.hasOwnProperty("capabilities") || !reply["capabilities"].hasOwnProperty("probeEntries"))
+            return std::unexpected{std::string{"Malformed capabilities response"}};
+        return FileEngine::Capabilities{
+            .probeEntries = reply["capabilities"]["probeEntries"].as<bool>(),
+        };
     }
 }
 
@@ -110,6 +125,39 @@ void FileEngine::lazyOpen(
                 pendingOpen(id, info);
         }
     ));
+}
+
+void FileEngine::capabilities(
+    std::function<void(std::optional<Capabilities> const&, std::string const& info)> onComplete
+)
+{
+    lazyOpen(
+        [this, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::warn("Cannot ask for the capabilities of the server, no file system channel");
+                onComplete(std::nullopt, info);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::capabilities", impl_->engine->sessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val reply)
+                {
+                    const auto capabilities = capabilitiesOf(reply);
+                    if (!capabilities)
+                    {
+                        Log::warn("(Frontend) Failed to read the capabilities of the server: {}", capabilities.error());
+                        onComplete(std::nullopt, capabilities.error());
+                        return;
+                    }
+                    onComplete(*capabilities, "Success");
+                },
+                channelId.value().value()
+            );
+        }
+    );
 }
 
 void FileEngine::listDirectory(

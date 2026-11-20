@@ -181,6 +181,7 @@ struct FileExplorerPanel::Implementation
     Nui::Observed<std::shared_ptr<Nui::Dom::Element>> fileExplorerElement{};
     LanguageChangeListener languageListener{};
     std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+    bool uploadsNeedUnsafeFastMode{false};
 
     explicit Implementation(Params&& params)
         : stateHolder{params.stateHolder}
@@ -195,6 +196,24 @@ struct FileExplorerPanel::Implementation
         , isInLostConnectionState{params.isInLostConnectionState}
         , fileGrid{buildFileGrid(params, engineOptions)}
     {}
+
+    /**
+     * @brief Shows on the remote side whether its uploads need the unsafe fast mode, in the current language.
+     */
+    void applyRemoteOriginWarning()
+    {
+        auto* const remote = fileGrid.rightSide();
+        if (!remote)
+            return;
+        if (!uploadsNeedUnsafeFastMode)
+            return remote->originWarning(std::nullopt);
+        remote->originWarning(
+            NuiFileExplorer::OriginWarning{
+                .label = language->get("uploadDestinationCheck", "indicatorLabel"),
+                .description = language->get("uploadDestinationCheck", "indicatorDescription"),
+            }
+        );
+    }
 };
 
 FileExplorerPanel::FileExplorerPanel(Params params)
@@ -255,6 +274,7 @@ void FileExplorerPanel::setup()
                 if (side && side->places())
                     side->places()->reloadDefaultPlaces();
             }
+            impl_->applyRemoteOriginWarning();
             Nui::globalEventContext.executeActiveEventsImmediately();
         }
     );
@@ -308,6 +328,12 @@ void FileExplorerPanel::setRemoteOrigin(std::string userAndHost)
 {
     if (auto* remote = remoteFileGridSide(); remote)
         remote->originHost(std::move(userAndHost));
+}
+
+void FileExplorerPanel::setUploadsNeedUnsafeFastMode(bool value)
+{
+    impl_->uploadsNeedUnsafeFastMode = value;
+    impl_->applyRemoteOriginWarning();
 }
 
 void FileExplorerPanel::setOnSynchronize(std::function<void(std::filesystem::path, std::filesystem::path)> onSync)

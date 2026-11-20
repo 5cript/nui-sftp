@@ -97,6 +97,12 @@ class FileExplorerPanel
     void setRemoteOrigin(std::string userAndHost);
 
     /**
+     * @brief Marks the remote side of a server that cannot check what an upload would replace, so uploads need the
+     * unsafe fast mode there. Syncing the change is left to the caller.
+     */
+    void setUploadsNeedUnsafeFastMode(bool value);
+
+    /**
      * @brief Attaches the caller-provided synchronize callback to both sides
      *        of the grid.  Used by Session::setupFileGrid to wire in the
      *        sync-dialog + progress-dialog open flow, which themselves stay

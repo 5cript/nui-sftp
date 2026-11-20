@@ -321,6 +321,17 @@ reconnectDialog:
   cancel: "Abbrechen"
   now: "Jetzt"
   restoringState: "Sitzungsstand wird wiederhergestellt..."
+uploadDestinationCheck:
+  noticeHeader: "Uploads brauchen den unsicheren Schnellmodus"
+  noticeText: "Der Server {} kann nicht prüfen, was ein Upload ersetzen würde, er unterstützt weder MLST noch SIZE. Durchsuchen, Downloads und die übrigen Dateioperationen funktionieren wie gewohnt. Für Uploads bedeutet das:"
+  normalUploads: "Uploads schlagen fehl"
+  normalUploadsDescription: "Ein Upload bricht mit einem Fehler ab, weil der Server nicht sagen kann, ob sein Ziel existiert."
+  unsafeFastUploads: "Der unsichere Schnellmodus lädt hoch"
+  unsafeFastUploadsDescription: "Ist der unsichere Schnellmodus der Operationswarteschlange eingeschaltet, gehen Dateien jeder Größe direkt an ihr Ziel und ersetzen vorhandene Dateien ohne Nachfrage."
+  fileTrackingUploads: "Die Dateiüberwachung kann nicht hochladen"
+  fileTrackingUploadsDescription: "Sie lädt immer sicher hoch, deshalb schlagen ihre Uploads auf diesem Server fehl."
+  indicatorLabel: "Uploads brauchen den unsicheren Schnellmodus"
+  indicatorDescription: "Dieser Server kann nicht prüfen, was ein Upload ersetzen würde. Uploads schlagen fehl, solange der unsichere Schnellmodus der Operationswarteschlange aus ist, und mit ihm ersetzen sie vorhandene Dateien ohne Nachfrage."
 sessionFrontend:
   sessionCreationFailedHeader: "Sitzungserstellung fehlgeschlagen"
   sessionCreationFailedText: "Sitzungsinstanz konnte nicht erstellt werden:\n{}"

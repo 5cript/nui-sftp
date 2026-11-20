@@ -303,6 +303,60 @@ struct Session::Implementation
     }
 
     /**
+     * @brief Tells the user that the server @p host cannot check what an upload would replace, unless they asked
+     *        never to be told again.
+     */
+    void announceUncheckedUploads(std::string const& host)
+    {
+        confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
+            .headerText = language->get("uploadDestinationCheck", "noticeHeader"),
+            .text = fmt::format(fmt::runtime(language->get("uploadDestinationCheck", "noticeText")), host),
+            .buttons = ConfirmDialog::Button::Ok,
+            .listItems =
+                {
+                    {
+                        .text = language->get("uploadDestinationCheck", "normalUploads"),
+                        .description = language->get("uploadDestinationCheck", "normalUploadsDescription"),
+                    },
+                    {
+                        .text = language->get("uploadDestinationCheck", "unsafeFastUploads"),
+                        .description = language->get("uploadDestinationCheck", "unsafeFastUploadsDescription"),
+                    },
+                    {
+                        .text = language->get("uploadDestinationCheck", "fileTrackingUploads"),
+                        .description = language->get("uploadDestinationCheck", "fileTrackingUploadsDescription"),
+                    },
+                },
+            .neverShowAgainId = "uploadDestinationCheck",
+        });
+    }
+
+    /**
+     * @brief Asks whether the server of an FTP session can check what an upload would replace, marks the remote side
+     *        when it cannot and tells the user when @p announce is set.
+     */
+    void checkUploadDestinations(FileEngine& fileEngine, bool announce)
+    {
+        fileEngine.capabilities(lifetime.guarded(
+            [this, announce](std::optional<FileEngine::Capabilities> const& capabilities, std::string const& info)
+            {
+                if (!capabilities)
+                {
+                    Log::warn("Could not ask the server whether it can check upload destinations: {}", info);
+                    return;
+                }
+                const bool uploadsNeedUnsafeFastMode = !capabilities->probeEntries;
+                fileExplorerPanel.setUploadsNeedUnsafeFastMode(uploadsNeedUnsafeFastMode);
+                auto const* ftp = std::get_if<Persistence::FtpSessionOptions>(&engineOptions.engine);
+                if (uploadsNeedUnsafeFastMode && announce && ftp)
+                    announceUncheckedUploads(ftp->host);
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        ));
+    }
+
+    /**
      * @brief Drops the replies of the backend that arrive after this session is gone. Last, so it goes first.
      */
     Utility::LifetimeToken lifetime{};
@@ -785,6 +839,13 @@ void Session::openSftp(std::string const& username, bool forceOpen)
             .buttons = ConfirmDialog::Button::Ok,
             .neverShowAgainId = "sftpInitializationFailed",
         });
+    }
+
+    if (std::holds_alternative<Persistence::FtpSessionOptions>(impl_->engineOptions.engine))
+    {
+        // A reconnect only marks the remote side again, the user heard about it when the session started.
+        const bool isResumed = impl_->snapshotManager->hasPending();
+        impl_->checkUploadDestinations(*fileEngine, !isResumed);
     }
 
     if (remoteSideModel())

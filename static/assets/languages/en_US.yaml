@@ -238,6 +238,17 @@ reconnectDialog:
   cancel: "Cancel"
   now: "Now"
   restoringState: "Restoring session state..."
+uploadDestinationCheck:
+  noticeHeader: "Uploads Need the Unsafe Fast Mode"
+  noticeText: "The server {} cannot check what an upload would replace, it supports neither MLST nor SIZE. Browsing, downloads and the other file operations work as usual. For uploads that means:"
+  normalUploads: "Uploads fail"
+  normalUploadsDescription: "An upload stops with an error, because the server cannot tell whether its destination exists."
+  unsafeFastUploads: "The Unsafe Fast Mode uploads"
+  unsafeFastUploadsDescription: "With the Unsafe Fast Mode of the operation queue on, files of any size go straight to their destination and replace existing files without asking."
+  fileTrackingUploads: "File Tracking cannot upload"
+  fileTrackingUploadsDescription: "It always uploads safely, so its uploads fail on this server."
+  indicatorLabel: "Uploads need the Unsafe Fast Mode"
+  indicatorDescription: "This server cannot check what an upload would replace. Uploads fail unless the Unsafe Fast Mode of the operation queue is on, and then they replace existing files without asking."
 sideModel:
   failedToListDirectory: "Failed to List Directory"
   failedToListDirectoryText: "An error occurred while trying to list the contents of the directory '{}'."

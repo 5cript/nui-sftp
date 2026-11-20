@@ -31,7 +31,26 @@ class FileEngine
     explicit FileEngine(RemoteSessionEngine* engine);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FileEngine);
 
+    /**
+     * @brief What the server of the session can do, as far as the frontend needs to know.
+     */
+    struct Capabilities
+    {
+        /**
+         * @brief Whether the server can check what an upload would replace. Without it, uploads fail unless the
+         *        unsafe fast mode sends them straight to their destination.
+         */
+        bool probeEntries{false};
+    };
+
     std::optional<Ids::ChannelId> release();
+
+    /**
+     * @brief Asks the backend what the server of the session can do.
+     *
+     * @param onComplete Receives the capabilities, or std::nullopt and the reason on failure.
+     */
+    void capabilities(std::function<void(std::optional<Capabilities> const&, std::string const& info)> onComplete);
 
     /**
      * @brief Lists the remote directory @p path.

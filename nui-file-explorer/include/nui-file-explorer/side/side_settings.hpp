@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <optional>
+#include <string>
 
 namespace NuiFileExplorer
 {
@@ -14,6 +15,21 @@ namespace NuiFileExplorer
     {
         Local,
         Remote
+    };
+
+    /**
+     * @brief A warning about the machine a side shows, for something it cannot do that users would expect.
+     */
+    struct OriginWarning
+    {
+        /**
+         * @brief A few words, shown below the user and host on top of Places.
+         */
+        std::string label;
+        /**
+         * @brief What the warning means for the user, shown when hovering the warning.
+         */
+        std::string description;
     };
 
     struct SideSettings
