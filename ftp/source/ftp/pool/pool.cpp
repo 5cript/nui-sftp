@@ -333,10 +333,18 @@ namespace FileTransferProtocol
             withoutThrowing(resolver_->resolve(options_.host, options_.port, asio::use_awaitable)),
             asio::cancel_after(options_.resolveTimeout, useTuple)
         );
+        // A cancel and the timeout end the lookup with an error value, an exception is neither.
+        if (exception)
+        {
+            co_return std::unexpected(errorOf(
+                RemoteErrorKind::Failure,
+                fmt::format("The lookup of the server ended with an exception: {}", Utility::errorMessage(exception))
+            ));
+        }
         const auto cancelledHere = isCancelled(co_await asio::this_coro::cancellation_state);
-        if (cancelledHere && (exception || !found))
+        if (cancelledHere && !found)
             co_return std::unexpected(cancelled("The lookup of the server"));
-        if (exception || (!found && found.error().kind == RemoteErrorKind::Cancelled))
+        if (!found && found.error().kind == RemoteErrorKind::Cancelled)
             co_return std::unexpected(errorOf(RemoteErrorKind::TimedOut, "The lookup of the server took too long"));
         co_return std::move(found);
     }
@@ -455,7 +463,10 @@ namespace FileTransferProtocol
             useTuple
         );
         connection->checking = false;
-        const auto open = !exception && !failure;
+        // Ends the session with the operation or the work of the pool that asked.
+        if (exception)
+            std::rethrow_exception(exception);
+        const auto open = !failure;
         const auto cancelledCheck = isCancelled(co_await asio::this_coro::cancellation_state);
         if (open && !cancelledCheck)
             co_return LeaseResult{Lease{weak_from_this(), std::move(connection)}};
@@ -466,9 +477,7 @@ namespace FileTransferProtocol
         }
         // It ended while idle.
         connection->leased = false;
-        lose(
-            connection, failure.value_or(errorOf(RemoteErrorKind::Failure, "The check of a connection failed")), false
-        );
+        lose(connection, *failure, false);
         if (cancelledCheck)
             co_return LeaseResult{std::unexpected(cancelled("The wait for a connection"))};
         co_return std::nullopt;
@@ -588,9 +597,15 @@ namespace FileTransferProtocol
         // A connection that ended reports through the release.
         const Lease held{weak_from_this(), connection};
         const auto control = connection->control;
-        co_await asio::co_spawn(
+        const auto [exception, reply] = co_await asio::co_spawn(
             control->strand(), withoutThrowing(control->execute(Command{.verb = Verb::Noop})), useTuple
         );
+        if (exception)
+        {
+            // Loses the session, see spawn(). Nothing tells what state the connection is in, so it does not go back.
+            control->close();
+            std::rethrow_exception(exception);
+        }
     }
 
     asio::awaitable<void> Pool::quitAll(std::vector<std::shared_ptr<PooledConnection>> connections)

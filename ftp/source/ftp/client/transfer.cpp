@@ -739,7 +739,10 @@ namespace FileTransferProtocol
             withoutThrowing(store_->finalReply()),
             asio::cancel_after(options_.refusalWait, useTuple)
         );
-        if (exception || !reply)
+        // Fails the session, as every exception of a transfer does.
+        if (exception)
+            std::rethrow_exception(exception);
+        if (!reply)
             co_return std::nullopt;
         co_return *reply;
     }
