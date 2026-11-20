@@ -26,54 +26,60 @@ namespace FileTracking
     namespace
     {
         /**
+         * @brief Removes the new instance directory again unless keep() ran: no cleanup of orphans takes one
+         *        without a lock file.
+         */
+        class RemovesUnlessKept
+        {
+          public:
+            explicit RemovesUnlessKept(std::filesystem::path const& directory)
+                : directory_{&directory}
+            {}
+            ~RemovesUnlessKept()
+            {
+                if (directory_ == nullptr)
+                    return;
+                std::error_code ignored{};
+                Utility::removeAllNoFollow(*directory_, ignored);
+            }
+            RemovesUnlessKept(RemovesUnlessKept const&) = delete;
+            RemovesUnlessKept& operator=(RemovesUnlessKept const&) = delete;
+            RemovesUnlessKept(RemovesUnlessKept&&) = delete;
+            RemovesUnlessKept& operator=(RemovesUnlessKept&&) = delete;
+
+            void keep()
+            {
+                directory_ = nullptr;
+            }
+
+          private:
+            std::filesystem::path const* directory_;
+        };
+
+        /**
          * @brief Creates the instance directory with its bookkeeping directory, so the lock can be created in it.
          *
-         * @param dir Path to create.
+         * @param dir Path to create, the directory of a new instance id.
          * @return The same path that was passed in.
-         * @throws std::runtime_error on filesystem failure.
+         * @throws std::runtime_error on filesystem failure. What was made of the instance directory is removed again
+         *         then.
          */
         std::filesystem::path prepareInstanceDir(std::filesystem::path const& dir)
         {
+            RemovesUnlessKept removing{dir};
             if (const auto created = createBookkeepingDirectory(dir); !created)
                 throw std::runtime_error{fmt::format("Failed to create instance directory: {}", created.error())};
+            removing.keep();
             return dir;
         }
 
         /**
          * @brief Locks the new @p instanceDirectory.
          *
-         * @throws std::runtime_error When the lock cannot be taken. The directory is removed again then: no cleanup
-         *         of orphans takes one without a lock file.
+         * @throws std::runtime_error When the lock cannot be taken. The directory is removed again then.
          */
         InstanceLock lockOrRemove(std::filesystem::path const& instanceDirectory)
         {
-            class RemovesUnlessKept
-            {
-              public:
-                explicit RemovesUnlessKept(std::filesystem::path const& directory)
-                    : directory_{&directory}
-                {}
-                ~RemovesUnlessKept()
-                {
-                    if (directory_ == nullptr)
-                        return;
-                    std::error_code ignored{};
-                    Utility::removeAllNoFollow(*directory_, ignored);
-                }
-                RemovesUnlessKept(RemovesUnlessKept const&) = delete;
-                RemovesUnlessKept& operator=(RemovesUnlessKept const&) = delete;
-                RemovesUnlessKept(RemovesUnlessKept&&) = delete;
-                RemovesUnlessKept& operator=(RemovesUnlessKept&&) = delete;
-
-                void keep()
-                {
-                    directory_ = nullptr;
-                }
-
-              private:
-                std::filesystem::path const* directory_;
-            };
-
             RemovesUnlessKept removing{instanceDirectory};
             InstanceLock lock{bookkeepingPaths(instanceDirectory).lock};
             removing.keep();
