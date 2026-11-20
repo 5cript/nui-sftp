@@ -3,6 +3,7 @@
 #include <ids/ids.hpp>
 #include <frontend/terminal/channel_interface.hpp>
 #include <frontend/terminal/channel_creation_options.hpp>
+#include <frontend/terminal/remote_session_engine.hpp>
 #include <log/toast.hpp>
 
 #include <string>
@@ -32,10 +33,16 @@ class TerminalEngine
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
         std::function<void(Ids::ChannelId const&)> onChannelLoss
     ) = 0;
-    virtual void
-    createSftpChannel(std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated) = 0;
     virtual void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) = 0;
     virtual ChannelInterface* channel(Ids::ChannelId const& channelId) = 0;
+
+    /**
+     * @brief The backend session behind this engine, nothing for an engine without one.
+     */
+    virtual RemoteSessionEngine* remoteSession()
+    {
+        return nullptr;
+    }
 
     virtual ~TerminalEngine() = default;
 };

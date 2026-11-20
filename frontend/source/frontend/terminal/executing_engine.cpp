@@ -249,13 +249,6 @@ void ExecutingTerminalEngine::createChannel(
     );
 }
 
-void ExecutingTerminalEngine::createSftpChannel(
-    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
-)
-{
-    onCreated(std::nullopt, "SFTP is not supported by the local process engine");
-}
-
 void ExecutingTerminalEngine::closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose)
 {
     auto iter = impl_->channels.find(channelId);

@@ -531,12 +531,8 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
             impl_->terminalPanel->onLockedModeUserInput(channelId, input);
         }
     );
-    if (impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
-    {
-        auto* sshEngine =
-            static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
-        sshEngine->setOnConnectionLoss([this]() { onTerminalConnectionLoss(); });
-    }
+    if (auto* remoteSession = impl_->frontendSessionManager.value()->engine().remoteSession())
+        remoteSession->setOnConnectionLoss([this]() { onTerminalConnectionLoss(); });
 
     // The proto only probed the transport, it never created a channel — so the capture wiring
     // arrives in time for every channel this session opens.
@@ -724,8 +720,8 @@ void Session::openSftp(std::string const& username, bool forceOpen)
         {
             Log::info("Opening SFTP by default");
             impl_->snapshotManager->setSftpIsOpen(true);
-            auto* sshTerminalEngine = static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager.value()->engine());
-            auto fileEngine = std::make_shared<FileEngine>(sshTerminalEngine);
+            auto* const remoteSession = impl_->frontendSessionManager.value()->engine().remoteSession();
+            auto fileEngine = std::make_shared<FileEngine>(remoteSession);
 
             if (!remoteSideModel())
             {
@@ -746,8 +742,8 @@ void Session::openSftp(std::string const& username, bool forceOpen)
                 remoteSideModel()->engine(fileEngine);
             localSideModel().engine(std::move(fileEngine));
             if (remoteSideModel())
-                impl_->operationQueue.activate(remoteSideModel()->engine(), sshTerminalEngine->sshSessionId());
-            impl_->fileTrackingPanel.activate(sshTerminalEngine->sshSessionId());
+                impl_->operationQueue.activate(remoteSideModel()->engine(), remoteSession->sessionId());
+            impl_->fileTrackingPanel.activate(remoteSession->sessionId());
             localSideModel().operationQueue(&impl_->operationQueue);
             localSideModel().setFileTracking(&impl_->fileTrackingPanel);
             if (remoteSideModel())

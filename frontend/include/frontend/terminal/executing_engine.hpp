@@ -76,10 +76,6 @@ class ExecutingTerminalEngine : public TerminalEngine
         std::function<void(Ids::ChannelId const&)> onChannelLoss
     ) override;
 
-    void createSftpChannel(
-        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
-    ) override;
-
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) override;
     ChannelInterface* channel(Ids::ChannelId const& channelId) override;
 

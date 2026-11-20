@@ -213,7 +213,7 @@ void SshTerminalEngine::createChannel(
     );
 }
 
-void SshTerminalEngine::createSftpChannel(
+void SshTerminalEngine::createFileChannel(
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
 )
 {
@@ -223,7 +223,12 @@ void SshTerminalEngine::createSftpChannel(
     );
 }
 
-Ids::SessionId SshTerminalEngine::sshSessionId() const
+void SshTerminalEngine::closeFileChannel(Ids::ChannelId const& channelId, std::function<void()> onClosed)
+{
+    closeChannel(channelId, std::move(onClosed));
+}
+
+Ids::SessionId SshTerminalEngine::sessionId() const
 {
     return impl_->sshSessionId;
 }

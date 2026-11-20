@@ -20,12 +20,15 @@
 #include <vector>
 #include <optional>
 
-class SshTerminalEngine;
+class RemoteSessionEngine;
 
 class FileEngine
 {
   public:
-    FileEngine(SshTerminalEngine* engine);
+    /**
+     * @brief Works on a file system channel of the session behind @p engine.
+     */
+    explicit FileEngine(RemoteSessionEngine* engine);
     ROAR_PIMPL_SPECIAL_FUNCTIONS(FileEngine);
 
     std::optional<Ids::ChannelId> release();
