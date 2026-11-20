@@ -23,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <regex>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -708,6 +709,8 @@ namespace FileTransferProtocol::Test
                 {
                     const auto [readError, size] = co_await transport_->readSome(asio::buffer(chunk));
                     uploaded.append(chunk.data(), size);
+                    if (step.received && size > 0u)
+                        step.received(std::string_view{chunk.data(), size});
                     error = readError;
                 }
                 if (uploaded.size() > step.limit)
