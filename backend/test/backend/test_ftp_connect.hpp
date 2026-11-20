@@ -14,6 +14,8 @@
 #include <remote_io/remote_file_system.hpp>
 #include "nui_env.hpp"
 
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <fmt/format.h>
 #include <gtest/gtest.h>
@@ -183,6 +185,16 @@ namespace Test
                 .expect("PASS", password)
                 .reply("530 Login incorrect.")
                 .expectDisconnect();
+            return script;
+        }
+
+        /**
+         * @brief The connection that reaches the server before the password is asked for: the greeting and QUIT.
+         */
+        Script reaching()
+        {
+            Script script{};
+            script.reply("220 Ready").expect("QUIT").reply("221 Goodbye").expectDisconnect();
             return script;
         }
 
@@ -699,6 +711,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret"));
         std::vector<std::string> prompts{};
         auto connected = connect(
@@ -729,9 +742,11 @@ namespace Test
         connection_ = *std::move(connected);
     }
 
-    TEST_F(FtpConnectTests, ACancelledPromptFailsTheConnectBeforeItConnects)
+    TEST_F(FtpConnectTests, ACancelledPromptFailsTheConnectBeforeAnyCredentialIsSent)
     {
+        using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         const auto connected = connect(
             session(),
             [](std::string const&) -> std::optional<std::string>
@@ -741,13 +756,53 @@ namespace Test
         );
         ASSERT_FALSE(connected);
         EXPECT_EQ(connected.error(), "The password prompt was cancelled.");
-        EXPECT_TRUE(server_->transcript().empty()) << "connected without a password";
+        ASSERT_TRUE(server_->waitUntilDisconnected());
+        EXPECT_EQ(server_->commands(0u), std::vector<std::string>{"QUIT"}) << "a credential was sent";
+    }
+
+    TEST_F(FtpConnectTests, AnUnreachableServerIsNotAskedForAPassword)
+    {
+        using namespace FtpConnectTesting;
+        // A port nobody listens on any more.
+        boost::asio::io_context context{};
+        boost::asio::ip::tcp::acceptor acceptor{context, {boost::asio::ip::make_address("127.0.0.1"), 0u}};
+        auto options = FtpConnectTesting::sessionFor("127.0.0.1", "alice");
+        options.port = acceptor.local_endpoint().port();
+        options.tlsMode = Persistence::FtpTlsMode::Plain;
+        acceptor.close();
+
+        const auto connected = connect(options, neverAsked());
+
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("could not be reached"), std::string::npos) << connected.error();
+    }
+
+    TEST_F(FtpConnectTests, TheServerIsReachedBeforeThePasswordIsAsked)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(reaching());
+        addConnection(loggingIn(tree_, "alice", "s3cret"));
+        std::vector<std::string> commandsWhenAsked{};
+
+        auto connected = connect(
+            session(),
+            [this, &commandsWhenAsked](std::string const&) -> std::optional<std::string>
+            {
+                commandsWhenAsked = server_->commands(0u);
+                return "s3cret";
+            }
+        );
+
+        ASSERT_TRUE(connected) << connected.error();
+        EXPECT_EQ(commandsWhenAsked, std::vector<std::string>{"QUIT"});
     }
 
     TEST_F(FtpConnectTests, ARefusedLoginFailsWithAReadableMessageWithoutThePassword)
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(refusingTheLogin("alice", "s3cret"));
         const auto connected = connect(session(), answering("s3cret"));
         ASSERT_FALSE(connected);
@@ -771,6 +826,7 @@ namespace Test
             .expect("PASS", "s3cret")
             .reply("332 Need account for login.")
             .expectDisconnect();
+        addConnection(reaching());
         addConnection(std::move(script));
         auto options = session();
         options.users.front().account = "";
@@ -785,6 +841,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(silentAfterTheGreeting());
         auto options = session();
         // The login alone would wait a minute for the reply to USER.
@@ -833,7 +890,8 @@ namespace Test
         auto options = session();
         options.tlsMode = Persistence::FtpTlsMode::Explicit;
 
-        const auto connected = connect(options, answering("s3cret"));
+        // The certificate is refused before anybody is asked for a password.
+        const auto connected = connect(options, neverAsked());
         ASSERT_FALSE(connected);
         EXPECT_NE(connected.error().find("is not trusted"), std::string::npos) << connected.error();
         const std::regex fingerprint{"SHA-256 fingerprint is ([0-9A-F]{2}:){31}[0-9A-F]{2}\\."};
@@ -844,6 +902,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret", resetsAtTheFirstListing));
         // The logins in the background after the loss.
         addConnection(refusingTheLogin("alice", "s3cret"));
@@ -873,6 +932,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret", stallsTheSlowListing));
         // C0 closed by the cancel of the listing may be logged in again in the background before the pool closes.
         addConnection(spare(tree_));
@@ -909,7 +969,9 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret"));
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret", listsNoSize));
 
         auto withSize = connect(session(), answering("s3cret"));
@@ -993,6 +1055,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret"));
         AnsweringProvider provider{"s3cret"};
         manager_->addPasswordProvider(0, &provider);
@@ -1013,6 +1076,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         AnsweringProvider provider{std::nullopt};
         manager_->addPasswordProvider(0, &provider);
 
@@ -1048,6 +1112,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret", resetsAtTheFirstListing));
         // The logins in the background after the loss.
         addConnection(refusingTheLogin("alice", "s3cret"));
@@ -1098,6 +1163,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(loggingIn(tree_, "alice", "s3cret"));
         AnsweringProvider provider{"s3cret"};
         manager_->addPasswordProvider(0, &provider);
@@ -1150,6 +1216,7 @@ namespace Test
     {
         using namespace FtpConnectTesting;
         startServer();
+        addConnection(reaching());
         addConnection(silentAfterTheGreeting());
         AnsweringProvider provider{"s3cret"};
         manager_->addPasswordProvider(0, &provider);

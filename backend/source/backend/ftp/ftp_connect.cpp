@@ -366,18 +366,42 @@ namespace FtpConnect
         constexpr auto stopCheckInterval = std::chrono::milliseconds{50};
 
         /**
-         * @brief Waits for @p login until it completes or @p stop is requested.
+         * @brief Waits for @p outcome until it completes or @p stop is requested.
          *
          * @return Nothing after a stop request.
          */
-        std::optional<LoginOutcome> awaitLogin(std::future<LoginOutcome>& login, std::stop_token const& stop)
+        template <typename OutcomeT>
+        std::optional<OutcomeT> awaitOutcome(std::future<OutcomeT>& outcome, std::stop_token const& stop)
         {
-            while (login.wait_for(stopCheckInterval) == std::future_status::timeout)
+            while (outcome.wait_for(stopCheckInterval) == std::future_status::timeout)
             {
                 if (stop.stop_requested())
                     return std::nullopt;
             }
-            return login.get();
+            return outcome.get();
+        }
+
+        /**
+         * @brief @p options once the server answered and its certificate is trusted, so nobody is asked for the
+         *        password of a server that is not there or not trusted. An anonymous login asks nothing, its login
+         *        reaches the server.
+         */
+        std::expected<FtpConnectionOptions, std::string> reachedFirst(
+            FtpEngineContext& engine,
+            FtpConnectionOptions options,
+            Persistence::FtpSessionOptions const& session,
+            std::stop_token const& stop
+        )
+        {
+            if (isAnonymous(session.loginUser()))
+                return options;
+            auto reached = FileTransferProtocol::reachServer(engine.executor(), engine.resolver(), options.pool);
+            const auto outcome = awaitOutcome(reached, stop);
+            if (!outcome)
+                return std::unexpected(stoppedMessage(session));
+            if (!*outcome)
+                return std::unexpected(loginFailureMessage(outcome->error(), session));
+            return options;
         }
 
         std::expected<SessionConnection, std::string> logIn(
@@ -402,7 +426,7 @@ namespace FtpConnect
                 }
             );
             auto login = connection->logIn();
-            const auto outcome = awaitLogin(login, stop);
+            const auto outcome = awaitOutcome(login, stop);
             // The destructor of the connection fails a login that still runs.
             if (!outcome)
                 return std::unexpected(stoppedMessage(session));
@@ -547,6 +571,12 @@ namespace FtpConnect
                 [&session](std::shared_ptr<FileTransferProtocol::TlsContext> tlsContext)
                 {
                     return connectionOptionsOf(session, std::move(tlsContext));
+                }
+            )
+            .and_then(
+                [&engine, &session, &stop](FtpConnectionOptions options)
+                {
+                    return reachedFirst(engine, std::move(options), session, stop);
                 }
             )
             .and_then(
