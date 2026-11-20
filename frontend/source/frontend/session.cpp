@@ -6,7 +6,7 @@
 #include <frontend/sync_dialog/backend_sync_provider.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
 #include <frontend/terminal/executing_engine.hpp>
-#include <frontend/terminal/ssh_engine.hpp>
+#include <frontend/terminal/remote_engine_factory.hpp>
 #include <frontend/terminal/file_engine.hpp>
 #include <frontend/session_components/session_options.hpp>
 #include <frontend/session_components/operation_queue.hpp>
@@ -24,6 +24,7 @@
 #include <persistence/state/sftp_options.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>
+#include <utility/lifetime_token.hpp>
 
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
@@ -45,14 +46,46 @@ using namespace Nui::Attributes;
 namespace
 {
     /**
-     * @brief Formats the address of an SSH session as user@host:port, with brackets around IPv6 hosts.
+     * @brief Formats the address of a remote session as user@host:port, with brackets around IPv6 hosts.
      */
-    std::string sshAddress(std::string const& user, Persistence::SshSessionOptions const& options)
+    std::string remoteAddress(std::string const& user, std::string const& host, int port)
     {
-        auto host = options.host;
         if (host.find(':') != std::string::npos)
-            host = "[" + host + "]";
-        return fmt::format("{}@{}:{}", user, host, options.port.value_or(22));
+            return fmt::format("{}@[{}]:{}", user, host, port);
+        return fmt::format("{}@{}:{}", user, host, port);
+    }
+
+    /**
+     * @brief The user an FTP session logs in as, "anonymous" for a user without a name.
+     */
+    std::string ftpUserName(Persistence::FtpSessionOptions const& options)
+    {
+        const auto name = options.loginUser().name;
+        if (!name || name->empty())
+            return "anonymous";
+        return *name;
+    }
+
+    /**
+     * @brief The transfer options of a remote session, nothing for a local one.
+     */
+    Persistence::SftpOptions const* transferOptionsOf(Persistence::SessionOptions const& options)
+    {
+        if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
+            return &ssh->sftpOptions.value();
+        if (auto const* ftp = std::get_if<Persistence::FtpSessionOptions>(&options.engine))
+            return &ftp->sftpOptions.value();
+        return nullptr;
+    }
+
+    /**
+     * @brief Whether the remote file system opens with the session. Always for FTP, which has nothing else.
+     */
+    bool opensFileSystemByDefault(Persistence::SessionOptions const& options)
+    {
+        if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
+            return ssh->openSftpByDefault;
+        return std::holds_alternative<Persistence::FtpSessionOptions>(options.engine);
     }
 }
 
@@ -268,6 +301,11 @@ struct Session::Implementation
         );
         Nui::globalEventContext.executeActiveEventsImmediately();
     }
+
+    /**
+     * @brief Drops the replies of the backend that arrive after this session is gone. Last, so it goes first.
+     */
+    Utility::LifetimeToken lifetime{};
 };
 
 int Session::tabId() const
@@ -297,13 +335,16 @@ auto Session::makeChannelElement() -> Nui::ElementRenderer
 
 bool Session::supportsLocalShell() const
 {
-    return std::holds_alternative<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
+    return std::holds_alternative<Persistence::SshSessionOptions>(impl_->engineOptions.engine) ||
+        std::holds_alternative<Persistence::FtpSessionOptions>(impl_->engineOptions.engine);
 }
 
-std::optional<Persistence::SshUser> Session::loginUser() const
+std::optional<Session::LoginUser> Session::loginUser() const
 {
     if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&impl_->engineOptions.engine))
-        return ssh->loginUser();
+        return LoginUser{ssh->loginUser()};
+    if (const auto* ftp = std::get_if<Persistence::FtpSessionOptions>(&impl_->engineOptions.engine))
+        return LoginUser{ftp->loginUser()};
     return std::nullopt;
 }
 
@@ -321,7 +362,7 @@ void Session::openLocalShellChannel(std::string const& shellName)
 {
     if (!supportsLocalShell())
     {
-        Log::warn("openLocalShellChannel called on non-SSH session, ignored");
+        Log::warn("openLocalShellChannel called on a local session, ignored");
         return;
     }
     if (impl_->layoutInitializer)
@@ -428,9 +469,15 @@ Session::Session(Params params)
         createExecutingEngine();
         setupFileGrid();
     }
-    else if (std::holds_alternative<Persistence::SshSessionOptions>(impl_->engineOptions.engine))
+    else if (auto engine = makeRemoteTerminalEngine(
+                 impl_->engineOptions,
+                 [this]()
+                 {
+                     onTerminalConnectionLoss();
+                 }
+             ))
     {
-        createSshEngine();
+        createRemoteEngine(std::move(engine));
         setupFileGrid();
     }
     else
@@ -538,8 +585,8 @@ Session::Session(Params params, std::unique_ptr<ProtoSession> proto)
     // arrives in time for every channel this session opens.
     wireCommandCapture();
 
-    // SSH is the only path through ProtoSession today, but build the file
-    // grid regardless so the remote side is ready for snapshot application.
+    // Remote sessions are the only path through ProtoSession today, but build
+    // the file grid regardless so the remote side is ready for snapshot application.
     setupFileGrid();
 
     // Transport is already up: drive the post-open success branch synchronously
@@ -616,18 +663,15 @@ void Session::runInTerminal(std::string const& command, bool execute)
     impl_->runInTerminal(command, execute);
 }
 
-void Session::createSshEngine()
+void Session::createRemoteEngine(std::unique_ptr<TerminalEngine> engine)
 {
-    Log::info("Creating SSH engine");
+    Log::info("Creating {} engine", engine->engineName());
 
     // Eager-construct the aux ExecutingTerminalEngine so applySnapshot can
     // adopt ejected local-shell channels on a reconnect even before the user
     // opens an interactive local-shell tab.
     impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
-        std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
-            .sessionOptions = impl_->engineOptions,
-            .onConnectionLoss = std::bind(&Session::onTerminalConnectionLoss, this),
-        }),
+        std::move(engine),
         [this](Ids::ChannelId channelId, std::string const& input) {
             impl_->terminalPanel->onLockedModeUserInput(channelId, input);
         },
@@ -713,83 +757,103 @@ void Session::openLocalFilesystem()
 
 void Session::openSftp(std::string const& username, bool forceOpen)
 {
-    if (impl_->frontendSessionManager.value() && impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
+    auto* const manager = impl_->frontendSessionManager.value().get();
+    auto* const remoteSession = manager ? manager->engine().remoteSession() : nullptr;
+    auto const* const transferOptions = transferOptionsOf(impl_->engineOptions);
+    if (!remoteSession || !transferOptions)
     {
-        auto const& opts = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
-        if (forceOpen || opts.openSftpByDefault)
+        Log::info("Cannot open a remote file system for a local session");
+        return;
+    }
+    if (!forceOpen && !opensFileSystemByDefault(impl_->engineOptions))
+        return;
+
+    Log::info("Opening the remote file system");
+    impl_->snapshotManager->setSftpIsOpen(true);
+    auto fileEngine = std::make_shared<FileEngine>(remoteSession);
+
+    if (!remoteSideModel())
+    {
+        Log::error(
+            "Remote side model is not available, cannot open SFTP. This is a bug and should not happen by "
+            "design."
+        );
+        impl_->confirmDialog->open({
+            .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
+            .headerText = language->get("sessionFrontend", "sftpInitializationFailed"),
+            .text = language->get("sessionFrontend", "remoteSideModelUnavailable"),
+            .buttons = ConfirmDialog::Button::Ok,
+            .neverShowAgainId = "sftpInitializationFailed",
+        });
+    }
+
+    if (remoteSideModel())
+        remoteSideModel()->engine(fileEngine);
+    localSideModel().engine(std::move(fileEngine));
+    if (remoteSideModel())
+        impl_->operationQueue.activate(remoteSideModel()->engine(), remoteSession->sessionId());
+    impl_->fileTrackingPanel.activate(remoteSession->sessionId());
+    localSideModel().operationQueue(&impl_->operationQueue);
+    localSideModel().setFileTracking(&impl_->fileTrackingPanel);
+    if (remoteSideModel())
+    {
+        remoteSideModel()->operationQueue(&impl_->operationQueue);
+        remoteSideModel()->setFileTracking(&impl_->fileTrackingPanel);
+        if (transferOptions->defaultDirectory)
         {
-            Log::info("Opening SFTP by default");
-            impl_->snapshotManager->setSftpIsOpen(true);
-            auto* const remoteSession = impl_->frontendSessionManager.value()->engine().remoteSession();
-            auto fileEngine = std::make_shared<FileEngine>(remoteSession);
-
-            if (!remoteSideModel())
-            {
-                Log::error(
-                    "Remote side model is not available, cannot open SFTP. This is a bug and should not happen by "
-                    "design."
-                );
-                impl_->confirmDialog->open({
-                    .styleVariant = ScriptNuiComponents::StyleVariant::Danger,
-                    .headerText = language->get("sessionFrontend", "sftpInitializationFailed"),
-                    .text = language->get("sessionFrontend", "remoteSideModelUnavailable"),
-                    .buttons = ConfirmDialog::Button::Ok,
-                    .neverShowAgainId = "sftpInitializationFailed",
-                });
-            }
-
-            if (remoteSideModel())
-                remoteSideModel()->engine(fileEngine);
-            localSideModel().engine(std::move(fileEngine));
-            if (remoteSideModel())
-                impl_->operationQueue.activate(remoteSideModel()->engine(), remoteSession->sessionId());
-            impl_->fileTrackingPanel.activate(remoteSession->sessionId());
-            localSideModel().operationQueue(&impl_->operationQueue);
-            localSideModel().setFileTracking(&impl_->fileTrackingPanel);
-            if (remoteSideModel())
-            {
-                remoteSideModel()->operationQueue(&impl_->operationQueue);
-                remoteSideModel()->setFileTracking(&impl_->fileTrackingPanel);
-                if (opts.sftpOptions->defaultDirectory)
-                {
-                    remoteFileGridSide()->path(
-                        fmt::format(
-                            fmt::runtime(opts.sftpOptions->defaultDirectory->generic_string()),
-                            fmt::arg("user", username)
-                        )
-                    );
-                }
-                remoteSideModel()->engine()->homeDirectory(
-                    [this, readUserDirectories = opts.sftpOptions->readUserDirectories.value_or(true)](
-                        std::optional<std::filesystem::path> const& home, std::string const& info
-                    )
-                    {
-                        if (!remoteSideModel())
-                            return;
-                        if (!home)
-                        {
-                            Log::error("Failed to determine the remote home directory: {}", info);
-                            if (remoteFileGridSide()->path().empty())
-                                remoteFileGridSide()->path("/");
-                            return;
-                        }
-
-                        remoteSideModel()->setRemoteHome(*home, readUserDirectories);
-                        // A snapshot restore or the user may have navigated already.
-                        if (remoteFileGridSide()->path().empty())
-                            remoteFileGridSide()->path(*home);
-                        if (auto* places = remoteFileGridSide()->places(); places)
-                            places->reloadDefaultPlaces();
-                    }
-                );
-            }
-            openLocalFilesystem();
+            remoteFileGridSide()->path(
+                fmt::format(
+                    fmt::runtime(transferOptions->defaultDirectory->generic_string()), fmt::arg("user", username)
+                )
+            );
         }
+        remoteSideModel()->engine()->homeDirectory(
+            [this, readUserDirectories = transferOptions->readUserDirectories.value_or(true)](
+                std::optional<std::filesystem::path> const& home, std::string const& info
+            )
+            {
+                if (!remoteSideModel())
+                    return;
+                if (!home)
+                {
+                    Log::error("Failed to determine the remote home directory: {}", info);
+                    if (remoteFileGridSide()->path().empty())
+                        remoteFileGridSide()->path("/");
+                    return;
+                }
+
+                remoteSideModel()->setRemoteHome(*home, readUserDirectories);
+                // A snapshot restore or the user may have navigated already.
+                if (remoteFileGridSide()->path().empty())
+                    remoteFileGridSide()->path(*home);
+                if (auto* places = remoteFileGridSide()->places(); places)
+                    places->reloadDefaultPlaces();
+            }
+        );
     }
-    else
-    {
-        Log::info("Cannot open SFTP for non-ssh terminal");
-    }
+    openLocalFilesystem();
+}
+
+void Session::announceRemoteUser(std::string const& user, std::string const& address)
+{
+    *impl_->tabTitle = impl_->disambiguateTitle(this, address);
+    impl_->fileExplorerPanel.setRemoteOrigin(address);
+    impl_->snapshotManager->setRemoteUsername(user);
+}
+
+void Session::resumeRemoteSession(std::string const& address)
+{
+    // Reconnect shortcut: reuse the username from the old Session to
+    // avoid an "errorName" flash during RpcSystem::getUsername.
+    const auto& snapshot = impl_->snapshotManager->pending();
+    const auto& user = snapshot.remoteUsername;
+    announceRemoteUser(user, address);
+    if (snapshot.sftpWasOpen)
+        openSftp(user, /*forceOpen=*/true);
+    applySnapshot(snapshot);
+    if (impl_->onReconnectSucceeded)
+        impl_->onReconnectSucceeded(this);
+    impl_->snapshotManager->resetPending();
 }
 
 void Session::onOpenSession(bool success, std::string const& info)
@@ -818,62 +882,55 @@ void Session::onOpenSession(bool success, std::string const& info)
         closeSelf();
         return;
     }
-    else
+
+    Log::info("Session opened successfully: {}", info);
+    const bool isResumed = impl_->snapshotManager && impl_->snapshotManager->hasPending();
+    if (const auto* ssh = std::get_if<Persistence::SshSessionOptions>(&impl_->engineOptions.engine))
     {
-        Log::info("Session opened successfully: {}", info);
-        if (impl_->frontendSessionManager.value() &&
-            impl_->frontendSessionManager.value()->engine().engineName() == "ssh")
+        if (isResumed)
         {
-            const auto& sshSessionOptions = std::get<Persistence::SshSessionOptions>(impl_->engineOptions.engine);
-
-            // Reconnect shortcut: reuse the username from the old Session to
-            // avoid an "errorName" flash during RpcSystem::getUsername.
-            if (impl_->snapshotManager && impl_->snapshotManager->hasPending())
-            {
-                const auto& snapshot = impl_->snapshotManager->pending();
-                const auto& user = snapshot.remoteUsername;
-                const auto address = sshAddress(user, sshSessionOptions);
-                *impl_->tabTitle = impl_->disambiguateTitle(this, address);
-                impl_->fileExplorerPanel.setRemoteOrigin(address);
-                impl_->snapshotManager->setRemoteUsername(user);
-                const bool sftpWasOpen = snapshot.sftpWasOpen;
-                if (sftpWasOpen)
-                    openSftp(user, /*forceOpen=*/true);
-                applySnapshot(snapshot);
-                if (impl_->onReconnectSucceeded)
-                    impl_->onReconnectSucceeded(this);
-                impl_->snapshotManager->resetPending();
-                impl_->frontendSessionManager.value()->focusFirst();
-                if (impl_->layoutInitializer)
-                    impl_->layoutInitializer->initialize();
-                return;
-            }
-
+            const auto& user = impl_->snapshotManager->pending().remoteUsername;
+            resumeRemoteSession(remoteAddress(user, ssh->host, ssh->port.value_or(22)));
+        }
+        else
+        {
             Log::info("Retrieving username for tab title");
             Nui::RpcClient::callWithBackChannel(
                 "RpcSystem::getUsername",
-                [this, &sshSessionOptions](Nui::val response)
-                {
-                    std::string username = "errorName";
-                    if (response.hasOwnProperty("username"))
-                        username = response["username"].as<std::string>();
-                    Log::info("Retrieved username: {}", username);
+                impl_->lifetime.guarded(
+                    [this, ssh](Nui::val response)
+                    {
+                        std::string username = "errorName";
+                        if (response.hasOwnProperty("username"))
+                            username = response["username"].as<std::string>();
+                        Log::info("Retrieved username: {}", username);
 
-                    const auto user = sshSessionOptions.loginUser().name.value_or(username);
-                    const auto address = sshAddress(user, sshSessionOptions);
-                    *impl_->tabTitle = impl_->disambiguateTitle(this, address);
-                    impl_->fileExplorerPanel.setRemoteOrigin(address);
-                    impl_->snapshotManager->setRemoteUsername(user);
-
-                    openSftp(user);
-                }
+                        const auto user = ssh->loginUser().name.value_or(username);
+                        announceRemoteUser(user, remoteAddress(user, ssh->host, ssh->port.value_or(22)));
+                        openSftp(user);
+                    }
+                )
             );
         }
-
-        impl_->frontendSessionManager.value()->focusFirst();
-        if (impl_->layoutInitializer)
-            impl_->layoutInitializer->initialize();
     }
+    else if (const auto* ftp = std::get_if<Persistence::FtpSessionOptions>(&impl_->engineOptions.engine))
+    {
+        const auto user = ftpUserName(*ftp);
+        const auto address = remoteAddress(user, ftp->host, ftp->effectivePort());
+        if (isResumed)
+        {
+            resumeRemoteSession(address);
+        }
+        else
+        {
+            announceRemoteUser(user, address);
+            openSftp(user);
+        }
+    }
+
+    impl_->frontendSessionManager.value()->focusFirst();
+    if (impl_->layoutInitializer)
+        impl_->layoutInitializer->initialize();
 }
 
 void Session::onOpenChannel(std::optional<Ids::ChannelId> channelId, std::string const& info)

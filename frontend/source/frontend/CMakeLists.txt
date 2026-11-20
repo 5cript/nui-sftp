@@ -178,6 +178,8 @@ target_sources(
         terminal/executing_engine.cpp
         terminal/executing_channel.cpp
         terminal/file_engine.cpp
+        terminal/ftp_engine.cpp
+        terminal/remote_engine_factory.cpp
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
         components/code_editor.cpp

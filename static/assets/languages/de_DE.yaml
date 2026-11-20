@@ -1345,6 +1345,7 @@ toolbar:
   deleteLayout: "Layout Löschen"
   saveLayoutForSsh: "Geben Sie einen Namen ein. Das Layout wird für alle SSH-Server gespeichert."
   saveLayoutForShell: "Geben Sie einen Namen ein. Das Layout wird für alle lokalen Shells gespeichert."
+  saveLayoutForFtp: "Geben Sie einen Namen ein. Das Layout wird für alle FTP-Server gespeichert."
   layoutNameReserved: "Dieser Name ist für das Standard-Layout reserviert. Bitte wählen Sie einen anderen Namen."
   overwriteLayoutHeader: "Layout ersetzen"
   overwriteLayout: "Ein Layout mit diesem Namen existiert bereits. Ersetzen"

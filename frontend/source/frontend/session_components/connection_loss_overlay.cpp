@@ -37,8 +37,8 @@ struct ConnectionLossOverlay::Implementation
      * @brief Non-modal, draggable dialog that hosts the reconnect UI.
      *        Opened on connection loss, closed on Session disposal.  The
      *        draggability lets the user move it out of the way to keep
-     *        working with local-shell panels while the SSH transport tries
-     *        to reconnect.
+     *        working with local-shell panels while the remote connection
+     *        tries to reconnect.
      */
     std::unique_ptr<ScriptNuiComponents::Dialog> dialog;
 

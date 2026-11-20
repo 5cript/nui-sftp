@@ -1,7 +1,7 @@
 #include <frontend/proto_session.hpp>
 
 #include <frontend/terminal/executing_engine.hpp>
-#include <frontend/terminal/ssh_engine.hpp>
+#include <frontend/terminal/remote_engine_factory.hpp>
 #include <log/log.hpp>
 
 #include <utility>
@@ -39,21 +39,18 @@ ProtoSession::ProtoSession(Params params)
     // rebinds this on adoption via FrontendSessionManager::setLockedUserInputHandler.
     auto noopLockedInput = [](Ids::ChannelId, std::string const&) {};
 
-    if (std::holds_alternative<Persistence::SshSessionOptions>(impl_->sessionOptions.engine))
+    // onConnectionLoss is left unbound here — if the transport drops
+    // between open() and adoption the probe fails cleanly via onOpen,
+    // and after adoption Session::Session rebinds this to route into
+    // the lost-connection overlay.
+    if (auto remoteEngine = makeRemoteTerminalEngine(impl_->sessionOptions, {}))
     {
-        // onConnectionLoss is left unbound here — if the transport drops
-        // between open() and adoption the probe fails cleanly via onOpen,
-        // and after adoption Session::Session rebinds this to route into
-        // the lost-connection overlay.
+        impl_->engineNameCache = remoteEngine->engineName();
         impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
-            std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
-                .sessionOptions = impl_->sessionOptions,
-                .onConnectionLoss = {},
-            }),
+            std::move(remoteEngine),
             std::move(noopLockedInput),
             /*eagerAuxEngine=*/true
         );
-        impl_->engineNameCache = "ssh";
     }
     else
     {

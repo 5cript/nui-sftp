@@ -37,7 +37,7 @@ class ProtoSession
   public:
     struct Params
     {
-        /// Engine options (SSH connection details, termios, terminal options).
+        /// Engine options (connection details, termios, terminal options).
         Persistence::SessionOptions sessionOptions{};
         /// UiOptions carried through to the adopting Session untouched.
         Persistence::UiOptions uiOptions{};
@@ -78,7 +78,7 @@ class ProtoSession
     std::unique_ptr<FrontendSessionManager> takeFrontendSessionManager();
     std::optional<SessionSnapshot> takeResumeSnapshot();
 
-    /** @brief Engine name of the probed transport ("ssh" or "local"). */
+    /** @brief Engine name of the probed transport ("ssh", "ftp" or "local"). */
     std::string engineName() const;
 
   private:

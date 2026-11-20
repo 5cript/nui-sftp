@@ -65,6 +65,18 @@ namespace
         );
     }
 
+    /**
+     * @brief The remote favorites of a remote session, nothing for a local one.
+     */
+    std::vector<std::string> const* remoteFavoritesOf(Persistence::SessionOptions const& options)
+    {
+        if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
+            return &ssh->remoteFavorites;
+        if (auto const* ftp = std::get_if<Persistence::FtpSessionOptions>(&options.engine))
+            return &ftp->remoteFavorites;
+        return nullptr;
+    }
+
     NuiFileExplorer::FileGrid
     buildFileGrid(FileExplorerPanel::Params& params, Persistence::SessionOptions const& engineOptions)
     {
@@ -75,7 +87,7 @@ namespace
         auto const& uiOptions = params.uiOptions;
         auto* stateHolder = params.stateHolder;
 
-        if (std::holds_alternative<Persistence::SshSessionOptions>(engineOptions.engine))
+        if (auto const* remoteFavorites = remoteFavoritesOf(engineOptions))
         {
             return {
                 {
@@ -117,7 +129,7 @@ namespace
                 ),
                 std::make_unique<RemoteSideModel>(
                     uiOptions,
-                    std::get<Persistence::SshSessionOptions>(engineOptions.engine).remoteFavorites,
+                    *remoteFavorites,
                     confirmDialog,
                     inputDialog,
                     filePropertyDialog,
@@ -195,7 +207,7 @@ FileExplorerPanel& FileExplorerPanel::operator=(FileExplorerPanel&&) = default;
 void FileExplorerPanel::setup()
 {
     // Persist favorites changes through StateHolder.  Local-side favorites
-    // live in uiOptions; remote-side favorites live inside the SSH session's
+    // live in uiOptions; remote-side favorites live inside the remote session's
     // engine config, so the remote callback has to look up the session by
     // name at persist time.
     static_cast<LocalSideModel*>(&impl_->fileGrid.leftModel())
@@ -225,6 +237,8 @@ void FileExplorerPanel::setup()
                             return;
                         if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&iter->second.engine))
                             ssh->remoteFavorites = favs;
+                        else if (auto* ftp = std::get_if<Persistence::FtpSessionOptions>(&iter->second.engine))
+                            ftp->remoteFavorites = favs;
                     }
                 );
             }

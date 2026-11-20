@@ -66,7 +66,7 @@ class FileExplorerPanel
 
         /**
          * @brief Engine configuration.  The engine variant decides whether a
-         *        remote side is built (SSH = both sides, local-shell/executing
+         *        remote side is built (SSH and FTP = both sides, local-shell/executing
          *        = local only).  Remote favorites also live inside this.
          */
         Persistence::SessionOptions engineOptions{};

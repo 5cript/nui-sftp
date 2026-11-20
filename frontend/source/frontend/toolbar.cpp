@@ -8,6 +8,7 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/dialog/direct_connect_dialog.hpp>
 #include <frontend/settings/ssh_user_settings.hpp>
+#include <frontend/settings/ftp_user_settings.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
 #include <events/app_event_context.hpp>
@@ -37,6 +38,26 @@
 #include <nui/frontend/attributes.hpp>
 
 #include <numeric>
+
+namespace
+{
+    /**
+     * @brief The text that asks for the name of a layout saved for every session of @p type.
+     */
+    std::string saveLayoutPromptOf(Persistence::TerminalEngineType type)
+    {
+        switch (type)
+        {
+            case Persistence::TerminalEngineType::shell:
+                return language->get("toolbar", "saveLayoutForShell");
+            case Persistence::TerminalEngineType::ftp:
+                return language->get("toolbar", "saveLayoutForFtp");
+            case Persistence::TerminalEngineType::ssh:
+                return language->get("toolbar", "saveLayoutForSsh");
+        }
+        return language->get("toolbar", "saveLayoutForSsh");
+    }
+}
 
 struct Toolbar::Implementation
 {
@@ -239,6 +260,11 @@ void Toolbar::Implementation::loadUserLabels()
             for (auto const& user : ssh->users)
                 userLabels.push_back(sshUserLabel(user));
         }
+        else if (const auto* ftp = std::get_if<Persistence::FtpSessionOptions>(&iter->second.engine))
+        {
+            for (auto const& user : ftp->users)
+                userLabels.push_back(ftpUserLabel(user));
+        }
     }
 
     std::vector<std::size_t> indices(userLabels.size());
@@ -343,9 +369,7 @@ void Toolbar::saveLayout()
     const auto type = session->engineOptions().type;
     const auto& selected = impl_->selectedLayout.value();
     impl_->inputDialog->open({
-        .whatFor = language->get(
-            "toolbar", type == Persistence::TerminalEngineType::shell ? "saveLayoutForShell" : "saveLayoutForSsh"
-        ),
+        .whatFor = saveLayoutPromptOf(type),
         .headerText = language->get("settings", "layoutSetting", "addLayoutKeyHeader"),
         .initialValue = selected == Constants::defaultLayoutName ? std::string{} : selected,
         .onConfirm =

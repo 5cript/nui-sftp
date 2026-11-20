@@ -22,15 +22,25 @@
 #include <ids/ids.hpp>
 
 class ProtoSession;
+class TerminalEngine;
 
 #include <nui/frontend/element_renderer.hpp>
 #include <nui/frontend/utility/stabilize.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <roar/detail/pimpl_special_functions.hpp>
 
+#include <memory>
+#include <optional>
+#include <variant>
+
 class Session
 {
   public:
+    /**
+     * @brief The user a remote session logs in as.
+     */
+    using LoginUser = std::variant<Persistence::SshUser, Persistence::FtpUser>;
+
     /** @brief Construction-time wiring. */
     struct Params
     {
@@ -110,11 +120,11 @@ class Session
     auto makeAdoptedLocalShellChannelElement(LocalShellAdoption adoption) -> Nui::ElementRenderer;
     auto makeFileExplorerElement() -> Nui::ElementRenderer;
 
-    /** @brief True if this session can host local-shell panels (SSH sessions only). */
+    /** @brief True if this session can host local-shell panels (remote sessions only). */
     bool supportsLocalShell() const;
 
-    /** @brief The user an SSH session logged in as, nothing for local sessions. */
-    std::optional<Persistence::SshUser> loginUser() const;
+    /** @brief The user a remote session logged in as, nothing for local sessions. */
+    std::optional<LoginUser> loginUser() const;
 
     /** @brief The name of the session in the settings, nothing for a direct connect. */
     std::optional<std::string> persistenceName() const;
@@ -131,7 +141,7 @@ class Session
     std::optional<nlohmann::json> getLayout() const;
     int tabId() const;
 
-    /** @brief True while the SSH transport is lost and no reconnect has succeeded yet. */
+    /** @brief True while the remote connection is lost and no reconnect has succeeded yet. */
     bool isInLostConnectionState() const;
 
     /** @brief Captures a snapshot and hands off to SessionArea via requestReconnect. */
@@ -197,6 +207,17 @@ class Session
      *        can re-enqueue operations into a live FileEngine.
      */
     void openSftp(std::string const& username, bool forceOpen = false);
+
+    /**
+     * @brief Shows the user and address of the remote session in the tab title and the file explorer.
+     */
+    void announceRemoteUser(std::string const& user, std::string const& address);
+
+    /**
+     * @brief Restores the snapshot of the session this one reconnects, see onOpenSession.
+     */
+    void resumeRemoteSession(std::string const& address);
+
     void openLocalFilesystem();
     void closeSelf();
 
@@ -205,7 +226,11 @@ class Session
     void onChannelClosedByUser(Ids::ChannelId const& channelId);
 
     void createExecutingEngine();
-    void createSshEngine();
+
+    /**
+     * @brief Opens @p engine, the engine of an SSH or FTP session, with an auxiliary engine for local shells.
+     */
+    void createRemoteEngine(std::unique_ptr<TerminalEngine> engine);
 
     /**
      * @brief Points the session manager at the command store: capture mode and the sink that records
