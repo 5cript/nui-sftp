@@ -142,8 +142,12 @@ namespace Persistence
             ftpEngineThreads)
     )
 
+    /** @brief The most threads the FTP engine starts, whatever the config asks for. */
+    inline constexpr int maximumFtpEngineThreads = 64;
+
     /**
-     * @brief The FTP engine threads @p state asks for, two when unset and at least one.
+     * @brief The FTP engine threads @p state asks for, two when unset, at least one and at most
+     *        maximumFtpEngineThreads.
      */
     int ftpEngineThreadsOf(State const& state);
 

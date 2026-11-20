@@ -112,7 +112,7 @@ namespace Persistence
 
     int ftpEngineThreadsOf(State const& state)
     {
-        return std::max(1, state.ftpEngineThreads.value_or(2));
+        return std::clamp(state.ftpEngineThreads.value_or(2), 1, maximumFtpEngineThreads);
     }
 
     void State::writeLegacyUsers()

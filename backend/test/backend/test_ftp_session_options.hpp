@@ -163,7 +163,7 @@ namespace Test
         EXPECT_EQ(&state.sessionLayouts->of(Persistence::TerminalEngineType::ftp), &state.sessionLayouts->ftp);
     }
 
-    TEST(FtpSessionOptionsTests, TheEngineHasTwoThreadsUnlessSetAndAlwaysOne)
+    TEST(FtpSessionOptionsTests, TheEngineHasTwoThreadsUnlessSetAndStaysWithinItsBounds)
     {
         Persistence::State state{};
         EXPECT_EQ(Persistence::ftpEngineThreadsOf(state), 2);
@@ -171,6 +171,8 @@ namespace Test
         EXPECT_EQ(Persistence::ftpEngineThreadsOf(state), 4);
         state.ftpEngineThreads = 0;
         EXPECT_EQ(Persistence::ftpEngineThreadsOf(state), 1);
+        state.ftpEngineThreads = 5000;
+        EXPECT_EQ(Persistence::ftpEngineThreadsOf(state), Persistence::maximumFtpEngineThreads);
     }
 
 #ifndef _WIN32

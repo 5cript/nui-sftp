@@ -367,7 +367,7 @@ GeneralSettings::GeneralSettings(
             nulloptReset(connections.ftpEngineThreads, onChange),
             NumberSetting<int, true>::ConstructionArgs{
                 .minValue = 1,
-                .maxValue = 64,
+                .maxValue = Persistence::maximumFtpEngineThreads,
             },
         },
     }
