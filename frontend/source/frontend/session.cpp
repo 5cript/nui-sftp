@@ -308,6 +308,10 @@ struct Session::Implementation
      */
     void announceUncheckedUploads(std::string const& host)
     {
+        const auto consequence = [](std::string const& what, std::string const& why)
+        {
+            return ConfirmDialog::OpenOptions::ListElement{.text = fmt::format("{}: {}", what, why)};
+        };
         confirmDialog->open({
             .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
             .headerText = language->get("uploadDestinationCheck", "noticeHeader"),
@@ -315,18 +319,18 @@ struct Session::Implementation
             .buttons = ConfirmDialog::Button::Ok,
             .listItems =
                 {
-                    {
-                        .text = language->get("uploadDestinationCheck", "normalUploads"),
-                        .description = language->get("uploadDestinationCheck", "normalUploadsDescription"),
-                    },
-                    {
-                        .text = language->get("uploadDestinationCheck", "unsafeFastUploads"),
-                        .description = language->get("uploadDestinationCheck", "unsafeFastUploadsDescription"),
-                    },
-                    {
-                        .text = language->get("uploadDestinationCheck", "fileTrackingUploads"),
-                        .description = language->get("uploadDestinationCheck", "fileTrackingUploadsDescription"),
-                    },
+                    consequence(
+                        language->get("uploadDestinationCheck", "normalUploads"),
+                        language->get("uploadDestinationCheck", "normalUploadsDescription")
+                    ),
+                    consequence(
+                        language->get("uploadDestinationCheck", "unsafeFastUploads"),
+                        language->get("uploadDestinationCheck", "unsafeFastUploadsDescription")
+                    ),
+                    consequence(
+                        language->get("uploadDestinationCheck", "fileTrackingUploads"),
+                        language->get("uploadDestinationCheck", "fileTrackingUploadsDescription")
+                    ),
                 },
             .neverShowAgainId = "uploadDestinationCheck",
         });
