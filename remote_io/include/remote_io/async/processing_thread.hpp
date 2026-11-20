@@ -169,10 +169,11 @@ namespace RemoteIo
         void start(std::chrono::milliseconds const& pollInterval = std::chrono::milliseconds{0});
 
         /**
-         * @brief Sets what runs when a task threw, which ends the thread: once on the ending thread, after the queued
-         *        cleanup tasks ran and outside every lock of the thread. From then on pushes are refused, so the owner
-         *        ends what depends on the thread. A task that throws in the drain of stop() is told at the end of the
-         *        drain, on the thread that stops, unless the loop told of one before. Set before start().
+         * @brief Sets what runs when a task threw, which ends the thread: once on the ending thread, outside every
+         *        lock of the thread, after the queued cleanup tasks ran unless stop() drains them at that time. From
+         *        then on pushes are refused, so the owner ends what depends on the thread. A task that throws in the
+         *        drain of stop() is told at the end of the drain, on the thread that stops, unless the loop told of
+         *        one before. Set before start().
          */
         void onFailure(FailureHandler handler);
 
