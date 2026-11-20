@@ -730,7 +730,7 @@ namespace FileTransferProtocol::Test
         EXPECT_EQ(connectionsAccepted(), 2u);
     }
 
-    TEST_F(PoolTests, BackgroundWorkThatEndsWithAnExceptionLosesTheSession)
+    TEST_F(PoolTests, AWakeThatThrowsWhenANewC0LoggedInLosesTheSession)
     {
         server_->addConnection(loginThenResetOn("NOOP"));
         server_->addConnection(refusedAtTheGreeting());
@@ -764,6 +764,38 @@ namespace FileTransferProtocol::Test
         flush(pool->strand());
         EXPECT_EQ(pool->health(), PoolHealth::Lost);
         expectError(run(pool->acquireCommand()), RemoteErrorKind::ConnectionLost);
+    }
+
+    TEST_F(PoolTests, AWakeThatThrowsOnAReleaseLosesTheSessionAndTheWakesBehindItStillRun)
+    {
+        for (auto index = 0; index < 3; ++index)
+            server_->addConnection(loginThenDisconnect());
+        const auto pool = startedPool();
+        auto first = leaseFrom(run(pool->acquireTransfer()));
+        const auto second = leaseFrom(run(pool->acquireTransfer()));
+        expectError(
+            run(pool->acquireTransfer(
+                []()
+                {
+                    throw std::runtime_error{"boom"};
+                }
+            )),
+            RemoteErrorKind::Busy
+        );
+        const auto wakes = std::make_shared<WakeCount>();
+        expectError(run(pool->acquireTransfer(wakes->wake())), RemoteErrorKind::Busy);
+
+        giveBack(first);
+
+        ASSERT_EQ(wakes->woken.wait_for(10s), std::future_status::ready) << "the wake behind the one that threw";
+        ASSERT_EQ(losses_->lost.wait_for(10s), std::future_status::ready);
+        const auto losses = losses_->recorded();
+        ASSERT_EQ(losses.size(), 1u);
+        EXPECT_EQ(losses.front().kind, RemoteErrorKind::ConnectionLost) << losses.front().toString();
+        EXPECT_NE(losses.front().message.find("boom"), std::string::npos) << losses.front().toString();
+        flush(pool->strand());
+        EXPECT_EQ(pool->health(), PoolHealth::Lost);
+        EXPECT_EQ(wakes->calls, 1u);
     }
 
     TEST_F(PoolTests, ACommandBesideTheOnlyConnectionItsCallerHoldsIsBusyAtOnce)

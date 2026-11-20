@@ -802,8 +802,35 @@ namespace FileTransferProtocol
     {
         // A wake may be what lets go of the pool.
         const auto wakes = std::exchange(wakes_, {});
+        std::exception_ptr thrown{};
         for (auto wake = wakes.begin(); wake != wakes.end() && !abandoned_; ++wake)
-            (*wake)();
+        {
+            try
+            {
+                (*wake)();
+            }
+            catch (...)
+            {
+                // The wakes behind it still run, nothing else wakes what waits for them.
+                if (!thrown)
+                    thrown = std::current_exception();
+            }
+        }
+        if (thrown && !abandoned_)
+            wakeThrew(thrown);
+    }
+
+    void Pool::wakeThrew(std::exception_ptr exception)
+    {
+        const auto what = Utility::errorMessage(exception);
+        Log::error("FTP: A wake of the connection pool threw, the session is lost: {}", what);
+        // Nothing tells what the caller of the wake goes on with.
+        if (!closed_)
+        {
+            loseSession(
+                errorOf(RemoteErrorKind::ConnectionLost, fmt::format("A wake for a free connection threw: {}", what))
+            );
+        }
     }
 
     void Pool::abandon()

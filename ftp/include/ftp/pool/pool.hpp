@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -87,7 +88,7 @@ namespace FileTransferProtocol
         using LeaseResult = std::expected<Lease, RemoteIo::RemoteError>;
         /** @brief Called once on the pool's strand when the session is lost, must not block. */
         using LostHandler = std::function<void(RemoteIo::RemoteError const&)>;
-        /** @brief Called once, from the pool's strand, see acquireTransfer(). */
+        /** @brief Called once, from the pool's strand, see acquireTransfer(). An exception of it loses the session. */
         using Wake = std::function<void()>;
 
         /**
@@ -219,7 +220,11 @@ namespace FileTransferProtocol
         void promote(std::shared_ptr<PooledConnection> const& connection);
         bool grantMetadata();
         void failCommandWaiters(RemoteIo::RemoteError const& error);
+        /**
+         * @brief Calls the kept wakes, each once. One that throws loses the session, the wakes behind it still run.
+         */
         void fireWakes();
+        void wakeThrew(std::exception_ptr exception);
         /**
          * @brief The owner let go of its handle: ends the work in the background and calls nothing of the owner
          *        any more.

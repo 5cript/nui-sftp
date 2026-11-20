@@ -241,7 +241,7 @@ namespace RemoteIo
          * @brief Called once, from any thread, after the open failed with Busy, when a connection became free or the
          *        protocol may open another one again, as after the wait that follows a refusal for too many
          *        connections. The open that follows may fail with Busy again. An open that did not fail with Busy
-         *        drops it.
+         *        drops it. An exception of it ends the session.
          */
         std::function<void()> wakeWhenFree{};
     };
