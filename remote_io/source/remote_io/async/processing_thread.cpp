@@ -8,8 +8,11 @@
 #include <chrono>
 #include <exception>
 #include <future>
+#include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 
 namespace RemoteIo
 {
@@ -90,6 +93,7 @@ namespace RemoteIo
             std::lock_guard lock{taskMutex_};
             running_ = true;
             intake_ = Intake::Open;
+            failureReported_ = false;
         }
         stateIsSet.set_value();
         awaitThreadStart.get_future().wait();
@@ -115,6 +119,7 @@ namespace RemoteIo
         // caller meanwhile.
         std::unique_lock lock{taskMutex_};
         processingThreadId_.store(std::this_thread::get_id());
+        std::optional<std::string> failure{};
         while (!tasks_.empty())
         {
             {
@@ -122,28 +127,35 @@ namespace RemoteIo
                 tasks_.pop_front();
                 lock.unlock();
                 if (task.kind != TaskKind::Refused)
-                    runContained(task.run);
+                {
+                    auto threw = runContained(task.run);
+                    if (!failure)
+                        failure = std::move(threw);
+                }
             }
             lock.lock();
         }
         // The id of the joined thread may be reused.
         processingThreadId_.store({});
         intake_ = Intake::Closed;
+        lock.unlock();
+        // As for a task that throws in the loop: the batch runs on, then the owner learns why.
+        if (failure)
+            reportFailure(*failure);
     }
-    void ProcessingThread::runContained(std::function<void()> const& task)
+    std::optional<std::string> ProcessingThread::runContained(std::function<void()> const& task)
     {
         try
         {
             task();
+            return std::nullopt;
         }
         catch (...)
         {
-            // Outside the loop no task ends anything, a promise task completes with its unfinished result.
-            Log::error(
-                Log::Toast::Skip,
-                "A task threw behind the end of its processing thread: {}",
-                Utility::errorMessage(std::current_exception())
-            );
+            // The tasks behind it still run, a promise task completes with its unfinished result.
+            auto reason = Utility::errorMessage(std::current_exception());
+            Log::error(Log::Toast::Skip, "A task threw behind the end of its processing thread: {}", reason);
+            return reason;
         }
     }
     bool ProcessingThread::pushTask(std::function<void()>&& task)
@@ -206,7 +218,7 @@ namespace RemoteIo
             return;
         }
         const ActingProcessingThread acting{processingThreadId_};
-        runContained(task);
+        std::ignore = runContained(task);
     }
     void ProcessingThread::wake()
     {
@@ -513,7 +525,7 @@ namespace RemoteIo
         for (auto& task : pending)
         {
             if (task.kind == TaskKind::Cleanup)
-                runContained(task.run);
+                std::ignore = runContained(task.run);
         }
     }
     void ProcessingThread::onFailure(FailureHandler handler)
@@ -526,6 +538,8 @@ namespace RemoteIo
         FailureHandler handler{};
         {
             std::lock_guard lock{taskMutex_};
+            if (std::exchange(failureReported_, true))
+                return;
             handler = failureHandler_;
         }
         if (handler)

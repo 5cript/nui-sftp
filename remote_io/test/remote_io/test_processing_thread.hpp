@@ -1798,6 +1798,107 @@ namespace RemoteIo::Test
         EXPECT_TRUE(finalTask.get());
     }
 
+    TEST_F(ProcessingThreadTest, ThrowingTaskInTheDrainOfStopTellsTheFailureHandlerOnceTheDrainEnded)
+    {
+        std::atomic_int ran = 0;
+        std::atomic_int reports = 0;
+        std::atomic_int ranBeforeTheReport = 0;
+        std::string reason{};
+        std::thread::id reportedOn{};
+        // Never started, so stop() drains what was pushed.
+        ProcessingThread processingThread;
+        processingThread.onFailure(
+            [&](std::string const& why)
+            {
+                ++reports;
+                ranBeforeTheReport = ran.load();
+                reason = why;
+                reportedOn = std::this_thread::get_id();
+            }
+        );
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("later");
+            }
+        );
+        processingThread.pushTask(
+            [&ran]
+            {
+                ++ran;
+            }
+        );
+
+        processingThread.stop();
+
+        EXPECT_EQ(reports.load(), 1);
+        EXPECT_EQ(reason, "boom");
+        EXPECT_EQ(ranBeforeTheReport.load(), 1) << "the handler ran before the drain ended";
+        EXPECT_EQ(reportedOn, std::this_thread::get_id());
+    }
+
+    TEST_F(ProcessingThreadTest, ThrowingTaskInTheDrainIsNotToldBehindOneOfTheLoop)
+    {
+        std::atomic_int reports = 0;
+        std::promise<void> reported{};
+        std::promise<void> stopping{};
+        ProcessingThread processingThread;
+        processingThread.onFailure(
+            [&reports, &reported, stopCalled = stopping.get_future().share()](std::string const&)
+            {
+                if (++reports == 1)
+                    reported.set_value();
+                // Holds the thread until stop() waits for it, so the drain gets a task of its own.
+                stopCalled.wait();
+            }
+        );
+        processingThread.pushTask(
+            []
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+        processingThread.start(std::chrono::milliseconds{1});
+        ASSERT_EQ(reported.get_future().wait_for(5s), std::future_status::ready);
+
+        auto stopped = std::async(
+            std::launch::async,
+            [&processingThread]
+            {
+                processingThread.stop();
+            }
+        );
+        // A cleanup task runs on its caller until stop() drains, then it waits in the queue for the drain.
+        ASSERT_TRUE(waitUntil(
+            [&processingThread]
+            {
+                const auto ranAtOnce = std::make_shared<std::atomic_bool>(false);
+                processingThread.pushCleanupTask(
+                    [ranAtOnce]
+                    {
+                        *ranAtOnce = true;
+                    }
+                );
+                return !ranAtOnce->load();
+            }
+        ));
+        processingThread.pushCleanupTask(
+            []
+            {
+                throw std::runtime_error("later");
+            }
+        );
+        stopping.set_value();
+        ASSERT_EQ(stopped.wait_for(5s), std::future_status::ready);
+        EXPECT_EQ(reports.load(), 1);
+    }
+
     TEST_F(ProcessingThreadTest, ThrowingCleanupTaskAfterStopDoesNotThrowAtItsCaller)
     {
         ProcessingThread processingThread;
