@@ -80,8 +80,8 @@ namespace NuiSftpPage::Sections
                         "FTP and FTPS",
                         "FTP servers open in the same file view, unencrypted or over explicit or implicit TLS, "
                         "with synchronization, file tracking and archives. Certificates are checked against "
-                        "the authorities your system trusts, and one that nobody vouches for is shown to you "
-                        "before a password is sent.",
+                        "the certificate authorities trusted by your system. A certificate they do not vouch "
+                        "for, a self-signed one for example, can be reviewed and trusted manually.",
                         {"Explicit or implicit TLS", "Certificate check", "Parallel transfers"},
                     },
                     {

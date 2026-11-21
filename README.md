@@ -90,7 +90,7 @@ You can synchronize folders between your local machine and the server. This will
 ![Synchronize](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/synchronize.png)
 
 ## FTP Servers
-Connect to FTP servers, unencrypted or over explicit or implicit TLS. An FTP session opens the same file view as SFTP, without terminals: transfers, synchronization, File Tracking and archives work there too. Certificates are checked against the certificate authorities your system trusts, and one that nobody vouches for is shown to you before a password is sent.
+Connect to FTP servers, unencrypted or over explicit or implicit TLS. Transfers, synchronization, File Tracking and archives work in an FTP session as they do over SFTP, in the same file view. Certificates are checked against the certificate authorities trusted by your system. A certificate they do not vouch for, a self-signed one for example, can be reviewed and trusted manually. An FTP session has no terminals, as the FTP protocol has no shell.
 
 ## Local Shell
 Run a PTY on your local machine with a file view.
@@ -140,7 +140,7 @@ You can download and upload files and folders directly as tar archives, no manua
 - Plain FTP, explicit FTP over TLS and implicit FTP over TLS.
 - Everything of the SFTP list above, with the same file view, queue and synchronization.
 - Certificates are verified with the certificate authorities of the system, on Linux, Windows and macOS.
-- An unverified certificate is shown with its fingerprints before the login, to trust once or always.
+- An unverified certificate (self-signed, expired, issued for another server) is shown with its details and fingerprints. You can reject it, trust it once or trust it always.
 - Anonymous login and several users per server.
 - Passwords are asked for when connecting and never stored.
 - Several connections per session: one for browsing, the others for parallel transfers.
