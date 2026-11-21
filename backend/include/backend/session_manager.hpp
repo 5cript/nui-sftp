@@ -2,6 +2,7 @@
 
 #include <backend/session.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
+#include <backend/ftp/certificate_trust.hpp>
 #include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/local_operation_queue.hpp>
@@ -80,6 +81,12 @@ class SessionManager
     void fileTrackingDefaults(Persistence::FileTrackingOptions const& options);
 
     void addPasswordProvider(int priority, PasswordProvider* provider);
+
+    /**
+     * @brief Who is asked whether to trust a certificate of an FTP server that nobody vouched for. Without one such a
+     *        certificate fails the connect.
+     */
+    void setTrustProvider(FtpConnect::TrustProvider* provider);
     void joinSessionAdder();
     /**
      * @brief Makes the connection of a new session on the strand, handed the callback for its loss.
@@ -100,15 +107,22 @@ class SessionManager
     );
 
     /**
-     * @brief Connects to the FTP server of @p sessionOptions, whose references are resolved. Asks the password
-     *        providers for the password unless the login is anonymous.
+     * @brief Connects to the FTP server of @p sessionOptions, whose references are resolved. Asks the trust provider
+     *        about a certificate nobody vouched for, and the password providers for the password unless the login is
+     *        anonymous.
      */
     Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
 
     /**
-     * @brief @p connect, which also sets @p passwordDeclined to whether the last password prompt during it got no
-     *        password: a prompt the user cancelled, that no provider answered or that shutdown() cancelled. A prompt
-     *        answered after a declined one makes what follows a failure of its own.
+     * @brief Asks the trust provider about a certificate, on the strand, which it blocks until the answer. A prompt
+     *        that shutdown() cancels or that no provider can answer is refused, like a declined password prompt.
+     */
+    FtpConnect::TrustSource trustSource();
+
+    /**
+     * @brief @p connect, which also sets @p passwordDeclined to whether the last password or trust prompt during it
+     *        got no answer: a prompt the user cancelled, that no provider answered or that shutdown() cancelled. A
+     *        prompt answered after a declined one makes what follows a failure of its own.
      */
     Connect noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool> passwordDeclined);
 
@@ -168,6 +182,19 @@ class SessionManager
      * @brief Asks the providers as askPassword() does, and lets what they throw through.
      */
     std::optional<std::string> askProviders(std::string const& whatFor, std::string const& prompt);
+
+    /**
+     * @brief Asks the trust provider whether to trust the certificate of @p question. On the strand, which it blocks
+     *        until then.
+     *
+     * @return The public key the user trusts, nothing when the user refused, prompts are cancelled or asking failed.
+     */
+    std::optional<FileTransferProtocol::Sha256Digest> askTrust(FtpConnect::TrustQuestion const& question) noexcept;
+
+    /**
+     * @brief Asks as askTrust() does, and lets what the provider throws through.
+     */
+    std::optional<FileTransferProtocol::Sha256Digest> askTrustProvider(FtpConnect::TrustQuestion const& question);
 
     /**
      * @brief Stops and removes every session, later ones are refused. On the strand.
@@ -241,7 +268,8 @@ class SessionManager
     void registerRpcStopFileTracking();
 
     /**
-     * @brief Makes a new request the pending one, so that shutdown() can cancel it.
+     * @brief Makes a new request the pending one, so that shutdown() can cancel it. Password and trust prompts share
+     *        it, one at a time on the strand.
      *
      * @return The request, or nullptr once prompts are cancelled.
      */
@@ -271,13 +299,15 @@ class SessionManager
     std::shared_ptr<LocalOperationQueue> localOperationQueue_;
 
     std::map<int, PasswordProvider*> passwordProviders_{};
+    /** @brief On the strand. */
+    FtpConnect::TrustProvider* trustProvider_{nullptr};
     std::mutex passwordRequestMutex_{};
-    /** @brief At most one, askPassDefault only runs within the strand. */
+    /** @brief At most one, the prompts only run within the strand. */
     std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};
     bool passwordPromptsCancelled_{false};
     /** @brief Stops the FTP connects, a login that runs among them, once shutdown() begins. Thread-safe. */
     std::stop_source connectsStop_{};
-    /** @brief Whether the last prompt of askPassword got no password, a failed one aside. On the strand. */
+    /** @brief Whether the last prompt of askPassword or askTrust got no answer, a failed one aside. On the strand. */
     bool lastPromptDeclined_{false};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};

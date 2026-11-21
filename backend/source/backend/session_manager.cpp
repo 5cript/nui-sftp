@@ -295,6 +295,73 @@ std::optional<std::string> SessionManager::askPassword(std::string const& whatFo
     return std::nullopt;
 }
 
+std::optional<FileTransferProtocol::Sha256Digest>
+SessionManager::askTrustProvider(FtpConnect::TrustQuestion const& question)
+{
+    if (!trustProvider_)
+    {
+        Log::warn("There is no trust provider to ask about the certificate of {}:{}.", question.host, question.port);
+        return std::nullopt;
+    }
+
+    const auto request = beginPasswordRequest();
+    if (!request)
+        return std::nullopt;
+    const auto endRequest = Nui::ScopeExit(
+        [this]() noexcept
+        {
+            endPasswordRequest();
+        }
+    );
+
+    trustProvider_->askTrust(
+        question,
+        [request](std::optional<std::string> trustedKey)
+        {
+            request->resolve(std::move(trustedKey));
+        }
+    );
+    return request->wait().and_then(
+        [](std::string const& trustedKey)
+        {
+            auto digest = FileTransferProtocol::parseDigest(trustedKey);
+            if (!digest)
+                Log::error("The trust prompt answered with no SHA-256 digest, the certificate is not trusted.");
+            return digest;
+        }
+    );
+}
+
+std::optional<FileTransferProtocol::Sha256Digest>
+SessionManager::askTrust(FtpConnect::TrustQuestion const& question) noexcept
+{
+    // A prompt that fails is no declined one, its error is reported.
+    lastPromptDeclined_ = false;
+    try
+    {
+        auto trustedKey = askTrustProvider(question);
+        lastPromptDeclined_ = !trustedKey;
+        return trustedKey;
+    }
+    catch (std::exception const& exception)
+    {
+        Log::error("Asking whether to trust a certificate failed: {}", Utility::errorMessage(exception));
+    }
+    catch (...)
+    {
+        Log::error("Asking whether to trust a certificate failed.");
+    }
+    return std::nullopt;
+}
+
+FtpConnect::TrustSource SessionManager::trustSource()
+{
+    return [this](FtpConnect::TrustQuestion const& question)
+    {
+        return askTrust(question);
+    };
+}
+
 std::shared_ptr<PasswordRequest> SessionManager::beginPasswordRequest()
 {
     std::scoped_lock lock{passwordRequestMutex_};
@@ -316,6 +383,16 @@ void SessionManager::addPasswordProvider(int priority, PasswordProvider* provide
         [this, priority, provider]()
         {
             passwordProviders_.emplace(priority, provider);
+        }
+    );
+}
+
+void SessionManager::setTrustProvider(FtpConnect::TrustProvider* provider)
+{
+    within_strand_do(
+        [this, provider]()
+        {
+            trustProvider_ = provider;
         }
     );
 }
@@ -367,6 +444,7 @@ SessionManager::Connect SessionManager::ftpConnect(Persistence::FtpSessionOption
             {
                 return askPassword("password", prompt);
             },
+            trustSource(),
             std::move(onConnectionLoss),
             connectsStop_.get_token()
         );

@@ -269,6 +269,7 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
     , rpcSystem_{}
     , processes_{window_.getExecutor(), window_, hub_, forkPool}
     , prompter_{hub_}
+    , trustPrompter_{hub_}
     , sshSessionManager_{
           std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_, *ftpEngine_)
       }
@@ -278,6 +279,7 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
     , platformSpecifics_{std::make_unique<PlatformSpecifics>(window_, hub_)}
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
+    sshSessionManager_->setTrustProvider(&trustPrompter_);
 }
 Main::~Main()
 {
@@ -313,6 +315,7 @@ void Main::registerRpc()
 
     Log::setupBackendRpcHub(&hub_);
     prompter_.registerRpc();
+    trustPrompter_.registerRpc();
     stateHolder_.registerRpc(hub_);
     processes_.registerRpc(window_, hub_);
     sshSessionManager_->registerRpc();

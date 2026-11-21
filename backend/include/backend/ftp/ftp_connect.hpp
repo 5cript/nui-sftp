@@ -1,5 +1,6 @@
 #pragma once
 
+#include <backend/ftp/certificate_trust.hpp>
 #include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/session.hpp>
 #include <ftp/client/login.hpp>
@@ -71,9 +72,11 @@ namespace FtpConnect
     );
 
     /**
-     * @brief Logs in to the server of @p session on the threads of @p engine, asking @p askPassword unless the login is
-     *        anonymous. Blocks until the login ended, within the login limits of the connection. Neither on an engine
-     *        thread nor on a processing thread.
+     * @brief Logs in to the server of @p session on the threads of @p engine. A login with a password or over TLS
+     *        reaches the server first, without credentials: a certificate nobody vouched for is put to @p askTrust,
+     *        and the server is reached again with the key the user trusted pinned, for this connection only. Then
+     *        @p askPassword is asked unless the login is anonymous. Blocks until the login ended, within the login
+     *        limits of the connection. Neither on an engine thread nor on a processing thread.
      *
      * @param onConnectionLoss Called once when the session is lost after the start of the connection, on its
      *        processing thread, or from within start() for a loss before it.
@@ -84,6 +87,7 @@ namespace FtpConnect
         FtpEngineContext& engine,
         Persistence::FtpSessionOptions const& session,
         PasswordSource const& askPassword,
+        TrustSource const& askTrust,
         std::function<void()> onConnectionLoss,
         std::stop_token const& stop = {}
     );
