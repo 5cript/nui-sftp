@@ -88,7 +88,7 @@ struct MainPage::Implementation
         , directConnectDialog{"DirectConnectDialog", stateHolder}
         , newSessionDialog{"NewSessionDialog"}
         , prompter{}
-        , trustPrompter{*stateHolder}
+        , trustPrompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
         , notificationCenter{events}

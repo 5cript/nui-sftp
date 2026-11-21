@@ -5,21 +5,16 @@
 
 #include <memory>
 
-namespace Persistence
-{
-    class StateHolder;
-}
-
 /**
- * @brief Asks whether to trust the certificate of an FTP server that no authority vouched for, for the backend's
- *        "CertificateTrustPrompter::prompt", and answers with "CertificateTrustPrompter::promptDone". Always trust
- *        also pins the public key in every saved FTP session of that server with TLS, so later connects and
- *        reconnects trust it.
+ * @brief Asks whether to trust the certificate of an FTP server that the backend refused, for the backend's
+ *        "CertificateTrustPrompter::prompt", and answers with "CertificateTrustPrompter::promptDone": the id of the
+ *        prompt and "once", "always" or "refuse". The certificate is only shown, nothing of it goes back; the backend
+ *        keeps the key it trusts.
  */
 class CertificateTrustPrompter
 {
   public:
-    explicit CertificateTrustPrompter(Persistence::StateHolder& stateHolder);
+    CertificateTrustPrompter();
     ROAR_PIMPL_SPECIAL_FUNCTIONS(CertificateTrustPrompter);
 
     Nui::ElementRenderer dialog();

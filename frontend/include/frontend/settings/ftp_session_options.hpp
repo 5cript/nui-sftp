@@ -14,6 +14,7 @@
 #include <frontend/settings/atomic_setting/text_setting.hpp>
 
 #include <persistence/state/session_options.hpp>
+#include <utility/lifetime_token.hpp>
 
 #include <functional>
 #include <string>
@@ -50,9 +51,10 @@ struct FtpSessionOptions
     RemoteServerSettings server;
     ComboSetting<Persistence::FtpTlsMode, std::string> tlsMode;
     /**
-     * @brief Empty when no certificate is pinned. Only cleared here, pinning happens when connecting.
+     * @brief The public key the backend trusts for the host and port, empty without one. Only shown and forgotten
+     *        here: the backend keeps it, and takes it from a certificate that is trusted when connecting.
      */
-    ReadOnlyTextSetting pinnedPublicKeySha256;
+    ReadOnlyTextSetting trustedPublicKey;
     MultiSetting<FtpUserSettings> users;
 
     FtpOptions ftpOptions;
@@ -83,7 +85,30 @@ struct FtpSessionOptions
     void showDefaultPort();
 
     /**
-     * @brief The change callback of the TLS mode, which also updates the default port shown.
+     * @brief The change callback of the TLS mode, which also updates the default port shown and the trusted key.
      */
     std::function<void()> tlsModeChanged(std::function<void()> onChange);
+
+    /**
+     * @brief The change callback of the host and the port, which also shows the key trusted for the new server.
+     */
+    std::function<void()> serverChanged(std::function<void()> onChange);
+
+    /**
+     * @brief The port a connect would use: the one set, else the default of the TLS mode.
+     */
+    int effectivePort() const;
+
+    /**
+     * @brief Asks the backend for the key it trusts for the host and port, and shows it.
+     */
+    void showTrustedKey();
+
+    /**
+     * @brief Has the backend forget the key it trusts for the host and port, then shows what is left.
+     */
+    void forgetTrustedKey();
+
+  private:
+    Utility::LifetimeToken lifetime_{};
 };
