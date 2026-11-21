@@ -1457,7 +1457,7 @@ certificateTrustPrompter:
   problemNotYetValid: "Es ist noch nicht gültig."
   problemSelfSigned: "Es ist selbstsigniert, keine Zertifizierungsstelle bürgt dafür."
   problemUnknownAuthority: "Keine Zertifizierungsstelle, der dieser Computer vertraut, bürgt dafür."
-  problemKeyOnly: "Eine Zertifizierungsstelle, der dieser Computer vertraut, bürgt dafür, nur ist sein Schlüssel nicht der, dem Sie vertraut haben."
+  problemKeyOnly: "Eine Zertifizierungsstelle, der dieser Computer vertraut, bürgt dafür, nur ist sein Schlüssel nicht der, dem Sie vertraut haben. Immer vertrauen vergisst diesen Schlüssel und verlässt sich für diesen Server wieder auf die Zertifizierungsstellen."
   advice: "Vergleichen Sie den Fingerabdruck des öffentlichen Schlüssels mit dem, den Ihnen der Administrator des Servers nennt, bevor Sie ihm vertrauen."
   subject: "Inhaber"
   issuer: "Aussteller"

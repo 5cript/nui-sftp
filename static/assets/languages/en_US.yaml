@@ -1459,7 +1459,7 @@ certificateTrustPrompter:
   problemNotYetValid: "It is not valid yet."
   problemSelfSigned: "It is signed by itself, no authority vouches for it."
   problemUnknownAuthority: "No authority this computer trusts vouches for it."
-  problemKeyOnly: "An authority this computer trusts vouches for it, only its key is not the one you trusted."
+  problemKeyOnly: "An authority this computer trusts vouches for it, only its key is not the one you trusted. Always Trust forgets that key and relies on the authorities for this server again."
   advice: "Compare the public key fingerprint with the one the administrator of the server gives you before you trust it."
   subject: "Subject"
   issuer: "Issuer"

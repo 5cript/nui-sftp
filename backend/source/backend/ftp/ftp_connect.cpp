@@ -124,22 +124,49 @@ namespace FtpConnect
         }
 
         /**
-         * @brief Keeps @p publicKey in @p trustStore as the user decided with @p answer, which trusts it. A key that
-         *        cannot be saved is trusted until the application ends.
+         * @brief Has @p trustStore forget the key of the server: the authorities vouch for its certificate, and the
+         *        user trusts them for it from now on.
+         */
+        void trustTheAuthoritiesAgain(CertificateTrustStore& trustStore, std::string const& host, std::uint16_t port)
+        {
+            const auto forgotten = trustStore.forget(host, port);
+            if (forgotten)
+                return Log::info(
+                    "FTP: The authorities vouch for the certificate of {}:{}, the key trusted before is forgotten.",
+                    host,
+                    port
+                );
+            Log::error(
+                "The trusted key of the FTP server {}:{} could not be removed from the saved keys, it is forgotten "
+                "until the application ends: {}",
+                host,
+                port,
+                forgotten.error()
+            );
+        }
+
+        /**
+         * @brief Keeps the key of @p certificate in @p trustStore as the user decided with @p answer, which trusts it.
+         *        A key that cannot be saved is trusted until the application ends. Always trusting a certificate the
+         *        authorities vouch for, refused for its key alone, keeps no key: the one trusted before is forgotten,
+         *        so later certificates of the server need the authorities and no prompt.
          */
         void rememberTrust(
             CertificateTrustStore& trustStore,
             TrustAnswer answer,
             std::string const& host,
             std::uint16_t port,
-            FileTransferProtocol::Sha256Digest const& publicKey
+            FileTransferProtocol::CertificateInfo const& certificate
         )
         {
+            auto const& publicKey = certificate.publicKeySha256;
             if (answer != TrustAnswer::Always)
             {
                 Log::info("FTP: The user trusts the certificate of {}:{} until the application ends.", host, port);
                 return trustStore.trustForThisRun(host, port, publicKey);
             }
+            if (certificate.verifyFailures.empty())
+                return trustTheAuthoritiesAgain(trustStore, host, port);
             const auto saved = trustStore.trustLastingly(host, port, publicKey);
             if (saved)
                 return Log::info("FTP: The user trusts the certificate of {}:{} from now on.", host, port);
@@ -478,7 +505,8 @@ namespace FtpConnect
                         "The certificate of the FTP server {}:{} was not trusted.", session.host, options.pool.port
                     )
                 );
-            rememberTrust(trustStore, answer, session.host, options.pool.port, certificate.publicKeySha256);
+            rememberTrust(trustStore, answer, session.host, options.pool.port, certificate);
+            // This connect keeps to the certificate the user saw, whatever the store keeps for later ones.
             tls->pinnedPublicKey = certificate.publicKeySha256;
             return options;
         }
