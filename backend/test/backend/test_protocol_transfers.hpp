@@ -10,8 +10,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <compare>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -161,6 +163,27 @@ namespace Test
 
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_EQ(localContentOf(local), content);
+    }
+
+    TEST_P(ProtocolTransferTests, ADownloadGivesItsFileTheModificationTimeOfItsSource)
+    {
+        // 2023-11-14 22:13:57 UTC, seconds that a listing to the minute or the day leaves out.
+        constexpr std::uint64_t sourceTime{1700000037u};
+        putRemoteFile("timed.txt", "timed content");
+        ASSERT_NO_FATAL_FAILURE(setRemoteModificationTime("timed.txt", sourceTime));
+        for (const bool inheritPermissions : {true, false})
+        {
+            SCOPED_TRACE(fmt::format("inheritPermissions: {}", inheritPermissions));
+            const auto local = localDirectory_.path() / fmt::format("timed{}.txt", inheritPermissions);
+            auto options = downloadOf("timed.txt", local);
+            options.inheritPermissions = inheritPermissions;
+            DownloadOperation operation{fileSystem(), std::move(options)};
+
+            const auto result = runToEnd(operation, operationLimit);
+
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_EQ(localModificationTimeOf(local), sourceTime);
+        }
     }
 
     TEST_P(ProtocolTransferTests, AStoppedDownloadEndsCanceledAndTheNextOneRuns)
@@ -468,6 +491,38 @@ namespace Test
 
         ASSERT_TRUE(result.has_value()) << result.error().toString();
         EXPECT_EQ(localContentOf(local), "fast content");
+    }
+
+    TEST_P(ProtocolTransferTests, AnUnsafeFastDownloadAsksNothingBehindItsTransferWhereItsEntryShowsThePermissions)
+    {
+        // 2023-11-14 22:13:57 UTC, which an FTP listing tells to the day.
+        constexpr std::uint64_t sourceTime{1700000037u};
+        putRemoteFile("listed.txt", "listed content");
+        ASSERT_NO_FATAL_FAILURE(setRemoteModificationTime("listed.txt", sourceTime));
+        auto looking = fileSystem()->later(RemoteIo::Lstat{.path = remoteAt("listed.txt")});
+        ASSERT_EQ(looking.wait_for(lookLimit), std::future_status::ready);
+        const auto listed = looking.get();
+        ASSERT_TRUE(listed.has_value()) << listed.error().toString();
+        ASSERT_NE(listed->permissions, std::filesystem::perms::unknown);
+        const auto local = localDirectory_.path() / "listed.txt";
+        auto options = downloadOf("listed.txt", local);
+        options.entry = *listed;
+        options.unsafeFastMode = unsafeFast();
+        DownloadOperation operation{fileSystem(), std::move(options)};
+        const auto timesAskedBefore = ftpCommandCount("MDTM");
+
+        const auto result = runToEnd(operation, operationLimit);
+
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_EQ(localContentOf(local), "listed content");
+        EXPECT_EQ(ftpCommandCount("MDTM"), timesAskedBefore);
+        // The time is the source's as exact as the entry tells it.
+        EXPECT_EQ(
+            SharedData::compareTimes(
+                localModificationTimeOf(local), SharedData::TimePrecision::Second, sourceTime, listed->mtimePrecision
+            ),
+            std::strong_ordering::equal
+        );
     }
 
     INSTANTIATE_FOR_BOTH_PROTOCOLS(ProtocolTransferTests);

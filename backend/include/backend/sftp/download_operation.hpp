@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 
 class DownloadOperation : public Operation
@@ -202,14 +203,27 @@ class DownloadOperation : public Operation
     std::expected<void, Error> openEmptyWrittenFile();
 
     /**
-     * @brief The permissions of the finished file: inherited, configured, or those of a new file.
+     * @brief What the server tells of the file at the end of the transfer, asked where the finished file inherits its
+     *        permissions or where the entry's time is rounded. The unsafe fast mode asks for neither where the listing
+     *        showed the permissions.
+     * @return Nothing where nothing was asked, or where only the time was and the server did not tell it.
      */
-    std::expected<std::filesystem::perms, Error> finalPermissionsInStrand();
+    std::expected<std::optional<RemoteIo::FileInformation>, Error> remoteStateAtEndInStrand();
 
     /**
-     * @brief Gives @p path the modification time of the remote file. A failure is only logged.
+     * @brief The permissions of the finished file: inherited from @p atEnd or the entry, configured, or those of a new
+     *        file.
      */
-    void applyModificationTime(std::filesystem::path const& path) const;
+    std::filesystem::perms finalPermissions(std::optional<RemoteIo::FileInformation> const& atEnd) const;
+
+    /**
+     * @brief Gives @p path the modification time of the remote file: the one in @p atEnd where it is exact to the
+     *        second, else the entry's. A failure is only logged.
+     */
+    void applyModificationTime(
+        std::filesystem::path const& path,
+        std::optional<RemoteIo::FileInformation> const& atEnd
+    ) const;
 
     void cleanup();
 

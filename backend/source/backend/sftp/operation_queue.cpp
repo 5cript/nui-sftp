@@ -2107,6 +2107,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                         .sizeBytes = entry.sizeBytes,
                         .mtime = entry.mtime,
                         .mtimeNsec = entry.mtimeNsec,
+                        .mtimePrecision = entry.mtimePrecision,
                         .mayOverwrite = entry.mayOverwrite,
                         .isDirectory = entry.isDirectory,
                         .comparedDestination = entry.comparedDestination,
@@ -2531,6 +2532,7 @@ SharedData::Sync::SyncExecutionResult OperationQueue::executeSyncPlan(
                     .withoutContent = entry.isDirectory,
                     .mtime = entry.mtime,
                     .mtimeNsec = entry.mtimeNsec,
+                    .mtimePrecision = entry.mtimePrecision,
                     .mayOverwrite = planned.compared.exists,
                     .comparedDestination = comparedDestination,
                 });

@@ -808,6 +808,7 @@ DownloadOperation::prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
         options_.entry->size = targetInfo->size;
         options_.entry->mtime = targetInfo->mtime;
         options_.entry->mtimeNsec = targetInfo->mtimeNsec;
+        options_.entry->mtimePrecision = targetInfo->mtimePrecision;
         options_.entry->permissions = targetInfo->permissions;
     }
 
@@ -975,9 +976,10 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     }
 
     // Read from the stream before the transfer is finished, which closes it.
-    const auto permissions = finalPermissionsInStrand();
-    if (!permissions)
-        return std::unexpected(permissions.error());
+    const auto atEnd = remoteStateAtEndInStrand();
+    if (!atEnd)
+        return std::unexpected(atEnd.error());
+    const auto permissions = finalPermissions(*atEnd);
     if (const auto finished = finishTransferInStrand(fileStream_); !finished)
     {
         Log::error(
@@ -1005,9 +1007,9 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     }
 
     // Times and permissions go on the temp file, so nothing can fail once the destination is replaced.
-    applyModificationTime(tempPath);
+    applyModificationTime(tempPath, *atEnd);
     std::error_code permissionsError{};
-    std::filesystem::permissions(tempPath, *permissions, permissionsError);
+    std::filesystem::permissions(tempPath, permissions, permissionsError);
     if (permissionsError)
     {
         Log::error("DownloadOperation: Failed to set permissions: {}", Utility::errorMessage(permissionsError));
@@ -1024,40 +1026,64 @@ std::expected<void, DownloadOperation::Error> DownloadOperation::finalizeInStran
     );
 }
 
-std::expected<std::filesystem::perms, DownloadOperation::Error> DownloadOperation::finalPermissionsInStrand()
+std::expected<std::optional<RemoteIo::FileInformation>, DownloadOperation::Error>
+DownloadOperation::remoteStateAtEndInStrand()
 {
-    if (!options_.inheritPermissions)
-    {
-        return options_.filePermissions.and_then(Utility::sanitizePermissions).value_or(Utility::newFilePermissions());
-    }
     // The listing's permissions spare the unsafe fast mode the round trip.
-    if (unsafeFast_ && options_.entry->permissions != std::filesystem::perms::unknown)
-        return Utility::inheritablePermissions(options_.entry->permissions).value_or(Utility::newFilePermissions());
+    const bool forPermissions =
+        options_.inheritPermissions && !(unsafeFast_ && options_.entry->permissions != std::filesystem::perms::unknown);
+    // A listing to the minute or the day leaves out what the server tells exactly.
+    const bool forTime = !unsafeFast_ && options_.entry->mtimePrecision != SharedData::TimePrecision::Second;
+    if (!forPermissions && !forTime)
+        return std::nullopt;
 
     auto stream = fileStream_.lock();
     if (!stream)
     {
         Log::error("DownloadOperation: File stream expired.");
+        if (!forPermissions)
+            return std::nullopt;
         return std::unexpected(Error{.type = ErrorType::FileStreamExpired});
     }
-    const auto fileInfo = stream->statInStrand();
-    if (!fileInfo.has_value())
+    auto fileInfo = stream->statInStrand();
+    if (fileInfo.has_value())
+        return std::optional{std::move(fileInfo).value()};
+    if (!forPermissions)
     {
-        Log::error("DownloadOperation: Failed to stat file.");
-        return std::unexpected(Error{.type = ErrorType::FileStatFailed, .remoteError = fileInfo.error()});
+        Log::warn(
+            "DownloadOperation: The server did not tell the time of '{}', the listed one stays: {}",
+            options_.remotePath.value(),
+            fileInfo.error().toString()
+        );
+        return std::nullopt;
     }
+    Log::error("DownloadOperation: Failed to stat file.");
+    return std::unexpected(Error{.type = ErrorType::FileStatFailed, .remoteError = fileInfo.error()});
+}
+
+std::filesystem::perms DownloadOperation::finalPermissions(std::optional<RemoteIo::FileInformation> const& atEnd) const
+{
+    if (!options_.inheritPermissions)
+        return options_.filePermissions.and_then(Utility::sanitizePermissions).value_or(Utility::newFilePermissions());
     // A protocol whose stat tells no permissions leaves those the listing showed.
-    const auto permissions = fileInfo->permissions != std::filesystem::perms::unknown ? fileInfo->permissions
-                                                                                   : options_.entry->permissions;
+    const auto permissions = atEnd && atEnd->permissions != std::filesystem::perms::unknown
+        ? atEnd->permissions
+        : options_.entry->permissions;
     // Special bits never travel and the umask applies, like for a file created locally.
     return Utility::inheritablePermissions(permissions).value_or(Utility::newFilePermissions());
 }
 
-void DownloadOperation::applyModificationTime(std::filesystem::path const& path) const
+void DownloadOperation::applyModificationTime(
+    std::filesystem::path const& path,
+    std::optional<RemoteIo::FileInformation> const& atEnd
+) const
 {
     using namespace std::chrono;
+    // Told at the end of the transfer, the time is that of what was read, unless the file changed while it was read.
+    const bool exact = atEnd && atEnd->mtime != 0u && atEnd->mtimePrecision == SharedData::TimePrecision::Second;
+    auto const& told = exact ? *atEnd : *options_.entry;
     const auto sysTime = system_clock::time_point{
-        duration_cast<system_clock::duration>(seconds{options_.entry->mtime} + nanoseconds{options_.entry->mtimeNsec})
+        duration_cast<system_clock::duration>(seconds{told.mtime} + nanoseconds{told.mtimeNsec})
     };
     std::error_code mtimeError{};
     std::filesystem::last_write_time(path, std::chrono::file_clock::from_sys(sysTime), mtimeError);
