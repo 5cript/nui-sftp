@@ -472,15 +472,42 @@ namespace FtpConnect
         }
 
         /**
-         * @brief @p options with the key of the certificate that @p failure refused pinned, when @p askTrust trusts
-         *        it. The key is the one the backend saw, the answer names none; it goes to @p trustStore.
+         * @brief Who decides about a certificate that was refused, and where the user's decisions are kept.
          */
-        std::expected<FtpConnectionOptions, std::string> trustedByTheUser(
+        struct Deciders
+        {
+            CertificateTrustStore& trustStore;
+            PlatformTrust const& askPlatform;
+            TrustSource const& askUser;
+        };
+
+        /**
+         * @brief Whether the system trusts @p certificate for the server, asked only when no key is trusted for it: a
+         *        trusted key is the only key of its server, whoever else vouches for another.
+         */
+        bool trustedByTheSystem(
+            FileTransferProtocol::CertificateInfo const& certificate,
+            FileTransferProtocol::TlsConnectionSettings const& tls,
+            PlatformTrust const& askPlatform,
+            std::stop_token const& stop
+        )
+        {
+            if (tls.pinnedPublicKey || !askPlatform)
+                return false;
+            return askPlatform(certificate.presentedChain, tls.serverName, stop) ==
+                FileTransferProtocol::PlatformVerdict::Trusted;
+        }
+
+        /**
+         * @brief @p options with the key of the certificate that @p failure refused pinned, when the system trusts it
+         *        or the user does. The key is the one the backend saw, the user's answer names none; it goes to the
+         *        trust store, the system's verdict does not.
+         */
+        std::expected<FtpConnectionOptions, std::string> trustedAfterRefusal(
             FtpConnectionOptions options,
             FileTransferProtocol::LoginFailure const& failure,
             Persistence::FtpSessionOptions const& session,
-            CertificateTrustStore& trustStore,
-            TrustSource const& askTrust,
+            Deciders const& deciders,
             std::stop_token const& stop
         )
         {
@@ -488,7 +515,16 @@ namespace FtpConnect
             if (failure.error.kind != RemoteErrorKind::TrustRequired || !failure.untrustedCertificate || !tls)
                 return std::unexpected(reachFailureMessage(failure, session, stop));
             auto const& certificate = *failure.untrustedCertificate;
-            const auto answer = askTrust(
+            const bool systemTrusts = trustedByTheSystem(certificate, *tls, deciders.askPlatform, stop);
+            if (stop.stop_requested())
+                return std::unexpected(stoppedMessage(session));
+            if (systemTrusts)
+            {
+                Log::info("FTP: The system trusts the certificate of {}:{}.", session.host, options.pool.port);
+                tls->pinnedPublicKey = certificate.publicKeySha256;
+                return options;
+            }
+            const auto answer = deciders.askUser(
                 TrustQuestion{
                     .host = session.host,
                     .port = options.pool.port,
@@ -505,7 +541,7 @@ namespace FtpConnect
                         "The certificate of the FTP server {}:{} was not trusted.", session.host, options.pool.port
                     )
                 );
-            rememberTrust(trustStore, answer, session.host, options.pool.port, certificate);
+            rememberTrust(deciders.trustStore, answer, session.host, options.pool.port, certificate);
             // This connect keeps to the certificate the user saw, whatever the store keeps for later ones.
             tls->pinnedPublicKey = certificate.publicKeySha256;
             return options;
@@ -513,16 +549,15 @@ namespace FtpConnect
 
         /**
          * @brief @p options once the server answered and its certificate is trusted, so nobody is asked for the
-         *        password of a server that is not there or not trusted. A certificate that was refused is put to
-         *        @p askTrust, and the server is reached again with the key the user trusted, which is not asked about
-         *        twice. An anonymous login without TLS asks nothing, its login reaches the server.
+         *        password of a server that is not there or not trusted. A certificate that was refused is put to the
+         *        system, then to the user, and the server is reached again with the key they trusted, which is not
+         *        asked about twice. An anonymous login without TLS asks nothing, its login reaches the server.
          */
         std::expected<FtpConnectionOptions, std::string> reachedFirst(
             FtpEngineContext& engine,
             FtpConnectionOptions options,
             Persistence::FtpSessionOptions const& session,
-            CertificateTrustStore& trustStore,
-            TrustSource const& askTrust,
+            Deciders const& deciders,
             std::stop_token const& stop
         )
         {
@@ -531,7 +566,7 @@ namespace FtpConnect
             const auto reached = reach(engine, options, stop);
             if (reached)
                 return options;
-            return trustedByTheUser(std::move(options), reached.error(), session, trustStore, askTrust, stop)
+            return trustedAfterRefusal(std::move(options), reached.error(), session, deciders, stop)
                 .and_then(
                     [&engine,
                         &session,
@@ -703,10 +738,12 @@ namespace FtpConnect
         PasswordSource const& askPassword,
         CertificateTrustStore& trustStore,
         TrustSource const& askTrust,
+        PlatformTrust const& askPlatform,
         std::function<void()> onConnectionLoss,
         std::stop_token const& stop
     )
     {
+        const Deciders deciders{.trustStore = trustStore, .askPlatform = askPlatform, .askUser = askTrust};
         if (stop.stop_requested())
             return std::unexpected(stoppedMessage(session));
         return tlsContextOf(session)
@@ -717,15 +754,10 @@ namespace FtpConnect
                 }
             )
             .and_then(
-                [&engine, &session, &trustStore, &askTrust, &stop](FtpConnectionOptions options)
+                [&engine, &session, &trustStore, &deciders, &stop](FtpConnectionOptions options)
                 {
                     return reachedFirst(
-                        engine,
-                        withTrustedKey(std::move(options), session, trustStore),
-                        session,
-                        trustStore,
-                        askTrust,
-                        stop
+                        engine, withTrustedKey(std::move(options), session, trustStore), session, deciders, stop
                     );
                 }
             )

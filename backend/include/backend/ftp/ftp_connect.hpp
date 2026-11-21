@@ -75,12 +75,13 @@ namespace FtpConnect
     /**
      * @brief Logs in to the server of @p session on the threads of @p engine. Over TLS the key @p trustStore holds for
      *        the server is pinned: only a certificate with it is taken. A login with a password or over TLS reaches the
-     *        server first, without credentials: a certificate that was refused is put to @p askTrust, its key goes to
-     *        @p trustStore as the user decided, and the server is reached again with that key pinned. A certificate
-     *        the authorities vouch for, refused for its key alone and trusted always, has the store forget the key of
-     *        the server instead, so the authorities are trusted for it again. Then
-     *        @p askPassword is asked unless the login is anonymous. Blocks until the login ended, within the login
-     *        limits of the connection. Neither on an engine thread nor on a processing thread.
+     *        server first, without credentials: a certificate that was refused is put to @p askPlatform when no key
+     *        is trusted for the server, and when the system does not trust it either to @p askTrust, whose answer
+     *        goes to @p trustStore. The server is then reached again with the key of the certificate pinned. A
+     *        certificate the authorities vouch for, refused for its key alone and trusted always, has the store
+     *        forget the key of the server instead, so the authorities are trusted for it again. Then @p askPassword
+     *        is asked unless the login is anonymous. Blocks until the login ended, within the login limits of the
+     *        connection. Neither on an engine thread nor on a processing thread.
      *
      * @param onConnectionLoss Called once when the session is lost after the start of the connection, on its
      *        processing thread, or from within start() for a loss before it.
@@ -93,6 +94,7 @@ namespace FtpConnect
         PasswordSource const& askPassword,
         CertificateTrustStore& trustStore,
         TrustSource const& askTrust,
+        PlatformTrust const& askPlatform,
         std::function<void()> onConnectionLoss,
         std::stop_token const& stop = {}
     );

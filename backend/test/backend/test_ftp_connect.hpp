@@ -23,6 +23,9 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 #include <algorithm>
 #include <atomic>
@@ -250,6 +253,75 @@ namespace Test
             std::vector<std::string> order{};
             std::vector<FtpConnect::TrustQuestion> trustQuestions{};
         };
+
+        FtpConnect::PlatformTrust noPlatformCheck()
+        {
+            return [](auto const&, auto const&, auto const&)
+            {
+                return FileTransferProtocol::PlatformVerdict::Unavailable;
+            };
+        }
+
+        /**
+         * @brief What the check of the system was asked about.
+         */
+        struct PlatformQuestion
+        {
+            std::vector<FileTransferProtocol::DerCertificate> chain{};
+            std::string serverName{};
+        };
+
+        /**
+         * @brief Records the questions in @p asked, then gives @p verdict to each.
+         */
+        FtpConnect::PlatformTrust answeringPlatform(
+            std::shared_ptr<std::vector<PlatformQuestion>> asked,
+            FileTransferProtocol::PlatformVerdict verdict
+        )
+        {
+            return [asked = std::move(asked), verdict](
+                       std::vector<FileTransferProtocol::DerCertificate> const& chain,
+                       std::string const& serverName,
+                       std::stop_token const&
+                   )
+            {
+                asked->push_back({.chain = chain, .serverName = serverName});
+                return verdict;
+            };
+        }
+
+        /**
+         * @brief The SHA-256 of the public key in @p der.
+         */
+        std::optional<FileTransferProtocol::Sha256Digest>
+        publicKeyOfDer(FileTransferProtocol::DerCertificate const& der)
+        {
+            unsigned char const* input = der.data();
+            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
+                d2i_X509(nullptr, &input, static_cast<long>(der.size())), &X509_free
+            };
+            const auto info = FileTransferProtocol::describeCertificate(certificate.get());
+            if (!info)
+                return std::nullopt;
+            return info->publicKeySha256;
+        }
+
+        /**
+         * @brief The SHA-256 of the public key in @p pem.
+         */
+        std::optional<FileTransferProtocol::Sha256Digest> publicKeyOfPem(std::string const& pem)
+        {
+            const std::unique_ptr<BIO, decltype(&BIO_free)> bio{
+                BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free
+            };
+            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
+                PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free
+            };
+            const auto info = FileTransferProtocol::describeCertificate(certificate.get());
+            if (!info)
+                return std::nullopt;
+            return info->publicKeySha256;
+        }
 
         /**
          * @brief Records the questions in @p prompts and gives @p answer to each.
@@ -885,7 +957,7 @@ namespace Test
         )
         {
             return FtpConnect::connect(
-                engine_, options, askPassword, trustStore_, askTrust, std::move(onConnectionLoss), stop
+                engine_, options, askPassword, trustStore_, askTrust, askPlatform_, std::move(onConnectionLoss), stop
             );
         }
 
@@ -937,6 +1009,8 @@ namespace Test
         FtpEngineContext engine_{2u};
         /** @brief The keys the connects of the test trust, kept for the test only. */
         FtpConnect::CertificateTrustStore trustStore_{};
+        /** @brief The check of the system, which has none of its own unless a test says otherwise. */
+        FtpConnect::PlatformTrust askPlatform_ = FtpConnectTesting::noPlatformCheck();
         std::shared_ptr<FtpConnectTesting::ServedTree> tree_ =
             std::make_shared<FtpConnectTesting::ServedTree>(std::vector<FileTransferProtocol::Test::ServedEntry>{
                 FtpConnectTesting::servedDirectory(
@@ -1346,6 +1420,86 @@ namespace Test
         ASSERT_TRUE(now);
         EXPECT_EQ(now->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
         EXPECT_FALSE(now->lasting);
+    }
+
+    TEST_F(FtpConnectTests, ACertificateTheSystemTrustsIsNotPutToTheUser)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        const auto asked = std::make_shared<std::vector<PlatformQuestion>>();
+        askPlatform_ = answeringPlatform(asked, FileTransferProtocol::PlatformVerdict::Trusted);
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto options = explicitTlsSession();
+        const auto connected = connect(options, decliningThePassword(prompts));
+        ASSERT_FALSE(connected);
+        EXPECT_EQ(connected.error(), "The password prompt was cancelled.");
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"password"}));
+        ASSERT_EQ(asked->size(), 1u);
+        EXPECT_EQ(asked->front().serverName, options.host);
+        ASSERT_FALSE(asked->front().chain.empty());
+        const auto checkedKey = publicKeyOfDer(asked->front().chain.front());
+        ASSERT_TRUE(checkedKey);
+        EXPECT_EQ(checkedKey, publicKeyOfPem(pki().selfSigned.certificate)) << "the chain does not start with the leaf";
+        // The second reach took the certificate by the key the system vouched for.
+        ASSERT_TRUE(server_->waitUntilDisconnected());
+        EXPECT_EQ(server_->commands(1u), (std::vector<std::string>{"AUTH TLS", "QUIT"}));
+        EXPECT_FALSE(trustStore_.trustedKeyOf(options.host, server_->port())) << "the system's verdict was kept";
+    }
+
+    TEST_F(FtpConnectTests, ACertificateTheSystemRefusesIsPutToTheUser)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto asked = std::make_shared<std::vector<PlatformQuestion>>();
+        askPlatform_ = answeringPlatform(asked, FileTransferProtocol::PlatformVerdict::Refused);
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto connected = connect(
+            explicitTlsSession(), neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused)
+        );
+        ASSERT_FALSE(connected);
+        EXPECT_EQ(asked->size(), 1u);
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust"}));
+    }
+
+    TEST_F(FtpConnectTests, TheSystemIsNotAskedAboutAnotherKeyThanTheTrustedOne)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        trustStore_.trustForThisRun(options.host, server_->port(), FileTransferProtocol::Sha256Digest{});
+        const auto asked = std::make_shared<std::vector<PlatformQuestion>>();
+        askPlatform_ = answeringPlatform(asked, FileTransferProtocol::PlatformVerdict::Trusted);
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto connected =
+            connect(options, neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused));
+        ASSERT_FALSE(connected);
+        EXPECT_TRUE(asked->empty()) << "the system vouched for a key other than the trusted one";
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        EXPECT_TRUE(prompts->trustQuestions.front().pinnedKeyDiffers);
+    }
+
+    TEST_F(FtpConnectTests, AStopDuringTheSystemCheckEndsTheConnect)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        std::stop_source stop{};
+        askPlatform_ = [&stop](auto const&, auto const&, auto const&)
+        {
+            stop.request_stop();
+            return FileTransferProtocol::PlatformVerdict::Refused;
+        };
+
+        const auto connected = connect(explicitTlsSession(), neverAsked(), {}, stop.get_token());
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("stopped"), std::string::npos) << connected.error();
     }
 
     TEST_F(FtpConnectTests, ACertificateThatChangedWhileItWasAskedAboutFailsWithItsFingerprint)
