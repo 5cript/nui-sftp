@@ -1079,7 +1079,7 @@ void DownloadOperation::applyModificationTime(
 ) const
 {
     using namespace std::chrono;
-    // Told after the transfer, the time is that of what was read.
+    // Told at the end of the transfer, the time is that of what was read, unless the file changed while it was read.
     const bool exact = atEnd && atEnd->mtime != 0u && atEnd->mtimePrecision == SharedData::TimePrecision::Second;
     auto const& told = exact ? *atEnd : *options_.entry;
     const auto sysTime = system_clock::time_point{

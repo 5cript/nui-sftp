@@ -67,7 +67,7 @@ day, so a download takes the exact time the server tells after the transfer (`MD
 which it asks for the permissions anyway; a download that keeps no permissions asks for the time alone when its listed
 time is rounded. A sync plan carries how exact its scan told each time, so its downloads ask the same way. The unsafe
 fast mode skips that round trip where the listing showed the permissions and keeps the listed time. File Tracking
-relies on the exact time: it is what the server had when the copy was made.
+relies on the exact time: it is what the server had when the copy was made, unless the file changed while it was read.
 
 ## Sync
 
