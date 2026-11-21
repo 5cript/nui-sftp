@@ -135,6 +135,33 @@ namespace Test
         }
 
         /**
+         * @brief Gives the file at @p relative the modification time @p seconds since the epoch.
+         */
+        void setRemoteModificationTime(std::string_view relative, std::uint64_t seconds)
+        {
+            const auto path = remoteAt(relative);
+            auto setting = fileSystem()->later(
+                RemoteIo::SetModificationTime{
+                    .path = path,
+                    .modificationTime = std::chrono::system_clock::time_point{std::chrono::seconds{seconds}},
+                }
+            );
+            ASSERT_EQ(setting.wait_for(lookLimit), std::future_status::ready) << path.value();
+            const auto set = setting.get();
+            ASSERT_TRUE(set.has_value()) << path.value() << ": " << set.error().toString();
+        }
+
+        /**
+         * @brief The modification time of the local file @p path in seconds since the epoch.
+         */
+        static std::uint64_t localModificationTimeOf(std::filesystem::path const& path)
+        {
+            const auto since =
+                std::chrono::file_clock::to_sys(std::filesystem::last_write_time(path)).time_since_epoch();
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(since).count());
+        }
+
+        /**
          * @brief Waits until the processing strand of the file system ran what was queued on it before, like the
          *        removal of the part a stopped transfer left.
          */

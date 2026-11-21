@@ -163,6 +163,27 @@ namespace Test
         EXPECT_EQ(localContentOf(local), content);
     }
 
+    TEST_P(ProtocolTransferTests, ADownloadGivesItsFileTheModificationTimeOfItsSource)
+    {
+        // 2023-11-14 22:13:57 UTC, seconds that a listing to the minute or the day leaves out.
+        constexpr std::uint64_t sourceTime{1700000037u};
+        putRemoteFile("timed.txt", "timed content");
+        ASSERT_NO_FATAL_FAILURE(setRemoteModificationTime("timed.txt", sourceTime));
+        for (const bool inheritPermissions : {true, false})
+        {
+            SCOPED_TRACE(fmt::format("inheritPermissions: {}", inheritPermissions));
+            const auto local = localDirectory_.path() / fmt::format("timed{}.txt", inheritPermissions);
+            auto options = downloadOf("timed.txt", local);
+            options.inheritPermissions = inheritPermissions;
+            DownloadOperation operation{fileSystem(), std::move(options)};
+
+            const auto result = runToEnd(operation, operationLimit);
+
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_EQ(localModificationTimeOf(local), sourceTime);
+        }
+    }
+
     TEST_P(ProtocolTransferTests, AStoppedDownloadEndsCanceledAndTheNextOneRuns)
     {
         putRemoteFile("big.bin", patternedContent(4u * 1024u * 1024u));

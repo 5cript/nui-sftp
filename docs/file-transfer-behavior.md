@@ -60,6 +60,14 @@ server:
 File Tracking uploads are always safe, so they fail on such servers. Directories an upload creates are still looked
 up there, in the listing of their parent.
 
+## Downloads
+
+A downloaded file gets the modification time of its source. FTP's `LIST` and `STAT` round it to the minute or the
+day, so a download takes the exact time the server tells after the transfer (`MDTM`, `MLST`, or `fstat` over SFTP),
+which it asks for the permissions anyway; a download that keeps no permissions asks for the time alone when its listed
+time is rounded. The unsafe fast mode skips that round trip where the listing showed the permissions and keeps the
+listed time. File Tracking relies on the exact time: it is what the server had when the copy was made.
+
 ## Sync
 
 A sync compares the files of both sides by size and modification time. Times compare at the coarser precision of

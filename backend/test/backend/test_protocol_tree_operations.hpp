@@ -186,6 +186,48 @@ namespace Test
             EXPECT_EQ(localContentOf(destination / path), content) << path;
     }
 
+    TEST_P(ProtocolTreeTests, ABulkDownloadOfAPlanGivesItsFilesTheModificationTimesOfTheirSources)
+    {
+        // 2023-11-14 22:13:57 UTC. A plan made from a listing to the minute knows 22:13:00.
+        constexpr std::uint64_t sourceTime{1700000037u};
+        constexpr std::uint64_t plannedTime{sourceTime - sourceTime % 60u};
+        const std::map<std::string, std::string> files{{"first.txt", "first"}, {"second.txt", "second content"}};
+        ASSERT_NO_FATAL_FAILURE(putRemoteDirectory("planned"));
+        for (auto const& [name, content] : files)
+        {
+            ASSERT_NO_FATAL_FAILURE(putRemoteFile(fmt::format("planned/{}", name), content));
+            ASSERT_NO_FATAL_FAILURE(setRemoteModificationTime(fmt::format("planned/{}", name), sourceTime));
+        }
+        const auto destination = localDirectory_.path() / "planned";
+        BulkDownloadOperation operation{
+            fileSystem(),
+            {
+                .remotePath = remoteAt("planned"),
+                .localPath = toLocal(destination),
+                .individualOptions = {.createMissingDirectories = true},
+            }
+        };
+        std::vector<BulkDownloadOperation::PrescannedFile> planned{};
+        for (auto const& [name, content] : files)
+            planned.push_back({
+                .source = remoteAt(fmt::format("planned/{}", name)),
+                .destination = toLocal(destination / name),
+                .sizeBytes = content.size(),
+                .mtime = plannedTime,
+            });
+        operation.setPrescannedFileList(std::move(planned));
+
+        const auto result = runToEnd(operation, operationLimit);
+
+        ASSERT_TRUE(result.has_value()) << result.error().toString();
+        EXPECT_TRUE(operation.getFailed().empty());
+        for (auto const& [name, content] : files)
+        {
+            EXPECT_EQ(localContentOf(destination / name), content) << name;
+            EXPECT_EQ(localModificationTimeOf(destination / name), sourceTime) << name;
+        }
+    }
+
     TEST_P(ProtocolTreeTests, ABulkUploadCreatesTheTree)
     {
         const auto source = localDirectory_.path() / "tree";
