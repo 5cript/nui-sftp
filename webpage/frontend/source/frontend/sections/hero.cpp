@@ -80,11 +80,12 @@ namespace NuiSftpPage::Sections
                     ),
                     h1{class_ = "hero-title"}(
                         text{"A modern "}(),
-                        span{class_ = "grad"}("SFTP & SSH"),
+                        span{class_ = "grad"}("SFTP & FTP"),
                         text{" workbench."}()
                     ),
                     p{class_ = "hero-sub"}(
-                        "Terminals and file transfers share one SSH connection. "
+                        "Terminals and file transfers share one SSH connection, "
+                        "and FTP servers open in the same file view. "
                         "Synchronize folders, edit remote files with your local apps, "
                         "and keep the commands you use. Free and open source."
                     ),
