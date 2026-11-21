@@ -517,14 +517,6 @@ void NewSessionDialog::open(OpenOptions options)
         .headerText = language->get("newSessionDialog", "title"),
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,
         .initialFocus = impl_->nameInputId,
-        .onButton =
-            [this](Snc::Dialog::Button button)
-        {
-            if (button != Snc::Dialog::Button::Ok || inputIsValid())
-                return true;
-            reportInvalidInput();
-            return false;
-        },
         .onClose =
             [this](std::optional<Snc::Dialog::Button> button)
         {
@@ -552,6 +544,14 @@ void NewSessionDialog::open(OpenOptions options)
                     .ftpServer = ftpServer(),
                 }
             );
+        },
+        .onButton =
+            [this](Snc::Dialog::Button button)
+        {
+            if (button != Snc::Dialog::Button::Ok || inputIsValid())
+                return true;
+            reportInvalidInput();
+            return false;
         },
         .modal = true,
         .mayCloseWithoutButton = false,
