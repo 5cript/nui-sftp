@@ -6,6 +6,7 @@
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_filesystem.hpp>
 #include <backend/rpc_system.hpp>
+#include <backend/ftp/certificate_trust_prompter.hpp>
 #include <backend/password/password_prompter.hpp>
 #include <backend/theme_finder.hpp>
 #include <backend/program_options.hpp>
@@ -83,6 +84,8 @@ class Main
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
+    std::shared_ptr<FtpConnect::CertificateTrustStore> trustStore_;
+    CertificateTrustPrompter trustPrompter_;
     std::optional<CommandStore::Store> commandStore_;
     /** @brief StoreRpc, or UnavailableStoreRpc when the store could not be opened. */
     std::unique_ptr<RpcHelper::StrandRpc> commandStoreRpc_;

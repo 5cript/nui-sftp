@@ -394,7 +394,7 @@ namespace FileTransferProtocol::Test
         const auto untrusted = connection->untrustedCertificate();
         ASSERT_TRUE(untrusted);
         EXPECT_EQ(untrusted->publicKeySha256, publicKeyDigestOf(certificate()));
-        EXPECT_FALSE(untrusted->verifyFailure.empty());
+        EXPECT_FALSE(untrusted->verifyFailures.empty());
         EXPECT_FALSE(connection->trustedCertificate());
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
     }
@@ -409,7 +409,7 @@ namespace FileTransferProtocol::Test
         const auto trusted = startTls(connection, settings(publicKeyDigestOf(certificate())));
         ASSERT_TRUE(trusted) << trusted.error().toString();
         EXPECT_EQ(trusted->source, TrustSource::Pin);
-        EXPECT_FALSE(trusted->certificate.verifyFailure.empty());
+        EXPECT_FALSE(trusted->certificate.verifyFailures.empty());
         expectReply(execute(connection, command(Verb::Noop)), 200);
     }
 
@@ -439,14 +439,110 @@ namespace FileTransferProtocol::Test
         }
     );
 
-    TEST_F(ControlConnectionTlsTests, PinDoesNotReplaceTheAuthorities)
+    TEST_F(ControlConnectionTlsTests, PinOfAnotherKeyRefusesWhatTheAuthoritiesVouchFor)
     {
         server_->addConnection(explicitTls().expectDisconnect());
         const auto connection = makeConnection();
         connect(connection);
         const auto trusted = startTls(connection, settings(publicKeyDigestOf(tlsTestPki().otherServer)));
+        ASSERT_FALSE(trusted);
+        EXPECT_EQ(trusted.error().kind, RemoteIo::RemoteErrorKind::TrustRequired) << trusted.error().toString();
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        EXPECT_EQ(untrusted->publicKeySha256, publicKeyDigestOf(tlsTestPki().server));
+        EXPECT_TRUE(untrusted->verifyFailures.empty()) << reasonsOf(untrusted->verifyFailures);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
+    }
+
+    TEST_F(ControlConnectionTlsTests, PinnedKeyTheAuthoritiesVouchForIsTrustedByThem)
+    {
+        server_->addConnection(explicitTls().expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto trusted = startTls(connection, settings(publicKeyDigestOf(tlsTestPki().server)));
         ASSERT_TRUE(trusted) << trusted.error().toString();
         EXPECT_EQ(trusted->source, TrustSource::Authorities);
+        EXPECT_TRUE(trusted->certificate.verifyFailures.empty());
+    }
+
+    struct FailureCase
+    {
+        std::string_view name{};
+        CertifiedKey TestPki::* certificate{};
+        VerifyFailureKind kind{};
+    };
+
+    void PrintTo(FailureCase const& failure, std::ostream* stream)
+    {
+        *stream << failure.name;
+    }
+
+    bool hasFailureOf(CertificateInfo const& certificate, VerifyFailureKind kind)
+    {
+        return std::ranges::any_of(
+            certificate.verifyFailures,
+            [kind](VerifyFailure const& failure)
+            {
+                return failure.kind == kind;
+            }
+        );
+    }
+
+    class ControlConnectionVerifyFailureTests
+        : public ControlConnectionTlsTests
+        , public ::testing::WithParamInterface<FailureCase>
+    {};
+
+    TEST_P(ControlConnectionVerifyFailureTests, TheRefusedCertificateSaysWhatKindOfFailureItHad)
+    {
+        server_->addConnection(explicitTls({.certificate = tlsTestPki().*GetParam().certificate}).expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        ASSERT_FALSE(startTls(connection, settings()));
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        EXPECT_TRUE(hasFailureOf(*untrusted, GetParam().kind)) << reasonsOf(untrusted->verifyFailures);
+        for (auto const& failure : untrusted->verifyFailures)
+            EXPECT_FALSE(failure.reason.empty());
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        Certificates,
+        ControlConnectionVerifyFailureTests,
+        ::testing::Values(
+            FailureCase{
+                .name = "SelfSigned",
+                .certificate = &TestPki::selfSigned,
+                .kind = VerifyFailureKind::SelfSigned,
+            },
+            FailureCase{.name = "Expired", .certificate = &TestPki::expired, .kind = VerifyFailureKind::Expired},
+            FailureCase{
+                .name = "WrongName",
+                .certificate = &TestPki::wrongName,
+                .kind = VerifyFailureKind::NameMismatch,
+            },
+            FailureCase{
+                .name = "OtherAuthority",
+                .certificate = &TestPki::otherAuthority,
+                .kind = VerifyFailureKind::UnknownAuthority,
+            }
+        ),
+        [](::testing::TestParamInfo<FailureCase> const& info)
+        {
+            return std::string{info.param.name};
+        }
+    );
+
+    TEST_F(ControlConnectionTlsTests, EveryVerifyFailureOfACertificateIsKept)
+    {
+        server_->addConnection(explicitTls({.certificate = tlsTestPki().selfSigned}).expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        ASSERT_FALSE(startTls(connection, settings(std::nullopt, "ftp.example.org")));
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        EXPECT_TRUE(hasFailureOf(*untrusted, VerifyFailureKind::SelfSigned)) << reasonsOf(untrusted->verifyFailures);
+        EXPECT_TRUE(hasFailureOf(*untrusted, VerifyFailureKind::NameMismatch)) << reasonsOf(untrusted->verifyFailures);
     }
 
     TEST_F(ControlConnectionTlsTests, CertificateHasToNameTheServer)

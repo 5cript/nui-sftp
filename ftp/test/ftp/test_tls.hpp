@@ -152,7 +152,7 @@ namespace FileTransferProtocol::Test
         EXPECT_NE(
             std::ranges::find(info->subjectAlternativeNames, "DNS:localhost"), info->subjectAlternativeNames.end()
         );
-        EXPECT_TRUE(info->verifyFailure.empty());
+        EXPECT_TRUE(info->verifyFailures.empty());
     }
 
     TEST(TlsCertificateTests, PublicKeyDigestCoversTheWholeSubjectPublicKeyInfo)

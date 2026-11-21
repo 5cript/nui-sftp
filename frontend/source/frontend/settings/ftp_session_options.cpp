@@ -5,7 +5,13 @@
 #include <frontend/settings/subgroup.hpp>
 #include <utility/language.hpp>
 
+#include <log/log.hpp>
+
 #include <nui/frontend/elements/fragment.hpp>
+#include <nui/event_system/event_context.hpp>
+#include <nui/frontend/val.hpp>
+#include <nui/rpc.hpp>
+#include <fmt/format.h>
 
 namespace
 {
@@ -15,11 +21,21 @@ namespace
             .within({"sessionOptions", "ftpSessionServerOptions"});
     }
 
-    std::optional<std::string> nonEmpty(std::string const& text)
+    /**
+     * @brief @p reply of "CertificateTrust::trustedKey" as the setting shows it: the key, marked when it is trusted
+     *        only until the application ends. Empty without a key.
+     */
+    std::string trustedKeyText(Nui::val const& reply)
     {
-        if (text.empty())
-            return std::nullopt;
-        return text;
+        const auto key = reply["publicKeySha256"];
+        if (!key.isString())
+            return {};
+        auto text = key.as<std::string>();
+        if (text.empty() || reply["lasting"].as<bool>())
+            return text;
+        return fmt::format(
+            fmt::runtime(language->get("settings", "ftpSessionOptions", "trustedPublicKeyThisRun")), text
+        );
     }
 }
 
@@ -51,7 +67,7 @@ FtpSessionOptions::FtpSessionOptions(
           miscellaneousFactory_,
           "ftpSessionOptions",
           RemoteServerSettings::defaultsOf(Persistence::FtpSessionOptions{}),
-          onChange,
+          serverChanged(onChange),
           inputDialog
       }
     , tlsMode{
@@ -65,10 +81,13 @@ FtpSessionOptions::FtpSessionOptions(
           valueReset(tlsMode, tlsModeChanged(onChange), Persistence::FtpSessionOptions{}.tlsMode),
           ftpTlsModeLabel
       }
-    , pinnedPublicKeySha256{
-          connectionFactory_.identity({"ftpSessionOptions", "pinnedPublicKeySha256"}),
+    , trustedPublicKey{
+          connectionFactory_.identity({"ftpSessionOptions", "trustedPublicKey"}),
           onChange,
-          valueReset(pinnedPublicKeySha256, onChange, std::string{})
+          [this]()
+          {
+              forgetTrustedKey();
+          }
       }
     , users{
           usersFactory_.identity({"ftpSessionOptions", "users"}),
@@ -88,7 +107,6 @@ void FtpSessionOptions::applyToState(Persistence::FtpSessionOptions& state) cons
 {
     server.applyToState(state);
     assignIfValid(state.tlsMode, tlsMode);
-    state.pinnedPublicKeySha256 = nonEmpty(pinnedPublicKeySha256.value());
     state.users = users.value();
     ftpOptions.applyToState(state.ftpOptions.value());
 
@@ -100,7 +118,7 @@ void FtpSessionOptions::loadFromState(Persistence::FtpSessionOptions const& stat
     server.loadFromState(state);
     tlsMode.value(state.tlsMode);
     showDefaultPort();
-    pinnedPublicKeySha256.value(state.pinnedPublicKeySha256.value_or(std::string{}));
+    showTrustedKey();
     users.value(state.users);
     ftpOptions.loadFromState(state.ftpOptions.value(), loadRefs);
 
@@ -124,7 +142,7 @@ Nui::ElementRenderer FtpSessionOptions::renderServerSettings(std::function<void(
         subgroup(
             {.groupTitle = language->getObserved("settings", "sessionOptions", "connectionCategory"),
                 .onChange = onChange},
-            fragment(server.host(), server.port(), tlsMode(), pinnedPublicKeySha256())
+            fragment(server.host(), server.port(), tlsMode(), trustedPublicKey())
         ),
         subgroup(
             {.groupTitle = language->getObserved("settings", "ftpSessionOptions", "usersCategory"),
@@ -149,6 +167,59 @@ std::function<void()> FtpSessionOptions::tlsModeChanged(std::function<void()> on
     return [this, onChange = std::move(onChange)]()
     {
         showDefaultPort();
+        showTrustedKey();
         onChange();
     };
+}
+
+std::function<void()> FtpSessionOptions::serverChanged(std::function<void()> onChange)
+{
+    return [this, onChange = std::move(onChange)]()
+    {
+        showTrustedKey();
+        onChange();
+    };
+}
+
+int FtpSessionOptions::effectivePort() const
+{
+    return server.port.value().value_or(Persistence::defaultFtpPort(tlsMode.value()));
+}
+
+void FtpSessionOptions::showTrustedKey()
+{
+    const auto host = server.host.value();
+    const auto port = effectivePort();
+    Nui::RpcClient::callWithBackChannel(
+        "CertificateTrust::trustedKey",
+        lifetime_.guarded(
+            [this, host, port](Nui::val reply)
+            {
+                // The host or the port was edited meanwhile, its own reply follows.
+                if (host != server.host.value() || port != effectivePort())
+                    return;
+                trustedPublicKey.value(trustedKeyText(reply));
+                Nui::globalEventContext.executeActiveEventsImmediately();
+            }
+        ),
+        host,
+        port
+    );
+}
+
+void FtpSessionOptions::forgetTrustedKey()
+{
+    Nui::RpcClient::callWithBackChannel(
+        "CertificateTrust::forget",
+        lifetime_.guarded(
+            [this](Nui::val reply)
+            {
+                if (reply.hasOwnProperty("error"))
+                    Log::error("The trusted key could not be forgotten: {}", reply["error"].as<std::string>());
+                showTrustedKey();
+            }
+        ),
+        server.host.value(),
+        effectivePort()
+    );
 }

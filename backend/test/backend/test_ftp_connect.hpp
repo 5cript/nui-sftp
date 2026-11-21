@@ -8,11 +8,14 @@
 #include <ftp/support/test_pki.hpp>
 #include <ftp/support/tree_responder.hpp>
 #include <ids/ids.hpp>
+#include <paths/native.hpp>
 #include <persistence/state/ftp_options.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state_holder.hpp>
 #include <remote_io/remote_file_system.hpp>
+#include <utility/temporary_directory.hpp>
 #include "nui_env.hpp"
+#include "test_environment.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -21,8 +24,11 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -36,6 +42,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+extern std::filesystem::path temporaryRoot;
 
 namespace Test
 {
@@ -225,6 +233,102 @@ namespace Test
             };
         }
 
+        FtpConnect::TrustSource neverAskedAboutTrust()
+        {
+            return [](FtpConnect::TrustQuestion const& question)
+            {
+                ADD_FAILURE() << "asked whether to trust the certificate of " << question.host;
+                return FtpConnect::TrustAnswer::Refused;
+            };
+        }
+
+        /**
+         * @brief What the prompts of one connect were asked, in their order: "trust" and "password".
+         */
+        struct Prompts
+        {
+            std::vector<std::string> order{};
+            std::vector<FtpConnect::TrustQuestion> trustQuestions{};
+        };
+
+        /**
+         * @brief Records the questions in @p prompts and gives @p answer to each.
+         */
+        FtpConnect::TrustSource answeringTrust(std::shared_ptr<Prompts> prompts, FtpConnect::TrustAnswer answer)
+        {
+            return [prompts = std::move(prompts), answer](FtpConnect::TrustQuestion const& question)
+            {
+                prompts->order.emplace_back("trust");
+                prompts->trustQuestions.push_back(question);
+                return answer;
+            };
+        }
+
+        /**
+         * @brief Records the password prompt in @p prompts and declines it, so the connect ends before its login.
+         */
+        FtpConnect::PasswordSource decliningThePassword(std::shared_ptr<Prompts> prompts)
+        {
+            return [prompts = std::move(prompts)](std::string const&) -> std::optional<std::string>
+            {
+                prompts->order.emplace_back("password");
+                return std::nullopt;
+            };
+        }
+
+        /**
+         * @brief Has the TLS contexts made while it lives trust the authority of the tests, as an authority of the
+         *        system: OpenSSL reads SSL_CERT_FILE for its default authorities.
+         */
+        class AuthorityOfTheTests
+        {
+          public:
+            explicit AuthorityOfTheTests(std::string const& authorityPem)
+            {
+                std::ofstream writer{file(), std::ios_base::binary};
+                writer << authorityPem;
+            }
+
+          private:
+            std::filesystem::path file() const
+            {
+                return directory_.path() / "authority.pem";
+            }
+
+            Utility::TemporaryDirectory directory_{temporaryRoot, true};
+            ScopedVariable certificateFile_{"SSL_CERT_FILE", Paths::nativeToUtf8(file())};
+        };
+
+        /**
+         * @brief The greeting and AUTH TLS, answered with @p certificate.
+         */
+        Script& explicitTlsWith(Script& script, FileTransferProtocol::Test::CertifiedKey const& certificate)
+        {
+            FileTransferProtocol::Test::TlsBehaviour behaviour{};
+            behaviour.certificate = certificate;
+            return script.reply("220 Ready").expect("AUTH", "TLS").reply("234 Proceed").startTls(behaviour);
+        }
+
+        /**
+         * @brief A reach over explicit TLS whose @p certificate the client refuses.
+         */
+        Script refusedOverTls(FileTransferProtocol::Test::CertifiedKey const& certificate)
+        {
+            Script script{};
+            explicitTlsWith(script, certificate).expectDisconnect();
+            return script;
+        }
+
+        /**
+         * @brief A reach over explicit TLS whose @p certificate the client takes: the handshake and QUIT.
+         */
+        Script reachingOverTls(FileTransferProtocol::Test::CertifiedKey const& certificate)
+        {
+            Script script{};
+            explicitTlsWith(script, certificate).expect("QUIT").reply("221 Goodbye").expectDisconnect();
+            return script;
+        }
+
         Paths::RemotePath remotePath(std::string_view path)
         {
             return Paths::RemotePath::make(path).value();
@@ -285,6 +389,115 @@ namespace Test
             mutable std::mutex mutex_{};
             std::vector<Question> questions_{};
         };
+
+        /**
+         * @brief Answers trust prompts as it was told, and keeps what it was asked.
+         */
+        class AnsweringTrustProvider : public FtpConnect::TrustProvider
+        {
+          public:
+            enum class Answer
+            {
+                Trust,
+                Refuse,
+                /** @brief Leaves the prompt waiting. */
+                Never,
+            };
+
+            explicit AnsweringTrustProvider(Answer answer)
+                : answer_{answer}
+            {}
+
+            void askTrust(
+                FtpConnect::TrustQuestion const& question,
+                std::function<void(FtpConnect::TrustAnswer)> onAnswer
+            ) override
+            {
+                {
+                    std::scoped_lock lock{mutex_};
+                    questions_.push_back(question);
+                    if (questions_.size() == 1u)
+                        firstAsked_.set_value();
+                }
+                switch (answer_)
+                {
+                    case Answer::Trust:
+                        return onAnswer(FtpConnect::TrustAnswer::Once);
+                    case Answer::Refuse:
+                        return onAnswer(FtpConnect::TrustAnswer::Refused);
+                    case Answer::Never:
+                        return;
+                }
+            }
+
+            std::vector<FtpConnect::TrustQuestion> questions() const
+            {
+                std::scoped_lock lock{mutex_};
+                return questions_;
+            }
+
+            /**
+             * @brief Ready once the first prompt was asked. Call once.
+             */
+            std::future<void> firstAsked()
+            {
+                return firstAsked_.get_future();
+            }
+
+          private:
+            const Answer answer_;
+            mutable std::mutex mutex_{};
+            std::vector<FtpConnect::TrustQuestion> questions_{};
+            std::promise<void> firstAsked_{};
+        };
+    }
+
+    TEST(FtpTrustQuestionTests, TheFrontendGetsTheCertificateWithUtcTimesAndFingerprints)
+    {
+        using namespace std::chrono;
+        FileTransferProtocol::Sha256Digest publicKey{};
+        publicKey.fill(0x01u);
+        FileTransferProtocol::Sha256Digest certificate{};
+        certificate.fill(0xABu);
+        const FtpConnect::TrustQuestion question{
+            .host = "ftp.example.com",
+            .port = 990u,
+            .certificate =
+                {
+                    .subject = "CN=ftp.example.com",
+                    .issuer = "CN=Example Authority",
+                    .notBefore = sys_seconds{sys_days{year{2026} / 1 / 2}} + hours{3} + minutes{4} + seconds{5},
+                    .notAfter = sys_seconds{sys_days{year{2027} / 12 / 31}},
+                    .subjectAlternativeNames = {"DNS:ftp.example.com", "IP:192.0.2.1"},
+                    .certificateSha256 = certificate,
+                    .publicKeySha256 = publicKey,
+                    .verifyFailures =
+                        {{.kind = FileTransferProtocol::VerifyFailureKind::SelfSigned,
+                            .reason = "self-signed certificate"}},
+                },
+            .pinnedKeyDiffers = true,
+        };
+
+        const auto json = FtpConnect::toJson(question);
+        EXPECT_EQ(json.at("host"), "ftp.example.com");
+        EXPECT_EQ(json.at("port"), 990);
+        EXPECT_EQ(json.at("subject"), "CN=ftp.example.com");
+        EXPECT_EQ(json.at("issuer"), "CN=Example Authority");
+        EXPECT_EQ(json.at("notBefore"), "2026-01-02 03:04:05 UTC");
+        EXPECT_EQ(json.at("notAfter"), "2027-12-31 00:00:00 UTC");
+        EXPECT_EQ(json.at("subjectAlternativeNames"), nlohmann::json::array({"DNS:ftp.example.com", "IP:192.0.2.1"}));
+        EXPECT_EQ(
+            FileTransferProtocol::parseDigest(json.at("publicKeySha256").get<std::string>()), std::optional{publicKey}
+        );
+        EXPECT_EQ(
+            FileTransferProtocol::parseDigest(json.at("certificateSha256").get<std::string>()),
+            std::optional{certificate}
+        );
+        EXPECT_EQ(
+            json.at("verifyFailures"),
+            nlohmann::json::array({{{"kind", "selfSigned"}, {"reason", "self-signed certificate"}}})
+        );
+        EXPECT_EQ(json.at("pinnedKeyDiffers"), true);
     }
 
     TEST(FtpConnectOptionsTests, AnonymousLoginsNeedNoPassword)
@@ -403,20 +616,19 @@ namespace Test
         EXPECT_EQ(mapped->fileSystem.transferCallLimits.backstop, defaults.fileSystem.transferCallLimits.backstop);
     }
 
-    TEST(FtpConnectOptionsTests, AnImplicitSessionUsesPort990AndThePinnedKey)
+    TEST(FtpConnectOptionsTests, AnImplicitSessionUsesPort990AndPinsNoKeyOfItsOwn)
     {
         using namespace FtpConnectTesting;
         auto session = sessionFor("ftp.example.com");
         session.tlsMode = Persistence::FtpTlsMode::Implicit;
-        const std::string pin = "0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789ABCDEF";
-        session.pinnedPublicKeySha256 = pin;
 
         const auto mapped = FtpConnect::connectionOptionsOf(session, testTlsContext());
         ASSERT_TRUE(mapped) << mapped.error();
         EXPECT_EQ(mapped->pool.port, 990u);
         EXPECT_EQ(mapped->pool.login.tlsMode, FileTransferProtocol::TlsMode::Implicit);
         ASSERT_TRUE(mapped->pool.login.tls);
-        EXPECT_EQ(mapped->pool.login.tls->pinnedPublicKey, FileTransferProtocol::parseDigest(pin));
+        // The pin comes from the trust store of the backend at the connect, a session names none.
+        EXPECT_FALSE(mapped->pool.login.tls->pinnedPublicKey);
     }
 
     TEST(FtpConnectOptionsTests, TheTransferConnectionsAreTheConcurrencyBelowTheConnectionLimit)
@@ -489,12 +701,6 @@ namespace Test
                     session.host.clear();
                 },
                 "no server"},
-            {[](auto& session)
-                {
-                    session.tlsMode = Persistence::FtpTlsMode::Explicit;
-                    session.pinnedPublicKeySha256 = "not a digest";
-                },
-                "pinned"},
         };
         for (auto const& [change, named] : cases)
         {
@@ -608,11 +814,15 @@ namespace Test
 
         auto untrusted = failure(RemoteErrorKind::TrustRequired, "");
         FileTransferProtocol::CertificateInfo certificate{};
-        certificate.verifyFailure = "self-signed certificate";
+        certificate.verifyFailures = {
+            {.kind = FileTransferProtocol::VerifyFailureKind::SelfSigned, .reason = "self-signed certificate"},
+            {.kind = FileTransferProtocol::VerifyFailureKind::Expired, .reason = "certificate has expired"},
+        };
         certificate.certificateSha256.fill(0xABu);
         untrusted.untrustedCertificate = certificate;
         const auto message = FtpConnect::loginFailureMessage(untrusted, session);
-        EXPECT_NE(message.find("is not trusted (self-signed certificate)"), std::string::npos) << message;
+        EXPECT_NE(message.find("is not trusted (self-signed certificate, certificate has expired)"), std::string::npos)
+            << message;
         EXPECT_NE(message.find(FileTransferProtocol::formatDigest(certificate.certificateSha256)), std::string::npos)
             << message;
     }
@@ -670,10 +880,31 @@ namespace Test
             Persistence::FtpSessionOptions const& options,
             FtpConnect::PasswordSource const& askPassword,
             std::function<void()> onConnectionLoss = {},
-            std::stop_token const& stop = {}
+            std::stop_token const& stop = {},
+            FtpConnect::TrustSource const& askTrust = FtpConnectTesting::neverAskedAboutTrust()
         )
         {
-            return FtpConnect::connect(engine_, options, askPassword, std::move(onConnectionLoss), stop);
+            return FtpConnect::connect(
+                engine_, options, askPassword, trustStore_, askTrust, std::move(onConnectionLoss), stop
+            );
+        }
+
+        /**
+         * @brief A session on the server over explicit TLS, which trusts no authority of the tests.
+         */
+        Persistence::FtpSessionOptions explicitTlsSession(std::optional<std::string> user = "alice") const
+        {
+            auto options = session(std::move(user));
+            options.tlsMode = Persistence::FtpTlsMode::Explicit;
+            return options;
+        }
+
+        static FileTransferProtocol::Test::TestPki const& pki()
+        {
+            const auto made = FileTransferProtocol::Test::testPki();
+            if (!made)
+                throw std::runtime_error{made.error()};
+            return made->get();
         }
 
         /**
@@ -704,6 +935,8 @@ namespace Test
         }
 
         FtpEngineContext engine_{2u};
+        /** @brief The keys the connects of the test trust, kept for the test only. */
+        FtpConnect::CertificateTrustStore trustStore_{};
         std::shared_ptr<FtpConnectTesting::ServedTree> tree_ =
             std::make_shared<FtpConnectTesting::ServedTree>(std::vector<FileTransferProtocol::Test::ServedEntry>{
                 FtpConnectTesting::servedDirectory(
@@ -912,26 +1145,274 @@ namespace Test
         EXPECT_TRUE(server_->transcript().empty()) << "connected after the stop";
     }
 
-    TEST_F(FtpConnectTests, AnUntrustedCertificateFailsWithItsFingerprint)
+    TEST_F(FtpConnectTests, AnUntrustedCertificateIsAskedAboutBeforeThePassword)
     {
         using namespace FtpConnectTesting;
         startServer();
-        const auto pki = FileTransferProtocol::Test::testPki();
-        ASSERT_TRUE(pki) << pki.error();
-        FileTransferProtocol::Test::TlsBehaviour selfSigned{};
-        selfSigned.certificate = pki->get().selfSigned;
-        Script script{};
-        script.reply("220 Ready").expect("AUTH", "TLS").reply("234 Proceed").startTls(selfSigned).expectDisconnect();
-        addConnection(std::move(script));
-        auto options = session();
-        options.tlsMode = Persistence::FtpTlsMode::Explicit;
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        const auto prompts = std::make_shared<Prompts>();
 
-        // The certificate is refused before anybody is asked for a password.
-        const auto connected = connect(options, neverAsked());
+        const auto connected = connect(
+            explicitTlsSession(),
+            decliningThePassword(prompts),
+            {},
+            {},
+            answeringTrust(prompts, FtpConnect::TrustAnswer::Once)
+        );
         ASSERT_FALSE(connected);
+        EXPECT_EQ(connected.error(), "The password prompt was cancelled.");
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust", "password"}));
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        auto const& question = prompts->trustQuestions.front();
+        EXPECT_EQ(question.host, server_->address());
+        EXPECT_EQ(question.port, server_->port());
+        EXPECT_FALSE(question.pinnedKeyDiffers);
+        EXPECT_FALSE(question.certificate.verifyFailures.empty());
+        // The second reach took the certificate by the key the user trusted.
+        ASSERT_TRUE(server_->waitUntilDisconnected());
+        EXPECT_EQ(server_->commands(1u), (std::vector<std::string>{"AUTH TLS", "QUIT"}));
+    }
+
+    TEST_F(FtpConnectTests, ARefusedCertificateEndsTheConnectWithoutAPasswordPrompt)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto connected = connect(
+            explicitTlsSession(), neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused)
+        );
+        ASSERT_FALSE(connected);
+        EXPECT_EQ(
+            connected.error(),
+            fmt::format("The certificate of the FTP server {}:{} was not trusted.", server_->address(), server_->port())
+        );
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust"}));
+    }
+
+    TEST_F(FtpConnectTests, AKeyOtherThanThePinnedOneIsAskedAboutAsChanged)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        const FileTransferProtocol::Sha256Digest trustedBefore{};
+        trustStore_.trustForThisRun(options.host, server_->port(), trustedBefore);
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto connected =
+            connect(options, neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused));
+        ASSERT_FALSE(connected);
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        EXPECT_TRUE(prompts->trustQuestions.front().pinnedKeyDiffers);
+        const auto trusted = trustStore_.trustedKeyOf(options.host, server_->port());
+        ASSERT_TRUE(trusted);
+        EXPECT_EQ(trusted->publicKey, trustedBefore) << "a refused certificate replaced the trusted key";
+    }
+
+    TEST_F(FtpConnectTests, AKeyTrustedOnceIsNotAskedAboutAgainInThisRun)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(
+            options, decliningThePassword(prompts), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Once)
+        ));
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        const auto trusted = trustStore_.trustedKeyOf(options.host, server_->port());
+        ASSERT_TRUE(trusted);
+        EXPECT_EQ(trusted->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
+        EXPECT_FALSE(trusted->lasting);
+
+        // A reconnect: the key of the first connect is pinned, nobody is asked.
+        const auto again = connect(options, decliningThePassword(prompts), {}, {}, neverAskedAboutTrust());
+        ASSERT_FALSE(again);
+        EXPECT_EQ(again.error(), "The password prompt was cancelled.");
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust", "password", "password"}));
+    }
+
+    TEST_F(FtpConnectTests, AnotherKeyThanTheOneTrustedOnceIsAskedAboutAsChanged)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        addConnection(refusedOverTls(pki().otherAuthority));
+        const auto options = explicitTlsSession();
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(
+            options, decliningThePassword(prompts), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Once)
+        ));
+        // A reconnect that meets another server, as one that intercepts the connection.
+        const auto again =
+            connect(options, neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused));
+        ASSERT_FALSE(again);
+        ASSERT_EQ(prompts->trustQuestions.size(), 2u);
+        EXPECT_FALSE(prompts->trustQuestions.front().pinnedKeyDiffers);
+        EXPECT_TRUE(prompts->trustQuestions.back().pinnedKeyDiffers);
+        const auto trusted = trustStore_.trustedKeyOf(options.host, server_->port());
+        ASSERT_TRUE(trusted);
+        EXPECT_EQ(trusted->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
+    }
+
+    TEST_F(FtpConnectTests, AlwaysTrustSavesTheKeyOfTheCertificateTheBackendSaw)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(
+            options, decliningThePassword(prompts), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Always)
+        ));
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        const auto trusted = trustStore_.trustedKeyOf(options.host, server_->port());
+        ASSERT_TRUE(trusted);
+        EXPECT_EQ(trusted->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
+        EXPECT_TRUE(trusted->lasting);
+    }
+
+    TEST_F(FtpConnectTests, ARefusedCertificateTrustsNoKey)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(options, neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused)));
+        EXPECT_FALSE(trustStore_.trustedKeyOf(options.host, server_->port()));
+    }
+
+    TEST_F(FtpConnectTests, AlwaysTrustingACertificateTheAuthoritiesVouchForForgetsTheTrustedKey)
+    {
+        using namespace FtpConnectTesting;
+        const AuthorityOfTheTests trusted{pki().authority};
+        startServer();
+        // Refused for its key alone, reached with it, then reached by a later connect.
+        addConnection(refusedOverTls(pki().server));
+        addConnection(reachingOverTls(pki().server));
+        addConnection(reachingOverTls(pki().server));
+        const auto options = explicitTlsSession();
+        const FileTransferProtocol::Sha256Digest trustedBefore{};
+        ASSERT_TRUE(trustStore_.trustLastingly(options.host, server_->port(), trustedBefore));
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(
+            options, decliningThePassword(prompts), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Always)
+        ));
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        auto const& question = prompts->trustQuestions.front();
+        EXPECT_TRUE(question.pinnedKeyDiffers);
+        EXPECT_TRUE(question.certificate.verifyFailures.empty())
+            << FileTransferProtocol::reasonsOf(question.certificate.verifyFailures);
+        EXPECT_FALSE(trustStore_.trustedKeyOf(options.host, server_->port())) << "a key is still pinned";
+
+        // The authorities are trusted for the server again, nobody is asked.
+        const auto again = connect(options, decliningThePassword(prompts), {}, {}, neverAskedAboutTrust());
+        ASSERT_FALSE(again);
+        EXPECT_EQ(again.error(), "The password prompt was cancelled.");
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust", "password", "password"}));
+    }
+
+    TEST_F(FtpConnectTests, TrustingACertificateTheAuthoritiesVouchForOnceKeepsTheSavedKey)
+    {
+        using namespace FtpConnectTesting;
+        const AuthorityOfTheTests trusted{pki().authority};
+        startServer();
+        addConnection(refusedOverTls(pki().server));
+        addConnection(reachingOverTls(pki().server));
+        const auto options = explicitTlsSession();
+        const FileTransferProtocol::Sha256Digest trustedBefore{};
+        ASSERT_TRUE(trustStore_.trustLastingly(options.host, server_->port(), trustedBefore));
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(
+            options, decliningThePassword(prompts), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Once)
+        ));
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        // For this run the key of the certificate the user saw, the saved one comes back with the next run.
+        const auto now = trustStore_.trustedKeyOf(options.host, server_->port());
+        ASSERT_TRUE(now);
+        EXPECT_EQ(now->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
+        EXPECT_FALSE(now->lasting);
+    }
+
+    TEST_F(FtpConnectTests, ACertificateThatChangedWhileItWasAskedAboutFailsWithItsFingerprint)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(refusedOverTls(pki().otherAuthority));
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto connected =
+            connect(explicitTlsSession(), neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Once));
+        ASSERT_FALSE(connected);
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust"})) << "the changed certificate was asked about";
+        // The key that is trusted is the one the user was shown, the changed certificate got none in.
+        const auto trusted = trustStore_.trustedKeyOf(server_->address(), server_->port());
+        ASSERT_TRUE(trusted);
+        EXPECT_EQ(trusted->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
         EXPECT_NE(connected.error().find("is not trusted"), std::string::npos) << connected.error();
         const std::regex fingerprint{"SHA-256 fingerprint is ([0-9A-F]{2}:){31}[0-9A-F]{2}\\."};
         EXPECT_TRUE(std::regex_search(connected.error(), fingerprint)) << connected.error();
+    }
+
+    TEST_F(FtpConnectTests, AnAnonymousLoginOverTlsIsAskedAboutTheCertificate)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto prompts = std::make_shared<Prompts>();
+
+        const auto connected = connect(
+            explicitTlsSession(std::nullopt),
+            neverAsked(),
+            {},
+            {},
+            answeringTrust(prompts, FtpConnect::TrustAnswer::Refused)
+        );
+        ASSERT_FALSE(connected);
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust"}));
+        EXPECT_NE(connected.error().find("was not trusted"), std::string::npos) << connected.error();
+    }
+
+    TEST_F(FtpConnectTests, AStopDuringTheTrustPromptEndsTheConnect)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        std::stop_source stop{};
+        const auto askTrust = [&stop](FtpConnect::TrustQuestion const&)
+        {
+            // Shutdown ends a prompt that waits, after it stopped the connects.
+            stop.request_stop();
+            return FtpConnect::TrustAnswer::Once;
+        };
+
+        const auto connected = connect(explicitTlsSession(), neverAsked(), {}, stop.get_token(), askTrust);
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("was stopped"), std::string::npos) << connected.error();
+        const auto transcript = server_->transcript();
+        const auto reaches = std::ranges::count_if(
+            transcript,
+            [](FileTransferProtocol::Test::TranscriptEntry const& entry)
+            {
+                return entry.kind == FileTransferProtocol::Test::TranscriptEntry::Kind::Connected;
+            }
+        );
+        EXPECT_EQ(reaches, 1) << "reached again after the stop";
     }
 
     TEST_F(FtpConnectTests, ALostSessionIsReportedOnce)
@@ -1120,6 +1601,78 @@ namespace Test
         EXPECT_FALSE(connected.id);
         EXPECT_EQ(connected.error, "The password prompt was cancelled.");
         EXPECT_EQ(provider.questions().size(), 1u);
+    }
+
+    TEST_F(FtpSessionManagerTests, AnUntrustedCertificateIsPutToTheTrustProviderBeforeThePassword)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        AnsweringTrustProvider trust{AnsweringTrustProvider::Answer::Trust};
+        manager_->setTrustProvider(&trust);
+        AnsweringProvider passwords{std::nullopt};
+        manager_->addPasswordProvider(0, &passwords);
+
+        const auto connected = connectThroughManager(explicitTlsSession());
+        EXPECT_FALSE(connected.id);
+        EXPECT_EQ(connected.error, "The password prompt was cancelled.");
+        ASSERT_EQ(trust.questions().size(), 1u);
+        EXPECT_EQ(trust.questions().front().host, server_->address());
+        EXPECT_EQ(passwords.questions().size(), 1u);
+    }
+
+    TEST_F(FtpSessionManagerTests, ARefusedTrustPromptCancelsTheConnect)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        AnsweringTrustProvider trust{AnsweringTrustProvider::Answer::Refuse};
+        manager_->setTrustProvider(&trust);
+        auto options = explicitTlsSession();
+        auto transfers = options.sftpOptions.value();
+        const auto declined = std::make_shared<bool>(false);
+
+        auto connecting = startConnect(
+            manager_->noticingDeclinedPasswords(manager_->ftpConnect(std::move(options)), declined),
+            std::move(transfers)
+        );
+        const auto connected = awaitConnect(connecting);
+        EXPECT_FALSE(connected.id);
+        EXPECT_TRUE(*declined) << "a refused certificate reads as an error";
+    }
+
+    TEST_F(FtpSessionManagerTests, WithoutATrustProviderAnUntrustedCertificateEndsTheConnect)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+
+        const auto connected = connectThroughManager(explicitTlsSession());
+        EXPECT_FALSE(connected.id);
+        ASSERT_TRUE(connected.error);
+        EXPECT_NE(connected.error->find("was not trusted"), std::string::npos) << *connected.error;
+    }
+
+    TEST_F(FtpSessionManagerTests, TheShutdownEndsAWaitingTrustPrompt)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        AnsweringTrustProvider trust{AnsweringTrustProvider::Answer::Never};
+        manager_->setTrustProvider(&trust);
+        auto asked = trust.firstAsked();
+        auto options = explicitTlsSession();
+        auto transfers = options.sftpOptions.value();
+
+        auto connecting = startConnect(manager_->ftpConnect(std::move(options)), std::move(transfers));
+        ASSERT_EQ(asked.wait_for(std::chrono::seconds{20}), std::future_status::ready);
+        manager_->shutdown();
+
+        const auto connected = awaitConnect(connecting);
+        EXPECT_FALSE(connected.id);
+        ASSERT_TRUE(connected.error);
+        EXPECT_NE(connected.error->find("was stopped"), std::string::npos) << *connected.error;
     }
 
     TEST_F(FtpSessionManagerTests, TheShutdownClosesTheFtpSessionsAndRefusesNewOnes)

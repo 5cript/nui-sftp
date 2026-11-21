@@ -26,6 +26,7 @@
 @import "./dialog/file_property_dialog.css";
 @import "./dialog/multi_input_dialog.css";
 @import "./dialog/confirm_dialog.css";
+@import "./dialog/certificate_trust_prompter.css";
 @import "./dialog/input_dialog.css";
 @import "./dialog/archive_transfer_dialog.css";
 @import "./dialog/snippet_import_dialog.css";

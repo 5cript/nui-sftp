@@ -187,11 +187,6 @@ namespace Persistence
          */
         std::vector<FtpUser> users{};
         FtpTlsMode tlsMode{FtpTlsMode::Explicit};
-        /**
-         * @brief The SHA-256 of the public key of a certificate the user trusted although no authority vouched for
-         * it, as hex. A certificate with this key is accepted.
-         */
-        std::optional<std::string> pinnedPublicKeySha256{std::nullopt};
         std::vector<std::string> remoteFavorites{};
 
         /**
@@ -240,7 +235,6 @@ namespace Persistence
             port,
             users,
             tlsMode,
-            pinnedPublicKeySha256,
             remoteFavorites,
             maxReconnectAttempts,
             maxReconnectBackoffMs)

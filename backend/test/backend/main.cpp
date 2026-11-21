@@ -46,6 +46,7 @@
 #include "test_failure_reason.hpp"
 #include "test_local_file_problem.hpp"
 #include "test_password_request.hpp"
+#include "test_certificate_trust.hpp"
 #include "test_sync_session.hpp"
 #include "test_dropped_entry.hpp"
 #include "test_transfer_failures.hpp"

@@ -103,6 +103,7 @@ target_sources(
         persistence_load_warnings.cpp
         dialog/input_dialog.cpp
         dialog/multi_input_dialog.cpp
+        dialog/certificate_trust_prompter.cpp
         dialog/password_prompter.cpp
         dialog/confirm_dialog.cpp
         dialog/new_session_dialog.cpp
@@ -292,6 +293,7 @@ nui_prepare_emscripten_target(
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/multi_input_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/new_session_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/direct_connect_dialog.css"
+        "${CMAKE_SOURCE_DIR}/static/styles/dialog/certificate_trust_prompter.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/confirm_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/input_dialog.css"
         "${CMAKE_SOURCE_DIR}/static/styles/dialog/archive_transfer_dialog.css"

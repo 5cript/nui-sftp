@@ -65,13 +65,14 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief What the verify callback found out during one handshake, freed with the SSL that holds it.
+         * @brief What the certificate check found out during one handshake, freed with the SSL that holds it.
          */
         struct Verification
         {
             std::optional<Sha256Digest> pin{};
             CertificateHandle leaf{};
-            int firstFailure{X509_V_OK};
+            /** @brief What the check against the authorities reported, each error once, as found. */
+            std::vector<int> failures{};
             bool trustedByPin{false};
             bool refused{false};
         };
@@ -200,31 +201,100 @@ namespace FileTransferProtocol
             return names;
         }
 
-        /**
-         * @brief Never blocks, it runs inside the handshake on an engine thread. A failure is accepted only for a
-         *        certificate whose public key matches the pin.
-         */
-        int verifyPeer(int preverified, X509_STORE_CTX* store)
+        Verification* verificationOf(X509_STORE_CTX* store)
         {
-            auto* const handle =
-                static_cast<SSL*>(X509_STORE_CTX_get_ex_data(store, SSL_get_ex_data_X509_STORE_CTX_idx()));
-            auto* const verification = verificationOf(handle);
-            if (verification == nullptr)
-                return 0;
-            X509* const leaf = X509_STORE_CTX_get0_cert(store);
-            if (leaf != nullptr && !verification->leaf && X509_up_ref(leaf) == 1)
-                verification->leaf.reset(leaf);
+            return verificationOf(
+                static_cast<SSL*>(X509_STORE_CTX_get_ex_data(store, SSL_get_ex_data_X509_STORE_CTX_idx()))
+            );
+        }
+
+        /**
+         * @brief Keeps a failure of the check against the authorities and lets the check go on, so that it finds
+         *        every failure. verifyCertificate() decides once it ended.
+         */
+        int recordFailure(int preverified, X509_STORE_CTX* store)
+        {
             if (preverified == 1)
                 return 1;
-            if (verification->firstFailure == X509_V_OK)
-                verification->firstFailure = X509_STORE_CTX_get_error(store);
-            if (verification->pin && leaf != nullptr && publicKeyDigest(leaf) == verification->pin)
+            auto* const verification = verificationOf(store);
+            if (verification == nullptr)
+                return 0;
+            const int failure = X509_STORE_CTX_get_error(store);
+            if (std::ranges::find(verification->failures, failure) == verification->failures.end())
+                verification->failures.push_back(failure);
+            return 1;
+        }
+
+        /**
+         * @brief The whole certificate check of a handshake, on an engine thread: never blocks. Without a pin it
+         *        accepts what the authorities vouch for. A pin names the one key of the server: a certificate with it
+         *        is accepted whatever the authorities say, any other is refused whoever vouches for it.
+         */
+        int verifyCertificate(X509_STORE_CTX* store, void*)
+        {
+            auto* const verification = verificationOf(store);
+            if (verification == nullptr)
             {
-                verification->trustedByPin = true;
-                return 1;
+                X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
+                return 0;
             }
-            verification->refused = true;
-            return 0;
+            X509_STORE_CTX_set_verify_cb(store, &recordFailure);
+            // A failure that recordFailure() was not asked about, as when OpenSSL ran out of memory.
+            if (X509_verify_cert(store) != 1 && verification->failures.empty())
+            {
+                const int failure = X509_STORE_CTX_get_error(store);
+                verification->failures.push_back(failure == X509_V_OK ? X509_V_ERR_UNSPECIFIED : failure);
+            }
+            X509* const leaf = X509_STORE_CTX_get0_cert(store);
+            if (leaf != nullptr && X509_up_ref(leaf) == 1)
+                verification->leaf.reset(leaf);
+
+            const bool vouchedFor = verification->failures.empty();
+            const bool hasPinnedKey =
+                verification->pin && leaf != nullptr && publicKeyDigest(leaf) == verification->pin;
+            const bool accepted = verification->pin ? hasPinnedKey : vouchedFor;
+            if (!accepted)
+            {
+                verification->refused = true;
+                // Vouched for, refused for its key: the check left no error for the alert.
+                if (vouchedFor)
+                    X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
+                return 0;
+            }
+            verification->trustedByPin = !vouchedFor;
+            return 1;
+        }
+
+        VerifyFailureKind kindOf(int failure)
+        {
+            switch (failure)
+            {
+                case X509_V_ERR_HOSTNAME_MISMATCH:
+                case X509_V_ERR_IP_ADDRESS_MISMATCH:
+                    return VerifyFailureKind::NameMismatch;
+                case X509_V_ERR_CERT_HAS_EXPIRED:
+                    return VerifyFailureKind::Expired;
+                case X509_V_ERR_CERT_NOT_YET_VALID:
+                    return VerifyFailureKind::NotYetValid;
+                case X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT:
+                case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN:
+                    return VerifyFailureKind::SelfSigned;
+                case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
+                case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY:
+                case X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE:
+                    return VerifyFailureKind::UnknownAuthority;
+                default:
+                    return VerifyFailureKind::Other;
+            }
+        }
+
+        std::vector<VerifyFailure> failuresOf(Verification const& verification)
+        {
+            std::vector<VerifyFailure> failures{};
+            failures.reserve(verification.failures.size());
+            for (const int failure : verification.failures)
+                failures.push_back({.kind = kindOf(failure), .reason = X509_verify_cert_error_string(failure)});
+            return failures;
         }
 
         std::expected<void, RemoteIo::RemoteError> addAuthorities(SSL_CTX* context, std::string const& pem)
@@ -301,6 +371,18 @@ namespace FileTransferProtocol
         return digest;
     }
 
+    std::string reasonsOf(std::vector<VerifyFailure> const& failures)
+    {
+        std::string reasons{};
+        for (auto const& failure : failures)
+        {
+            if (!reasons.empty())
+                reasons += ", ";
+            reasons += failure.reason;
+        }
+        return reasons;
+    }
+
     std::optional<CertificateInfo> describeCertificate(X509* certificate)
     {
         if (certificate == nullptr)
@@ -336,7 +418,8 @@ namespace FileTransferProtocol
         // Asio's ssl::stream can keep the ClientHello of a renegotiation in its buffer while a write is in flight,
         // both sides then wait. TLS 1.3 has none, TLS 1.2 servers ask only when configured to.
         SSL_CTX_set_options(native.get(), SSL_OP_NO_RENEGOTIATION);
-        SSL_CTX_set_verify(native.get(), SSL_VERIFY_PEER, &verifyPeer);
+        SSL_CTX_set_verify(native.get(), SSL_VERIFY_PEER, nullptr);
+        SSL_CTX_set_cert_verify_callback(native.get(), &verifyCertificate, nullptr);
         if (options.systemAuthorities && SSL_CTX_set_default_verify_paths(native.get()) != 1)
             return std::unexpected(refused("the authorities of the system"));
         for (auto const& authority : options.authorities)
@@ -416,7 +499,7 @@ namespace FileTransferProtocol
             return std::unexpected(
                 errorOf(RemoteErrorKind::NoSecureConnection, "The connection has no certificate check")
             );
-        // The verify callback does not run for a resumed session, it would read as trusted by the authorities.
+        // The certificate check does not run for a resumed session, it would read as trusted by the authorities.
         if (SSL_session_reused(handle) == 1)
             return std::unexpected(errorOf(
                 RemoteErrorKind::NoSecureConnection, "The handshake resumed a session, it checked no certificate"
@@ -427,9 +510,9 @@ namespace FileTransferProtocol
             return std::unexpected(
                 errorOf(RemoteErrorKind::NoSecureConnection, "The server's certificate cannot be read")
             );
-        if (verification->firstFailure == X509_V_OK)
+        if (verification->failures.empty())
             return TrustedCertificate{.certificate = std::move(*info), .source = TrustSource::Authorities};
-        info->verifyFailure = X509_verify_cert_error_string(verification->firstFailure);
+        info->verifyFailures = failuresOf(*verification);
         if (!verification->trustedByPin)
             return std::unexpected(
                 errorOf(RemoteErrorKind::NoSecureConnection, "The certificate check let a refused one pass")
@@ -449,12 +532,14 @@ namespace FileTransferProtocol
     {
         if (auto const* const verification = verificationOf(handle); verification != nullptr && verification->refused)
         {
+            if (verification->failures.empty())
+                return errorOf(
+                    RemoteErrorKind::TrustRequired,
+                    "The server's certificate has another public key than the one trusted for the server"
+                );
             return errorOf(
                 RemoteErrorKind::TrustRequired,
-                fmt::format(
-                    "The server's certificate is not trusted: {}",
-                    X509_verify_cert_error_string(verification->firstFailure)
-                )
+                fmt::format("The server's certificate is not trusted: {}", reasonsOf(failuresOf(*verification)))
             );
         }
         if (timedOut)
@@ -483,7 +568,7 @@ namespace FileTransferProtocol
             return std::nullopt;
         auto info = describeCertificate(verification->leaf.get());
         if (info)
-            info->verifyFailure = X509_verify_cert_error_string(verification->firstFailure);
+            info->verifyFailures = failuresOf(*verification);
         return info;
     }
 
