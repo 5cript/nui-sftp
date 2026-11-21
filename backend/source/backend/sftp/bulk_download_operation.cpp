@@ -215,6 +215,7 @@ void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> fi
         entry.size = file.isDirectory ? 0u : file.sizeBytes;
         entry.mtime = file.mtime;
         entry.mtimeNsec = file.mtimeNsec;
+        entry.mtimePrecision = file.mtimePrecision;
         totalBytes += entry.size;
         entries.push_back(std::move(entry));
         paths.push_back(
@@ -257,6 +258,7 @@ BulkDownloadOperation::resumeRequest(SharedData::BulkDownloadRequest request) co
             .withoutContent = entry.isDirectory(),
             .mtime = entry.mtime,
             .mtimeNsec = entry.mtimeNsec,
+            .mtimePrecision = entry.mtimePrecision,
             .mayOverwrite = paths->mayOverwrite,
             .comparedDestination = paths->comparedDestination,
         });

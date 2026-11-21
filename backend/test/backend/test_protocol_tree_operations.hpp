@@ -198,33 +198,38 @@ namespace Test
             ASSERT_NO_FATAL_FAILURE(putRemoteFile(fmt::format("planned/{}", name), content));
             ASSERT_NO_FATAL_FAILURE(setRemoteModificationTime(fmt::format("planned/{}", name), sourceTime));
         }
-        const auto destination = localDirectory_.path() / "planned";
-        BulkDownloadOperation operation{
-            fileSystem(),
-            {
-                .remotePath = remoteAt("planned"),
-                .localPath = toLocal(destination),
-                .individualOptions = {.createMissingDirectories = true},
-            }
-        };
-        std::vector<BulkDownloadOperation::PrescannedFile> planned{};
-        for (auto const& [name, content] : files)
-            planned.push_back({
-                .source = remoteAt(fmt::format("planned/{}", name)),
-                .destination = toLocal(destination / name),
-                .sizeBytes = content.size(),
-                .mtime = plannedTime,
-            });
-        operation.setPrescannedFileList(std::move(planned));
-
-        const auto result = runToEnd(operation, operationLimit);
-
-        ASSERT_TRUE(result.has_value()) << result.error().toString();
-        EXPECT_TRUE(operation.getFailed().empty());
-        for (auto const& [name, content] : files)
+        for (const bool inheritPermissions : {true, false})
         {
-            EXPECT_EQ(localContentOf(destination / name), content) << name;
-            EXPECT_EQ(localModificationTimeOf(destination / name), sourceTime) << name;
+            SCOPED_TRACE(fmt::format("inheritPermissions: {}", inheritPermissions));
+            const auto destination = localDirectory_.path() / fmt::format("planned{}", inheritPermissions);
+            BulkDownloadOperation operation{
+                fileSystem(),
+                {
+                    .remotePath = remoteAt("planned"),
+                    .localPath = toLocal(destination),
+                    .individualOptions = {.inheritPermissions = inheritPermissions, .createMissingDirectories = true},
+                }
+            };
+            std::vector<BulkDownloadOperation::PrescannedFile> planned{};
+            for (auto const& [name, content] : files)
+                planned.push_back({
+                    .source = remoteAt(fmt::format("planned/{}", name)),
+                    .destination = toLocal(destination / name),
+                    .sizeBytes = content.size(),
+                    .mtime = plannedTime,
+                    .mtimePrecision = SharedData::TimePrecision::Minute,
+                });
+            operation.setPrescannedFileList(std::move(planned));
+
+            const auto result = runToEnd(operation, operationLimit);
+
+            ASSERT_TRUE(result.has_value()) << result.error().toString();
+            EXPECT_TRUE(operation.getFailed().empty());
+            for (auto const& [name, content] : files)
+            {
+                EXPECT_EQ(localContentOf(destination / name), content) << name;
+                EXPECT_EQ(localModificationTimeOf(destination / name), sourceTime) << name;
+            }
         }
     }
 

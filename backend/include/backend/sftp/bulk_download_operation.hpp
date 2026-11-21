@@ -52,6 +52,8 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::uint64_t sizeBytes;
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        /** @brief See SharedData::BulkDownloadEntry::mtimePrecision. */
+        SharedData::TimePrecision mtimePrecision{SharedData::TimePrecision::Second};
         bool mayOverwrite{false};
         /** @brief A directory created without its content, with the link check of every local directory. */
         bool isDirectory{false};

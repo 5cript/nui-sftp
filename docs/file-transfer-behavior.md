@@ -65,8 +65,9 @@ up there, in the listing of their parent.
 A downloaded file gets the modification time of its source. FTP's `LIST` and `STAT` round it to the minute or the
 day, so a download takes the exact time the server tells after the transfer (`MDTM`, `MLST`, or `fstat` over SFTP),
 which it asks for the permissions anyway; a download that keeps no permissions asks for the time alone when its listed
-time is rounded. The unsafe fast mode skips that round trip where the listing showed the permissions and keeps the
-listed time. File Tracking relies on the exact time: it is what the server had when the copy was made.
+time is rounded. A sync plan carries how exact its scan told each time, so its downloads ask the same way. The unsafe
+fast mode skips that round trip where the listing showed the permissions and keeps the listed time. File Tracking
+relies on the exact time: it is what the server had when the copy was made.
 
 ## Sync
 
