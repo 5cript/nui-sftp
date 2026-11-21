@@ -17,6 +17,7 @@ add_library(
         program_options.cpp
         ftp/certificate_trust.cpp
         ftp/certificate_trust_prompter.cpp
+        ftp/certificate_trust_store.cpp
         ftp/ftp_connect.cpp
         ftp/ftp_engine_context.cpp
         inspector_environment.cpp

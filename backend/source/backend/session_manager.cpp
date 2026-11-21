@@ -17,6 +17,7 @@
 #include <optional>
 #include <thread>
 #include <future>
+#include <atomic>
 #include <mutex>
 #include <cstring>
 #include <ranges>
@@ -295,18 +296,17 @@ std::optional<std::string> SessionManager::askPassword(std::string const& whatFo
     return std::nullopt;
 }
 
-std::optional<FileTransferProtocol::Sha256Digest>
-SessionManager::askTrustProvider(FtpConnect::TrustQuestion const& question)
+FtpConnect::TrustAnswer SessionManager::askTrustProvider(FtpConnect::TrustQuestion const& question)
 {
     if (!trustProvider_)
     {
         Log::warn("There is no trust provider to ask about the certificate of {}:{}.", question.host, question.port);
-        return std::nullopt;
+        return FtpConnect::TrustAnswer::Refused;
     }
 
     const auto request = beginPasswordRequest();
     if (!request)
-        return std::nullopt;
+        return FtpConnect::TrustAnswer::Refused;
     const auto endRequest = Nui::ScopeExit(
         [this]() noexcept
         {
@@ -314,34 +314,30 @@ SessionManager::askTrustProvider(FtpConnect::TrustQuestion const& question)
         }
     );
 
+    // The request only wakes the wait and lets shutdown() cancel it, the answer travels beside it.
+    const auto given = std::make_shared<std::atomic<FtpConnect::TrustAnswer>>(FtpConnect::TrustAnswer::Refused);
     trustProvider_->askTrust(
         question,
-        [request](std::optional<std::string> trustedKey)
+        [request, given](FtpConnect::TrustAnswer answer)
         {
-            request->resolve(std::move(trustedKey));
+            given->store(answer);
+            request->resolve(std::string{});
         }
     );
-    return request->wait().and_then(
-        [](std::string const& trustedKey)
-        {
-            auto digest = FileTransferProtocol::parseDigest(trustedKey);
-            if (!digest)
-                Log::error("The trust prompt answered with no SHA-256 digest, the certificate is not trusted.");
-            return digest;
-        }
-    );
+    if (!request->wait())
+        return FtpConnect::TrustAnswer::Refused;
+    return given->load();
 }
 
-std::optional<FileTransferProtocol::Sha256Digest>
-SessionManager::askTrust(FtpConnect::TrustQuestion const& question) noexcept
+FtpConnect::TrustAnswer SessionManager::askTrust(FtpConnect::TrustQuestion const& question) noexcept
 {
     // A prompt that fails is no declined one, its error is reported.
     lastPromptDeclined_ = false;
     try
     {
-        auto trustedKey = askTrustProvider(question);
-        lastPromptDeclined_ = !trustedKey;
-        return trustedKey;
+        const auto answer = askTrustProvider(question);
+        lastPromptDeclined_ = answer == FtpConnect::TrustAnswer::Refused;
+        return answer;
     }
     catch (std::exception const& exception)
     {
@@ -351,7 +347,7 @@ SessionManager::askTrust(FtpConnect::TrustQuestion const& question) noexcept
     {
         Log::error("Asking whether to trust a certificate failed.");
     }
-    return std::nullopt;
+    return FtpConnect::TrustAnswer::Refused;
 }
 
 FtpConnect::TrustSource SessionManager::trustSource()
@@ -393,6 +389,16 @@ void SessionManager::setTrustProvider(FtpConnect::TrustProvider* provider)
         [this, provider]()
         {
             trustProvider_ = provider;
+        }
+    );
+}
+
+void SessionManager::setTrustStore(std::shared_ptr<FtpConnect::CertificateTrustStore> store)
+{
+    within_strand_do(
+        [this, store = std::move(store)]() mutable
+        {
+            trustStore_ = std::move(store);
         }
     );
 }
@@ -444,6 +450,7 @@ SessionManager::Connect SessionManager::ftpConnect(Persistence::FtpSessionOption
             {
                 return askPassword("password", prompt);
             },
+            *trustStore_,
             trustSource(),
             std::move(onConnectionLoss),
             connectsStop_.get_token()

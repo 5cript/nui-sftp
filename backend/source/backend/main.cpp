@@ -269,7 +269,8 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
     , rpcSystem_{}
     , processes_{window_.getExecutor(), window_, hub_, forkPool}
     , prompter_{hub_}
-    , trustPrompter_{hub_}
+    , trustStore_{std::make_shared<FtpConnect::CertificateTrustStore>(Nui::resolvePath(Constants::trustedKeysPath))}
+    , trustPrompter_{hub_, trustStore_}
     , sshSessionManager_{
           std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_, *ftpEngine_)
       }
@@ -280,6 +281,7 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
 {
     sshSessionManager_->addPasswordProvider(-99, &prompter_);
     sshSessionManager_->setTrustProvider(&trustPrompter_);
+    sshSessionManager_->setTrustStore(trustStore_);
 }
 Main::~Main()
 {

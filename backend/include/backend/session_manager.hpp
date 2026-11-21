@@ -3,6 +3,7 @@
 #include <backend/session.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
 #include <backend/ftp/certificate_trust.hpp>
+#include <backend/ftp/certificate_trust_store.hpp>
 #include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/local_operation_queue.hpp>
@@ -83,10 +84,16 @@ class SessionManager
     void addPasswordProvider(int priority, PasswordProvider* provider);
 
     /**
-     * @brief Who is asked whether to trust a certificate of an FTP server that nobody vouched for. Without one such a
+     * @brief Who is asked whether to trust a certificate of an FTP server that was refused. Without one such a
      *        certificate fails the connect.
      */
     void setTrustProvider(FtpConnect::TrustProvider* provider);
+
+    /**
+     * @brief Where the keys the user trusts for FTP servers are kept. Until one is set they are kept for this run
+     *        only.
+     */
+    void setTrustStore(std::shared_ptr<FtpConnect::CertificateTrustStore> store);
     void joinSessionAdder();
     /**
      * @brief Makes the connection of a new session on the strand, handed the callback for its loss.
@@ -107,9 +114,9 @@ class SessionManager
     );
 
     /**
-     * @brief Connects to the FTP server of @p sessionOptions, whose references are resolved. Asks the trust provider
-     *        about a certificate nobody vouched for, and the password providers for the password unless the login is
-     *        anonymous.
+     * @brief Connects to the FTP server of @p sessionOptions, whose references are resolved. Trusts the key the trust
+     *        store holds for the server, asks the trust provider about a certificate that was refused, and the
+     *        password providers for the password unless the login is anonymous.
      */
     Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
 
@@ -187,14 +194,14 @@ class SessionManager
      * @brief Asks the trust provider whether to trust the certificate of @p question. On the strand, which it blocks
      *        until then.
      *
-     * @return The public key the user trusts, nothing when the user refused, prompts are cancelled or asking failed.
+     * @return What the user decided, Refused also when prompts are cancelled or asking failed.
      */
-    std::optional<FileTransferProtocol::Sha256Digest> askTrust(FtpConnect::TrustQuestion const& question) noexcept;
+    FtpConnect::TrustAnswer askTrust(FtpConnect::TrustQuestion const& question) noexcept;
 
     /**
      * @brief Asks as askTrust() does, and lets what the provider throws through.
      */
-    std::optional<FileTransferProtocol::Sha256Digest> askTrustProvider(FtpConnect::TrustQuestion const& question);
+    FtpConnect::TrustAnswer askTrustProvider(FtpConnect::TrustQuestion const& question);
 
     /**
      * @brief Stops and removes every session, later ones are refused. On the strand.
@@ -301,6 +308,10 @@ class SessionManager
     std::map<int, PasswordProvider*> passwordProviders_{};
     /** @brief On the strand. */
     FtpConnect::TrustProvider* trustProvider_{nullptr};
+    /** @brief On the strand, the store itself is thread-safe. */
+    std::shared_ptr<FtpConnect::CertificateTrustStore> trustStore_{
+        std::make_shared<FtpConnect::CertificateTrustStore>()
+    };
     std::mutex passwordRequestMutex_{};
     /** @brief At most one, the prompts only run within the strand. */
     std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};

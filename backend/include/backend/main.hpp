@@ -84,6 +84,7 @@ class Main
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
+    std::shared_ptr<FtpConnect::CertificateTrustStore> trustStore_;
     CertificateTrustPrompter trustPrompter_;
     std::optional<CommandStore::Store> commandStore_;
     /** @brief StoreRpc, or UnavailableStoreRpc when the store could not be opened. */
