@@ -1020,7 +1020,7 @@ settings:
     trustPassiveAddressHelpText: "Verbindet Datenverbindungen mit der Adresse, die der Server in seiner PASV Antwort nennt, statt mit der Adresse des Servers. Nur manche Server hinter NAT brauchen das. Aus schützt vor einem Server, der Datenverbindungen auf einen anderen Host lenkt."
     trustPassiveAddressSearchTags: "PASV, passiv, NAT, Adresse"
     keepIdleAlive: "Untätige Sitzungen aufrechterhalten"
-    keepIdleAliveHelpText: "Sendet NOOP Befehle, während eine Sitzung untätig ist, damit der Server sie nicht wegen Inaktivität beendet."
+    keepIdleAliveHelpText: "Sendet NOOP Befehle, während eine Sitzung untätig ist, damit der Server ihre Verbindung offen hält. Ohne sie meldet sich eine Sitzung, deren Verbindung der Server wegen Inaktivität geschlossen hat, bei der nächsten Benutzung von selbst wieder an."
     keepIdleAliveSearchTags: "NOOP, untätig, Zeitlimit, Keepalive"
     idleNoopIntervalSeconds: "NOOP Intervall (Sekunden)"
     idleNoopIntervalSecondsHelpText: "Wie oft NOOP gesendet wird, während eine Sitzung untätig ist. Nur wirksam, wenn untätige Sitzungen aufrechterhalten werden."

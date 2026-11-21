@@ -1048,7 +1048,7 @@ settings:
     trustPassiveAddressHelpText: "Connects data connections to the address the server names in its PASV reply instead of the address of the server. Only some servers behind NAT need this. Off protects against a server that points data connections at another host."
     trustPassiveAddressSearchTags: "pasv, passive, nat, address"
     keepIdleAlive: "Keep Idle Sessions Alive"
-    keepIdleAliveHelpText: "Sends NOOP commands while a session is idle, so the server does not end it for inactivity."
+    keepIdleAliveHelpText: "Sends NOOP commands while a session is idle, so the server keeps its connection open. Without them, a session whose connection the server closed for inactivity logs in again on its own when it is next used."
     keepIdleAliveSearchTags: "noop, idle, timeout, keepalive"
     idleNoopIntervalSeconds: "Idle NOOP Interval (Seconds)"
     idleNoopIntervalSecondsHelpText: "How often to send NOOP while a session is idle. Only used when idle sessions are kept alive."
