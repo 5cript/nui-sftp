@@ -1735,12 +1735,16 @@ Nui::ElementRenderer Settings::currentSession()
                     .styleVariant = Snc::StyleVariant::Danger,
                 })
             ),
-            impl_->currentSessionOptions.terminalEngineType(),
-            impl_->currentSessionOptions.icon(),
-            // SSH/local server options sit directly under the icon picker so
-            // the connection-relevant fields (host, port, etc.) are visible
-            // without scrolling. Sort/startup/layout controls live further
-            // down — they're rarely-touched session metadata.
+            subgroup(
+                {.groupTitle = language->getObserved("settings", "sessionOptions", "sessionCategory"),
+                    .onChange = [this]() { onChange(); }},
+                fragment(
+                    impl_->currentSessionOptions.terminalEngineType(),
+                    impl_->currentSessionOptions.icon(),
+                    impl_->currentSessionOptions.orderBy(),
+                    impl_->currentSessionOptions.isStartupSession()
+                )
+            ),
             engineServerSettings(
                 Persistence::TerminalEngineType::ssh,
                 "sshSessionServerOptions",
@@ -1772,9 +1776,7 @@ Nui::ElementRenderer Settings::currentSession()
                         impl_->currentSessionOptions.executingSessionOptions.cleanEnvironment()
                     )
                 )
-            ),
-            impl_->currentSessionOptions.orderBy(),
-            impl_->currentSessionOptions.isStartupSession()
+            )
         );
 
         return fragment(

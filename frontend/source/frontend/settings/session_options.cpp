@@ -79,7 +79,8 @@ SessionOptions::SessionOptions(
               Persistence::TerminalEngineType::ssh,
               Persistence::TerminalEngineType::ftp,
           },
-          basicSettingsFactory_.identity({"sessionOptions", "terminalEngineType"}),
+          basicSettingsFactory_.within({"sessionOptions", "sessionCategory"})
+              .identity({"sessionOptions", "terminalEngineType"}),
           onChange,
           valueReset(
               terminalEngineType,
@@ -97,7 +98,7 @@ SessionOptions::SessionOptions(
             }
             return icons;
         }(),
-          basicSettingsFactory_.identity({"sessionOptions", "icon"}),
+          basicSettingsFactory_.within({"sessionOptions", "sessionCategory"}).identity({"sessionOptions", "icon"}),
           onChange,
           valueReset(icon, onChange, Persistence::SessionOptions{}.icon),
             [](std::string const& icon)
@@ -110,12 +111,13 @@ SessionOptions::SessionOptions(
             },
       }
     , orderBy{
-          basicSettingsFactory_.identity({"sessionOptions", "orderBy"}),
+          basicSettingsFactory_.within({"sessionOptions", "sessionCategory"}).identity({"sessionOptions", "orderBy"}),
           onChange,
           nulloptReset(orderBy, onChange)
       }
     , isStartupSession{
-          basicSettingsFactory_.identity({"sessionOptions", "isStartupSession"}),
+          basicSettingsFactory_.within({"sessionOptions", "sessionCategory"})
+              .identity({"sessionOptions", "isStartupSession"}),
           onChange,
           valueReset(isStartupSession, onChange, Persistence::SessionOptions{}.startupSession)
       }

@@ -822,6 +822,7 @@ settings:
     userWithoutName: "(kein Benutzername)"
     resetUsersConfirmHeader: "Alle Benutzer entfernen?"
     resetUsersConfirmText: "Das Zurücksetzen entfernt alle Benutzer dieses Servers samt der für sie eingetragenen Schlüsseldateien."
+    sessionCategory: "Sitzung"
     connectionCategory: "Verbindung"
     usersCategory: "Benutzer und Schlüssel"
     miscellaneousCategory: "Sonstiges"
