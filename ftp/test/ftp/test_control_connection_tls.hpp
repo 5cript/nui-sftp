@@ -49,24 +49,6 @@ namespace FileTransferProtocol::Test
             return made->get();
         }
 
-        DerCertificate derOfPem(std::string const& pem)
-        {
-            const std::unique_ptr<BIO, decltype(&BIO_free)> bio{
-                BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free
-            };
-            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
-                PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free
-            };
-            if (!certificate)
-                throw std::runtime_error{"The test certificate cannot be read"};
-            const int length = i2d_X509(certificate.get(), nullptr);
-            DerCertificate der(static_cast<std::size_t>(length));
-            unsigned char* output = der.data();
-            if (length <= 0 || i2d_X509(certificate.get(), &output) != length)
-                throw std::runtime_error{"The test certificate cannot be written as DER"};
-            return der;
-        }
-
         Sha256Digest publicKeyDigestOf(CertifiedKey const& certified)
         {
             const std::unique_ptr<BIO, decltype(&BIO_free)> bio{

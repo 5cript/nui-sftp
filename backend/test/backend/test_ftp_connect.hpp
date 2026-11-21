@@ -23,9 +23,6 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-#include <openssl/bio.h>
-#include <openssl/pem.h>
-#include <openssl/x509.h>
 
 #include <algorithm>
 #include <atomic>
@@ -288,39 +285,6 @@ namespace Test
                 asked->push_back({.chain = chain, .serverName = serverName});
                 return verdict;
             };
-        }
-
-        /**
-         * @brief The SHA-256 of the public key in @p der.
-         */
-        std::optional<FileTransferProtocol::Sha256Digest>
-        publicKeyOfDer(FileTransferProtocol::DerCertificate const& der)
-        {
-            unsigned char const* input = der.data();
-            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
-                d2i_X509(nullptr, &input, static_cast<long>(der.size())), &X509_free
-            };
-            const auto info = FileTransferProtocol::describeCertificate(certificate.get());
-            if (!info)
-                return std::nullopt;
-            return info->publicKeySha256;
-        }
-
-        /**
-         * @brief The SHA-256 of the public key in @p pem.
-         */
-        std::optional<FileTransferProtocol::Sha256Digest> publicKeyOfPem(std::string const& pem)
-        {
-            const std::unique_ptr<BIO, decltype(&BIO_free)> bio{
-                BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free
-            };
-            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
-                PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free
-            };
-            const auto info = FileTransferProtocol::describeCertificate(certificate.get());
-            if (!info)
-                return std::nullopt;
-            return info->publicKeySha256;
         }
 
         /**
@@ -1440,9 +1404,8 @@ namespace Test
         ASSERT_EQ(asked->size(), 1u);
         EXPECT_EQ(asked->front().serverName, options.host);
         ASSERT_FALSE(asked->front().chain.empty());
-        const auto checkedKey = publicKeyOfDer(asked->front().chain.front());
-        ASSERT_TRUE(checkedKey);
-        EXPECT_EQ(checkedKey, publicKeyOfPem(pki().selfSigned.certificate)) << "the chain does not start with the leaf";
+        EXPECT_EQ(asked->front().chain.front(), FileTransferProtocol::Test::derOfPem(pki().selfSigned.certificate))
+            << "the chain does not start with the leaf";
         // The second reach took the certificate by the key the system vouched for.
         ASSERT_TRUE(server_->waitUntilDisconnected());
         EXPECT_EQ(server_->commands(1u), (std::vector<std::string>{"AUTH TLS", "QUIT"}));

@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace FileTransferProtocol::Test
 {
@@ -48,4 +50,11 @@ namespace FileTransferProtocol::Test
      * @return The PKI, or why OpenSSL could not make it.
      */
     std::expected<std::reference_wrapper<TestPki const>, std::string> testPki();
+
+    /**
+     * @brief @p pem, a certificate in PEM, in DER.
+     *
+     * @throws std::runtime_error when OpenSSL cannot read the certificate or write it.
+     */
+    std::vector<std::uint8_t> derOfPem(std::string const& pem);
 }

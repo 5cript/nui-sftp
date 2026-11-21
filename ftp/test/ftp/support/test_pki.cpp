@@ -13,6 +13,7 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -267,5 +268,21 @@ namespace FileTransferProtocol::Test
         if (!pki)
             return std::unexpected(pki.error());
         return std::cref(*pki);
+    }
+
+    std::vector<std::uint8_t> derOfPem(std::string const& pem)
+    {
+        const MemoryBio memory{BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size()))};
+        const Certificate certificate{PEM_read_bio_X509(memory.get(), nullptr, nullptr, nullptr)};
+        if (!certificate)
+            throw std::runtime_error{"The test certificate cannot be read"};
+        const int length = i2d_X509(certificate.get(), nullptr);
+        if (length <= 0)
+            throw std::runtime_error{"The test certificate cannot be written as DER"};
+        std::vector<std::uint8_t> der(static_cast<std::size_t>(length));
+        unsigned char* output = der.data();
+        if (i2d_X509(certificate.get(), &output) != length)
+            throw std::runtime_error{"The test certificate cannot be written as DER"};
+        return der;
     }
 }
