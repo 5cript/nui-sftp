@@ -4,6 +4,7 @@
 #include <frontend/dialog/input_dialog.hpp>
 #include <frontend/dialog/multi_input_dialog.hpp>
 #include <frontend/settings/search/setting_factory.hpp>
+#include <frontend/settings/remote_server_settings.hpp>
 #include <frontend/settings/ssh_options.hpp>
 #include <frontend/settings/atomic_setting/bool_setting.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
@@ -38,13 +39,9 @@ struct SshSessionOptions
     SettingFactory miscellaneousFactory_;
 
   public:
-    TextSetting<> host;
-    NumberSetting<int, true> port;
+    RemoteServerSettings server;
     MultiSetting<SshUserSettings> users;
     BoolSetting<> openSftpByDefault;
-    ListSetting<> remoteFavorites;
-    NumberSetting<int, false> maxReconnectAttempts;
-    NumberSetting<int, false> maxReconnectBackoffMs;
 
     SshOptions sshOptions;
 

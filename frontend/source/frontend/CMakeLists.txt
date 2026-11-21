@@ -128,6 +128,7 @@ target_sources(
         settings/ftp_options.cpp
         settings/ftp_session_options.cpp
         settings/ftp_user_settings.cpp
+        settings/remote_server_settings.cpp
         settings/session_options.cpp
         settings/subgroup.cpp
         settings/layout_setting.cpp

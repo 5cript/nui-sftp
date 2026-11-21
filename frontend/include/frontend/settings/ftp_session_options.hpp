@@ -5,6 +5,7 @@
 #include <frontend/settings/search/setting_factory.hpp>
 #include <frontend/settings/ftp_options.hpp>
 #include <frontend/settings/ftp_user_settings.hpp>
+#include <frontend/settings/remote_server_settings.hpp>
 #include <frontend/settings/atomic_setting/combo_setting.hpp>
 #include <frontend/settings/atomic_setting/list_setting.hpp>
 #include <frontend/settings/atomic_setting/multi_setting.hpp>
@@ -43,20 +44,16 @@ struct FtpSessionOptions
     SettingFactory miscellaneousFactory_;
 
   public:
-    TextSetting<> host;
     /**
-     * @brief Unset, it shows the port the TLS mode uses by default.
+     * @brief Its port, while unset, shows the port the TLS mode uses by default.
      */
-    NumberSetting<int, true> port;
+    RemoteServerSettings server;
     ComboSetting<Persistence::FtpTlsMode, std::string> tlsMode;
     /**
      * @brief Empty when no certificate is pinned. Only cleared here, pinning happens when connecting.
      */
     ReadOnlyTextSetting pinnedPublicKeySha256;
     MultiSetting<FtpUserSettings> users;
-    ListSetting<> remoteFavorites;
-    NumberSetting<int, false> maxReconnectAttempts;
-    NumberSetting<int, false> maxReconnectBackoffMs;
 
     FtpOptions ftpOptions;
 

@@ -15,29 +15,6 @@ namespace
             .within({"sessionOptions", "ftpSessionServerOptions"});
     }
 
-    /**
-     * @brief Resets the users only after a confirmation, because a reset removes all of them.
-     */
-    auto confirmedUsersReset(auto& users, std::function<void()> onChange, ConfirmDialog& confirmDialog)
-    {
-        return [&users, onChange = std::move(onChange), &confirmDialog]()
-        {
-            confirmDialog.open({
-                .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                .headerText = language->get("settings", "ftpSessionOptions", "resetUsersConfirmHeader"),
-                .text = language->get("settings", "ftpSessionOptions", "resetUsersConfirmText"),
-                .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-                .onClose = [&users, onChange](std::optional<ConfirmDialog::Button> button)
-                {
-                    if (button != ConfirmDialog::Button::Ok)
-                        return;
-                    users.value(Persistence::FtpSessionOptions{}.users);
-                    onChange();
-                },
-            });
-        };
-    }
-
     std::optional<std::string> nonEmpty(std::string const& text)
     {
         if (text.empty())
@@ -69,19 +46,13 @@ FtpSessionOptions::FtpSessionOptions(
     : connectionFactory_{serverFactory(factory).within({"sessionOptions", "connectionCategory"})}
     , usersFactory_{serverFactory(factory).within({"ftpSessionOptions", "usersCategory"})}
     , miscellaneousFactory_{serverFactory(factory).within({"sessionOptions", "miscellaneousCategory"})}
-    , host{
-          connectionFactory_.identity({"ftpSessionOptions", "host"}),
+    , server{
+          connectionFactory_,
+          miscellaneousFactory_,
+          "ftpSessionOptions",
+          RemoteServerSettings::defaultsOf(Persistence::FtpSessionOptions{}),
           onChange,
-          valueReset(host, onChange, Persistence::FtpSessionOptions{}.host)
-      }
-    , port{
-          connectionFactory_.identity({"ftpSessionOptions", "port"}),
-          onChange,
-          nulloptReset(port, onChange),
-          {
-              .minValue = 1,
-              .maxValue = 65535,
-          }
+          inputDialog
       }
     , tlsMode{
           {
@@ -103,32 +74,10 @@ FtpSessionOptions::FtpSessionOptions(
           usersFactory_.identity({"ftpSessionOptions", "users"}),
           usersFactory_,
           onChange,
-          confirmedUsersReset(users, onChange, confirmDialog),
+          confirmedUsersReset(
+              users, Persistence::FtpSessionOptions{}.users, "ftpSessionOptions", onChange, confirmDialog
+          ),
           ftpUserLabel
-      }
-    , remoteFavorites{
-          miscellaneousFactory_.identity({"ftpSessionOptions", "remoteFavorites"}),
-          inputDialog,
-          onChange,
-          valueReset(remoteFavorites, onChange, Persistence::FtpSessionOptions{}.remoteFavorites)
-      }
-    , maxReconnectAttempts{
-          miscellaneousFactory_.identity({"ftpSessionOptions", "maxReconnectAttempts"}),
-          onChange,
-          valueReset(maxReconnectAttempts, onChange, Persistence::FtpSessionOptions{}.maxReconnectAttempts),
-          {
-              .minValue = -1,
-              .maxValue = 1000,
-          }
-      }
-    , maxReconnectBackoffMs{
-          miscellaneousFactory_.identity({"ftpSessionOptions", "maxReconnectBackoffMs"}),
-          onChange,
-          valueReset(maxReconnectBackoffMs, onChange, Persistence::FtpSessionOptions{}.maxReconnectBackoffMs),
-          {
-              .minValue = 1000,
-              .maxValue = 600000,
-          }
       }
     , ftpOptions{factory.within({"ftpOptionsGroupName"}), onChange}
 {
@@ -137,14 +86,10 @@ FtpSessionOptions::FtpSessionOptions(
 
 void FtpSessionOptions::applyToState(Persistence::FtpSessionOptions& state) const
 {
-    assignIfValid(state.host, host);
-    assignIfValid(state.port, port);
+    server.applyToState(state);
     assignIfValid(state.tlsMode, tlsMode);
     state.pinnedPublicKeySha256 = nonEmpty(pinnedPublicKeySha256.value());
     state.users = users.value();
-    state.remoteFavorites = remoteFavorites.value();
-    assignIfValid(state.maxReconnectAttempts, maxReconnectAttempts);
-    assignIfValid(state.maxReconnectBackoffMs, maxReconnectBackoffMs);
     ftpOptions.applyToState(state.ftpOptions.value());
 
     state.ftpOptions.ref(*ftpOptions.groupKey);
@@ -152,15 +97,11 @@ void FtpSessionOptions::applyToState(Persistence::FtpSessionOptions& state) cons
 
 void FtpSessionOptions::loadFromState(Persistence::FtpSessionOptions const& state, bool loadRefs)
 {
-    host.value(state.host);
-    port.value(state.port);
+    server.loadFromState(state);
     tlsMode.value(state.tlsMode);
     showDefaultPort();
     pinnedPublicKeySha256.value(state.pinnedPublicKeySha256.value_or(std::string{}));
     users.value(state.users);
-    remoteFavorites.value(state.remoteFavorites);
-    maxReconnectAttempts.value(state.maxReconnectAttempts);
-    maxReconnectBackoffMs.value(state.maxReconnectBackoffMs);
     ftpOptions.loadFromState(state.ftpOptions.value(), loadRefs);
 
     if (loadRefs)
@@ -183,7 +124,7 @@ Nui::ElementRenderer FtpSessionOptions::renderServerSettings(std::function<void(
         subgroup(
             {.groupTitle = language->getObserved("settings", "sessionOptions", "connectionCategory"),
                 .onChange = onChange},
-            fragment(host(), port(), tlsMode(), pinnedPublicKeySha256())
+            fragment(server.host(), server.port(), tlsMode(), pinnedPublicKeySha256())
         ),
         subgroup(
             {.groupTitle = language->getObserved("settings", "ftpSessionOptions", "usersCategory"),
@@ -193,14 +134,14 @@ Nui::ElementRenderer FtpSessionOptions::renderServerSettings(std::function<void(
         subgroup(
             {.groupTitle = language->getObserved("settings", "sessionOptions", "miscellaneousCategory"),
                 .onChange = onChange},
-            fragment(remoteFavorites(), maxReconnectAttempts(), maxReconnectBackoffMs())
+            fragment(server.remoteFavorites(), server.maxReconnectAttempts(), server.maxReconnectBackoffMs())
         )
     );
 }
 
 void FtpSessionOptions::showDefaultPort()
 {
-    port.fallback(Persistence::defaultFtpPort(tlsMode.value()));
+    server.port.fallback(Persistence::defaultFtpPort(tlsMode.value()));
 }
 
 std::function<void()> FtpSessionOptions::tlsModeChanged(std::function<void()> onChange)

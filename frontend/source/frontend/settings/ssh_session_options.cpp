@@ -16,29 +16,6 @@ namespace
         return factory.within({"sessionOptions", "basicSettings"})
             .within({"sessionOptions", "sshSessionServerOptions"});
     }
-
-    /**
-     * @brief Resets the users only after a confirmation, because a reset removes all of them.
-     */
-    auto confirmedUsersReset(auto& users, std::function<void()> onChange, ConfirmDialog& confirmDialog)
-    {
-        return [&users, onChange = std::move(onChange), &confirmDialog]()
-        {
-            confirmDialog.open({
-                .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-                .headerText = language->get("settings", "sessionOptions", "resetUsersConfirmHeader"),
-                .text = language->get("settings", "sessionOptions", "resetUsersConfirmText"),
-                .buttons = ConfirmDialog::Button::Ok | ConfirmDialog::Button::Cancel,
-                .onClose = [&users, onChange](std::optional<ConfirmDialog::Button> button)
-                {
-                    if (button != ConfirmDialog::Button::Ok)
-                        return;
-                    users.value(Persistence::SshSessionOptions{}.users);
-                    onChange();
-                },
-            });
-        };
-    }
 }
 
 SshSessionOptions::SshSessionOptions(
@@ -51,25 +28,21 @@ SshSessionOptions::SshSessionOptions(
     : connectionFactory_{serverFactory(factory).within({"sessionOptions", "connectionCategory"})}
     , usersFactory_{serverFactory(factory).within({"sessionOptions", "usersCategory"})}
     , miscellaneousFactory_{serverFactory(factory).within({"sessionOptions", "miscellaneousCategory"})}
-    , host{
-          connectionFactory_.identity({"sessionOptions", "host"}),
+    , server{
+          connectionFactory_,
+          miscellaneousFactory_,
+          "sessionOptions",
+          RemoteServerSettings::defaultsOf(Persistence::SshSessionOptions{}),
           onChange,
-          valueReset(host, onChange, Persistence::SshSessionOptions{}.host)
-      }
-    , port{
-          connectionFactory_.identity({"sessionOptions", "port"}),
-          onChange,
-          nulloptReset(port, onChange),
-          {
-            .minValue = 1,
-            .maxValue = 65535,
-          }
+          inputDialog
       }
     , users{
           usersFactory_.identity({"sessionOptions", "users"}),
           usersFactory_,
           onChange,
-          confirmedUsersReset(users, onChange, confirmDialog),
+          confirmedUsersReset(
+              users, Persistence::SshSessionOptions{}.users, "sessionOptions", onChange, confirmDialog
+          ),
           sshUserLabel
       }
     , openSftpByDefault{
@@ -77,46 +50,14 @@ SshSessionOptions::SshSessionOptions(
           onChange,
           valueReset(openSftpByDefault, onChange, Persistence::SshSessionOptions{}.openSftpByDefault)
       }
-    , remoteFavorites{
-          miscellaneousFactory_.identity({"sessionOptions", "remoteFavorites"}),
-          inputDialog,
-          onChange,
-          valueReset(remoteFavorites, onChange, Persistence::SshSessionOptions{}.remoteFavorites)
-      }
-    , maxReconnectAttempts{
-          miscellaneousFactory_.identity({"sessionOptions", "maxReconnectAttempts"}),
-          onChange,
-          valueReset(
-              maxReconnectAttempts, onChange, Persistence::SshSessionOptions{}.maxReconnectAttempts
-          ),
-          {
-              .minValue = -1,
-              .maxValue = 1000,
-          }
-      }
-    , maxReconnectBackoffMs{
-          miscellaneousFactory_.identity({"sessionOptions", "maxReconnectBackoffMs"}),
-          onChange,
-          valueReset(
-              maxReconnectBackoffMs, onChange, Persistence::SshSessionOptions{}.maxReconnectBackoffMs
-          ),
-          {
-              .minValue = 1000,
-              .maxValue = 600000,
-          }
-      }
     , sshOptions{factory.within({"sshOptionsGroupName"}), onChange, inputDialog, multiInputDialog}
 {}
 
 void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) const
 {
-    assignIfValid(state.host, host);
-    assignIfValid(state.port, port);
+    server.applyToState(state);
     state.users = users.value();
     assignIfValid(state.openSftpByDefault, openSftpByDefault);
-    state.remoteFavorites = remoteFavorites.value();
-    assignIfValid(state.maxReconnectAttempts, maxReconnectAttempts);
-    assignIfValid(state.maxReconnectBackoffMs, maxReconnectBackoffMs);
     sshOptions.applyToState(state.sshOptions.value());
 
     state.sshOptions.ref(*sshOptions.groupKey);
@@ -124,13 +65,9 @@ void SshSessionOptions::applyToState(Persistence::SshSessionOptions& state) cons
 
 void SshSessionOptions::loadFromState(Persistence::SshSessionOptions const& state, bool loadRefs)
 {
-    host.value(state.host);
-    port.value(state.port);
+    server.loadFromState(state);
     users.value(state.users);
     openSftpByDefault.value(state.openSftpByDefault);
-    remoteFavorites.value(state.remoteFavorites);
-    maxReconnectAttempts.value(state.maxReconnectAttempts);
-    maxReconnectBackoffMs.value(state.maxReconnectBackoffMs);
     sshOptions.loadFromState(state.sshOptions.value(), loadRefs);
 
     if (loadRefs)
@@ -153,7 +90,7 @@ Nui::ElementRenderer SshSessionOptions::renderServerSettings(std::function<void(
         subgroup(
             {.groupTitle = language->getObserved("settings", "sessionOptions", "connectionCategory"),
                 .onChange = onChange},
-            fragment(host(), port())
+            fragment(server.host(), server.port())
         ),
         subgroup(
             {.groupTitle = language->getObserved("settings", "sessionOptions", "usersCategory"), .onChange = onChange},
@@ -162,7 +99,12 @@ Nui::ElementRenderer SshSessionOptions::renderServerSettings(std::function<void(
         subgroup(
             {.groupTitle = language->getObserved("settings", "sessionOptions", "miscellaneousCategory"),
                 .onChange = onChange},
-            fragment(openSftpByDefault(), remoteFavorites(), maxReconnectAttempts(), maxReconnectBackoffMs())
+            fragment(
+                openSftpByDefault(),
+                server.remoteFavorites(),
+                server.maxReconnectAttempts(),
+                server.maxReconnectBackoffMs()
+            )
         )
     );
 }
