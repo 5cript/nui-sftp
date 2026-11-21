@@ -1157,11 +1157,19 @@ namespace Test
         manager_->addPasswordProvider(0, &provider);
 
         std::shared_ptr<RemoteIo::IRemoteFileSystem> fileSystem{};
-        auto loseBeforeTheStart = [&fileSystem, connect = manager_->ftpConnect(session())](
+        const auto lossReported = std::make_shared<std::promise<void>>();
+        auto lossReport = lossReported->get_future();
+        auto loseBeforeTheStart = [&fileSystem, lossReported, connect = manager_->ftpConnect(session())](
                                       std::function<void()> onConnectionLoss
                                   ) -> std::expected<SessionConnection, std::string>
         {
-            auto connected = connect(std::move(onConnectionLoss));
+            auto connected = connect(
+                [onConnectionLoss = std::move(onConnectionLoss), lossReported]()
+                {
+                    onConnectionLoss();
+                    lossReported->set_value();
+                }
+            );
             if (!connected)
                 return connected;
             auto created = connected->connection->createFileSystem().get();
@@ -1188,8 +1196,10 @@ namespace Test
         const auto connected = future.get();
         ASSERT_TRUE(connected.id) << connected.error.value_or("no error");
         ASSERT_TRUE(fileSystem);
+        // The engine may tell the session of the loss only after its start, under load.
+        ASSERT_EQ(lossReport.wait_for(std::chrono::seconds{20}), std::future_status::ready);
 
-        // Behind the removal of the lost session on the strand.
+        // Behind the removal of the lost session on the strand, which the report posted.
         const auto refused = connectThroughManager(Persistence::FtpSessionOptions{});
         EXPECT_FALSE(refused.id);
         EXPECT_FALSE(fileSystem->close()) << "the lost session was not removed, its file system is still open";
