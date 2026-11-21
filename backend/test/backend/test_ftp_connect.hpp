@@ -1429,7 +1429,7 @@ namespace Test
         EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust"}));
     }
 
-    TEST_F(FtpConnectTests, TheSystemIsNotAskedAboutAnotherKeyThanTheTrustedOne)
+    TEST_F(FtpConnectTests, TheSystemDoesNotTakeAnotherKeyThanTheTrustedOne)
     {
         using namespace FtpConnectTesting;
         startServer();
@@ -1442,10 +1442,61 @@ namespace Test
 
         const auto connected =
             connect(options, neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused));
-        ASSERT_FALSE(connected);
-        EXPECT_TRUE(asked->empty()) << "the system vouched for a key other than the trusted one";
+        ASSERT_FALSE(connected) << "the system vouched for a key other than the trusted one";
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        auto const& question = prompts->trustQuestions.front();
+        EXPECT_TRUE(question.pinnedKeyDiffers);
+        // The system vouches for the certificate, so the key alone is in the way.
+        EXPECT_TRUE(question.certificate.verifyFailures.empty())
+            << FileTransferProtocol::reasonsOf(question.certificate.verifyFailures);
+    }
+
+    TEST_F(FtpConnectTests, AnotherKeyTheSystemRefusesKeepsItsVerifyFailures)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(refusedOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        trustStore_.trustForThisRun(options.host, server_->port(), FileTransferProtocol::Sha256Digest{});
+        const auto asked = std::make_shared<std::vector<PlatformQuestion>>();
+        askPlatform_ = answeringPlatform(asked, FileTransferProtocol::PlatformVerdict::Refused);
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(options, neverAsked(), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Refused)));
         ASSERT_EQ(prompts->trustQuestions.size(), 1u);
         EXPECT_TRUE(prompts->trustQuestions.front().pinnedKeyDiffers);
+        EXPECT_FALSE(prompts->trustQuestions.front().certificate.verifyFailures.empty());
+    }
+
+    TEST_F(FtpConnectTests, AlwaysTrustingACertificateTheSystemVouchesForForgetsTheTrustedKey)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        // Refused for its key, reached with it. The later connect has no key: refused, then reached as the system says.
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        addConnection(refusedOverTls(pki().selfSigned));
+        addConnection(reachingOverTls(pki().selfSigned));
+        const auto options = explicitTlsSession();
+        const FileTransferProtocol::Sha256Digest trustedBefore{};
+        ASSERT_TRUE(trustStore_.trustLastingly(options.host, server_->port(), trustedBefore));
+        const auto asked = std::make_shared<std::vector<PlatformQuestion>>();
+        askPlatform_ = answeringPlatform(asked, FileTransferProtocol::PlatformVerdict::Trusted);
+        const auto prompts = std::make_shared<Prompts>();
+
+        ASSERT_FALSE(connect(
+            options, decliningThePassword(prompts), {}, {}, answeringTrust(prompts, FtpConnect::TrustAnswer::Always)
+        ));
+        ASSERT_EQ(prompts->trustQuestions.size(), 1u);
+        EXPECT_TRUE(prompts->trustQuestions.front().pinnedKeyDiffers);
+        EXPECT_FALSE(trustStore_.trustedKeyOf(options.host, server_->port())) << "a key is still pinned";
+
+        // The system is trusted for the server again, nobody is asked.
+        const auto again = connect(options, decliningThePassword(prompts), {}, {}, neverAskedAboutTrust());
+        ASSERT_FALSE(again);
+        EXPECT_EQ(again.error(), "The password prompt was cancelled.");
+        EXPECT_EQ(prompts->order, (std::vector<std::string>{"trust", "password", "password"}));
+        EXPECT_EQ(asked->size(), 2u);
     }
 
     TEST_F(FtpConnectTests, AStopDuringTheSystemCheckEndsTheConnect)

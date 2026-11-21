@@ -482,8 +482,7 @@ namespace FtpConnect
         };
 
         /**
-         * @brief Whether the system trusts @p certificate for the server, asked only when no key is trusted for it: a
-         *        trusted key is the only key of its server, whoever else vouches for another.
+         * @brief Whether the system trusts @p certificate for the server of @p tls.
          */
         bool trustedByTheSystem(
             FileTransferProtocol::CertificateInfo const& certificate,
@@ -492,7 +491,7 @@ namespace FtpConnect
             std::stop_token const& stop
         )
         {
-            if (tls.pinnedPublicKey || !askPlatform)
+            if (!askPlatform)
                 return false;
             return askPlatform(certificate.presentedChain, tls.serverName, stop) ==
                 FileTransferProtocol::PlatformVerdict::Trusted;
@@ -500,8 +499,10 @@ namespace FtpConnect
 
         /**
          * @brief @p options with the key of the certificate that @p failure refused pinned, when the system trusts it
-         *        or the user does. The key is the one the backend saw, the user's answer names none; it goes to the
-         *        trust store, the system's verdict does not.
+         *        or the user does. A key trusted for the server is its only key: the system's verdict takes no other,
+         *        it tells the user that the key alone is in the way, as an authority of OpenSSL does. The key is the
+         *        one the backend saw, the user's answer names none; it goes to the trust store, the system's verdict
+         *        does not.
          */
         std::expected<FtpConnectionOptions, std::string> trustedAfterRefusal(
             FtpConnectionOptions options,
@@ -514,23 +515,27 @@ namespace FtpConnect
             auto& tls = options.pool.login.tls;
             if (failure.error.kind != RemoteErrorKind::TrustRequired || !failure.untrustedCertificate || !tls)
                 return std::unexpected(reachFailureMessage(failure, session, stop));
-            auto const& certificate = *failure.untrustedCertificate;
+            auto certificate = *failure.untrustedCertificate;
             const bool systemTrusts = trustedByTheSystem(certificate, *tls, deciders.askPlatform, stop);
             if (stop.stop_requested())
                 return std::unexpected(stoppedMessage(session));
-            if (systemTrusts)
+            // A certificate with the pinned key is taken, so a pin here names another key.
+            const bool pinnedKeyDiffers = tls->pinnedPublicKey.has_value();
+            if (systemTrusts && !pinnedKeyDiffers)
             {
                 Log::info("FTP: The system trusts the certificate of {}:{}.", session.host, options.pool.port);
                 tls->pinnedPublicKey = certificate.publicKeySha256;
                 return options;
             }
+            // What OpenSSL found was the lack of the system's authorities.
+            if (systemTrusts)
+                certificate.verifyFailures.clear();
             const auto answer = deciders.askUser(
                 TrustQuestion{
                     .host = session.host,
                     .port = options.pool.port,
                     .certificate = certificate,
-                    // A certificate with the pinned key is taken, so a pin here names another key.
-                    .pinnedKeyDiffers = tls->pinnedPublicKey.has_value(),
+                    .pinnedKeyDiffers = pinnedKeyDiffers,
                 }
             );
             if (stop.stop_requested())
