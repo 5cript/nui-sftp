@@ -1,13 +1,11 @@
 #include <ftp/client/system_authorities.hpp>
 #include <log/log.hpp>
 #include <paths/native.hpp>
-#include "client_support.hpp"
+#include "openssl_error.hpp"
 
 #include <fmt/format.h>
-#include <openssl/err.h>
 #include <openssl/x509.h>
 
-#include <array>
 #include <cstdlib>
 #include <string>
 #include <system_error>
@@ -16,21 +14,7 @@ namespace FileTransferProtocol
 {
     namespace
     {
-        using Detail::errorOf;
-        using RemoteIo::RemoteErrorKind;
-
-        RemoteIo::RemoteError refusedAuthorities(std::string_view what)
-        {
-            const auto code = ERR_get_error();
-            ERR_clear_error();
-            std::array<char, 256> reason{};
-            if (code != 0u)
-                ERR_error_string_n(code, reason.data(), reason.size());
-            return errorOf(
-                RemoteErrorKind::Failure,
-                fmt::format("OpenSSL refused {}: {}", what, code == 0u ? "no reason given" : reason.data())
-            );
-        }
+        using Detail::refusedByOpenSsl;
 
 #if !defined(_WIN32) && !defined(__APPLE__)
         bool environmentChooses()
@@ -49,7 +33,7 @@ namespace FileTransferProtocol
             const auto path = Paths::nativeToUtf8(*bundle);
             Log::info("FTP: OpenSSL's authorities are missing, trusting the ones in {}.", path);
             if (SSL_CTX_load_verify_locations(context, path.c_str(), nullptr) != 1)
-                return std::unexpected(refusedAuthorities(fmt::format("the authorities in {}", path)));
+                return std::unexpected(refusedByOpenSsl(fmt::format("the authorities in {}", path)));
             return {};
         }
 #endif
@@ -86,7 +70,7 @@ namespace FileTransferProtocol
     std::expected<void, RemoteIo::RemoteError> addSystemAuthorities(SSL_CTX* context)
     {
         if (SSL_CTX_set_default_verify_paths(context) != 1)
-            return std::unexpected(refusedAuthorities("the authorities of the system"));
+            return std::unexpected(refusedByOpenSsl("the authorities of the system"));
 #if defined(_WIN32)
         constexpr std::array<wchar_t const*, 2> stores{L"ROOT", L"CA"};
         const auto added = addStoreAuthorities(SSL_CTX_get_cert_store(context), stores);
