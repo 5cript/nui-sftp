@@ -94,7 +94,7 @@ fileExplorer:
     dropTargetNameInvalid: "Nothing can be transferred into '{}' because its name is not valid UTF-8."
 newSessionDialog:
   title: "Create New Session"
-  validationMessage: "Please fill in all required fields."
+  validationMessage: "The name must not be empty and must not contain \", \\ or /."
   sessionTypeLabel: "Session Type:"
   iconLabel: "Session Icon:"
   sessionNameLabel: "Session Name:"

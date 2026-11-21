@@ -94,7 +94,7 @@ fileExplorer:
     dropTargetNameInvalid: "In '{}' kann nichts übertragen werden, weil der Name kein gültiges UTF-8 ist."
 newSessionDialog:
   title: "Neue Sitzung erstellen"
-  validationMessage: "Bitte füllen Sie alle Pflichtfelder aus."
+  validationMessage: "Der Name darf nicht leer sein und weder \", \\ noch / enthalten."
   sessionTypeLabel: "Sitzungstyp:"
   iconLabel: "Sitzungssymbol:"
   sessionNameLabel: "Sitzungsname:"

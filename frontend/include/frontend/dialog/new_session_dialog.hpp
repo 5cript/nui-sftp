@@ -80,7 +80,7 @@ class NewSessionDialog
     bool focusNeighbour(std::string const& currentId, int direction) const;
 
     /**
-     * @brief Closes the dialog as confirmed when the input is valid.
+     * @brief Closes the dialog as confirmed when the input is valid, else reports what is invalid.
      */
     void confirmIfValid();
 
@@ -90,8 +90,8 @@ class NewSessionDialog
     std::function<void(Nui::val)> selectKeyHandler(std::string fieldId);
 
     /**
-     * @brief The keydown handler of a text field: Enter takes the typed value, then moves on or confirms unless the
-     * value is invalid. The down arrow moves on in any case.
+     * @brief The keydown handler of a text field: Enter takes the typed value, then moves on or confirms. An invalid
+     * value keeps the focus and shows what is wrong with it. The down arrow moves on in any case.
      *
      * @param syncValue Stores and checks the typed value, returns whether it is valid.
      */
@@ -103,9 +103,19 @@ class NewSessionDialog
     void checkFtpPortValue(std::string const& value);
 
     /**
+     * @brief The id of the first field shown whose value is invalid: the name or, for an FTP session, a server field.
+     */
+    std::optional<std::string> firstInvalidFieldId() const;
+
+    /**
      * @brief Whether the name and, for an FTP session, the server fields are valid.
      */
     bool inputIsValid() const;
+
+    /**
+     * @brief Focuses the first invalid field and shows what is wrong with it next to it.
+     */
+    void reportInvalidInput() const;
 
     /**
      * @brief The FTP server as entered, with the host and user name trimmed.

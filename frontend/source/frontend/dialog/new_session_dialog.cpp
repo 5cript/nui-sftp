@@ -113,6 +113,16 @@ namespace
         if (!element.isNull() && !element.isUndefined())
             element.call<void>("focus");
     }
+
+    /**
+     * @brief Lets the browser focus the field and show its validation message next to it.
+     */
+    void reportValidityById(std::string const& fieldId)
+    {
+        auto element = Nui::val::global("document").call<Nui::val>("getElementById", fieldId);
+        if (!element.isNull() && !element.isUndefined())
+            element.call<void>("reportValidity");
+    }
 }
 
 struct NewSessionDialog::Implementation
@@ -218,7 +228,7 @@ bool NewSessionDialog::focusNeighbour(std::string const& currentId, int directio
 void NewSessionDialog::confirmIfValid()
 {
     if (!inputIsValid())
-        return;
+        return reportInvalidInput();
     impl_->confirmOnClose = true;
     impl_->dialog->close();
 }
@@ -253,7 +263,11 @@ NewSessionDialog::textKeyHandler(std::string fieldId, std::function<bool(std::st
             return;
         }
         if (!valid)
-            return;
+        {
+            // The message reaches the input with the events of its value state.
+            Nui::globalEventContext.executeActiveEventsImmediately();
+            return reportValidityById(fieldId);
+        }
         if (!focusNeighbour(fieldId, +1))
             confirmIfValid();
     };
@@ -503,6 +517,14 @@ void NewSessionDialog::open(OpenOptions options)
         .headerText = language->get("newSessionDialog", "title"),
         .buttons = Snc::Dialog::Button::Ok | Snc::Dialog::Button::Cancel,
         .initialFocus = impl_->nameInputId,
+        .onButton =
+            [this](Snc::Dialog::Button button)
+        {
+            if (button != Snc::Dialog::Button::Ok || inputIsValid())
+                return true;
+            reportInvalidInput();
+            return false;
+        },
         .onClose =
             [this](std::optional<Snc::Dialog::Button> button)
         {
@@ -561,14 +583,32 @@ void NewSessionDialog::checkFtpPortValue(std::string const& value)
     impl_->ftpPortValid = trimmed.empty() || portOf(trimmed) ? Snc::ValueState::Valid : Snc::ValueState::Invalid;
 }
 
-bool NewSessionDialog::inputIsValid() const
+std::optional<std::string> NewSessionDialog::firstInvalidFieldId() const
 {
     if (impl_->nameValid.value() != Snc::ValueState::Valid)
-        return false;
+        return impl_->nameInputId;
     if (!impl_->showsFtpServer())
-        return true;
-    return impl_->ftpHostValid.value() == Snc::ValueState::Valid &&
-        impl_->ftpPortValid.value() == Snc::ValueState::Valid;
+        return std::nullopt;
+    if (impl_->ftpHostValid.value() != Snc::ValueState::Valid)
+        return impl_->ftpHostInputId;
+    if (impl_->ftpPortValid.value() != Snc::ValueState::Valid)
+        return impl_->ftpPortInputId;
+    return std::nullopt;
+}
+
+bool NewSessionDialog::inputIsValid() const
+{
+    return !firstInvalidFieldId();
+}
+
+void NewSessionDialog::reportInvalidInput() const
+{
+    const auto invalid = firstInvalidFieldId();
+    if (!invalid)
+        return;
+    // The messages reach the inputs with the events of their value states.
+    Nui::globalEventContext.executeActiveEventsImmediately();
+    reportValidityById(*invalid);
 }
 
 NewSessionDialog::FtpServer NewSessionDialog::ftpServer() const
