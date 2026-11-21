@@ -4,8 +4,12 @@
 #include "../client/client_support.hpp"
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancel_after.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <fmt/format.h>
@@ -13,8 +17,11 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <utility>
 
@@ -89,6 +96,22 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief What a reachServer() call keeps until it completed: its result, and how a stop request cancels it.
+         */
+        struct Reaching
+        {
+            std::promise<Reachability> promise{};
+            /** @brief Emitted on the strand of the reach only. */
+            asio::cancellation_signal stopSignal{};
+            std::optional<std::stop_callback<std::function<void()>>> onStop{};
+        };
+
+        bool isCancelled(Reachability const& reachability)
+        {
+            return !reachability && reachability.error().error.kind == RemoteErrorKind::Cancelled;
+        }
+
+        /**
          * @brief A strand of @p thread that keeps it, for a file system held past its connection.
          */
         std::shared_ptr<RemoteIo::ProcessingStrand> strandKeeping(std::shared_ptr<RemoteIo::ProcessingThread> thread)
@@ -113,31 +136,57 @@ namespace FileTransferProtocol
         };
     }
 
-    std::future<Reachability>
-    reachServer(asio::any_io_executor executor, std::shared_ptr<Resolver> resolver, PoolOptions pool)
+    std::future<Reachability> reachServer(
+        asio::any_io_executor executor,
+        std::shared_ptr<Resolver> resolver,
+        PoolOptions pool,
+        std::stop_token stop
+    )
     {
-        const auto promise = std::make_shared<std::promise<Reachability>>();
-        auto future = promise->get_future();
+        const auto reaching = std::make_shared<Reaching>();
+        auto future = reaching->promise.get_future();
         const auto backstop = loginLimitsFor(pool).backstop;
+        const auto strand = asio::make_strand(executor);
         asio::co_spawn(
-            asio::make_strand(executor),
+            strand,
             Detail::withoutThrowing(lookUpAndReach(std::move(resolver), std::move(pool))),
             asio::cancel_after(
                 backstop,
-                [promise](std::exception_ptr exception, Reachability reachability) noexcept
-                {
-                    if (exception)
-                        return promise->set_value(std::unexpected(exceptionFailure("Reaching the server", exception)));
-                    // The backstop is the only cancel, the server took too long to answer.
-                    if (!reachability && reachability.error().error.kind == RemoteErrorKind::Cancelled)
-                        return promise->set_value(
-                            std::unexpected(
-                                failureOf(errorOf(RemoteErrorKind::TimedOut, "The server did not answer in time"))
-                            )
-                        );
-                    promise->set_value(std::move(reachability));
-                }
+                asio::bind_cancellation_slot(
+                    reaching->stopSignal.slot(),
+                    [reaching, stop](std::exception_ptr exception, Reachability reachability) noexcept
+                    {
+                        auto& promise = reaching->promise;
+                        if (exception)
+                            return promise.set_value(
+                                std::unexpected(exceptionFailure("Reaching the server", exception))
+                            );
+                        // Without a stop the backstop was the cancel, the server took too long to answer.
+                        if (isCancelled(reachability) && !stop.stop_requested())
+                            return promise.set_value(
+                                std::unexpected(
+                                    failureOf(errorOf(RemoteErrorKind::TimedOut, "The server did not answer in time"))
+                                )
+                            );
+                        promise.set_value(std::move(reachability));
+                    }
+                )
             )
+        );
+        // After the spawn, which connected the slot: a stop requested by now is emitted behind the start.
+        reaching->onStop.emplace(
+            stop,
+            [weak = std::weak_ptr{reaching}, strand]()
+            {
+                asio::post(
+                    strand,
+                    [weak]()
+                    {
+                        if (const auto reaching = weak.lock(); reaching)
+                            reaching->stopSignal.emit(asio::cancellation_type::terminal);
+                    }
+                );
+            }
         );
         return future;
     }

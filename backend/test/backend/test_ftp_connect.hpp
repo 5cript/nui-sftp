@@ -167,6 +167,16 @@ namespace Test
         }
 
         /**
+         * @brief Accepts and never greets: a server that went silent before a reach got anywhere.
+         */
+        Script silentBeforeTheGreeting()
+        {
+            Script script{};
+            script.checkpoint("reach stalled").stall();
+            return script;
+        }
+
+        /**
          * @brief A spare connection for one the pool may log in while the session closes, any login is taken.
          */
         Script spare(std::shared_ptr<ServedTree> tree)
@@ -863,6 +873,32 @@ namespace Test
         const auto connected = connecting.get();
         ASSERT_FALSE(connected);
         EXPECT_NE(connected.error().find("was stopped"), std::string::npos) << connected.error();
+    }
+
+    TEST_F(FtpConnectTests, AStopEndsTheReachOfAServerThatDoesNotGreet)
+    {
+        using namespace FtpConnectTesting;
+        startServer();
+        addConnection(silentBeforeTheGreeting());
+        auto options = session();
+        // The reach alone would wait a minute for the greeting.
+        options.ftpOptions.value().connectTimeoutSeconds = 60;
+        std::stop_source stop{};
+        auto connecting = std::async(
+            std::launch::async,
+            [this, &options, &stop]()
+            {
+                return connect(options, neverAsked(), {}, stop.get_token());
+            }
+        );
+        ASSERT_TRUE(server_->waitForCheckpoint("reach stalled"));
+
+        stop.request_stop();
+        ASSERT_EQ(connecting.wait_for(std::chrono::seconds{20}), std::future_status::ready);
+        const auto connected = connecting.get();
+        ASSERT_FALSE(connected);
+        EXPECT_NE(connected.error().find("was stopped"), std::string::npos) << connected.error();
+        EXPECT_TRUE(server_->waitUntilDisconnected()) << "the reach kept its connection after the stop";
     }
 
     TEST_F(FtpConnectTests, AStoppedConnectNeitherAsksNorConnects)

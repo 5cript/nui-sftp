@@ -395,9 +395,10 @@ namespace FtpConnect
         {
             if (isAnonymous(session.loginUser()))
                 return options;
-            auto reached = FileTransferProtocol::reachServer(engine.executor(), engine.resolver(), options.pool);
+            auto reached = FileTransferProtocol::reachServer(engine.executor(), engine.resolver(), options.pool, stop);
             const auto outcome = awaitOutcome(reached, stop);
-            if (!outcome)
+            // A stop ends the reach too, which may complete as cancelled before the wait sees the stop.
+            if (!outcome || stop.stop_requested())
                 return std::unexpected(stoppedMessage(session));
             if (!*outcome)
                 return std::unexpected(loginFailureMessage(outcome->error(), session));

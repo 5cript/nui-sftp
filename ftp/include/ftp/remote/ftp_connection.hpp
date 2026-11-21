@@ -24,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <vector>
 
 namespace FileTransferProtocol
@@ -70,11 +71,17 @@ namespace FileTransferProtocol
      *        and its certificate is trusted, before anybody is asked for a password. Nothing of the credentials is
      *        sent. Bounded like a first login, see loginLimitsFor(). Callable from any thread.
      *
+     * @param stop Ends the reach and closes its connection, from any thread.
      * @return Completes with the certificate, or the failure: NoConnection or TimedOut for a server that is not
-     *         there, TrustRequired with the certificate to ask about, the error of the greeting or of TLS.
+     *         there, TrustRequired with the certificate to ask about, the error of the greeting or of TLS, Cancelled
+     *         after a stop request.
      */
-    std::future<Reachability>
-    reachServer(boost::asio::any_io_executor executor, std::shared_ptr<Resolver> resolver, PoolOptions pool);
+    std::future<Reachability> reachServer(
+        boost::asio::any_io_executor executor,
+        std::shared_ptr<Resolver> resolver,
+        PoolOptions pool,
+        std::stop_token stop = {}
+    );
 
     /**
      * @brief One FTP session as a RemoteIo connection: its ProcessingThread, its engine on an executor of the
