@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ftp/client/platform_trust.hpp>
 #include <ftp/client/tls.hpp>
 
 #include <nlohmann/json.hpp>
@@ -7,8 +8,10 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace FtpConnect
 {
@@ -51,6 +54,16 @@ namespace FtpConnect
      * @brief Asks whether to trust a certificate.
      */
     using TrustSource = std::function<TrustAnswer(TrustQuestion const& question)>;
+
+    /**
+     * @brief Asks the system whether it trusts the chain a server sent for its name, see
+     *        FileTransferProtocol::platformVerdictOf().
+     */
+    using PlatformTrust = std::function<FileTransferProtocol::PlatformVerdict(
+        std::vector<FileTransferProtocol::DerCertificate> const& chain,
+        std::string const& serverName,
+        std::stop_token const& stop
+    )>;
 
     /**
      * @brief Asks the user whether to trust a certificate, see SessionManager::setTrustProvider().

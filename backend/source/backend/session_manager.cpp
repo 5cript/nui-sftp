@@ -452,6 +452,12 @@ SessionManager::Connect SessionManager::ftpConnect(Persistence::FtpSessionOption
             },
             *trustStore_,
             trustSource(),
+            [](std::vector<FileTransferProtocol::DerCertificate> const& chain,
+                std::string const& serverName,
+                std::stop_token const& stop)
+            {
+                return FileTransferProtocol::platformVerdictOf(chain, serverName, stop);
+            },
             std::move(onConnectionLoss),
             connectsStop_.get_token()
         );

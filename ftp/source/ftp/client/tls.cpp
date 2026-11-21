@@ -1,6 +1,8 @@
 #include <ftp/client/tls.hpp>
+#include <ftp/client/system_authorities.hpp>
 #include <ftp/protocol/protocol_error.hpp>
 #include "client_support.hpp"
+#include "openssl_error.hpp"
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -20,13 +22,16 @@
 #include <array>
 #include <cstddef>
 #include <ctime>
+#include <optional>
 #include <utility>
+#include <vector>
 
 namespace FileTransferProtocol
 {
     namespace
     {
         using Detail::errorOf;
+        using Detail::refusedByOpenSsl;
         using RemoteIo::RemoteErrorKind;
 
         template <auto release>
@@ -46,25 +51,6 @@ namespace FileTransferProtocol
         constexpr std::array<unsigned char, 4> applicationProtocols{3u, 'f', 't', 'p'};
 
         /**
-         * @brief The oldest error OpenSSL queued, the queue is empty afterwards.
-         */
-        std::string openSslReason()
-        {
-            const auto code = ERR_get_error();
-            ERR_clear_error();
-            if (code == 0u)
-                return "no reason given";
-            std::array<char, 256> reason{};
-            ERR_error_string_n(code, reason.data(), reason.size());
-            return reason.data();
-        }
-
-        RemoteIo::RemoteError refused(std::string_view what)
-        {
-            return errorOf(RemoteErrorKind::Failure, fmt::format("OpenSSL refused {}: {}", what, openSslReason()));
-        }
-
-        /**
          * @brief What the certificate check found out during one handshake, freed with the SSL that holds it.
          */
         struct Verification
@@ -73,6 +59,8 @@ namespace FileTransferProtocol
             CertificateHandle leaf{};
             /** @brief What the check against the authorities reported, each error once, as found. */
             std::vector<int> failures{};
+            /** @brief The certificates the server sent, kept when the check refused them. */
+            std::vector<DerCertificate> presentedChain{};
             bool trustedByPin{false};
             bool refused{false};
         };
@@ -225,6 +213,39 @@ namespace FileTransferProtocol
             return 1;
         }
 
+        std::optional<DerCertificate> derOf(X509* certificate)
+        {
+            const int length = i2d_X509(certificate, nullptr);
+            if (length <= 0)
+                return std::nullopt;
+            DerCertificate der(static_cast<std::size_t>(length));
+            unsigned char* output = der.data();
+            if (i2d_X509(certificate, &output) != length)
+                return std::nullopt;
+            return der;
+        }
+
+        /**
+         * @brief The certificates the server sent, @p leaf first.
+         */
+        std::vector<DerCertificate> presentedChainOf(X509_STORE_CTX* store, X509* leaf)
+        {
+            std::vector<DerCertificate> chain{};
+            STACK_OF(X509)* const sent = X509_STORE_CTX_get0_untrusted(store);
+            const int count = sent == nullptr ? 0 : sk_X509_num(sent);
+            for (int position = 0; position < count; ++position)
+            {
+                if (auto der = derOf(sk_X509_value(sent, position)); der)
+                    chain.push_back(std::move(*der));
+            }
+            if (chain.empty() && leaf != nullptr)
+            {
+                if (auto der = derOf(leaf); der)
+                    chain.push_back(std::move(*der));
+            }
+            return chain;
+        }
+
         /**
          * @brief The whole certificate check of a handshake, on an engine thread: never blocks. Without a pin it
          *        accepts what the authorities vouch for. A pin names the one key of the server: a certificate with it
@@ -256,6 +277,7 @@ namespace FileTransferProtocol
             if (!accepted)
             {
                 verification->refused = true;
+                verification->presentedChain = presentedChainOf(store, leaf);
                 // Vouched for, refused for its key: the check left no error for the alert.
                 if (vouchedFor)
                     X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
@@ -301,7 +323,7 @@ namespace FileTransferProtocol
         {
             const MemoryBio bio{BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size()))};
             if (!bio)
-                return std::unexpected(refused("a buffer for an authority"));
+                return std::unexpected(refusedByOpenSsl("a buffer for an authority"));
             X509_STORE* const store = SSL_CTX_get_cert_store(context);
             std::size_t added = 0u;
             for (
@@ -310,7 +332,7 @@ namespace FileTransferProtocol
             )
             {
                 if (X509_STORE_add_cert(store, certificate.get()) != 1)
-                    return std::unexpected(refused("an authority"));
+                    return std::unexpected(refusedByOpenSsl("an authority"));
                 ++added;
             }
             // The read past the last certificate queued a "no start line".
@@ -410,18 +432,21 @@ namespace FileTransferProtocol
     {
         ContextHandle native{SSL_CTX_new(TLS_client_method())};
         if (!native)
-            return std::unexpected(refused("a client context"));
+            return std::unexpected(refusedByOpenSsl("a client context"));
         const int minimum = options.minimumVersion == TlsVersion::Tls13 ? TLS1_3_VERSION : TLS1_2_VERSION;
         if (SSL_CTX_set_min_proto_version(native.get(), minimum) != 1)
-            return std::unexpected(refused("the minimum TLS version"));
+            return std::unexpected(refusedByOpenSsl("the minimum TLS version"));
         SSL_CTX_set_session_cache_mode(native.get(), SSL_SESS_CACHE_OFF);
         // Asio's ssl::stream can keep the ClientHello of a renegotiation in its buffer while a write is in flight,
         // both sides then wait. TLS 1.3 has none, TLS 1.2 servers ask only when configured to.
         SSL_CTX_set_options(native.get(), SSL_OP_NO_RENEGOTIATION);
         SSL_CTX_set_verify(native.get(), SSL_VERIFY_PEER, nullptr);
         SSL_CTX_set_cert_verify_callback(native.get(), &verifyCertificate, nullptr);
-        if (options.systemAuthorities && SSL_CTX_set_default_verify_paths(native.get()) != 1)
-            return std::unexpected(refused("the authorities of the system"));
+        if (options.systemAuthorities)
+        {
+            if (const auto added = addSystemAuthorities(native.get()); !added)
+                return std::unexpected(added.error());
+        }
         for (auto const& authority : options.authorities)
         {
             if (const auto added = addAuthorities(native.get(), authority); !added)
@@ -429,7 +454,7 @@ namespace FileTransferProtocol
         }
         // Returns 0 on success, unlike the rest of OpenSSL.
         if (SSL_CTX_set_alpn_protos(native.get(), applicationProtocols.data(), applicationProtocols.size()) != 0)
-            return std::unexpected(refused("ALPN"));
+            return std::unexpected(refusedByOpenSsl("ALPN"));
         return std::make_shared<TlsContext>(Private{}, native.release());
     }
 
@@ -464,14 +489,14 @@ namespace FileTransferProtocol
             );
         const auto index = verificationIndex();
         if (index < 0)
-            return std::unexpected(refused("a place for the certificate check"));
+            return std::unexpected(refusedByOpenSsl("a place for the certificate check"));
         SslHandle handle{SSL_new(settings.context->context().native_handle())};
         if (!handle)
-            return std::unexpected(refused("a connection handle"));
+            return std::unexpected(refusedByOpenSsl("a connection handle"));
         auto verification = std::make_unique<Verification>();
         verification->pin = settings.pinnedPublicKey;
         if (SSL_set_ex_data(handle.get(), index, verification.get()) != 1)
-            return std::unexpected(refused("the certificate check"));
+            return std::unexpected(refusedByOpenSsl("the certificate check"));
         // Freed with the handle by freeVerification().
         std::ignore = verification.release();
 
@@ -480,13 +505,13 @@ namespace FileTransferProtocol
         if (!notAnAddress)
         {
             if (X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(handle.get()), settings.serverName.c_str()) != 1)
-                return std::unexpected(refused("the address check"));
+                return std::unexpected(refusedByOpenSsl("the address check"));
             return handle;
         }
         if (SSL_set_tlsext_host_name(handle.get(), settings.serverName.c_str()) != 1)
-            return std::unexpected(refused("the server name indication"));
+            return std::unexpected(refusedByOpenSsl("the server name indication"));
         if (SSL_set1_host(handle.get(), settings.serverName.c_str()) != 1)
-            return std::unexpected(refused("the name check"));
+            return std::unexpected(refusedByOpenSsl("the name check"));
         // RFC 6125 6.4.3 lets a client refuse "f*.example.com", browsers do.
         SSL_set_hostflags(handle.get(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
         return handle;
@@ -568,7 +593,10 @@ namespace FileTransferProtocol
             return std::nullopt;
         auto info = describeCertificate(verification->leaf.get());
         if (info)
+        {
             info->verifyFailures = failuresOf(*verification);
+            info->presentedChain = verification->presentedChain;
+        }
         return info;
     }
 

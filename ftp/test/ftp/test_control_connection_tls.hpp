@@ -2,6 +2,7 @@
 
 #include "test_control_connection.hpp"
 
+#include <ftp/client/platform_trust.hpp>
 #include <ftp/client/tls.hpp>
 #include <ftp/support/test_pki.hpp>
 
@@ -27,6 +28,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace FileTransferProtocol::Test
 {
@@ -118,6 +120,17 @@ namespace FileTransferProtocol::Test
                 .serverName = std::move(serverName),
                 .pinnedPublicKey = pin,
             };
+        }
+
+        /**
+         * @brief Settings that trust no authority, so every certificate is refused.
+         */
+        TlsConnectionSettings untrustingSettings() const
+        {
+            auto context = TlsContext::create({.systemAuthorities = false});
+            if (!context)
+                throw std::runtime_error{context.error().toString()};
+            return TlsConnectionSettings{.context = std::move(context).value(), .serverName = "127.0.0.1"};
         }
 
         TrustResult startTls(std::shared_ptr<ControlConnection> const& connection, TlsConnectionSettings tls)
@@ -544,6 +557,51 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(hasFailureOf(*untrusted, VerifyFailureKind::SelfSigned)) << reasonsOf(untrusted->verifyFailures);
         EXPECT_TRUE(hasFailureOf(*untrusted, VerifyFailureKind::NameMismatch)) << reasonsOf(untrusted->verifyFailures);
     }
+
+    TEST_F(ControlConnectionTlsTests, ARefusedCertificateKeepsTheChainTheServerSent)
+    {
+        server_->addConnection(explicitTls().expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        ASSERT_FALSE(startTls(connection, untrustingSettings()));
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        ASSERT_FALSE(untrusted->presentedChain.empty());
+        EXPECT_EQ(untrusted->presentedChain.front(), derOfPem(tlsTestPki().server.certificate));
+    }
+
+#if defined(__APPLE__) || defined(_WIN32)
+    TEST_F(ControlConnectionTlsTests, TheSystemTrustsARefusedChainForTheServerItNames)
+    {
+        server_->addConnection(explicitTls().expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        ASSERT_FALSE(startTls(connection, untrustingSettings()));
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        const std::vector<DerCertificate> anchors{derOfPem(tlsTestPki().authority)};
+        EXPECT_EQ(platformVerdictOf(untrusted->presentedChain, "127.0.0.1", {}, anchors), PlatformVerdict::Trusted);
+        EXPECT_EQ(
+            platformVerdictOf(untrusted->presentedChain, "ftp.nui-sftp.test", {}, anchors), PlatformVerdict::Refused
+        );
+    }
+
+    TEST(PlatformTrustTests, TheSystemRefusesWhatItHasNoAnchorFor)
+    {
+        const std::vector<DerCertificate> chain{derOfPem(tlsTestPki().server.certificate)};
+        EXPECT_EQ(platformVerdictOf(chain, "127.0.0.1", {}), PlatformVerdict::Refused);
+        EXPECT_EQ(platformVerdictOf(chain, "127.0.0.1", {}, std::vector<DerCertificate>{}), PlatformVerdict::Refused);
+    }
+
+    TEST(PlatformTrustTests, TheSystemRefusesAnExpiredCertificate)
+    {
+        const std::vector<DerCertificate> anchors{derOfPem(tlsTestPki().authority)};
+        EXPECT_EQ(
+            platformVerdictOf({derOfPem(tlsTestPki().expired.certificate)}, "127.0.0.1", {}, anchors),
+            PlatformVerdict::Refused
+        );
+    }
+#endif
 
     TEST_F(ControlConnectionTlsTests, CertificateHasToNameTheServer)
     {

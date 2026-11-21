@@ -22,6 +22,7 @@
 #include "test_file_system_conformance.hpp"
 #include "test_delivery_ring.hpp"
 #include "test_supply_ring.hpp"
+#include "test_system_authorities.hpp"
 #include "test_transfer_conformance.hpp"
 #include "test_metadata_conformance.hpp"
 #include "test_printable.hpp"

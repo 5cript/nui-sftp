@@ -40,6 +40,11 @@ namespace FileTransferProtocol
     using Sha256Digest = std::array<std::uint8_t, 32>;
 
     /**
+     * @brief A certificate in DER.
+     */
+    using DerCertificate = std::vector<std::uint8_t>;
+
+    /**
      * @brief @p digest as upper case hex pairs separated by colons, the way certificate viewers show fingerprints.
      */
     std::string formatDigest(Sha256Digest const& digest);
@@ -93,6 +98,8 @@ namespace FileTransferProtocol
         Sha256Digest publicKeySha256{};
         /** @brief Every reason the trusted authorities did not vouch for it, as found, empty when they did. */
         std::vector<VerifyFailure> verifyFailures{};
+        /** @brief The certificates the server sent, its own first. Only for a refused certificate. */
+        std::vector<DerCertificate> presentedChain{};
     };
 
     /**
@@ -123,7 +130,7 @@ namespace FileTransferProtocol
 
     struct TlsContextOptions
     {
-        /** @brief Trusts the authorities in OpenSSL's default places. */
+        /** @brief Trusts the authorities of the system, which adds some on Linux only, see addSystemAuthorities(). */
         bool systemAuthorities{true};
         /** @brief Certificates in PEM of more authorities to trust. */
         std::vector<std::string> authorities{};
