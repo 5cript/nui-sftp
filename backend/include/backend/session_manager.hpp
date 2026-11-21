@@ -106,8 +106,9 @@ class SessionManager
     Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
 
     /**
-     * @brief @p connect, which also sets @p passwordDeclined to whether a password prompt got no password during it, a
-     *        prompt the user cancelled or no provider answered.
+     * @brief @p connect, which also sets @p passwordDeclined to whether the last password prompt during it got no
+     *        password: a prompt the user cancelled, that no provider answered or that shutdown() cancelled. A prompt
+     *        answered after a declined one makes what follows a failure of its own.
      */
     Connect noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool> passwordDeclined);
 
@@ -162,6 +163,11 @@ class SessionManager
      * @return The password, nothing when every provider declined, prompts are cancelled or asking failed.
      */
     std::optional<std::string> askPassword(std::string const& whatFor, std::string const& prompt) noexcept;
+
+    /**
+     * @brief Asks the providers as askPassword() does, and lets what they throw through.
+     */
+    std::optional<std::string> askProviders(std::string const& whatFor, std::string const& prompt);
 
     /**
      * @brief Stops and removes every session, later ones are refused. On the strand.
@@ -271,8 +277,8 @@ class SessionManager
     bool passwordPromptsCancelled_{false};
     /** @brief Stops the FTP connects, a login that runs among them, once shutdown() begins. Thread-safe. */
     std::stop_source connectsStop_{};
-    /** @brief The prompts askPassword got no password for, counted on the strand. */
-    std::size_t declinedPasswordPrompts_{0u};
+    /** @brief Whether the last prompt of askPassword got no password, a failed one aside. On the strand. */
+    bool lastPromptDeclined_{false};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};
     /// Backups of bulk operations interrupted by lost connection; consumed

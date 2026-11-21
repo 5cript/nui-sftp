@@ -252,27 +252,36 @@ void SessionManager::closeAllSessions()
     sessions_.clear();
 }
 
-std::optional<std::string> SessionManager::askPassword(std::string const& whatFor, std::string const& prompt) noexcept
+std::optional<std::string> SessionManager::askProviders(std::string const& whatFor, std::string const& prompt)
 {
     if (passwordProviders_.empty())
+    {
+        Log::warn("There is no password provider to ask for the {}.", whatFor);
         return std::nullopt;
+    }
 
+    const auto request = beginPasswordRequest();
+    if (!request)
+        return std::nullopt;
+    const auto endRequest = Nui::ScopeExit(
+        [this]() noexcept
+        {
+            endPasswordRequest();
+        }
+    );
+
+    askNextProvider(passwordProviders_.begin(), passwordProviders_.end(), request, whatFor, prompt);
+    return request->wait();
+}
+
+std::optional<std::string> SessionManager::askPassword(std::string const& whatFor, std::string const& prompt) noexcept
+{
+    // A prompt that fails is no declined one, its error is reported.
+    lastPromptDeclined_ = false;
     try
     {
-        const auto request = beginPasswordRequest();
-        if (!request)
-            return std::nullopt;
-        const auto endRequest = Nui::ScopeExit(
-            [this]() noexcept
-            {
-                endPasswordRequest();
-            }
-        );
-
-        askNextProvider(passwordProviders_.begin(), passwordProviders_.end(), request, whatFor, prompt);
-        auto password = request->wait();
-        if (!password)
-            ++declinedPasswordPrompts_;
+        auto password = askProviders(whatFor, prompt);
+        lastPromptDeclined_ = !password;
         return password;
     }
     catch (std::exception const& exception)
@@ -338,9 +347,9 @@ SessionManager::noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool>
                std::function<void()> onConnectionLoss
            ) -> std::expected<SessionConnection, std::string>
     {
-        const auto declinedBefore = declinedPasswordPrompts_;
+        lastPromptDeclined_ = false;
         auto connection = connect(std::move(onConnectionLoss));
-        *passwordDeclined = declinedPasswordPrompts_ != declinedBefore;
+        *passwordDeclined = lastPromptDeclined_;
         return connection;
     };
 }
@@ -580,27 +589,21 @@ void SessionManager::registerRpcSessionConnect()
                         engineName = engineNameOf(request->engine),
                         passwordDeclined](auto const& reply, auto const& maybeId, auto const& maybeErrorMessage)
                     {
-                        if (!maybeId && *passwordDeclined)
+                        if (!maybeId)
                         {
                             // The user cancelled the password prompt, which is no failure to report.
-                            Log::debug("The login to the {} server ended without a password", engineName);
+                            if (*passwordDeclined)
+                                Log::debug("The login to the {} server ended without a password", engineName);
+                            else
+                                Log::error(
+                                    failureToast,
+                                    "Failed to connect to {} server: {}",
+                                    engineName,
+                                    maybeErrorMessage.value_or("unknown error")
+                                );
                             return reply(
                                 {{"error",
                                      maybeErrorMessage.value_or("backend.sessionManager.connectFailedUnspecified")},
-                                    {"cancelled", true}}
-                            );
-                        }
-                        if (!maybeId)
-                        {
-                            Log::error(
-                                failureToast,
-                                "Failed to connect to {} server: {}",
-                                engineName,
-                                maybeErrorMessage.value_or("unknown error")
-                            );
-                            return reply(
-                                {{"error",
-                                    maybeErrorMessage.value_or("backend.sessionManager.connectFailedUnspecified")},
                                     {"cancelled", *passwordDeclined}}
                             );
                         }
