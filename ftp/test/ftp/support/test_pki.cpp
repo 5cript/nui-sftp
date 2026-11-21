@@ -38,6 +38,8 @@ namespace FileTransferProtocol::Test
 
         constexpr std::string_view allServerNames = "IP:127.0.0.1,IP:::1,DNS:localhost";
         constexpr std::chrono::hours oneDay{24};
+        /** @brief Apple refuses a TLS server certificate valid for more than 825 days. */
+        constexpr std::chrono::hours oneYear{24 * 365};
         constexpr std::chrono::hours tenYears{24 * 3650};
 
         std::unexpected<std::string> openSslFailure(std::string_view what)
@@ -59,7 +61,7 @@ namespace FileTransferProtocol::Test
             /** @brief The subject alternative names of a server, empty for an authority. */
             std::string_view names{};
             std::chrono::hours validFrom{-oneDay};
-            std::chrono::hours validUntil{tenYears};
+            std::chrono::hours validUntil{oneYear};
         };
 
         std::expected<Key, std::string> makeKey()
@@ -144,6 +146,13 @@ namespace FileTransferProtocol::Test
                               const std::string names{request.names};
                               return addExtension(context, certificate.get(), NID_subject_alt_name, names.c_str());
                           }
+                      )
+                      .and_then(
+                          [&]()
+                          {
+                              // Apple trusts a TLS server certificate only with this usage.
+                              return addExtension(context, certificate.get(), NID_ext_key_usage, "serverAuth");
+                          }
                       );
             if (!extended)
                 return std::unexpected(extended.error());
@@ -158,7 +167,8 @@ namespace FileTransferProtocol::Test
             return makeKey().and_then(
                 [&](Key key) -> std::expected<Authority, std::string>
                 {
-                    auto certificate = makeCertificate(Request{.commonName = commonName}, key.get(), nullptr);
+                    auto certificate =
+                        makeCertificate(Request{.commonName = commonName, .validUntil = tenYears}, key.get(), nullptr);
                     if (!certificate)
                         return std::unexpected(std::move(certificate).error());
                     return Authority{.certificate = std::move(certificate).value(), .key = std::move(key)};

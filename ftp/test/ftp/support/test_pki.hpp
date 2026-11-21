@@ -17,7 +17,8 @@ namespace FileTransferProtocol::Test
 
     /**
      * @brief Certificates for the tests, made at run time so no checked-in key expires. The server certificates name
-     *        127.0.0.1, ::1 and localhost unless they say otherwise.
+     *        127.0.0.1, ::1 and localhost unless they say otherwise, and meet Apple's rules for TLS servers: server
+     *        authentication as extended key usage, valid for a year.
      */
     struct TestPki
     {
