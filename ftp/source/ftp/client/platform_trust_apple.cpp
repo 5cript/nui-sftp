@@ -1,14 +1,13 @@
 #include <ftp/client/platform_trust.hpp>
 #include <log/log.hpp>
+#include "platform_answer.hpp"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #include <dispatch/dispatch.h>
 
 #include <array>
-#include <condition_variable>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <type_traits>
 
@@ -48,19 +47,9 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The answer of an evaluation, which outlives a wait that was stopped.
-         */
-        struct Answer
-        {
-            std::mutex mutex{};
-            std::condition_variable_any answered{};
-            std::optional<bool> trusted{};
-        };
-
-        /**
          * @brief Evaluates @p trust on a queue of its own and hands the result to @p answer. Takes the trust.
          */
-        void evaluate(Reference<SecTrustRef> trust, std::shared_ptr<Answer> answer)
+        void evaluate(Reference<SecTrustRef> trust, std::shared_ptr<Detail::PlatformAnswer> answer)
         {
             // Released once the evaluation answered.
             dispatch_queue_t queue = dispatch_queue_create("nui-sftp.platform-trust", DISPATCH_QUEUE_SERIAL);
@@ -77,22 +66,14 @@ namespace FileTransferProtocol
                             CFStringGetCString(description.get(), text.data(), text.size(), kCFStringEncodingUTF8))
                             Log::info("FTP: The system does not trust the certificate: {}", text.data());
                     }
-                    {
-                        std::scoped_lock lock{answer->mutex};
-                        answer->trusted = trusted;
-                    }
-                    answer->answered.notify_all();
+                    answer->give(trusted);
                     CFRelease(evaluated);
                     dispatch_release(queue);
                   });
               if (started != errSecSuccess)
               {
                   Log::error("FTP: The system could not evaluate the certificate: OSStatus {}.", started);
-                  {
-                      std::scoped_lock lock{answer->mutex};
-                      answer->trusted = false;
-                  }
-                  answer->answered.notify_all();
+                  answer->give(false);
                   CFRelease(evaluated);
                   dispatch_release(queue);
               }
@@ -104,7 +85,7 @@ namespace FileTransferProtocol
         std::vector<DerCertificate> const& chain,
         std::string const& serverName,
         std::stop_token const& stop,
-        PlatformAnchors const& anchors
+        std::optional<std::vector<DerCertificate>> const& exclusiveAnchors
     )
     {
         if (chain.empty())
@@ -121,28 +102,19 @@ namespace FileTransferProtocol
             SecTrustCreateWithCertificates(certificates->get(), policy.get(), &created) != errSecSuccess)
             return PlatformVerdict::Refused;
         Reference<SecTrustRef> trust{created};
-        if (!anchors.certificates.empty() || anchors.only)
+        if (exclusiveAnchors)
         {
-            const auto anchorCertificates = certificatesOf(anchors.certificates);
+            const auto anchorCertificates = certificatesOf(*exclusiveAnchors);
             if (!anchorCertificates ||
                 SecTrustSetAnchorCertificates(trust.get(), anchorCertificates->get()) != errSecSuccess ||
-                SecTrustSetAnchorCertificatesOnly(trust.get(), anchors.only) != errSecSuccess)
+                SecTrustSetAnchorCertificatesOnly(trust.get(), true) != errSecSuccess)
                 return PlatformVerdict::Refused;
         }
         SecTrustSetNetworkFetchAllowed(trust.get(), true);
 
-        const auto answer = std::make_shared<Answer>();
+        const auto answer = std::make_shared<Detail::PlatformAnswer>();
         evaluate(std::move(trust), answer);
-        std::unique_lock lock{answer->mutex};
-        if (!answer->answered.wait(
-                lock,
-                stop,
-                [&answer]()
-                {
-                    return answer->trusted.has_value();
-                }
-            ))
-            return PlatformVerdict::Refused;
-        return *answer->trusted ? PlatformVerdict::Trusted : PlatformVerdict::Refused;
+        const auto trusted = answer->waitUntilGiven(stop);
+        return trusted && *trusted ? PlatformVerdict::Trusted : PlatformVerdict::Refused;
     }
 }

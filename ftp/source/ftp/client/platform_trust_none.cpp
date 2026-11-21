@@ -6,7 +6,7 @@ namespace FileTransferProtocol
         std::vector<DerCertificate> const&,
         std::string const&,
         std::stop_token const&,
-        PlatformAnchors const&
+        std::optional<std::vector<DerCertificate>> const&
     )
     {
         return PlatformVerdict::Unavailable;

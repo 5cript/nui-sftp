@@ -81,7 +81,7 @@ namespace FileTransferProtocol::Test
     }
 #endif
 
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(_WIN32)
     TEST(PlatformTrustTests, OtherPlatformsHaveNoCheckOfTheirOwn)
     {
         EXPECT_EQ(platformVerdictOf({DerCertificate{0x30u, 0x00u}}, "127.0.0.1", {}), PlatformVerdict::Unavailable);
