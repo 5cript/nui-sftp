@@ -80,7 +80,7 @@ namespace NuiSftpPage::Sections
                     ),
                     h1{class_ = "hero-title"}(
                         text{"A modern "}(),
-                        span{class_ = "grad"}("SFTP, FTP & SSH"),
+                        span{class_ = "grad"}("SFTP & FTP"),
                         text{" workbench."}()
                     ),
                     p{class_ = "hero-sub"}(
