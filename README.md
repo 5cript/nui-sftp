@@ -1,6 +1,6 @@
 # nui-sftp
 
-This project contains a cross platform (Linux, Windows & macOS) SSH and SFTP workbench.
+This project contains a cross platform (Linux, Windows & macOS) SSH, SFTP and FTP(S) workbench.
 
 ![Session](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/session.png)
 
@@ -89,6 +89,9 @@ There will not be support for any other systems (Mobile Devices or BSD).
 You can synchronize folders between your local machine and the server. This will automatically upload/download files that are changed in the source folder to the target folder. You can also choose to only synchronize in one direction (upload or download).
 ![Synchronize](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/synchronize.png)
 
+## FTP Servers
+Connect to FTP servers, unencrypted or over explicit or implicit TLS. An FTP session opens the same file view as SFTP, without terminals: transfers, synchronization, File Tracking and archives work there too. Certificates are checked against the certificate authorities your system trusts, and one that nobody vouches for is shown to you before a password is sent.
+
 ## Local Shell
 Run a PTY on your local machine with a file view.
 ![LocalShellSession](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/local.png)
@@ -133,10 +136,22 @@ You can download and upload files and folders directly as tar archives, no manua
 - Show file properties.
 - Recursive folder delete.
 
+## FTP & FTPS
+- Plain FTP, explicit FTP over TLS and implicit FTP over TLS.
+- Everything of the SFTP list above, with the same file view, queue and synchronization.
+- Certificates are verified with the certificate authorities of the system, on Linux, Windows and macOS.
+- An unverified certificate is shown with its fingerprints before the login, to trust once or always.
+- Anonymous login and several users per server.
+- Passwords are asked for when connecting and never stored.
+- Several connections per session: one for browsing, the others for parallel transfers.
+- Continues interrupted uploads and downloads.
+- Keeps idle sessions alive and logs in again when the server closed the connection.
+- Passive mode (EPSV and PASV).
+
 ## General UI
 - Flexible Layout - organize widgets as you like
 - Save and Load Layouts.
-- Run multiple SSH or Local Shell Session in parallel.
+- Run multiple SSH, FTP or Local Shell Session in parallel.
 
 ## Settings UI
 - If it's configurable, it's in the settings.
@@ -157,6 +172,8 @@ You can download and upload files and folders directly as tar archives, no manua
 - [File transfer behavior](docs/file-transfer-behavior.md): how uploads check, replace and continue files, per protocol.
 
 # No intention to support for now:
+- FTP active mode and ASCII transfers: FTP uses passive mode and binary transfers only.
+- FTP servers without Unix-like paths (VMS, MVS).
 - Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
 - GSSAPI auth: Will make work when a need arises
 - KeypassXc database integration: lots of work for tiny use cases. It's a cool idea for later.
