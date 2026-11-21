@@ -1,4 +1,5 @@
 #include <ftp/client/tls.hpp>
+#include <ftp/client/system_authorities.hpp>
 #include <ftp/protocol/protocol_error.hpp>
 #include "client_support.hpp"
 
@@ -20,7 +21,9 @@
 #include <array>
 #include <cstddef>
 #include <ctime>
+#include <optional>
 #include <utility>
+#include <vector>
 
 namespace FileTransferProtocol
 {
@@ -73,6 +76,8 @@ namespace FileTransferProtocol
             CertificateHandle leaf{};
             /** @brief What the check against the authorities reported, each error once, as found. */
             std::vector<int> failures{};
+            /** @brief The certificates the server sent, kept when the check refused them. */
+            std::vector<DerCertificate> presentedChain{};
             bool trustedByPin{false};
             bool refused{false};
         };
@@ -225,6 +230,39 @@ namespace FileTransferProtocol
             return 1;
         }
 
+        std::optional<DerCertificate> derOf(X509* certificate)
+        {
+            const int length = i2d_X509(certificate, nullptr);
+            if (length <= 0)
+                return std::nullopt;
+            DerCertificate der(static_cast<std::size_t>(length));
+            unsigned char* output = der.data();
+            if (i2d_X509(certificate, &output) != length)
+                return std::nullopt;
+            return der;
+        }
+
+        /**
+         * @brief The certificates the server sent, @p leaf first.
+         */
+        std::vector<DerCertificate> presentedChainOf(X509_STORE_CTX* store, X509* leaf)
+        {
+            std::vector<DerCertificate> chain{};
+            STACK_OF(X509)* const sent = X509_STORE_CTX_get0_untrusted(store);
+            const int count = sent == nullptr ? 0 : sk_X509_num(sent);
+            for (int position = 0; position < count; ++position)
+            {
+                if (auto der = derOf(sk_X509_value(sent, position)); der)
+                    chain.push_back(std::move(*der));
+            }
+            if (chain.empty() && leaf != nullptr)
+            {
+                if (auto der = derOf(leaf); der)
+                    chain.push_back(std::move(*der));
+            }
+            return chain;
+        }
+
         /**
          * @brief The whole certificate check of a handshake, on an engine thread: never blocks. Without a pin it
          *        accepts what the authorities vouch for. A pin names the one key of the server: a certificate with it
@@ -256,6 +294,7 @@ namespace FileTransferProtocol
             if (!accepted)
             {
                 verification->refused = true;
+                verification->presentedChain = presentedChainOf(store, leaf);
                 // Vouched for, refused for its key: the check left no error for the alert.
                 if (vouchedFor)
                     X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
@@ -420,8 +459,11 @@ namespace FileTransferProtocol
         SSL_CTX_set_options(native.get(), SSL_OP_NO_RENEGOTIATION);
         SSL_CTX_set_verify(native.get(), SSL_VERIFY_PEER, nullptr);
         SSL_CTX_set_cert_verify_callback(native.get(), &verifyCertificate, nullptr);
-        if (options.systemAuthorities && SSL_CTX_set_default_verify_paths(native.get()) != 1)
-            return std::unexpected(refused("the authorities of the system"));
+        if (options.systemAuthorities)
+        {
+            if (const auto added = addSystemAuthorities(native.get()); !added)
+                return std::unexpected(added.error());
+        }
         for (auto const& authority : options.authorities)
         {
             if (const auto added = addAuthorities(native.get(), authority); !added)
@@ -568,7 +610,10 @@ namespace FileTransferProtocol
             return std::nullopt;
         auto info = describeCertificate(verification->leaf.get());
         if (info)
+        {
             info->verifyFailures = failuresOf(*verification);
+            info->presentedChain = verification->presentedChain;
+        }
         return info;
     }
 

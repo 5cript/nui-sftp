@@ -2,8 +2,13 @@
 
 #include "test_control_connection.hpp"
 
+#include <ftp/client/platform_trust.hpp>
+#include <ftp/client/system_authorities.hpp>
 #include <ftp/client/tls.hpp>
 #include <ftp/support/test_pki.hpp>
+#ifdef _WIN32
+#    include <ftp/support/windows_certificate_store.hpp>
+#endif
 
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
@@ -22,11 +27,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace FileTransferProtocol::Test
 {
@@ -40,6 +47,24 @@ namespace FileTransferProtocol::Test
             if (!made)
                 throw std::runtime_error{made.error()};
             return made->get();
+        }
+
+        DerCertificate derOfPem(std::string const& pem)
+        {
+            const std::unique_ptr<BIO, decltype(&BIO_free)> bio{
+                BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free
+            };
+            const std::unique_ptr<X509, decltype(&X509_free)> certificate{
+                PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free
+            };
+            if (!certificate)
+                throw std::runtime_error{"The test certificate cannot be read"};
+            const int length = i2d_X509(certificate.get(), nullptr);
+            DerCertificate der(static_cast<std::size_t>(length));
+            unsigned char* output = der.data();
+            if (length <= 0 || i2d_X509(certificate.get(), &output) != length)
+                throw std::runtime_error{"The test certificate cannot be written as DER"};
+            return der;
         }
 
         Sha256Digest publicKeyDigestOf(CertifiedKey const& certified)
@@ -118,6 +143,17 @@ namespace FileTransferProtocol::Test
                 .serverName = std::move(serverName),
                 .pinnedPublicKey = pin,
             };
+        }
+
+        /**
+         * @brief Settings that trust no authority, so every certificate is refused.
+         */
+        TlsConnectionSettings untrustingSettings() const
+        {
+            auto context = TlsContext::create({.systemAuthorities = false});
+            if (!context)
+                throw std::runtime_error{context.error().toString()};
+            return TlsConnectionSettings{.context = std::move(context).value(), .serverName = "127.0.0.1"};
         }
 
         TrustResult startTls(std::shared_ptr<ControlConnection> const& connection, TlsConnectionSettings tls)
@@ -544,6 +580,76 @@ namespace FileTransferProtocol::Test
         EXPECT_TRUE(hasFailureOf(*untrusted, VerifyFailureKind::SelfSigned)) << reasonsOf(untrusted->verifyFailures);
         EXPECT_TRUE(hasFailureOf(*untrusted, VerifyFailureKind::NameMismatch)) << reasonsOf(untrusted->verifyFailures);
     }
+
+    TEST_F(ControlConnectionTlsTests, ARefusedCertificateKeepsTheChainTheServerSent)
+    {
+        server_->addConnection(explicitTls().expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        ASSERT_FALSE(startTls(connection, untrustingSettings()));
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        ASSERT_FALSE(untrusted->presentedChain.empty());
+        EXPECT_EQ(untrusted->presentedChain.front(), derOfPem(tlsTestPki().server.certificate));
+    }
+
+#ifdef __APPLE__
+    TEST_F(ControlConnectionTlsTests, TheSystemTrustsARefusedChainForTheServerItNames)
+    {
+        server_->addConnection(explicitTls().expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        ASSERT_FALSE(startTls(connection, untrustingSettings()));
+        const auto untrusted = connection->untrustedCertificate();
+        ASSERT_TRUE(untrusted);
+        const PlatformAnchors anchors{.certificates = {derOfPem(tlsTestPki().authority)}, .only = true};
+        EXPECT_EQ(platformVerdictOf(untrusted->presentedChain, "127.0.0.1", {}, anchors), PlatformVerdict::Trusted);
+        EXPECT_EQ(
+            platformVerdictOf(untrusted->presentedChain, "ftp.nui-sftp.test", {}, anchors), PlatformVerdict::Refused
+        );
+    }
+
+    TEST(PlatformTrustTests, TheSystemRefusesWhatItHasNoAnchorFor)
+    {
+        const std::vector<DerCertificate> chain{derOfPem(tlsTestPki().server.certificate)};
+        EXPECT_EQ(platformVerdictOf(chain, "127.0.0.1", {}), PlatformVerdict::Refused);
+        EXPECT_EQ(
+            platformVerdictOf(chain, "127.0.0.1", {}, {.certificates = {}, .only = true}), PlatformVerdict::Refused
+        );
+    }
+
+    TEST(PlatformTrustTests, TheSystemRefusesAnExpiredCertificate)
+    {
+        const PlatformAnchors anchors{.certificates = {derOfPem(tlsTestPki().authority)}, .only = true};
+        EXPECT_EQ(
+            platformVerdictOf({derOfPem(tlsTestPki().expired.certificate)}, "127.0.0.1", {}, anchors),
+            PlatformVerdict::Refused
+        );
+    }
+#endif
+
+#ifdef _WIN32
+    TEST_F(ControlConnectionTlsTests, AnAuthorityOfAWindowsStoreIsTrusted)
+    {
+        TemporaryCertificateStore store{};
+        ASSERT_TRUE(store.add(tlsTestPki().authority));
+        ASSERT_TRUE(store.add(tlsTestPki().expired.certificate));
+        auto context = TlsContext::create({.systemAuthorities = false});
+        ASSERT_TRUE(context) << context.error().toString();
+        const std::array names{store.name()};
+        // The expired certificate is skipped.
+        EXPECT_EQ(addStoreAuthorities(SSL_CTX_get_cert_store((*context)->context().native_handle()), names), 1u);
+
+        server_->addConnection(explicitTls().expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto trusted = startTls(
+            connection, TlsConnectionSettings{.context = std::move(context).value(), .serverName = "127.0.0.1"}
+        );
+        ASSERT_TRUE(trusted) << trusted.error().toString();
+        EXPECT_EQ(trusted->source, TrustSource::Authorities);
+    }
+#endif
 
     TEST_F(ControlConnectionTlsTests, CertificateHasToNameTheServer)
     {

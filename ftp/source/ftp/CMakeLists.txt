@@ -15,6 +15,7 @@ function(add_file_transfer_protocol_library name remoteIo)
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/metadata.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/pending_command.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/socket_options.cpp
+            ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/system_authorities.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/tls.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/transfer.cpp
             ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/engine/call.cpp
@@ -61,9 +62,17 @@ function(add_file_transfer_protocol_library name remoteIo)
             Threads::Threads
         PRIVATE
             log
+            paths
     )
     if (WIN32)
-        target_link_libraries(${name} PUBLIC ws2_32 mswsock)
+        target_sources(${name} PRIVATE ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/system_authorities_windows.cpp)
+        target_link_libraries(${name} PUBLIC ws2_32 mswsock PRIVATE crypt32)
+    endif()
+    if (APPLE)
+        target_sources(${name} PRIVATE ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/platform_trust_apple.cpp)
+        target_link_libraries(${name} PRIVATE "-framework CoreFoundation" "-framework Security")
+    else()
+        target_sources(${name} PRIVATE ${FILE_TRANSFER_PROTOCOL_SOURCE_DIRECTORY}/client/platform_trust_none.cpp)
     endif()
 endfunction()
 
