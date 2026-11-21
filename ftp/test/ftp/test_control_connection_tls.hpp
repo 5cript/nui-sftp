@@ -590,9 +590,7 @@ namespace FileTransferProtocol::Test
     {
         const std::vector<DerCertificate> chain{derOfPem(tlsTestPki().server.certificate)};
         EXPECT_EQ(platformVerdictOf(chain, "127.0.0.1", {}), PlatformVerdict::Refused);
-        EXPECT_EQ(
-            platformVerdictOf(chain, "127.0.0.1", {}, std::vector<DerCertificate>{}), PlatformVerdict::Refused
-        );
+        EXPECT_EQ(platformVerdictOf(chain, "127.0.0.1", {}, std::vector<DerCertificate>{}), PlatformVerdict::Refused);
     }
 
     TEST(PlatformTrustTests, TheSystemRefusesAnExpiredCertificate)

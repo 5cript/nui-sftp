@@ -140,9 +140,9 @@ namespace FileTransferProtocol
         ChainHandle builtChainOf(std::vector<DerCertificate> const& chain, ChainEngine const& engine)
         {
             auto const& leafDer = chain.front();
-            const CertificateHandle leaf{CertCreateCertificateContext(
-                X509_ASN_ENCODING, leafDer.data(), static_cast<DWORD>(leafDer.size())
-            )};
+            const CertificateHandle leaf{
+                CertCreateCertificateContext(X509_ASN_ENCODING, leafDer.data(), static_cast<DWORD>(leafDer.size()))
+            };
             const auto sent = storeOf(std::span{chain}.subspan(1u));
             if (!leaf || !sent)
                 return nullptr;
