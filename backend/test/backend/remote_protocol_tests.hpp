@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -273,6 +274,27 @@ namespace Test
         {
             if (tree_)
                 tree_->stallDownloadsAfter(bytes);
+        }
+
+        /**
+         * @brief How many commands of the verb @p verb the FTP server received on all its connections, none for SFTP.
+         */
+        std::size_t ftpCommandCount(std::string_view verb) const
+        {
+            if (!ftpServer_)
+                return 0u;
+            std::size_t count{0u};
+            for (std::size_t connection = 0u; connection < servedConnections; ++connection)
+            {
+                count += static_cast<std::size_t>(std::ranges::count_if(
+                    ftpServer_->commands(connection),
+                    [verb](std::string const& command)
+                    {
+                        return command == verb || (command.starts_with(verb) && command[verb.size()] == ' ');
+                    }
+                ));
+            }
+            return count;
         }
 
         /**
