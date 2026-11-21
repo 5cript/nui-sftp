@@ -72,9 +72,9 @@ class SettingIdentity
     SettingScope scope() const;
 
     /**
-     * @brief The session engine the setting applies to, if it is limited to one.
+     * @brief The session engines the setting applies to, empty when it applies to sessions of every engine.
      */
-    std::optional<Persistence::TerminalEngineType> const& engineType() const;
+    std::vector<Persistence::TerminalEngineType> const& engineTypes() const;
 
     /**
      * @brief The group selection of the options the setting belongs to, if they are inheritable groups.
@@ -106,7 +106,7 @@ class SettingIdentity
     std::vector<std::vector<std::string>> breadcrumb_{};
     std::string htmlId_{};
     SettingScope scope_{SettingScope::General};
-    std::optional<Persistence::TerminalEngineType> engineType_{};
+    std::vector<Persistence::TerminalEngineType> engineTypes_{};
     Nui::Observed<std::optional<std::string>>* groupKey_{nullptr};
     SettingsSearchIndex* index_{nullptr};
 };

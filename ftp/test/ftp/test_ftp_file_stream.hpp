@@ -184,6 +184,37 @@ namespace FileTransferProtocol::Test
             );
         }
 
+        /**
+         * @brief Reads @p size bytes as a caller that knows the size does, then finishes without a read that found
+         *        the end of the data.
+         */
+        std::expected<std::string, RemoteIo::RemoteError>
+        readSizeThenFinish(StreamPointer const& stream, std::size_t size)
+        {
+            return onThread(
+                [stream, size]() -> std::expected<std::string, RemoteIo::RemoteError>
+                {
+                    std::string content(size, '\0');
+                    std::size_t filled = 0u;
+                    auto read = stream->readSomeInStrand(content.data(), size);
+                    while (read && *read > 0u && filled + *read < size)
+                    {
+                        filled += *read;
+                        read = stream->readSomeInStrand(content.data() + filled, size - filled);
+                    }
+                    if (!read)
+                        return std::unexpected(read.error());
+                    content.resize(filled + *read);
+                    return stream->finishInStrand().transform(
+                        [&content]()
+                        {
+                            return content;
+                        }
+                    );
+                }
+            );
+        }
+
         void closeOnThread(StreamPointer const& stream)
         {
             onThread(
@@ -807,6 +838,116 @@ namespace FileTransferProtocol::Test
         const auto content = readWhole(stream);
         ASSERT_FALSE(content) << "a download the server refused at its end finished";
         EXPECT_EQ(content.error().protocolCode, 451) << content.error().toString();
+        closeOnThread(stream);
+    }
+
+    TEST_P(FtpFileStreamTests, AFinishAfterReadingTheWholeSizeFindsTheEndOfTheData)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/file", "12");
+        completed(transferring(transfer, DataPlan{}.send("file content"), "RETR", "/dir/file"));
+        sized(transfer, "/dir/next", "4");
+        completed(transferring(transfer, DataPlan{}.send("next"), "RETR", "/dir/next")).expectDisconnect();
+        connect(std::move(metadata), {}, 1u);
+        server_->addConnection(std::move(transfer));
+
+        const auto stream = open("/dir/file", readMode);
+        const auto content = readSizeThenFinish(stream, 12u);
+        ASSERT_TRUE(content) << content.error().toString();
+        EXPECT_EQ(*content, "file content");
+        closeOnThread(stream);
+        const auto next = openWhenFree("/dir/next", readMode);
+        const auto nextContent = readWhole(next);
+        ASSERT_TRUE(nextContent) << nextContent.error().toString();
+        EXPECT_EQ(*nextContent, "next");
+        closeOnThread(next);
+    }
+
+    TEST_P(FtpFileStreamTests, AFinishWithBytesLeftFailsAndTheConnectionServesTheNextOpen)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/file", "12");
+        transferring(transfer, DataPlan{}.stallAfter("file content"), "RETR", "/dir/file")
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory);
+        sized(transfer, "/dir/next", "4");
+        completed(transferring(transfer, DataPlan{}.send("next"), "RETR", "/dir/next")).expectDisconnect();
+        connect(std::move(metadata), {}, 1u);
+        server_->addConnection(std::move(transfer));
+
+        const auto stream = open("/dir/file", readMode);
+        const auto content = readSizeThenFinish(stream, 4u);
+        ASSERT_FALSE(content) << "finished with bytes left: " << *content;
+        EXPECT_EQ(content.error().kind, RemoteIo::RemoteErrorKind::Failure) << content.error().toString();
+        EXPECT_EQ(content.error().message, "The file has more data than was read");
+        closeOnThread(stream);
+        const auto next = openWhenFree("/dir/next", readMode);
+        const auto nextContent = readWhole(next);
+        ASSERT_TRUE(nextContent) << nextContent.error().toString();
+        EXPECT_EQ(*nextContent, "next");
+        closeOnThread(next);
+    }
+
+    TEST_P(FtpFileStreamTests, ADownloadDroppedForAPauseAtItsEndStillFinishes)
+    {
+        auto metadata = loggedInScript();
+        metadata.expectDisconnect();
+        auto transfer = loggedInScript();
+        sized(transfer, "/dir/file", "12");
+        transferring(transfer, DataPlan{}.stallAfter("file content"), "RETR", "/dir/file")
+            .beginData()
+            .abortSequence(AbortReplies::VsftpdLike)
+            .expect("PWD")
+            .reply(currentDirectory)
+            .checkpoint("drained")
+            .expect("EPSV")
+            .passive(DataPlan{}.send(""))
+            .expect("REST", "12")
+            .reply("350 Restart position accepted (12).");
+        completed(transfer.expect("RETR", "/dir/file").reply("150 Opening BINARY mode data connection."))
+            .expectDisconnect();
+        FtpFileSystemOptions options{};
+        options.transfer.pauseDropAfter = 200ms;
+        connect(std::move(metadata), std::move(options), 1u);
+        server_->addConnection(std::move(transfer));
+
+        const auto stream = open("/dir/file", readMode);
+        const auto read = onThread(
+            [stream]()
+            {
+                std::array<char, 12u> buffer{};
+                std::size_t filled = 0u;
+                auto piece = stream->readSomeInStrand(buffer.data(), buffer.size());
+                while (piece && *piece > 0u && filled + *piece < buffer.size())
+                {
+                    filled += *piece;
+                    piece = stream->readSomeInStrand(buffer.data() + filled, buffer.size() - filled);
+                }
+                return piece.transform(
+                    [filled](std::size_t last)
+                    {
+                        return filled + last;
+                    }
+                );
+            }
+        );
+        ASSERT_TRUE(read) << read.error().toString();
+        ASSERT_EQ(*read, 12u);
+        // Nobody reads now, the download drops its data connection and the control connection drains.
+        ASSERT_TRUE(server_->waitForCheckpoint("drained"));
+        const auto finished = onThread(
+            [stream]()
+            {
+                return stream->finishInStrand();
+            }
+        );
+        ASSERT_TRUE(finished) << finished.error().toString();
         closeOnThread(stream);
     }
 

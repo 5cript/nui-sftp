@@ -1,13 +1,27 @@
 #include <ftp/remote/ftp_connection.hpp>
+#include <ftp/client/without_throwing.hpp>
 #include <log/log.hpp>
 #include "../client/client_support.hpp"
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancel_after.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_type.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <utility>
 
@@ -34,6 +48,69 @@ namespace FileTransferProtocol
          */
         constexpr auto loginReplies = 12;
 
+        LoginFailure failureOf(RemoteError error)
+        {
+            return LoginFailure{.error = std::move(error)};
+        }
+
+        LoginFailure exceptionFailure(std::string const& what, std::exception_ptr const& exception)
+        {
+            return failureOf(errorOf(
+                RemoteErrorKind::Failure,
+                fmt::format("{} ended with an exception: {}", what, Utility::errorMessage(exception))
+            ));
+        }
+
+        /**
+         * @brief Looks up the server of @p pool and reaches it, on the strand this runs on.
+         */
+        asio::awaitable<Reachability> lookUpAndReach(std::shared_ptr<Resolver> resolver, PoolOptions pool)
+        {
+            const auto executor = co_await asio::this_coro::executor;
+            auto [lookupException, found] = co_await asio::co_spawn(
+                executor,
+                Detail::withoutThrowing(resolver->resolve(pool.host, pool.port, asio::use_awaitable)),
+                asio::cancel_after(pool.resolveTimeout, Detail::useTuple)
+            );
+            if (lookupException)
+                co_return std::unexpected(exceptionFailure("The lookup of the server", lookupException));
+            if (!found)
+                co_return std::unexpected(failureOf(std::move(found).error()));
+
+            const auto connection = ControlConnection::create(executor, pool.control);
+            auto [reachException, reached] = co_await asio::co_spawn(
+                connection->strand(),
+                Detail::withoutThrowing(reach(connection, *std::move(found), std::move(pool.login))),
+                Detail::useTuple
+            );
+            if (reachException)
+                co_return std::unexpected(exceptionFailure("Reaching the server", reachException));
+            if (!reached)
+            {
+                auto failure = failureOf(std::move(reached).error());
+                if (failure.error.kind == RemoteErrorKind::TrustRequired)
+                    failure.untrustedCertificate = connection->untrustedCertificate();
+                co_return std::unexpected(std::move(failure));
+            }
+            co_return std::move(reached->certificate);
+        }
+
+        /**
+         * @brief What a reachServer() call keeps until it completed: its result, and how a stop request cancels it.
+         */
+        struct Reaching
+        {
+            std::promise<Reachability> promise{};
+            /** @brief Emitted on the strand of the reach only. */
+            asio::cancellation_signal stopSignal{};
+            std::optional<std::stop_callback<std::function<void()>>> onStop{};
+        };
+
+        bool isCancelled(Reachability const& reachability)
+        {
+            return !reachability && reachability.error().error.kind == RemoteErrorKind::Cancelled;
+        }
+
         /**
          * @brief A strand of @p thread that keeps it, for a file system held past its connection.
          */
@@ -57,6 +134,61 @@ namespace FileTransferProtocol
                 2 * (pool.resolveTimeout + pool.control.connectTimeout) + loginReplies * pool.control.commandTimeout,
             .drain = std::chrono::seconds{1},
         };
+    }
+
+    std::future<Reachability> reachServer(
+        asio::any_io_executor executor,
+        std::shared_ptr<Resolver> resolver,
+        PoolOptions pool,
+        std::stop_token stop
+    )
+    {
+        const auto reaching = std::make_shared<Reaching>();
+        auto future = reaching->promise.get_future();
+        const auto backstop = loginLimitsFor(pool).backstop;
+        const auto strand = asio::make_strand(executor);
+        asio::co_spawn(
+            strand,
+            Detail::withoutThrowing(lookUpAndReach(std::move(resolver), std::move(pool))),
+            asio::cancel_after(
+                backstop,
+                asio::bind_cancellation_slot(
+                    reaching->stopSignal.slot(),
+                    [reaching, stop](std::exception_ptr exception, Reachability reachability) noexcept
+                    {
+                        auto& promise = reaching->promise;
+                        if (exception)
+                            return promise.set_value(
+                                std::unexpected(exceptionFailure("Reaching the server", exception))
+                            );
+                        // Without a stop the backstop was the cancel, the server took too long to answer.
+                        if (isCancelled(reachability) && !stop.stop_requested())
+                            return promise.set_value(
+                                std::unexpected(
+                                    failureOf(errorOf(RemoteErrorKind::TimedOut, "The server did not answer in time"))
+                                )
+                            );
+                        promise.set_value(std::move(reachability));
+                    }
+                )
+            )
+        );
+        // After the spawn, which connected the slot: a stop requested by now is emitted behind the start.
+        reaching->onStop.emplace(
+            stop,
+            [weak = std::weak_ptr{reaching}, strand]()
+            {
+                asio::post(
+                    strand,
+                    [weak]()
+                    {
+                        if (const auto reaching = weak.lock(); reaching)
+                            reaching->stopSignal.emit(asio::cancellation_type::terminal);
+                    }
+                );
+            }
+        );
+        return future;
     }
 
     struct FtpConnection::Shared

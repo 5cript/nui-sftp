@@ -35,6 +35,7 @@
 #include "test_server_smoke.hpp"
 #include "test_socket_options.hpp"
 #include "test_tls.hpp"
+#include "test_tree_responder.hpp"
 #include "test_without_throwing.hpp"
 
 #include <gtest/gtest.h>

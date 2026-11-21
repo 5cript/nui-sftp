@@ -65,10 +65,18 @@ namespace
         return findPath(object, std::span<std::string const>{path.begin(), path.size()});
     }
 
+    /**
+     * @brief Whether the inheritable group is kept in the engine options of a session rather than the session itself.
+     */
+    bool isEngineGroup(std::string const& group)
+    {
+        return group == "sshOptions" || group == "sftpOptions" || group == "ftpOptions";
+    }
+
     bool isInheritableGroup(std::string const& group)
     {
-        return group == "sshOptions" || group == "sftpOptions" || group == "terminalOptions" || group == "termios" ||
-            group == "queueOptions" || group == "historyOptions";
+        return isEngineGroup(group) || group == "terminalOptions" || group == "termios" || group == "queueOptions" ||
+            group == "historyOptions";
     }
 
     /**
@@ -76,9 +84,25 @@ namespace
      */
     nlohmann::json const* inlineGroup(nlohmann::json const& session, std::string const& group)
     {
-        if (group == "sshOptions" || group == "sftpOptions")
+        if (isEngineGroup(group))
             return findPath(session, {"engine", group});
         return findPath(session, {group});
+    }
+
+    /**
+     * @brief Whether the settings below the first path segment are options of a session, partly kept in its engine.
+     */
+    bool isSessionOptionsPath(std::string const& first)
+    {
+        return first == "sessionOptions" || first == "ftpSessionOptions";
+    }
+
+    bool
+    appliesToEngine(SettingsSearchIndex::ScopeRegistration const& registration, Persistence::TerminalEngineType type)
+    {
+        return registration.engineTypes.empty() ||
+            std::find(registration.engineTypes.begin(), registration.engineTypes.end(), type) !=
+            registration.engineTypes.end();
     }
 
     /**
@@ -95,7 +119,7 @@ namespace
                 return nullptr;
             return findPath(*group, std::span<std::string const>{path}.subspan(1));
         }
-        if (path.front() != "sessionOptions")
+        if (!isSessionOptionsPath(path.front()))
             return nullptr;
         if (auto const* engineValue = findPath(session, {"engine", path.back()}))
             return engineValue;
@@ -391,7 +415,7 @@ struct SettingsSearch::Implementation
 
             for (auto const& [sessionId, sessionOptions] : stateHolder->stateCache().sessions)
             {
-                if (session->engineType && sessionOptions.type != *session->engineType)
+                if (!appliesToEngine(*session, sessionOptions.type))
                     continue;
 
                 auto row = serverRow(sessionId, sessionOptions);

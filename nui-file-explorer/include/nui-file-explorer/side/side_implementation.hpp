@@ -46,6 +46,7 @@ namespace NuiFileExplorer
         Nui::Observed<bool> showHiddenFiles{false};
         Nui::Observed<Texts> texts{};
         Nui::Observed<std::string> originHost{};
+        Nui::Observed<std::optional<OriginWarning>> originWarning{};
 
         std::weak_ptr<Nui::Dom::BasicElement> sideElement{};
         std::weak_ptr<Nui::Dom::BasicElement> scrollContainer{};

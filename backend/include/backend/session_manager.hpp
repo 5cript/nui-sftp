@@ -2,6 +2,7 @@
 
 #include <backend/session.hpp>
 #include <backend/file_tracking/local_watch_manager.hpp>
+#include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/file_tracking/temp_dir_instance_manager.hpp>
 #include <backend/local_operation_queue.hpp>
 #include <backend/password/password_provider.hpp>
@@ -26,19 +27,33 @@
 #include <map>
 #include <functional>
 #include <mutex>
+#include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
+
+/**
+ * @brief The engine a SessionManager::connect call asks for: SSH without "engineType", else the one it names, SSH or
+ *        FTP.
+ *
+ * @return Why it names none of them.
+ */
+std::expected<Persistence::TerminalEngineType, std::string> connectedEngineOf(nlohmann::json const& parameters);
 
 class SessionManager
     : public std::enable_shared_from_this<SessionManager>
     , public RpcHelper::StrandRpc
 {
   public:
+    /**
+     * @param ftpEngine Runs the FTP sessions, outlives the shutdown() of this manager.
+     */
     SessionManager(
         boost::asio::any_io_executor executor,
         Persistence::StateHolder& stateHolder,
         Nui::Window& wnd,
-        Nui::RpcHub& hub
+        Nui::RpcHub& hub,
+        FtpEngineContext& ftpEngine
     );
     ~SessionManager();
     SessionManager(SessionManager const&) = delete;
@@ -73,26 +88,60 @@ class SessionManager
         std::function<std::expected<SessionConnection, std::string>(std::function<void()> onConnectionLoss)>;
 
     /**
-     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed.
+     * @brief Connects a new session through @p connect, @p onComplete hears its id or why it failed and reports it.
+     *        Refused once shutdown() closed the sessions.
      * @param sftpOptions The transfer options of the session.
-     * @param failureToast Whether the error logged when it fails is shown as a toast.
      */
     void addSession(
         Connect connect,
         Persistence::SftpOptions sftpOptions,
-        Log::Toast failureToast,
         std::function<void(std::optional<Ids::SessionId> const&, std::optional<std::string> const& errorMessage)>
             onComplete
     );
 
     /**
-     * @brief Cancels pending and later password prompts and waits until the strand has run its queued work.
+     * @brief Connects to the FTP server of @p sessionOptions, whose references are resolved. Asks the password
+     *        providers for the password unless the login is anonymous.
+     */
+    Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
+
+    /**
+     * @brief @p connect, which also sets @p passwordDeclined to whether the last password prompt during it got no
+     *        password: a prompt the user cancelled, that no provider answered or that shutdown() cancelled. A prompt
+     *        answered after a declined one makes what follows a failure of its own.
+     */
+    Connect noticingDeclinedPasswords(Connect connect, std::shared_ptr<bool> passwordDeclined);
+
+    /**
+     * @brief What a SessionManager::connect call connects with.
+     */
+    struct ConnectRequest
+    {
+        Persistence::TerminalEngineType engine{Persistence::TerminalEngineType::ssh};
+        Connect connect{};
+        /** @brief The transfer options of the session. */
+        Persistence::SftpOptions sftpOptions{};
+    };
+
+    /**
+     * @brief The connect that the parameters of a SessionManager::connect call ask for, see
+     *        registerRpcSessionConnect(). Its connect sets @p passwordDeclined, see noticingDeclinedPasswords().
+     *
+     * @return Why the parameters name no engine to connect with or no options it can read.
+     */
+    std::expected<ConnectRequest, std::string>
+    connectRequestOf(nlohmann::json const& parameters, std::shared_ptr<bool> passwordDeclined);
+
+    /**
+     * @brief Cancels pending and later password prompts, stops a running FTP login, closes every session and refuses
+     *        new ones, and waits until the strand has run its queued work. The FTP engine may go afterwards.
      *
      * Call before the window shuts down, never from within the strand.
      */
     void shutdown();
 
-    friend int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);
+    friend int
+    askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata) noexcept;
 
     // void startUpdateDispatching();
     // void stopUpdateDispatching();
@@ -107,10 +156,33 @@ class SessionManager
     Connect secureShellConnect(Persistence::SshSessionOptions sessionOptions);
 
     /**
-     * Handles calls from the frontend to connect to a new ssh server with the following payload:
+     * @brief Asks the password providers in the order of their priority until one answers. On the strand, which it
+     *        blocks until then.
+     *
+     * @param whatFor What the prompt asks for, "password" or "keyPhrase".
+     * @return The password, nothing when every provider declined, prompts are cancelled or asking failed.
+     */
+    std::optional<std::string> askPassword(std::string const& whatFor, std::string const& prompt) noexcept;
+
+    /**
+     * @brief Asks the providers as askPassword() does, and lets what they throw through.
+     */
+    std::optional<std::string> askProviders(std::string const& whatFor, std::string const& prompt);
+
+    /**
+     * @brief Stops and removes every session, later ones are refused. On the strand.
+     */
+    void closeAllSessions();
+
+    /**
+     * Handles calls from the frontend to connect to a new server with the following payload:
      * {
-     *     engine: Persistence::SshTerminalEngine
+     *     engineType: "ssh" or "ftp" (optional, default "ssh"),
+     *     engineOptions: Persistence::SshSessionOptions or Persistence::FtpSessionOptions,
+     *     showFailureToast: bool (optional, default true)
      * }
+     * and answers {id} or {error, cancelled}, cancelled when a password prompt got no password, so retrying on its own
+     * would only ask again.
      */
     void registerRpcSessionConnect();
 
@@ -124,9 +196,21 @@ class SessionManager
 
     /**
      * @brief Removes a session and closes all its channels. Safe to call from any thread.
-     * @param connectionLost The session lost its connection, its watches tell the frontend why they end.
      */
-    void removeSession(Ids::SessionId sessionId, bool connectionLost = false);
+    void removeSession(Ids::SessionId sessionId);
+
+    /**
+     * @brief Stops the session and removes it. On the strand.
+     * @param connectionLost The session lost its connection, its watches tell the frontend why they end.
+     * @return False when there is no such session.
+     */
+    bool eraseSession(Ids::SessionId const& sessionId, bool connectionLost);
+
+    /**
+     * @brief Removes a session that lost its connection and tells the frontend, unless it was removed before. On the
+     *        strand.
+     */
+    void onSessionLost(Ids::SessionId const& sessionId);
 
     /**
      * @brief Handles "Session::sftp::adoptBulkResume" — pulls saved bulk
@@ -171,6 +255,10 @@ class SessionManager
   private:
     std::atomic_bool updateDispatchRunning_{false};
     Persistence::StateHolder* stateHolder_{};
+    /** @brief Outlives every session, see shutdown(). */
+    FtpEngineContext* ftpEngine_{};
+    /** @brief Set by shutdown() once the sessions are closed, new ones are refused from then on. On the strand. */
+    bool sessionsClosed_{false};
     /** @brief Outlive the sessions, which watch through them. */
     std::unique_ptr<FileTracking::TempDirInstanceManager> temporaryInstances_{};
     std::unique_ptr<FileTracking::LocalWatchManager> localWatches_{};
@@ -187,6 +275,10 @@ class SessionManager
     /** @brief At most one, askPassDefault only runs within the strand. */
     std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};
     bool passwordPromptsCancelled_{false};
+    /** @brief Stops the FTP connects, a login that runs among them, once shutdown() begins. Thread-safe. */
+    std::stop_source connectsStop_{};
+    /** @brief Whether the last prompt of askPassword got no password, a failed one aside. On the strand. */
+    bool lastPromptDeclined_{false};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};
     /// Backups of bulk operations interrupted by lost connection; consumed
@@ -196,4 +288,10 @@ class SessionManager
     std::shared_ptr<KeptTransferRegistry> keptTransferRegistry_{std::make_shared<KeptTransferRegistry>()};
 };
 
-int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata);
+/**
+ * @brief The libssh callback that asks the password providers, see SessionManager::askPassword(). Only on the strand of
+ *        the SessionManager in the pair of @p userdata, with what the prompt asks for.
+ *
+ * @return 0 with the password in @p buf, -1 without one.
+ */
+int askPassDefault(char const* prompt, char* buf, std::size_t length, int echo, int verify, void* userdata) noexcept;

@@ -50,8 +50,16 @@
     }
 }
 
+/* Subgrids down to the rows, so the rows of every box and subgroup share the columns of their group. */
 .settings-visibility-box {
     grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    row-gap: 6px;
+
+    &>h1 {
+        grid-column: 1 / -1;
+    }
 }
 
 .settings-group-header {
@@ -144,8 +152,10 @@
 
 .settings-subgroup {
     grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
     position: relative;
-    margin: 12px 0;
+    margin: 6px 0;
 }
 
 .settings-subgroup-header {
@@ -161,7 +171,8 @@
 
 .settings-subgroup-content {
     display: grid;
-    grid-template-columns: max-content max-content 1fr max-content max-content;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
     row-gap: 4px;
     margin: 0 16px;
     border: 1px solid var(--foreground-border-color);

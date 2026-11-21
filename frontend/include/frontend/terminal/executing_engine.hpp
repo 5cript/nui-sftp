@@ -51,7 +51,7 @@ class ExecutingTerminalEngine : public TerminalEngine
     ROAR_PIMPL_SPECIAL_FUNCTIONS(ExecutingTerminalEngine);
 
     /** @brief Signals success immediately — local processes need no prior connection. */
-    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) override;
+    void open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast) override;
     void dispose(std::function<void()> onDisposeComplete) override;
 
     /** @brief Returns the engine-level identifier (not a process UUID). */
@@ -74,10 +74,6 @@ class ExecutingTerminalEngine : public TerminalEngine
         std::function<void(std::string const&)> errorHandler,
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
         std::function<void(Ids::ChannelId const&)> onChannelLoss
-    ) override;
-
-    void createSftpChannel(
-        std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
     ) override;
 
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose = []() {}) override;

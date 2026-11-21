@@ -43,9 +43,9 @@ namespace FileTransferProtocol::Test
         actions.emplace_back(SendForever{});
         return *this;
     }
-    DataPlan& DataPlan::expectUpload(std::size_t limit)
+    DataPlan& DataPlan::expectUpload(std::size_t limit, std::function<void(std::string_view bytes)> received)
     {
-        actions.emplace_back(ExpectUpload{.limit = limit});
+        actions.emplace_back(ExpectUpload{.limit = limit, .received = std::move(received)});
         return *this;
     }
     DataPlan& DataPlan::close()

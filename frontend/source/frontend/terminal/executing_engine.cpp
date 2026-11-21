@@ -43,10 +43,10 @@ ExecutingTerminalEngine::~ExecutingTerminalEngine()
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(ExecutingTerminalEngine);
 
-void ExecutingTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen, Log::Toast)
+void ExecutingTerminalEngine::open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast)
 {
     // Local processes need no prior connection — signal success immediately.
-    onOpen(true, impl_->engineId);
+    onOpen(EngineOpenResult::Opened, impl_->engineId);
 }
 
 void ExecutingTerminalEngine::dispose(std::function<void()> onDisposeComplete)
@@ -247,13 +247,6 @@ void ExecutingTerminalEngine::createChannel(
         },
         obj
     );
-}
-
-void ExecutingTerminalEngine::createSftpChannel(
-    std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
-)
-{
-    onCreated(std::nullopt, "SFTP is not supported by the local process engine");
 }
 
 void ExecutingTerminalEngine::closeChannel(Ids::ChannelId const& channelId, std::function<void()> onClose)

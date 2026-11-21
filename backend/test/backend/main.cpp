@@ -25,6 +25,7 @@
 #include "test_ui_options.hpp"
 #include "test_legacy_migration.hpp"
 #include "test_unknown_config_entries.hpp"
+#include "test_ftp_session_options.hpp"
 #include "test_terminal_renderer_migration.hpp"
 #include "test_session_layouts.hpp"
 #include "test_ssh_user_selection.hpp"
@@ -51,6 +52,10 @@
 #include "test_unsafe_fast_mode.hpp"
 #include "test_unsafe_fast_without_exclusive_create.hpp"
 #include "test_upload_checks.hpp"
+#include "test_ftp_upload_checks.hpp"
+#include "test_protocol_transfers.hpp"
+#include "test_protocol_tree_operations.hpp"
+#include "test_protocol_sync_checks.hpp"
 #include "test_compared_state_check.hpp"
 #include "test_operation_queue.hpp"
 #include "test_operation_queue_batches.hpp"
@@ -64,6 +69,10 @@
 #include "test_file_system_answers.hpp"
 #include "test_ftp_hostile_listings.hpp"
 #include "test_ftp_downloads.hpp"
+#include "test_ftp_engine_context.hpp"
+#include "test_ftp_connect.hpp"
+#include "test_session_manager_passwords.hpp"
+#include "test_declined_password_connects.hpp"
 #include "test_rpc_path_parameters.hpp"
 #include "test_logger.hpp"
 
@@ -90,6 +99,8 @@ int main(int argc, char** argv)
     temporaryRoot = processTemporary.path();
 
     ::testing::InitGoogleTest(&argc, argv);
+    // The death tests start threads, so their child has to be a process of its own from the start.
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ::testing::AddGlobalTestEnvironment(new Test::NuiEnvGuard{});
     return RUN_ALL_TESTS();
 }

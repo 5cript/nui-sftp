@@ -5,8 +5,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <map>
 #include <string>
+#include <string_view>
 
 namespace Persistence
 {
@@ -17,6 +19,14 @@ namespace Persistence
     {
         std::map<std::string, nlohmann::json> ssh{};
         std::map<std::string, nlohmann::json> shell{};
+        /**
+         * @brief Older versions that know no FTP drop these when they save, the FTP sessions start with the default
+         * layout then.
+         */
+        std::map<std::string, nlohmann::json> ftp{};
+
+        /** @brief Missing in the configs of versions before FTP, see DefaultMissingMember. */
+        static constexpr std::array<std::string_view, 1u> silentlyDefaulted{"ftp"};
 
         /**
          * @brief The layouts shared by the sessions of a type.
@@ -32,5 +42,5 @@ namespace Persistence
          */
         std::map<std::string, nlohmann::json> const& of(TerminalEngineType type) const;
     };
-    BOOST_DESCRIBE_STRUCT(SessionLayouts, (), (ssh, shell))
+    BOOST_DESCRIBE_STRUCT(SessionLayouts, (), (ssh, shell, ftp))
 }

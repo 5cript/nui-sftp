@@ -24,6 +24,8 @@ struct InputDialog::Implementation
     Nui::Observed<bool> isPassword{false};
     Nui::Observed<bool> showPassword{false};
     Nui::Observed<std::string> whatFor{};
+    /** @brief Shown in the empty input, such as the server a password is for. */
+    Nui::Observed<std::string> prompt{};
     bool confirmOnClose{false};
 
     Implementation(std::string id)
@@ -62,6 +64,7 @@ Nui::ElementRenderer InputDialog::dialogBody()
                 .value = impl_->inputText,
                 .attributes = {
                     id = fmt::format("{}-input", impl_->id),
+                    placeHolder = impl_->prompt,
                     type = observe(impl_->isPassword, impl_->showPassword).generate([this](){
                         if (!impl_->isPassword.value()) return std::string{"Text"};
                         return impl_->showPassword.value() ? std::string{"Text"} : std::string{"Password"};
@@ -113,6 +116,7 @@ void InputDialog::open(OpenOptions const& options)
     impl_->showPassword = false;
     impl_->confirmOnClose = false;
     impl_->whatFor = options.whatFor;
+    impl_->prompt = options.prompt;
     impl_->inputText = options.initialValue;
     Nui::globalEventContext.executeActiveEventsImmediately();
 

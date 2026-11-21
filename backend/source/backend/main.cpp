@@ -248,6 +248,9 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
     , programDir_{boost::dll::program_location().parent_path().native()}
     , stateHolder_{programDir_}
     , loggerSetup_{stateHolder_}
+    , ftpEngine_{std::make_unique<FtpEngineContext>(
+          static_cast<std::size_t>(Persistence::ftpEngineThreadsOf(stateHolder_.stateCache()))
+      )}
     , window_{
           Nui::WindowOptions{
               .title = "NuiSftp"s,
@@ -266,7 +269,9 @@ Main::Main(ProgramOptions options, ForkPool* forkPool)
     , rpcSystem_{}
     , processes_{window_.getExecutor(), window_, hub_, forkPool}
     , prompter_{hub_}
-    , sshSessionManager_{std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_)}
+    , sshSessionManager_{
+          std::make_shared<SessionManager>(window_.getExecutor(), stateHolder_, window_, hub_, *ftpEngine_)
+      }
     , childSignalTimer_{window_.getExecutor()}
     , events_{hub_}
     , themeFinder_{resourceRoot(programDir_), events_}
@@ -280,7 +285,8 @@ Main::~Main()
     // No longer forward logs to the view:
     Log::Detail::logger.detach();
     // sshSessionManager_->stopUpdateDispatching();
-    // Releases a strand job blocked on an unanswered password prompt, the window joins its pool later.
+    // Releases a strand job blocked on an unanswered password prompt and closes the sessions, the window joins its pool
+    // later and the FTP engine after it.
     sshSessionManager_->shutdown();
     childSignalTimer_.cancel();
 }

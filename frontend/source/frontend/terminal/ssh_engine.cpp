@@ -1,4 +1,5 @@
 #include <frontend/terminal/ssh_engine.hpp>
+#include <frontend/terminal/remote_engine_factory.hpp>
 #include <frontend/nlohmann_compat.hpp>
 #include <log/log.hpp>
 
@@ -47,12 +48,12 @@ SshTerminalEngine::~SshTerminalEngine()
 
 ROAR_PIMPL_SPECIAL_FUNCTIONS_IMPL_NO_DTOR(SshTerminalEngine);
 
-void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast)
+void SshTerminalEngine::open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast)
 {
     if (impl_->blockedByDestruction)
     {
         Log::error("Blocked by destruction");
-        return onOpen(false, "Blocked by destruction");
+        return onOpen(EngineOpenResult::Failed, "Blocked by destruction");
     }
 
     Nui::val obj = Nui::val::object();
@@ -65,15 +66,18 @@ void SshTerminalEngine::open(std::function<void(bool, std::string const&)> onOpe
         {
             if (!val.hasOwnProperty("id"))
             {
+                // The user cancelled the login, which needs no message.
+                if (const auto result = connectFailureOf(val); result == EngineOpenResult::LoginCancelled)
+                    return onOpen(result, "");
                 Log::error(failureToast, "SessionManager::connect callback did not return an id");
                 std::string error = "";
                 if (val.hasOwnProperty("error"))
                     error = val["error"].as<std::string>();
-                return onOpen(false, error);
+                return onOpen(connectFailureOf(val), error);
             }
             impl_->sshSessionId = Ids::makeSessionId(val["id"].as<std::string>());
             onSuccessfulOpen();
-            onOpen(true, "");
+            onOpen(EngineOpenResult::Opened, "");
         },
         obj
     );
@@ -213,7 +217,7 @@ void SshTerminalEngine::createChannel(
     );
 }
 
-void SshTerminalEngine::createSftpChannel(
+void SshTerminalEngine::createFileChannel(
     std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
 )
 {
@@ -223,7 +227,12 @@ void SshTerminalEngine::createSftpChannel(
     );
 }
 
-Ids::SessionId SshTerminalEngine::sshSessionId() const
+void SshTerminalEngine::closeFileChannel(Ids::ChannelId const& channelId, std::function<void()> onClosed)
+{
+    closeChannel(channelId, std::move(onClosed));
+}
+
+Ids::SessionId SshTerminalEngine::sessionId() const
 {
     return impl_->sshSessionId;
 }

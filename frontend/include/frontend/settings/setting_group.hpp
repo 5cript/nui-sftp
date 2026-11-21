@@ -22,7 +22,10 @@ struct SettingGroupParameters
     InheritanceBehavior inheritanceBehavior = InheritanceBehavior::None;
 
     Nui::Observed<Persistence::TerminalEngineType>* engineTypeFilter = nullptr;
-    Persistence::TerminalEngineType engineTypeFilterValue{Persistence::TerminalEngineType::ssh};
+    /**
+     * @brief The engine types the group is shown for, when there is an engineTypeFilter.
+     */
+    std::vector<Persistence::TerminalEngineType> engineTypeFilterValues{};
 
     std::function<void(
         Nui::Observed<std::optional<std::string>>& currentGroupKey,

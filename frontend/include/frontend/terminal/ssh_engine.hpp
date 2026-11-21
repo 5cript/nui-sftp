@@ -11,7 +11,9 @@
 #include <memory>
 #include <string>
 
-class SshTerminalEngine : public TerminalEngine
+class SshTerminalEngine
+    : public TerminalEngine
+    , public RemoteSessionEngine
 {
   public:
     struct Settings
@@ -28,7 +30,7 @@ class SshTerminalEngine : public TerminalEngine
      * @brief Connects to the server, see TerminalEngine::open. The backend logs its connect errors with
      *        @p failureToast too.
      */
-    void open(std::function<void(bool, std::string const&)> onOpen, Log::Toast failureToast) override;
+    void open(std::function<void(EngineOpenResult, std::string const&)> onOpen, Log::Toast failureToast) override;
 
     /**
      * @brief Spawns an SSH shell channel. @p options is unused — SSH reads
@@ -42,9 +44,14 @@ class SshTerminalEngine : public TerminalEngine
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated,
         std::function<void(Ids::ChannelId const&)> onChannelLoss
     ) override;
-    void createSftpChannel(
+
+    /**
+     * @brief Opens an SFTP channel, see RemoteSessionEngine::createFileChannel.
+     */
+    void createFileChannel(
         std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)> onCreated
     ) override;
+    void closeFileChannel(Ids::ChannelId const& channelId, std::function<void()> onClosed) override;
 
     void closeChannel(Ids::ChannelId const& channelId, std::function<void()> onChannelClosed = []() {}) override;
     SshChannel* channel(Ids::ChannelId const& channelId) override;
@@ -56,7 +63,12 @@ class SshTerminalEngine : public TerminalEngine
         return "ssh";
     }
 
-    Ids::SessionId sshSessionId() const;
+    RemoteSessionEngine* remoteSession() override
+    {
+        return this;
+    }
+
+    Ids::SessionId sessionId() const override;
 
     /**
      * @brief Swap in a new onConnectionLoss callback.  Used when a ProtoSession
@@ -66,7 +78,7 @@ class SshTerminalEngine : public TerminalEngine
      *        (lost-connection overlay, in-session reconnect widget) reacts to
      *        a later transport drop.
      */
-    void setOnConnectionLoss(std::function<void()> onConnectionLoss);
+    void setOnConnectionLoss(std::function<void()> onConnectionLoss) override;
 
   private:
     void disconnect(std::function<void()> onDisconnect, bool byLossOfConnection = false);

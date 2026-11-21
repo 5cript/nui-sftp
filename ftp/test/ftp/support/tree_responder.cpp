@@ -3,6 +3,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <system_error>
@@ -16,6 +17,12 @@ namespace FileTransferProtocol::Test
 
         /** @brief Links followed in one lookup before it fails, as ELOOP does. */
         constexpr int maximumHops = 16;
+
+        /** @brief The most bytes one upload may send. */
+        constexpr std::size_t uploadLimit = 256u * 1024u * 1024u;
+
+        /** @brief What MDTM tells of a file whose time was never set. */
+        constexpr std::string_view defaultModified{"20260102030405"};
 
         std::vector<std::string_view> segmentsOf(std::string_view path)
         {
@@ -80,6 +87,84 @@ namespace FileTransferProtocol::Test
             return chain;
         }
 
+        /**
+         * @brief The directory that holds the absolute @p path and its last segment.
+         */
+        std::pair<std::string_view, std::string_view> splitLast(std::string_view path)
+        {
+            while (path.size() > 1u && path.ends_with('/'))
+                path.remove_suffix(1u);
+            const auto slash = path.find_last_of('/');
+            if (slash == std::string_view::npos)
+                return {".", path};
+            if (slash == 0u)
+                return {"/", path.substr(1u)};
+            return {path.substr(0u, slash), path.substr(slash + 1u)};
+        }
+
+        bool namesAnEntry(std::string_view name)
+        {
+            return !name.empty() && name != "." && name != "..";
+        }
+
+        /**
+         * @brief The entries from the root to the directory that would hold @p path, where @p path names nothing yet.
+         */
+        std::optional<Chain> creatableAt(ServedEntry& root, std::string_view path)
+        {
+            const auto [directory, name] = splitLast(path);
+            int hops{0};
+            auto parent = walk(Chain{&root}, directory, true, hops);
+            if (!parent || parent->back()->type != ServedEntry::Type::Directory || !namesAnEntry(name) ||
+                childNamed(*parent->back(), name) != nullptr)
+                return std::nullopt;
+            return parent;
+        }
+
+        /**
+         * @brief Whether @p moved may replace @p replaced in a rename.
+         */
+        bool replaceable(ServedEntry const& moved, ServedEntry const& replaced)
+        {
+            const bool replacesDirectory = replaced.type == ServedEntry::Type::Directory;
+            if (moved.type != ServedEntry::Type::Directory)
+                return !replacesDirectory;
+            return replacesDirectory && replaced.children.empty();
+        }
+
+        /**
+         * @brief The time LIST shows for @p entry, the same for every entry whose time was never set.
+         */
+        std::string listedTimeOf(ServedEntry const& entry)
+        {
+            constexpr std::array<std::string_view, 12u> months{
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+            };
+            if (!entry.modified || entry.modified->size() != 14u)
+                return "Jan 02 03:04";
+            std::string_view const time{*entry.modified};
+            unsigned month{0u};
+            std::from_chars(time.data() + 4, time.data() + 6, month);
+            if (month < 1u || month > months.size())
+                return "Jan 02 03:04";
+            return fmt::format("{} {}  {}", months[month - 1u], time.substr(6u, 2u), time.substr(0u, 4u));
+        }
+
+        /**
+         * @brief Whether @p time is a time-val of MFMT without fractions.
+         */
+        bool isTimeVal(std::string_view time)
+        {
+            const auto isDigit = [](char character)
+            {
+                return character >= '0' && character <= '9';
+            };
+            if (time.size() != 14u || !std::ranges::all_of(time, isDigit))
+                return false;
+            const auto month = (time[4] - '0') * 10 + (time[5] - '0');
+            return month >= 1 && month <= 12;
+        }
+
         std::string pathOf(Chain const& chain)
         {
             std::string path{};
@@ -96,13 +181,16 @@ namespace FileTransferProtocol::Test
             {
                 case ServedEntry::Type::File:
                     return fmt::format(
-                        "-{}    1 0        0        {:>8} Jan 02 03:04 {}\r\n",
+                        "-{}    1 0        0        {:>8} {} {}\r\n",
                         entry.permissions,
                         entry.content.size(),
+                        listedTimeOf(entry),
                         entry.name
                     );
                 case ServedEntry::Type::Directory:
-                    return fmt::format("drwxr-xr-x    2 0        0            4096 Jan 02 03:04 {}\r\n", entry.name);
+                    return fmt::format(
+                        "drwxr-xr-x    2 0        0            4096 {} {}\r\n", listedTimeOf(entry), entry.name
+                    );
                 case ServedEntry::Type::Link:
                     return fmt::format(
                         "lrwxrwxrwx    1 0        0        {:>8} Jan 02 03:04 {} -> {}\r\n",
@@ -257,6 +345,135 @@ namespace FileTransferProtocol::Test
         return walk(Chain{&root_}, path, false, hops).has_value();
     }
 
+    std::optional<std::pair<ServedEntry*, std::string>> ServedTree::fileAt(std::string_view path)
+    {
+        int hops{0};
+        if (const auto chain = walk(Chain{&root_}, path, true, hops))
+        {
+            if (chain->back()->type != ServedEntry::Type::File)
+                return std::nullopt;
+            return std::pair{chain->back(), pathOf(*chain)};
+        }
+        auto parent = creatableAt(root_, path);
+        if (!parent)
+            return std::nullopt;
+        auto& directory = *parent->back();
+        directory.children.push_back(servedFile(std::string{splitLast(path).second}, {}));
+        parent->push_back(&directory.children.back());
+        return std::pair{parent->back(), pathOf(*parent)};
+    }
+
+    std::optional<std::uint64_t> ServedTree::openForUpload(std::string_view path, Upload upload, std::uint64_t offset)
+    {
+        std::scoped_lock lock{mutex_};
+        auto file = fileAt(path);
+        if (!file)
+            return std::nullopt;
+        auto& [entry, resolved] = *file;
+        stored_.push_back(std::move(resolved));
+        entry->modified.reset();
+        if (upload == Upload::Append)
+            return entry->content.size();
+        if (offset == 0u)
+            entry->content.clear();
+        return offset;
+    }
+
+    bool ServedTree::write(std::string_view path, std::uint64_t position, std::string_view bytes)
+    {
+        std::scoped_lock lock{mutex_};
+        int hops{0};
+        const auto chain = walk(Chain{&root_}, path, true, hops);
+        if (!chain || chain->back()->type != ServedEntry::Type::File)
+            return false;
+        auto& content = chain->back()->content;
+        const auto end = static_cast<std::size_t>(position) + bytes.size();
+        if (content.size() < end)
+            content.resize(end, '\0');
+        std::ranges::copy(bytes, content.begin() + static_cast<std::ptrdiff_t>(position));
+        return true;
+    }
+
+    bool ServedTree::putFile(std::string_view path, std::string content)
+    {
+        std::scoped_lock lock{mutex_};
+        const auto file = fileAt(path);
+        if (!file)
+            return false;
+        file->first->content = std::move(content);
+        file->first->modified.reset();
+        return true;
+    }
+
+    bool ServedTree::makeDirectory(std::string_view path)
+    {
+        std::scoped_lock lock{mutex_};
+        const auto parent = creatableAt(root_, path);
+        if (!parent)
+            return false;
+        parent->back()->children.push_back(servedDirectory(std::string{splitLast(path).second}, {}));
+        return true;
+    }
+
+    bool ServedTree::rename(std::string_view from, std::string_view to)
+    {
+        std::scoped_lock lock{mutex_};
+        int hops{0};
+        const auto source = walk(Chain{&root_}, from, false, hops);
+        if (!source || source->size() < 2u)
+            return false;
+        const auto [directory, name] = splitLast(to);
+        hops = 0;
+        const auto target = walk(Chain{&root_}, directory, true, hops);
+        if (!target || target->back()->type != ServedEntry::Type::Directory || !namesAnEntry(name))
+            return false;
+        auto* moved = source->back();
+        if (std::ranges::find(*target, moved) != target->end())
+            return false;
+        auto const* replaced = childNamed(*target->back(), name);
+        if (replaced == moved)
+            return true;
+        if (replaced != nullptr && !replaceable(*moved, *replaced))
+            return false;
+
+        // Taking the entry out moves its later siblings, the target is looked up again behind it.
+        ServedEntry entry = std::move(*moved);
+        entry.name = std::string{name};
+        auto& siblings = (*source)[source->size() - 2u]->children;
+        siblings.erase(siblings.begin() + (moved - siblings.data()));
+        hops = 0;
+        const auto again = walk(Chain{&root_}, directory, true, hops);
+        if (!again)
+            return false;
+        auto& children = again->back()->children;
+        if (auto* existing = childNamed(*again->back(), name))
+            *existing = std::move(entry);
+        else
+            children.push_back(std::move(entry));
+        return true;
+    }
+
+    bool ServedTree::setModified(std::string_view path, std::string time)
+    {
+        std::scoped_lock lock{mutex_};
+        int hops{0};
+        const auto chain = walk(Chain{&root_}, path, true, hops);
+        if (!chain)
+            return false;
+        chain->back()->modified = std::move(time);
+        return true;
+    }
+
+    std::optional<std::string> ServedTree::modifiedOf(std::string_view path)
+    {
+        std::scoped_lock lock{mutex_};
+        int hops{0};
+        const auto chain = walk(Chain{&root_}, path, true, hops);
+        if (!chain || chain->back()->type != ServedEntry::Type::File)
+            return std::nullopt;
+        return chain->back()->modified.value_or(std::string{defaultModified});
+    }
+
     std::vector<std::string> ServedTree::listed() const
     {
         std::scoped_lock lock{mutex_};
@@ -275,8 +492,27 @@ namespace FileTransferProtocol::Test
         return retrieved_;
     }
 
-    TreeResponder::TreeResponder(std::shared_ptr<ServedTree> tree)
+    std::vector<std::string> ServedTree::stored() const
+    {
+        std::scoped_lock lock{mutex_};
+        return stored_;
+    }
+
+    void ServedTree::stallDownloadsAfter(std::optional<std::uint64_t> bytes)
+    {
+        std::scoped_lock lock{mutex_};
+        downloadStall_ = bytes;
+    }
+
+    std::optional<std::uint64_t> ServedTree::downloadStall() const
+    {
+        std::scoped_lock lock{mutex_};
+        return downloadStall_;
+    }
+
+    TreeResponder::TreeResponder(std::shared_ptr<ServedTree> tree, ServedFeatures features)
         : tree_{std::move(tree)}
+        , features_{features}
     {}
 
     std::string TreeResponder::absolute(std::string_view path) const
@@ -288,15 +524,70 @@ namespace FileTransferProtocol::Test
         return fmt::format("{}/{}", workingDirectory_, path);
     }
 
+    Script TreeResponder::upload(std::string_view verb, std::string_view argument)
+    {
+        const auto offset = std::exchange(restartAt_, 0u);
+        if (!passiveOpen_)
+            return replying("425 Use PORT or PASV first.");
+        passiveOpen_ = false;
+        const auto path = absolute(argument);
+        const auto upload = verb == "APPE" ? ServedTree::Upload::Append : ServedTree::Upload::Store;
+        const auto position = tree_->openForUpload(path, upload, offset);
+        if (!position)
+            return replying("553 Could not create file.");
+        auto written = std::make_shared<std::uint64_t>(*position);
+        Script script{};
+        script.reply("150 Ok to send data.")
+            .beginData(
+                DataPlan{}.expectUpload(
+                    uploadLimit,
+                    [tree = tree_, path, written](std::string_view bytes)
+                    {
+                        tree->write(path, *written, bytes);
+                        *written += bytes.size();
+                    }
+                )
+            )
+            .awaitData()
+            .reply("226 Transfer complete.");
+        return script;
+    }
+
+    Script TreeResponder::renameTo(std::optional<std::string> from, std::string_view argument)
+    {
+        if (!from)
+            return replying("503 RNFR required first.");
+        if (!tree_->rename(*from, absolute(argument)))
+            return replying("550 Rename failed.");
+        return replying("250 Rename successful.");
+    }
+
+    Script TreeResponder::setModified(std::string_view argument)
+    {
+        const auto [time, path] = verbAndArgument(argument);
+        if (!isTimeVal(time))
+            return replying("501 Syntax error in parameters or arguments.");
+        if (!tree_->setModified(absolute(path), std::string{time}))
+            return replying("550 Could not set file modification time.");
+        return replying(fmt::format("213 Modify={}; {}", time, path));
+    }
+
     Script TreeResponder::answer(std::string_view line)
     {
         const auto [verb, argument] = verbAndArgument(line);
+        // RNTO takes the RNFR right before it.
+        auto renameFrom = std::exchange(renameFrom_, std::nullopt);
         if (verb == "USER")
             return replying("331 Please specify the password.");
         if (verb == "PASS")
             return replying("230 Login successful.");
         if (verb == "FEAT")
-            return replying("211-Features:\n EPSV\n MDTM\n PASV\n REST STREAM\n SIZE\n UTF8\n211 End");
+            return replying(
+                fmt::format(
+                    "211-Features:\n EPSV\n MDTM\n MFMT\n PASV\n REST STREAM\n{}UTF8\n211 End",
+                    features_.size ? " SIZE\n " : " "
+                )
+            );
         if (verb == "OPTS" || verb == "TYPE" || verb == "NOOP")
             return replying("200 Command okay.");
         if (verb == "PWD")
@@ -330,14 +621,19 @@ namespace FileTransferProtocol::Test
                 .reply("226 Directory send OK.");
             return script;
         }
-        if (verb == "SIZE" || verb == "MDTM")
+        if (verb == "SIZE" && features_.size)
         {
             const auto content = tree_->contentOf(absolute(argument));
             if (!content)
                 return replying("550 Could not get file size.");
-            if (verb == "MDTM")
-                return replying("213 20260102030405");
             return replying(fmt::format("213 {}", content->size()));
+        }
+        if (verb == "MDTM")
+        {
+            const auto time = tree_->modifiedOf(absolute(argument));
+            if (!time)
+                return replying("550 Could not get file modification time.");
+            return replying(fmt::format("213 {}", *time));
         }
         if (verb == "REST")
         {
@@ -355,13 +651,39 @@ namespace FileTransferProtocol::Test
             const auto content = tree_->retrieve(absolute(argument));
             if (!content)
                 return replying("550 Failed to open file.");
+            const auto rest = std::string_view{*content}.substr(std::min<std::size_t>(offset, content->size()));
             Script script{};
-            script.reply(fmt::format("150 Opening BINARY mode data connection ({} bytes).", content->size()))
-                .beginData(DataPlan{}.send(content->substr(std::min<std::size_t>(offset, content->size()))))
-                .awaitData()
-                .reply("226 Transfer complete.");
+            script.reply(fmt::format("150 Opening BINARY mode data connection ({} bytes).", content->size()));
+            if (const auto stall = tree_->downloadStall(); stall && *stall < rest.size())
+            {
+                script.beginData(DataPlan{}.stallAfter(std::string{rest.substr(0u, *stall)}))
+                    .awaitData()
+                    .reply("426 Failure writing network stream.");
+                return script;
+            }
+            script.beginData(DataPlan{}.send(std::string{rest})).awaitData().reply("226 Transfer complete.");
             return script;
         }
+        if (verb == "STOR" || verb == "APPE")
+            return upload(verb, argument);
+        if (verb == "MKD")
+        {
+            const auto path = absolute(argument);
+            if (!tree_->makeDirectory(path))
+                return replying("550 Create directory operation failed.");
+            return replying(fmt::format("257 \"{}\" created", path));
+        }
+        if (verb == "RNFR")
+        {
+            if (!tree_->exists(absolute(argument)))
+                return replying("550 RNFR command failed.");
+            renameFrom_ = absolute(argument);
+            return replying("350 Ready for RNTO.");
+        }
+        if (verb == "RNTO")
+            return renameTo(std::move(renameFrom), argument);
+        if (verb == "MFMT")
+            return setModified(argument);
         if (verb == "DELE")
             return replying(removalReply(tree_->removeFile(absolute(argument)), "250 Delete operation successful."));
         if (verb == "RMD")
@@ -378,15 +700,15 @@ namespace FileTransferProtocol::Test
         }
         if (verb == "STAT" || verb == "MLSD" || verb == "MLST")
             return replying("500 Unknown command.");
-        if (verb == "MKD" || verb == "STOR" || verb == "APPE" || verb == "RNFR" || verb == "SITE" || verb == "MFMT")
+        if (verb == "SITE")
             return replying("550 Permission denied.");
         return replying("502 Command not implemented.");
     }
 
-    Script serving(std::shared_ptr<ServedTree> tree)
+    Script serving(std::shared_ptr<ServedTree> tree, ServedFeatures features)
     {
         Script script{};
-        script.reply("220 Served").serve(std::make_shared<TreeResponder>(std::move(tree)));
+        script.reply("220 Served").serve(std::make_shared<TreeResponder>(std::move(tree), features));
         return script;
     }
 }

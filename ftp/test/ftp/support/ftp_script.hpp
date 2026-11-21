@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -60,6 +61,8 @@ namespace FileTransferProtocol::Test
         struct ExpectUpload
         {
             std::size_t limit{0};
+            /** @brief Gets the bytes as they arrive, on the thread of the server. */
+            std::function<void(std::string_view bytes)> received{};
         };
         struct Close
         {};
@@ -76,8 +79,11 @@ namespace FileTransferProtocol::Test
         DataPlan& send(std::string bytes, std::size_t chunkSize = 0, std::chrono::milliseconds interval = {});
         /** @brief Sends until the client goes away or the control script calls stopData(), nothing can follow. */
         DataPlan& sendForever();
-        /** @brief Reads until the client closes, more than @p limit bytes fail the script. */
-        DataPlan& expectUpload(std::size_t limit);
+        /**
+         * @brief Reads until the client closes, more than @p limit bytes fail the script. @p received gets the bytes
+         *        as they arrive.
+         */
+        DataPlan& expectUpload(std::size_t limit, std::function<void(std::string_view bytes)> received = {});
         DataPlan& close();
         DataPlan& reset();
         /** @brief Sends @p bytes, then neither sends nor closes until the client goes away or stopData(). */

@@ -48,6 +48,18 @@ namespace
     }
 
     /**
+     * @brief What the frontend needs of the capabilities of a file system channel.
+     */
+    nlohmann::json capabilitiesAnswer(RemoteIo::Capabilities const& capabilities)
+    {
+        return {
+            {"probeEntries", capabilities.probeEntries},
+            {"symlinks", capabilities.symlinks},
+            {"setModificationTime", capabilities.setModificationTime},
+        };
+    }
+
+    /**
      * @brief The reply to a request that queued @p enqueued entries.
      */
     nlohmann::json enqueuedReply(std::size_t enqueued)
@@ -134,6 +146,7 @@ void Session::start()
             }
             self->registerRpcSftpListDirectory();
             self->registerRpcSftpHomeDirectory();
+            self->registerRpcSftpCapabilities();
             self->registerRpcSftpUserDirectories();
             self->registerRpcSftpCreateDirectory();
             self->registerRpcSftpCreateFile();
@@ -421,15 +434,6 @@ void Session::registerRpcCreateChannel()
                 if (!self)
                     return reply.error("Session no longer exists");
 
-                RpcHelper::ParameterVerifyView verify{
-                    reply, fmt::format("Session::{}::Channel::create", self->id_.value()), parameters
-                };
-
-                if (!verify.hasValueDeep("engineOptions"))
-                    return;
-                if (!verify.hasValueDeep("termios"))
-                    return;
-
                 const bool fileMode = parameters.contains("fileMode") && parameters["fileMode"].is_boolean() &&
                     parameters["fileMode"].get<bool>();
 
@@ -437,6 +441,14 @@ void Session::registerRpcCreateChannel()
                 {
                     if (!self->terminalHost_)
                         return reply.error("The session has no terminals");
+
+                    RpcHelper::ParameterVerifyView verify{
+                        reply, fmt::format("Session::{}::Channel::create", self->id_.value()), parameters
+                    };
+                    if (!verify.hasValueDeep("engineOptions"))
+                        return;
+                    if (!verify.hasValueDeep("termios"))
+                        return;
                     Log::info("Creating pty channel for session '{}'", self->id_.value());
                     Log::info("Session options: {}", parameters["engineOptions"].dump());
                     Log::info("Termios: {}", parameters["termios"].dump());
@@ -699,6 +711,28 @@ void Session::registerRpcSftpHomeDirectory()
                             RemoteIo::HomeDirectory{},
                             RpcHelper::answerOnCompletion(std::move(reply), FileSystemAnswers::homeDirectory())
                         );
+                    },
+                    std::move(reply)
+                );
+            }
+        );
+}
+
+void Session::registerRpcSftpCapabilities()
+{
+    on(fmt::format("Session::{}::sftp::capabilities", id_.value()))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, std::string const& channelIdString)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply.error("Session no longer exists");
+
+                self->withSftpChannelDo(
+                    Ids::makeChannelId(channelIdString),
+                    [](RpcHelper::RpcOnce&& reply, auto&& channel)
+                    {
+                        reply({{"success", true}, {"capabilities", capabilitiesAnswer(channel->capabilities())}});
                     },
                     std::move(reply)
                 );

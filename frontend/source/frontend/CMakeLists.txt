@@ -125,6 +125,10 @@ target_sources(
         settings/executing_session_options.cpp
         settings/ssh_session_options.cpp
         settings/ssh_user_settings.cpp
+        settings/ftp_options.cpp
+        settings/ftp_session_options.cpp
+        settings/ftp_user_settings.cpp
+        settings/remote_server_settings.cpp
         settings/session_options.cpp
         settings/subgroup.cpp
         settings/layout_setting.cpp
@@ -175,6 +179,8 @@ target_sources(
         terminal/executing_engine.cpp
         terminal/executing_channel.cpp
         terminal/file_engine.cpp
+        terminal/ftp_engine.cpp
+        terminal/remote_engine_factory.cpp
         terminal/ssh_engine.cpp
         terminal/ssh_channel.cpp
         components/code_editor.cpp
@@ -230,7 +236,9 @@ set(DEPENDANT_LINK_OPTIONS "")
 set(DEPENDANT_COMPILE_OPTIONS "")
 set(PARCEL_ARGS "")
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(DEPENDANT_LINK_OPTIONS "-g1")
+    # The DWARF goes to index.wasm.debug.wasm beside the module, which DevTools loads for debugging: inside it the
+    # module grows past the 1 GiB that V8 instantiates.
+    set(DEPENDANT_LINK_OPTIONS "-g1" "-gseparate-dwarf")
     set(DEPENDANT_COMPILE_OPTIONS "-g1")
     set(PARCEL_ARGS "--no-optimize")
 else()

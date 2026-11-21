@@ -7,6 +7,8 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/use_future.hpp>
 #include <fmt/format.h>
@@ -88,6 +90,20 @@ namespace FileTransferProtocol::Test
                 [connection, endpoints = endpoints(), options = std::move(options)]() -> asio::awaitable<LoginOutcome>
                 {
                     co_return co_await FileTransferProtocol::logIn(connection, endpoints, options);
+                }
+            );
+        }
+
+        std::expected<Reached, RemoteIo::RemoteError>
+        reached(std::shared_ptr<ControlConnection> const& connection, LoginOptions options)
+        {
+            return run(
+                connection,
+                [connection,
+                    endpoints = endpoints(),
+                    options = std::move(options)]() -> asio::awaitable<std::expected<Reached, RemoteIo::RemoteError>>
+                {
+                    co_return co_await FileTransferProtocol::reach(connection, endpoints, options);
                 }
             );
         }
@@ -181,6 +197,66 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(connection->untrustedCertificate());
         EXPECT_EQ(connection->untrustedCertificate()->publicKeySha256, publicKeyDigestOf(tlsTestPki().selfSigned));
         EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
+    }
+
+    TEST_F(LoginTests, ReachingAServerSendsNoCredentials)
+    {
+        Script script{};
+        script.reply("220 Ready").expect("QUIT").reply("221 Goodbye");
+        server_->addConnection(script.expectDisconnect());
+        const auto connection = makeConnection();
+
+        const auto result = reached(connection, LoginOptions{.credentials = testCredentials()});
+
+        ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_EQ(result->greeting.code, 220);
+        EXPECT_FALSE(result->certificate);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"QUIT"}));
+    }
+
+    TEST_F(LoginTests, ReachingAServerOverTlsShowsItsTrustedCertificate)
+    {
+        server_->addConnection(explicitTls().expect("QUIT").reply("221 Goodbye").expectDisconnect());
+        const auto connection = makeConnection();
+
+        const auto result = reached(connection, explicitOptions());
+
+        ASSERT_TRUE(result) << result.error().toString();
+        EXPECT_TRUE(result->certificate);
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS", "QUIT"}));
+    }
+
+    TEST_F(LoginTests, ReachingAServerWithAnUntrustedCertificateAsksForTrust)
+    {
+        server_->addConnection(explicitTls({.certificate = tlsTestPki().selfSigned}).expectDisconnect());
+        const auto connection = makeConnection();
+
+        const auto result = reached(connection, explicitOptions());
+
+        ASSERT_FALSE(result) << "reached over an untrusted certificate";
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::TrustRequired) << result.error().toString();
+        ASSERT_TRUE(connection->untrustedCertificate());
+        EXPECT_EQ(commandsAfterDisconnect(connection), (std::vector<std::string>{"AUTH TLS"}));
+    }
+
+    TEST_F(LoginTests, ReachingAServerThatIsNotThereFails)
+    {
+        // A port nobody listens on any more.
+        asio::io_context context{};
+        asio::ip::tcp::acceptor acceptor{context, {asio::ip::make_address("127.0.0.1"), 0u}};
+        const auto gone = acceptor.local_endpoint();
+        acceptor.close();
+        const auto connection = makeConnection();
+
+        const auto result =
+            run(connection,
+                [connection, gone]() -> asio::awaitable<std::expected<Reached, RemoteIo::RemoteError>>
+                {
+                    co_return co_await FileTransferProtocol::reach(connection, {gone}, LoginOptions{});
+                });
+
+        ASSERT_FALSE(result) << "reached a server that is gone";
+        EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::NoConnection) << result.error().toString();
     }
 
     TEST_F(LoginTests, PinnedCertificateLogsIn)

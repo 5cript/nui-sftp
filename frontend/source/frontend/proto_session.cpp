@@ -1,7 +1,7 @@
 #include <frontend/proto_session.hpp>
 
 #include <frontend/terminal/executing_engine.hpp>
-#include <frontend/terminal/ssh_engine.hpp>
+#include <frontend/terminal/remote_engine_factory.hpp>
 #include <log/log.hpp>
 
 #include <utility>
@@ -14,6 +14,7 @@ struct ProtoSession::Implementation
     std::optional<SessionSnapshot> resumeFromSnapshot;
     std::function<void(ProtoSession*)> onReady;
     std::function<void(ProtoSession*, std::string const&)> onFailed;
+    std::function<void(ProtoSession*)> onLoginCancelled;
     Log::Toast failureToast;
 
     std::unique_ptr<FrontendSessionManager> frontendSessionManager;
@@ -26,6 +27,7 @@ struct ProtoSession::Implementation
         , resumeFromSnapshot{std::move(params.resumeFromSnapshot)}
         , onReady{std::move(params.onReady)}
         , onFailed{std::move(params.onFailed)}
+        , onLoginCancelled{std::move(params.onLoginCancelled)}
         , failureToast{params.failureToast}
     {}
 };
@@ -39,21 +41,18 @@ ProtoSession::ProtoSession(Params params)
     // rebinds this on adoption via FrontendSessionManager::setLockedUserInputHandler.
     auto noopLockedInput = [](Ids::ChannelId, std::string const&) {};
 
-    if (std::holds_alternative<Persistence::SshSessionOptions>(impl_->sessionOptions.engine))
+    // onConnectionLoss is left unbound here: if the transport drops
+    // between open() and adoption the probe fails cleanly via onOpen,
+    // and after adoption Session::Session rebinds this to route into
+    // the lost-connection overlay.
+    if (auto remoteEngine = makeRemoteTerminalEngine(impl_->sessionOptions, {}))
     {
-        // onConnectionLoss is left unbound here — if the transport drops
-        // between open() and adoption the probe fails cleanly via onOpen,
-        // and after adoption Session::Session rebinds this to route into
-        // the lost-connection overlay.
+        impl_->engineNameCache = remoteEngine->engineName();
         impl_->frontendSessionManager = std::make_unique<FrontendSessionManager>(
-            std::make_unique<SshTerminalEngine>(SshTerminalEngine::Settings{
-                .sessionOptions = impl_->sessionOptions,
-                .onConnectionLoss = {},
-            }),
+            std::move(remoteEngine),
             std::move(noopLockedInput),
             /*eagerAuxEngine=*/true
         );
-        impl_->engineNameCache = "ssh";
     }
     else
     {
@@ -79,13 +78,18 @@ void ProtoSession::start()
     impl_->started = true;
 
     impl_->frontendSessionManager->open(
-        [this](bool success, std::string const& info) {
-            if (success)
+        [this](EngineOpenResult result, std::string const& info) {
+            if (result == EngineOpenResult::Opened)
             {
                 Log::info("ProtoSession: transport open succeeded");
                 if (impl_->onReady)
                     impl_->onReady(this);
                 return;
+            }
+            if (result == EngineOpenResult::LoginCancelled && impl_->onLoginCancelled)
+            {
+                Log::debug("ProtoSession: the login was cancelled");
+                return impl_->onLoginCancelled(this);
             }
             Log::warn("ProtoSession: transport open failed: {}", info);
             if (impl_->onFailed)

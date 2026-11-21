@@ -27,15 +27,16 @@ namespace Test
         using FileSystemHarness = FileTransferProtocol::Test::FileSystemHarness;
         using ScriptedFtpServer = FileTransferProtocol::Test::ScriptedFtpServer;
         using ServedEntry = FileTransferProtocol::Test::ServedEntry;
+        using ServedFeatures = FileTransferProtocol::Test::ServedFeatures;
         using ServedTree = FileTransferProtocol::Test::ServedTree;
 
         /** @brief How long an operation on the served tree may take. */
         static constexpr std::chrono::seconds operationLimit{30};
 
         /**
-         * @brief Serves @p root and opens a file system there.
+         * @brief Serves @p root from a server with @p features and opens a file system there.
          */
-        void serve(std::vector<ServedEntry> root)
+        void serve(std::vector<ServedEntry> root, ServedFeatures features = {})
         {
             tree_ = std::make_shared<ServedTree>(std::move(root));
             auto started = ScriptedFtpServer::start();
@@ -43,7 +44,7 @@ namespace Test
             server_ = std::move(started).value();
             // C0, the transfer connection and spares for connections the pool replaces.
             for (std::size_t connection = 0u; connection < servedConnections; ++connection)
-                server_->addConnection(FileTransferProtocol::Test::serving(tree_));
+                server_->addConnection(FileTransferProtocol::Test::serving(tree_, features));
             auto connected = FileSystemHarness::connect(
                 FileSystemHarness::Options{.host = server_->address(), .port = server_->port()}
             );

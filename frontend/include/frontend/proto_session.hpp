@@ -37,7 +37,7 @@ class ProtoSession
   public:
     struct Params
     {
-        /// Engine options (SSH connection details, termios, terminal options).
+        /// Engine options (connection details, termios, terminal options).
         Persistence::SessionOptions sessionOptions{};
         /// UiOptions carried through to the adopting Session untouched.
         Persistence::UiOptions uiOptions{};
@@ -53,6 +53,11 @@ class ProtoSession
         /// can be destroyed freely; its FSM has already begun disposal per
         /// FrontendSessionManager::open's contract.
         std::function<void(ProtoSession*, std::string const&)> onFailed{};
+        /**
+         * @brief Fired instead of onFailed when the login got no password because the user cancelled its prompt.
+         *        Nothing should retry on its own then, the next attempt would ask again.
+         */
+        std::function<void(ProtoSession*)> onLoginCancelled{};
         /**
          * @brief Whether the errors logged when the probe fails are shown as toasts. A reconnect attempt that is
          *        retried skips them, the lost-connection overlay shows the attempts.
@@ -78,7 +83,7 @@ class ProtoSession
     std::unique_ptr<FrontendSessionManager> takeFrontendSessionManager();
     std::optional<SessionSnapshot> takeResumeSnapshot();
 
-    /** @brief Engine name of the probed transport ("ssh" or "local"). */
+    /** @brief Engine name of the probed transport ("ssh", "ftp" or "local"). */
     std::string engineName() const;
 
   private:

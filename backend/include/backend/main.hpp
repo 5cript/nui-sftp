@@ -1,5 +1,6 @@
 #pragma once
 
+#include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/session_manager.hpp>
 #include <persistence/state_holder.hpp>
@@ -65,6 +66,12 @@ class Main
     {
         LoggerSetup(Persistence::StateHolder& stateHolder);
     } loggerSetup_;
+    /**
+     * @brief Made once the state is loaded. Destroyed after the session manager, whose shutdown() closes the FTP
+     *        sessions, and after the window joined its pool, where a handler may still hold an FTP file system: its
+     *        strands must not outlive these threads.
+     */
+    std::unique_ptr<FtpEngineContext> ftpEngine_;
     Nui::Window window_;
     Nui::RpcHub hub_;
     std::unique_ptr<Opener> opener_;

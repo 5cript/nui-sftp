@@ -133,6 +133,9 @@ export class ContentPanel {
         }
         switch (id) {
             case 'terminal':
+                // FTP sessions have no terminals, a layout saved elsewhere loses them.
+                if (this.engineType === 'ftp')
+                    return undefined;
                 return new Terminal('Terminal', this.factories.terminalFactory, this.factories.terminalDelete);
             case 'file-explorer':
                 return new FileExplorer('FileExplorer', this.factories.fileExplorerFactory, this.factories.fileExplorerDelete);
@@ -277,6 +280,8 @@ export class ContentPanel {
     // ── Dock construction ─────────────────────────────────────────────────
 
     private makeDefaultDock(): DockPanel {
+        if (this.engineType === 'ftp')
+            return this.makeFileOnlyDock();
         const f = this.factories;
         const term = new Terminal('Terminal', f.terminalFactory, f.terminalDelete);
         const explorer = new FileExplorer('FileExplorer', f.fileExplorerFactory, f.fileExplorerDelete);
@@ -300,6 +305,33 @@ export class ContentPanel {
         this.applyDefaultSplit(dock);
         // The file explorer stays the visible tab of its area.
         dock.selectWidget(explorer);
+        return dock;
+    }
+
+    /**
+     * The default of a session without terminals: the file explorer on top, the operation queue and File Tracking
+     * below it.
+     */
+    private makeFileOnlyDock(): DockPanel {
+        const f = this.factories;
+        const explorer = new FileExplorer('FileExplorer', f.fileExplorerFactory, f.fileExplorerDelete);
+        const queue = new OperationQueue('OperationQueue', f.operationQueueFactory, f.operationQueueDelete);
+        const fileTracking = this.makeFileTracking();
+
+        const dock = new DockPanel({
+            addButtonEnabled: true,
+            renderer: badgeDockRenderer,
+        });
+        dock.addWidget(explorer);
+        dock.addWidget(queue, { mode: 'split-bottom', ref: explorer });
+        dock.addWidget(fileTracking, { mode: 'tab-after', ref: queue });
+
+        const saved = dock.saveLayout();
+        const main = saved.main as DockLayout.ISplitAreaConfig;
+        if (main)
+            main.sizes = [0.65, 0.35];
+        dock.restoreLayout(saved);
+        dock.selectWidget(queue);
         return dock;
     }
 

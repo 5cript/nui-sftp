@@ -1,5 +1,5 @@
 #include <frontend/terminal/file_engine.hpp>
-#include <frontend/terminal/ssh_engine.hpp>
+#include <frontend/terminal/remote_session_engine.hpp>
 #include <frontend/file_explorer/side_paths.hpp>
 #include <log/log.hpp>
 #include <constants/sftp.hpp>
@@ -10,6 +10,7 @@
 #include <emscripten/val.h>
 
 #include <algorithm>
+#include <expected>
 #include <iterator>
 #include <string_view>
 #include <utility>
@@ -48,21 +49,35 @@ namespace
         Log::error("(Frontend) {} failed: {}", function, error);
         onComplete({}, error);
     }
+
+    /**
+     * @brief The capabilities in a capabilities reply, or the reason the reply holds none.
+     */
+    std::expected<FileEngine::Capabilities, std::string> capabilitiesOf(Nui::val const& reply)
+    {
+        if (reply.hasOwnProperty("error"))
+            return std::unexpected{reply["error"].as<std::string>()};
+        if (!reply.hasOwnProperty("capabilities") || !reply["capabilities"].hasOwnProperty("probeEntries"))
+            return std::unexpected{std::string{"Malformed capabilities response"}};
+        return FileEngine::Capabilities{
+            .probeEntries = reply["capabilities"]["probeEntries"].as<bool>(),
+        };
+    }
 }
 
 struct FileEngine::Implementation
 {
     bool wasDisposed = false;
-    SshTerminalEngine* engine;
+    RemoteSessionEngine* engine;
     std::optional<Ids::ChannelId> sftpChannelId{std::nullopt};
     std::vector<std::function<void(std::optional<Ids::ChannelId> const&, std::string const& info)>> pendingOpens{};
 
-    Implementation(SshTerminalEngine* engine)
+    explicit Implementation(RemoteSessionEngine* engine)
         : engine{engine}
     {}
 };
 
-FileEngine::FileEngine(SshTerminalEngine* engine)
+FileEngine::FileEngine(RemoteSessionEngine* engine)
     : impl_{std::make_unique<Implementation>(engine)}
 {}
 FileEngine::~FileEngine() = default;
@@ -79,7 +94,7 @@ void FileEngine::dispose(std::function<void()> onComplete)
         if (impl_->sftpChannelId)
         {
             Log::info("Closing sftp channel");
-            impl_->engine->closeChannel(impl_->sftpChannelId.value(), std::move(onComplete));
+            impl_->engine->closeFileChannel(impl_->sftpChannelId.value(), std::move(onComplete));
         }
     }
     impl_->wasDisposed = true;
@@ -102,7 +117,7 @@ void FileEngine::lazyOpen(
         return;
 
     Log::info("Creating sftp channel");
-    impl_->engine->createSftpChannel(lifetime_.guarded(
+    impl_->engine->createFileChannel(lifetime_.guarded(
         [this](std::optional<Ids::ChannelId> const& id, std::string const& info)
         {
             impl_->sftpChannelId = id;
@@ -110,6 +125,39 @@ void FileEngine::lazyOpen(
                 pendingOpen(id, info);
         }
     ));
+}
+
+void FileEngine::capabilities(
+    std::function<void(std::optional<Capabilities> const&, std::string const& info)> onComplete
+)
+{
+    lazyOpen(
+        [this, onComplete = std::move(onComplete)](auto const& channelId, std::string const& info)
+        {
+            if (!channelId)
+            {
+                Log::warn("Cannot ask for the capabilities of the server, no file system channel");
+                onComplete(std::nullopt, info);
+                return;
+            }
+
+            Nui::RpcClient::callWithBackChannel(
+                fmt::format("Session::{}::sftp::capabilities", impl_->engine->sessionId().value()),
+                [onComplete = std::move(onComplete)](Nui::val reply)
+                {
+                    const auto capabilities = capabilitiesOf(reply);
+                    if (!capabilities)
+                    {
+                        Log::warn("(Frontend) Failed to read the capabilities of the server: {}", capabilities.error());
+                        onComplete(std::nullopt, capabilities.error());
+                        return;
+                    }
+                    onComplete(*capabilities, "Success");
+                },
+                channelId.value().value()
+            );
+        }
+    );
 }
 
 void FileEngine::listDirectory(
@@ -130,7 +178,7 @@ void FileEngine::listDirectory(
 
             Log::info("Listing directory: {}", path.generic_string());
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::listDirectory", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::listDirectory", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     Log::info("Received response for listing directory.");
@@ -179,7 +227,7 @@ void FileEngine::homeDirectory(
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::homeDirectory", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::homeDirectory", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error") || !val.hasOwnProperty("path"))
@@ -217,7 +265,7 @@ void FileEngine::userDirectories(
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::userDirectories", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::userDirectories", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error") || !val.hasOwnProperty("directories"))
@@ -266,7 +314,7 @@ void FileEngine::createDirectory(
 
             Log::info("Creating directory: {}", path.value());
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::createDirectory", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::createDirectory", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -304,7 +352,7 @@ void FileEngine::createFile(
 
             Log::info("Creating file: {}", path.value());
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::createFile", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::createFile", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -360,7 +408,7 @@ void FileEngine::openSyncSession(
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::openSyncSession", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::openSyncSession", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
@@ -393,7 +441,7 @@ void FileEngine::recomputeSyncDiff(
 )
 {
     Nui::RpcClient::callWithBackChannel(
-        fmt::format("Session::{}::sftp::recomputeSyncDiff", impl_->engine->sshSessionId().value()),
+        fmt::format("Session::{}::sftp::recomputeSyncDiff", impl_->engine->sessionId().value()),
         [onSnapshot = std::move(onSnapshot)](Nui::val val)
         {
             const auto failed = [&onSnapshot]()
@@ -434,7 +482,7 @@ void FileEngine::loadSyncDiffChildren(
 )
 {
     Nui::RpcClient::callWithBackChannel(
-        fmt::format("Session::{}::sftp::loadSyncDiffChildren", impl_->engine->sshSessionId().value()),
+        fmt::format("Session::{}::sftp::loadSyncDiffChildren", impl_->engine->sessionId().value()),
         [onResolved = std::move(onResolved), onRejected = std::move(onRejected)](Nui::val val)
         {
             if (val.hasOwnProperty("error"))
@@ -480,7 +528,7 @@ void FileEngine::executeSyncSelection(
                 return;
             }
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::executeSyncSelection", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::executeSyncSelection", impl_->engine->sessionId().value()),
                 [onResolved = std::move(onResolved), onRejected = std::move(onRejected)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
@@ -509,7 +557,7 @@ void FileEngine::executeSyncSelection(
 void FileEngine::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
 {
     Nui::RpcClient::callWithBackChannel(
-        fmt::format("Session::{}::sftp::cancelSyncDiff", impl_->engine->sshSessionId().value()),
+        fmt::format("Session::{}::sftp::cancelSyncDiff", impl_->engine->sessionId().value()),
         [](Nui::val /*val*/) {},
         syncSessionId.value()
     );
@@ -518,7 +566,7 @@ void FileEngine::cancelSyncDiff(Ids::SyncSessionId syncSessionId)
 void FileEngine::closeSyncSession(Ids::SyncSessionId syncSessionId)
 {
     Nui::RpcClient::callWithBackChannel(
-        fmt::format("Session::{}::sftp::closeSyncSession", impl_->engine->sshSessionId().value()),
+        fmt::format("Session::{}::sftp::closeSyncSession", impl_->engine->sessionId().value()),
         [](Nui::val /*val*/) {},
         syncSessionId.value()
     );
@@ -535,7 +583,7 @@ void FileEngine::continueKept(
             if (!channelId)
                 return onDone(false, info);
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::continueKept", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::continueKept", impl_->engine->sessionId().value()),
                 [onDone = std::move(onDone)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
@@ -566,7 +614,7 @@ void FileEngine::discardKept(
             if (!channelId)
                 return onDone(false, info);
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::discardKept", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::discardKept", impl_->engine->sessionId().value()),
                 [onDone = std::move(onDone)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
@@ -617,7 +665,7 @@ void FileEngine::addDownload(
             );
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addDownload", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addDownload", impl_->engine->sessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -689,7 +737,7 @@ void FileEngine::addArchiveDownload(
             const nlohmann::json rootsJson = roots;
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addArchiveDownload", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addArchiveDownload", impl_->engine->sessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -761,7 +809,7 @@ void FileEngine::addArchiveUpload(
                 localPathStrings.push_back(localPath.toUtf8());
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addArchiveUpload", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addArchiveUpload", impl_->engine->sessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -835,7 +883,7 @@ void FileEngine::addBulkDownload(
             };
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addBulkDownload", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addBulkDownload", impl_->engine->sessionId().value()),
                 [onBulkCreated = std::move(onBulkCreated)](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -903,7 +951,7 @@ void FileEngine::addBulkUpload(
             };
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addBulkUpload", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addBulkUpload", impl_->engine->sessionId().value()),
                 [onBulkCreated = std::move(onBulkCreated)](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -955,7 +1003,7 @@ void FileEngine::addBulkDelete(
             };
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addBulkDelete", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addBulkDelete", impl_->engine->sessionId().value()),
                 [onBulkCreated = std::move(onBulkCreated)](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -1012,7 +1060,7 @@ void FileEngine::addUpload(
             );
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addUpload", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addUpload", impl_->engine->sessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     Nui::WebApi::Console::log(val);
@@ -1069,7 +1117,7 @@ void FileEngine::remove(
                 transformedDirectories.push_back(directory.value());
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::preDeleteChecks", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::preDeleteChecks", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete),
                     files = std::move(files),
                     directories = std::move(directories),
@@ -1138,7 +1186,7 @@ void FileEngine::rename(
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::rename", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::rename", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
@@ -1216,7 +1264,7 @@ void FileEngine::addRename(
             );
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::addRename", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::addRename", impl_->engine->sessionId().value()),
                 [onOperationCreated = std::move(onOperationCreated), operationId](Nui::val val)
                 {
                     if (val.hasOwnProperty("error"))
@@ -1262,7 +1310,7 @@ void FileEngine::removeOnQueueUnchecked(
                 pathStrings.push_back(path.value());
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::queuedRemove", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::queuedRemove", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val) mutable
                 {
                     if (val.hasOwnProperty("error"))
@@ -1309,7 +1357,7 @@ void FileEngine::existsBatchRemote(
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::existsBatch", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::existsBatch", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     replyExistsFlags(val, "sftp::existsBatch", onComplete);
@@ -1358,7 +1406,7 @@ void FileEngine::stat(
             }
 
             Nui::RpcClient::callWithBackChannel(
-                fmt::format("Session::{}::sftp::stat", impl_->engine->sshSessionId().value()),
+                fmt::format("Session::{}::sftp::stat", impl_->engine->sessionId().value()),
                 [onComplete = std::move(onComplete)](Nui::val val)
                 {
                     Nui::WebApi::Console::log("stat val", val);

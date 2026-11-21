@@ -142,6 +142,11 @@ namespace FileTransferProtocol
         std::optional<std::uint64_t> announcedSize() const;
 
         /**
+         * @brief Whether a read returned the end of the data, which finish() needs.
+         */
+        bool dataEnded() const;
+
+        /**
          * @brief Ends the download as cancelled: closes the data connection as DataConnection::closeOnceAnswered()
          *        does and sends ABOR, the control connection drains behind it and stays usable. Reads and finish()
          *        fail as Cancelled from then on, a first read under way once the server answered on the data

@@ -66,7 +66,7 @@ class FileExplorerPanel
 
         /**
          * @brief Engine configuration.  The engine variant decides whether a
-         *        remote side is built (SSH = both sides, local-shell/executing
+         *        remote side is built (SSH and FTP = both sides, local-shell/executing
          *        = local only).  Remote favorites also live inside this.
          */
         Persistence::SessionOptions engineOptions{};
@@ -95,6 +95,12 @@ class FileExplorerPanel
      * to the caller.
      */
     void setRemoteOrigin(std::string userAndHost);
+
+    /**
+     * @brief Marks the remote side of a server that cannot check what an upload would replace, so uploads need the
+     * unsafe fast mode there. Syncing the change is left to the caller.
+     */
+    void setUploadsNeedUnsafeFastMode(bool value);
 
     /**
      * @brief Attaches the caller-provided synchronize callback to both sides

@@ -28,12 +28,12 @@ namespace Test
             return nlohmann::json{{"type", "ssh"}, {"engine", std::move(engine)}};
         }
 
-        nlohmann::json ftpServer()
+        nlohmann::json webdavServer()
         {
             return nlohmann::json{
-                {"type", "ftp"},
+                {"type", "webdav"},
                 {"icon", "folder"},
-                {"engine", {{"host", "ftp.example.com"}, {"tlsMode", "explicit"}, {"ftpOptions", {{"$ref", "default"}}}}},
+                {"engine", {{"host", "dav.example.com"}, {"tls", true}, {"davOptions", {{"$ref", "default"}}}}},
             };
         }
 
@@ -62,7 +62,8 @@ namespace Test
     {
         EXPECT_EQ(Persistence::terminalEngineTypeFromName("ssh"), Persistence::TerminalEngineType::ssh);
         EXPECT_EQ(Persistence::terminalEngineTypeFromName("shell"), Persistence::TerminalEngineType::shell);
-        EXPECT_FALSE(Persistence::terminalEngineTypeFromName("ftp").has_value());
+        EXPECT_EQ(Persistence::terminalEngineTypeFromName("ftp"), Persistence::TerminalEngineType::ftp);
+        EXPECT_FALSE(Persistence::terminalEngineTypeFromName("webdav").has_value());
         EXPECT_FALSE(Persistence::terminalEngineTypeFromName("SSH").has_value());
         EXPECT_FALSE(Persistence::terminalEngineTypeFromName("").has_value());
     }
@@ -94,7 +95,7 @@ namespace Test
             {"sessions",
                 {
                     {"server", sshServer({{"host", "example.com"}})},
-                    {"files", ftpServer()},
+                    {"files", webdavServer()},
                     {"broken", {{"engine", {{"host", "nowhere"}}}}},
                 }},
         };
@@ -112,9 +113,9 @@ namespace Test
 
     TEST(UnknownConfigEntriesTests, UnreadSessionsSurviveTheWayThroughTheFrontend)
     {
-        const auto backendState =
-            nlohmann::json{{"sessions", {{"server", sshServer({{"host", "example.com"}})}, {"files", ftpServer()}}}}
-                .get<Persistence::State>();
+        const auto backendState = nlohmann::json{
+            {"sessions", {{"server", sshServer({{"host", "example.com"}})}, {"files", webdavServer()}}}
+        }.get<Persistence::State>();
 
         auto frontendState = Persistence::State{};
         nlohmann::json::parse(nlohmann::json(backendState).dump()).get_to(frontendState);
@@ -123,14 +124,14 @@ namespace Test
         const auto saved = nlohmann::json::parse(nlohmann::json(frontendState).dump()).get<Persistence::State>();
 
         const auto written = nlohmann::json(saved);
-        EXPECT_EQ(written["sessions"]["files"], ftpServer());
+        EXPECT_EQ(written["sessions"]["files"], webdavServer());
         EXPECT_EQ(written["sessions"]["server"]["icon"], "changed");
         EXPECT_TRUE(written["sessions"].contains("added"));
     }
 
     TEST(UnknownConfigEntriesTests, ReadingReplacesTheUnreadSessionsOfAnEarlierRead)
     {
-        auto state = nlohmann::json{{"sessions", {{"files", ftpServer()}}}}.get<Persistence::State>();
+        auto state = nlohmann::json{{"sessions", {{"files", webdavServer()}}}}.get<Persistence::State>();
 
         nlohmann::json{{"sessions", {{"server", sshServer({{"host", "example.com"}})}}}}.get_to(state);
 
@@ -158,7 +159,7 @@ namespace Test
         {
             std::ofstream writer{path, std::ios_base::binary};
             writer << nlohmann::json{
-                {"sessions", {{"files", ftpServer()}, {"server", sshServer({{"host", "example.com"}})}}},
+                {"sessions", {{"files", webdavServer()}, {"server", sshServer({{"host", "example.com"}})}}},
             }.dump(4);
         }
 
@@ -202,7 +203,7 @@ namespace Test
 
         std::ifstream reader{path, std::ios_base::binary};
         const auto written = nlohmann::json::parse(reader);
-        EXPECT_EQ(written["sessions"]["files"], ftpServer());
+        EXPECT_EQ(written["sessions"]["files"], webdavServer());
         EXPECT_EQ(written["sessions"]["server"]["icon"], "changed");
     }
 #endif

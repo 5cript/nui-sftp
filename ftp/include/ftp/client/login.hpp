@@ -65,4 +65,31 @@ namespace FileTransferProtocol
         std::vector<boost::asio::ip::tcp::endpoint> endpoints,
         LoginOptions options
     );
+
+    /**
+     * @brief What reaching a server showed before any credential.
+     */
+    struct Reached
+    {
+        Reply greeting{};
+        /** @brief The server's certificate and who vouched for it, nothing without TLS. */
+        std::optional<TrustedCertificate> certificate{};
+    };
+
+    /**
+     * @brief The steps of logIn() before the credentials: connects @p connection, waits for the greeting and makes the
+     *        TLS handshake of @p options, then sends QUIT and closes. Whether the server answers and its certificate
+     *        is trusted, known before a password is asked for. The credentials of @p options are not used. Runs on the
+     *        strand of @p connection, which the caller keeps.
+     *
+     * @return The greeting and the certificate, or the error of the step that failed as logIn() returns it:
+     *         NoConnection or TimedOut for a server that does not answer, TrustRequired with
+     *         ControlConnection::untrustedCertificate() to ask about, NoSecureConnection, the replyError() of the
+     *         greeting. A failed QUIT is no failure, the server was reached.
+     */
+    boost::asio::awaitable<std::expected<Reached, RemoteIo::RemoteError>> reach(
+        std::shared_ptr<ControlConnection> connection,
+        std::vector<boost::asio::ip::tcp::endpoint> endpoints,
+        LoginOptions options
+    );
 }

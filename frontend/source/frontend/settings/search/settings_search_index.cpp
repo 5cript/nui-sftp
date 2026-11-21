@@ -104,7 +104,7 @@ void SettingsSearchIndex::add(SettingIdentity const& identity, std::string const
         ScopeRegistration{
             .htmlId = identity.htmlId(),
             .breadcrumb = identity.breadcrumb(),
-            .engineType = identity.engineType(),
+            .engineTypes = identity.engineTypes(),
             .groupKey = identity.groupKey(),
         }
     );
