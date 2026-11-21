@@ -8,8 +8,8 @@
 #include <memory>
 
 /**
- * @brief The engine threads and the resolver that every FTP session of the application shares. One thread runs an
- *        io_context that logs an exception escaping a handler and goes on, more threads are a thread_pool.
+ * @brief The engine threads and the resolver that every FTP session of the application shares. The threads run one
+ *        io_context, an exception escaping a handler is logged and its thread goes on.
  *
  * Outlives every FTP session: destroy it after the SessionManager closed them all, never on one of its threads.
  */

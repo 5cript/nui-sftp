@@ -4,37 +4,46 @@
 
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/thread_pool.hpp>
 
 #include <cassert>
 #include <exception>
 #include <thread>
-#include <variant>
+#include <vector>
 
 namespace
 {
     /**
-     * @brief One engine thread on an io_context. An exception that escapes a handler is logged and the thread runs on.
+     * @brief The engine threads on one io_context. An exception that escapes a handler is logged and its thread runs
+     *        on.
      */
-    class SingleEngineThread
+    class EngineThreads
     {
       public:
-        SingleEngineThread()
-            : thread_{[this]()
-                  {
-                      run();
-                  }}
-        {}
-        ~SingleEngineThread()
+        explicit EngineThreads(std::size_t count)
+            : context_{static_cast<int>(count)}
+        {
+            threads_.reserve(count);
+            for (std::size_t index = 0u; index < count; ++index)
+            {
+                threads_.emplace_back(
+                    [this]()
+                    {
+                        run();
+                    }
+                );
+            }
+        }
+        ~EngineThreads()
         {
             workGuard_.reset();
             context_.stop();
-            thread_.join();
+            for (auto& thread : threads_)
+                thread.join();
         }
-        SingleEngineThread(SingleEngineThread const&) = delete;
-        SingleEngineThread& operator=(SingleEngineThread const&) = delete;
-        SingleEngineThread(SingleEngineThread&&) = delete;
-        SingleEngineThread& operator=(SingleEngineThread&&) = delete;
+        EngineThreads(EngineThreads const&) = delete;
+        EngineThreads& operator=(EngineThreads const&) = delete;
+        EngineThreads(EngineThreads&&) = delete;
+        EngineThreads& operator=(EngineThreads&&) = delete;
 
         boost::asio::any_io_executor executor()
         {
@@ -71,68 +80,28 @@ namespace
             }
         }
 
-        boost::asio::io_context context_{1};
+        boost::asio::io_context context_;
         boost::asio::executor_work_guard<boost::asio::io_context::executor_type> workGuard_{context_.get_executor()};
-        std::thread thread_;
+        std::vector<std::thread> threads_{};
     };
-
-    using EngineThreads = std::variant<SingleEngineThread, boost::asio::thread_pool>;
-
-    EngineThreads makeEngineThreads(std::size_t count)
-    {
-        if (count > 1u)
-            return EngineThreads{std::in_place_type<boost::asio::thread_pool>, count};
-        return EngineThreads{std::in_place_type<SingleEngineThread>};
-    }
-
-    boost::asio::any_io_executor executorOf(SingleEngineThread& thread)
-    {
-        return thread.executor();
-    }
-
-    boost::asio::any_io_executor executorOf(boost::asio::thread_pool& pool)
-    {
-        return pool.get_executor();
-    }
-
-    bool runsOn(SingleEngineThread& thread)
-    {
-        return thread.runningInThisThread();
-    }
-
-    bool runsOn(boost::asio::thread_pool& pool)
-    {
-        return pool.get_executor().running_in_this_thread();
-    }
 }
 
 struct FtpEngineContext::Implementation
 {
     explicit Implementation(std::size_t count)
         : threadCount{count}
-        , threads{makeEngineThreads(count)}
+        , threads{count}
     {}
 
     ~Implementation()
     {
-        assert(!runningInThisThread());
+        assert(!threads.runningInThisThread());
     }
 
     Implementation(Implementation const&) = delete;
     Implementation& operator=(Implementation const&) = delete;
     Implementation(Implementation&&) = delete;
     Implementation& operator=(Implementation&&) = delete;
-
-    bool runningInThisThread()
-    {
-        return std::visit(
-            [](auto& engineThreads)
-            {
-                return runsOn(engineThreads);
-            },
-            threads
-        );
-    }
 
     const std::size_t threadCount;
     EngineThreads threads;
@@ -149,19 +118,13 @@ FtpEngineContext::FtpEngineContext(std::size_t threads)
 
 FtpEngineContext::~FtpEngineContext()
 {
-    if (impl_->runningInThisThread())
+    if (impl_->threads.runningInThisThread())
         Log::error("FTP engine: Destroyed on one of its own threads, which cannot join themselves.");
 }
 
 boost::asio::any_io_executor FtpEngineContext::executor() const
 {
-    return std::visit(
-        [](auto& engineThreads)
-        {
-            return executorOf(engineThreads);
-        },
-        impl_->threads
-    );
+    return impl_->threads.executor();
 }
 
 std::shared_ptr<FileTransferProtocol::Resolver> FtpEngineContext::resolver() const
@@ -176,5 +139,5 @@ std::size_t FtpEngineContext::threads() const
 
 bool FtpEngineContext::runningInThisThread() const
 {
-    return impl_->runningInThisThread();
+    return impl_->threads.runningInThisThread();
 }
