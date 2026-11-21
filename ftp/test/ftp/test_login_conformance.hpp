@@ -138,7 +138,7 @@ namespace FileTransferProtocol::Test
             ASSERT_TRUE(untrusted);
             EXPECT_NE(untrusted->subject.find(fmt::format("CN={}", profile_.image)), std::string::npos)
                 << untrusted->subject;
-            EXPECT_FALSE(untrusted->verifyFailure.empty());
+            EXPECT_FALSE(untrusted->verifyFailures.empty());
 
             connection = makeConnection();
             result = login(connection, options(untrusted->publicKeySha256));

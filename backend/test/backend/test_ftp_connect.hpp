@@ -451,7 +451,9 @@ namespace Test
                     .subjectAlternativeNames = {"DNS:ftp.example.com", "IP:192.0.2.1"},
                     .certificateSha256 = certificate,
                     .publicKeySha256 = publicKey,
-                    .verifyFailure = "self-signed certificate",
+                    .verifyFailures =
+                        {{.kind = FileTransferProtocol::VerifyFailureKind::SelfSigned,
+                            .reason = "self-signed certificate"}},
                 },
             .pinnedKeyDiffers = true,
         };
@@ -796,11 +798,15 @@ namespace Test
 
         auto untrusted = failure(RemoteErrorKind::TrustRequired, "");
         FileTransferProtocol::CertificateInfo certificate{};
-        certificate.verifyFailure = "self-signed certificate";
+        certificate.verifyFailures = {
+            {.kind = FileTransferProtocol::VerifyFailureKind::SelfSigned, .reason = "self-signed certificate"},
+            {.kind = FileTransferProtocol::VerifyFailureKind::Expired, .reason = "certificate has expired"},
+        };
         certificate.certificateSha256.fill(0xABu);
         untrusted.untrustedCertificate = certificate;
         const auto message = FtpConnect::loginFailureMessage(untrusted, session);
-        EXPECT_NE(message.find("is not trusted (self-signed certificate)"), std::string::npos) << message;
+        EXPECT_NE(message.find("is not trusted (self-signed certificate, certificate has expired)"), std::string::npos)
+            << message;
         EXPECT_NE(message.find(FileTransferProtocol::formatDigest(certificate.certificateSha256)), std::string::npos)
             << message;
     }
@@ -1137,7 +1143,7 @@ namespace Test
         EXPECT_EQ(question.host, server_->address());
         EXPECT_EQ(question.port, server_->port());
         EXPECT_FALSE(question.pinnedKeyDiffers);
-        EXPECT_FALSE(question.certificate.verifyFailure.empty());
+        EXPECT_FALSE(question.certificate.verifyFailures.empty());
         // The second reach took the certificate by the key the user trusted.
         ASSERT_TRUE(server_->waitUntilDisconnected());
         EXPECT_EQ(server_->commands(1u), (std::vector<std::string>{"AUTH TLS", "QUIT"}));

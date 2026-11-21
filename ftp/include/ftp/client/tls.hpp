@@ -49,6 +49,31 @@ namespace FileTransferProtocol
      */
     std::optional<Sha256Digest> parseDigest(std::string_view text);
 
+    enum class VerifyFailureKind
+    {
+        /** @brief The certificate names other servers. */
+        NameMismatch,
+        Expired,
+        NotYetValid,
+        /** @brief Signed by itself, or its chain ends in such a certificate nobody trusts. */
+        SelfSigned,
+        /** @brief Signed by an authority that is not trusted or not known. */
+        UnknownAuthority,
+        Other,
+    };
+
+    /**
+     * @brief One reason the check of a certificate against the trusted authorities failed.
+     */
+    struct VerifyFailure
+    {
+        VerifyFailureKind kind{VerifyFailureKind::Other};
+        /** @brief The reason in the words of OpenSSL. */
+        std::string reason{};
+
+        bool operator==(VerifyFailure const&) const = default;
+    };
+
     /**
      * @brief What a server certificate says, for the trust prompt and for the pin.
      */
@@ -66,9 +91,14 @@ namespace FileTransferProtocol
         Sha256Digest certificateSha256{};
         /** @brief Of the SubjectPublicKeyInfo in DER, what a pin names. */
         Sha256Digest publicKeySha256{};
-        /** @brief Why the trusted authorities did not vouch for it, empty when they did. */
-        std::string verifyFailure{};
+        /** @brief Every reason the trusted authorities did not vouch for it, as found, empty when they did. */
+        std::vector<VerifyFailure> verifyFailures{};
     };
+
+    /**
+     * @brief The reasons of @p failures in one line, empty without one.
+     */
+    std::string reasonsOf(std::vector<VerifyFailure> const& failures);
 
     /**
      * @brief The facts of @p certificate.
@@ -79,7 +109,7 @@ namespace FileTransferProtocol
 
     enum class TrustSource
     {
-        /** @brief A trusted authority signed it and it names the server. */
+        /** @brief A trusted authority signed it and it names the server. A pin, when there is one, names its key. */
         Authorities,
         /** @brief The authorities did not vouch for it, its public key matched the pin. */
         Pin,
@@ -138,7 +168,10 @@ namespace FileTransferProtocol
         std::shared_ptr<TlsContext> context{};
         /** @brief The name the certificate has to carry, a DNS name (also sent as SNI) or an IP address. */
         std::string serverName{};
-        /** @brief Trusts a certificate with this public key when the authorities do not. */
+        /**
+         * @brief The one public key the server may present: a certificate with it is trusted also when the
+         *        authorities do not vouch for it, and no other certificate is, whoever vouches for it.
+         */
         std::optional<Sha256Digest> pinnedPublicKey{};
     };
 
@@ -156,8 +189,9 @@ namespace FileTransferProtocol
 
     /**
      * @brief A handle for one client connection, ready for the handshake: the name check without partial wildcards,
-     *        SNI for a DNS name, and a verify callback that never blocks. The callback keeps the certificate and the
-     *        first verify failure, and accepts a failed certificate only when its public key matches the pin.
+     *        SNI for a DNS name, and a certificate check that never blocks. The check keeps the certificate and every
+     *        verify failure. Without a pin it accepts what the authorities vouch for, with a pin only a certificate
+     *        whose public key matches it.
      *
      * @return A Failure naming the setting OpenSSL refused.
      */
@@ -167,7 +201,7 @@ namespace FileTransferProtocol
      * @brief Who vouched for the certificate of a completed handshake on @p handle.
      *
      * @return NoSecureConnection when the handshake resumed a session, which checks no certificate, or left no
-     *         certificate behind, which the verify callback does not allow.
+     *         certificate behind, which the certificate check does not allow.
      */
     std::expected<TrustedCertificate, RemoteIo::RemoteError> trustOf(SSL* handle);
 
@@ -179,7 +213,7 @@ namespace FileTransferProtocol
     std::optional<Sha256Digest> peerCertificateDigest(SSL* handle);
 
     /**
-     * @brief Why a handshake on @p handle failed: TrustRequired when the verify callback refused the certificate,
+     * @brief Why a handshake on @p handle failed: TrustRequired when the certificate check refused the certificate,
      *        otherwise NoSecureConnection that says whether it timed out (@p timedOut), the stream ended or what
      *        OpenSSL reported.
      */
@@ -192,7 +226,8 @@ namespace FileTransferProtocol
     RemoteIo::RemoteError asNoSecureConnection(RemoteIo::RemoteError error);
 
     /**
-     * @brief The certificate the verify callback refused on @p handle.
+     * @brief The certificate the certificate check refused on @p handle. Without verify failures it was refused for
+     *        its public key alone, which is not the pinned one.
      */
     std::optional<CertificateInfo> refusedCertificate(SSL* handle);
 

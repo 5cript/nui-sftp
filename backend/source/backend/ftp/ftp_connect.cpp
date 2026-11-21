@@ -324,8 +324,8 @@ namespace FtpConnect
         {
             if (!certificate)
                 return fmt::format("The certificate of the FTP server {} is not trusted.", server);
-            const auto why =
-                certificate->verifyFailure.empty() ? std::string{} : fmt::format(" ({})", certificate->verifyFailure);
+            const auto reasons = FileTransferProtocol::reasonsOf(certificate->verifyFailures);
+            const auto why = reasons.empty() ? std::string{} : fmt::format(" ({})", reasons);
             return fmt::format(
                 "The certificate of the FTP server {} is not trusted{}. Its SHA-256 fingerprint is {}.",
                 server,

@@ -28,7 +28,7 @@ namespace FtpConnect
             {"subjectAlternativeNames", certificate.subjectAlternativeNames},
             {"publicKeySha256", FileTransferProtocol::formatDigest(certificate.publicKeySha256)},
             {"certificateSha256", FileTransferProtocol::formatDigest(certificate.certificateSha256)},
-            {"verifyFailure", certificate.verifyFailure},
+            {"verifyFailure", FileTransferProtocol::reasonsOf(certificate.verifyFailures)},
             {"pinnedKeyDiffers", question.pinnedKeyDiffers},
         };
     }
