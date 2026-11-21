@@ -312,9 +312,11 @@ namespace Test
             };
         }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
         /**
          * @brief Has the TLS contexts made while it lives trust the authority of the tests, as an authority of the
-         *        system: OpenSSL reads SSL_CERT_FILE for its default authorities.
+         *        system: OpenSSL reads SSL_CERT_FILE for its default authorities. On Linux only, elsewhere OpenSSL
+         *        has no authorities of the system and the system itself vouches, see answeringPlatform().
          */
         class AuthorityOfTheTests
         {
@@ -334,6 +336,7 @@ namespace Test
             Utility::TemporaryDirectory directory_{temporaryRoot, true};
             ScopedVariable certificateFile_{"SSL_CERT_FILE", Paths::nativeToUtf8(file())};
         };
+#endif
 
         /**
          * @brief The greeting and AUTH TLS, answered with @p certificate.
@@ -1332,6 +1335,7 @@ namespace Test
         EXPECT_FALSE(trustStore_.trustedKeyOf(options.host, server_->port()));
     }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
     TEST_F(FtpConnectTests, AlwaysTrustingACertificateTheAuthoritiesVouchForForgetsTheTrustedKey)
     {
         using namespace FtpConnectTesting;
@@ -1385,6 +1389,7 @@ namespace Test
         EXPECT_EQ(now->publicKey, prompts->trustQuestions.front().certificate.publicKeySha256);
         EXPECT_FALSE(now->lasting);
     }
+#endif
 
     TEST_F(FtpConnectTests, ACertificateTheSystemTrustsIsNotPutToTheUser)
     {
