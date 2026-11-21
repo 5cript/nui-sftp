@@ -2,11 +2,15 @@
 
 #include <ftp/client/platform_trust.hpp>
 #include <ftp/client/system_authorities.hpp>
+#include <ftp/client/tls.hpp>
 
 #include <gtest/gtest.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <system_error>
 
@@ -78,6 +82,22 @@ namespace FileTransferProtocol::Test
         std::error_code error{};
         EXPECT_TRUE(std::filesystem::is_regular_file(bundles.defaultFile, error) || replacementBundleOf(bundles))
             << bundles.defaultFile;
+    }
+#endif
+
+#if defined(__APPLE__) || defined(_WIN32)
+    TEST(SystemAuthorityTests, OpenSslTrustsNoAuthorityWhereTheSystemDecides)
+    {
+        const auto context = TlsContext::create({});
+        ASSERT_TRUE(context) << context.error().toString();
+        X509_STORE* const store = SSL_CTX_get_cert_store((*context)->context().native_handle());
+        const auto free = [](STACK_OF(X509)* certificates)
+        {
+            sk_X509_pop_free(certificates, X509_free);
+        };
+        const std::unique_ptr<STACK_OF(X509), decltype(free)> trusted{X509_STORE_get1_all_certs(store), free};
+        ASSERT_TRUE(trusted);
+        EXPECT_EQ(sk_X509_num(trusted.get()), 0);
     }
 #endif
 

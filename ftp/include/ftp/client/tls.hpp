@@ -130,7 +130,7 @@ namespace FileTransferProtocol
 
     struct TlsContextOptions
     {
-        /** @brief Trusts the authorities of the system, see addSystemAuthorities(). */
+        /** @brief Trusts the authorities of the system, which adds some on Linux only, see addSystemAuthorities(). */
         bool systemAuthorities{true};
         /** @brief Certificates in PEM of more authorities to trust. */
         std::vector<std::string> authorities{};

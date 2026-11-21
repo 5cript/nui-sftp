@@ -3,12 +3,8 @@
 #include "test_control_connection.hpp"
 
 #include <ftp/client/platform_trust.hpp>
-#include <ftp/client/system_authorities.hpp>
 #include <ftp/client/tls.hpp>
 #include <ftp/support/test_pki.hpp>
-#ifdef _WIN32
-#    include <ftp/support/windows_certificate_store.hpp>
-#endif
 
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
@@ -27,7 +23,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -607,29 +602,6 @@ namespace FileTransferProtocol::Test
             platformVerdictOf({derOfPem(tlsTestPki().expired.certificate)}, "127.0.0.1", {}, anchors),
             PlatformVerdict::Refused
         );
-    }
-#endif
-
-#ifdef _WIN32
-    TEST_F(ControlConnectionTlsTests, AnAuthorityOfAWindowsStoreIsTrusted)
-    {
-        TemporaryCertificateStore store{};
-        ASSERT_TRUE(store.add(tlsTestPki().authority));
-        ASSERT_TRUE(store.add(tlsTestPki().expired.certificate));
-        auto context = TlsContext::create({.systemAuthorities = false});
-        ASSERT_TRUE(context) << context.error().toString();
-        const std::array names{store.name()};
-        // The expired certificate is skipped.
-        EXPECT_EQ(addStoreAuthorities(SSL_CTX_get_cert_store((*context)->context().native_handle()), names), 1u);
-
-        server_->addConnection(explicitTls().expectDisconnect());
-        const auto connection = makeConnection();
-        connect(connection);
-        const auto trusted = startTls(
-            connection, TlsConnectionSettings{.context = std::move(context).value(), .serverName = "127.0.0.1"}
-        );
-        ASSERT_TRUE(trusted) << trusted.error().toString();
-        EXPECT_EQ(trusted->source, TrustSource::Authorities);
     }
 #endif
 

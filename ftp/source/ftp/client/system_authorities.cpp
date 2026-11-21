@@ -12,11 +12,11 @@
 
 namespace FileTransferProtocol
 {
+#if !defined(_WIN32) && !defined(__APPLE__)
     namespace
     {
         using Detail::refusedByOpenSsl;
 
-#if !defined(_WIN32) && !defined(__APPLE__)
         bool environmentChooses()
         {
             return std::getenv(X509_get_default_cert_file_env()) != nullptr ||
@@ -36,8 +36,8 @@ namespace FileTransferProtocol
                 return std::unexpected(refusedByOpenSsl(fmt::format("the authorities in {}", path)));
             return {};
         }
-#endif
     }
+#endif
 
     AuthorityBundles authorityBundlesOfThisSystem()
     {
@@ -67,19 +67,17 @@ namespace FileTransferProtocol
         return std::nullopt;
     }
 
+#if defined(_WIN32) || defined(__APPLE__)
+    std::expected<void, RemoteIo::RemoteError> addSystemAuthorities(SSL_CTX*)
+    {
+        return {};
+    }
+#else
     std::expected<void, RemoteIo::RemoteError> addSystemAuthorities(SSL_CTX* context)
     {
         if (SSL_CTX_set_default_verify_paths(context) != 1)
             return std::unexpected(refusedByOpenSsl("the authorities of the system"));
-#if defined(_WIN32)
-        constexpr std::array<wchar_t const*, 2> stores{L"ROOT", L"CA"};
-        const auto added = addStoreAuthorities(SSL_CTX_get_cert_store(context), stores);
-        Log::debug("FTP: Trusting {} certificates of the Windows certificate stores.", added);
-        return {};
-#elif defined(__APPLE__)
-        return {};
-#else
         return addReplacementBundle(context);
-#endif
     }
+#endif
 }

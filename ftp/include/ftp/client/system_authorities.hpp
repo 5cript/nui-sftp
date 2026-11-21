@@ -9,11 +9,6 @@
 #include <optional>
 #include <vector>
 
-#ifdef _WIN32
-#    include <cstddef>
-#    include <span>
-#endif
-
 namespace FileTransferProtocol
 {
     /**
@@ -42,22 +37,12 @@ namespace FileTransferProtocol
     std::optional<std::filesystem::path> replacementBundleOf(AuthorityBundles const& bundles);
 
     /**
-     * @brief Trusts the authorities of the system in @p context: OpenSSL's default places, on Linux a known bundle in
-     *        place of a missing default file unless SSL_CERT_FILE or SSL_CERT_DIR choose, on Windows the ROOT and CA
-     *        stores. The Keychain of macOS is asked about refused certificates instead, see platformVerdictOf().
+     * @brief Trusts the authorities of the system in @p context, on Linux: OpenSSL's default places, and a known bundle
+     *        in place of a missing default file unless SSL_CERT_FILE or SSL_CERT_DIR choose. On macOS and Windows it
+     *        adds none: the system itself decides there, with what it distrusts, about every chain OpenSSL refused
+     *        for it, see platformVerdictOf().
      *
      * @return A Failure naming what OpenSSL refused.
      */
     std::expected<void, RemoteIo::RemoteError> addSystemAuthorities(SSL_CTX* context);
-
-#ifdef _WIN32
-    /**
-     * @brief Adds the certificates of the system stores @p storeNames of the current user, which include the ones of
-     *        the machine, to @p store. Certificates outside their validity and ones whose extended key usage leaves
-     *        out server authentication are skipped. A store that cannot be opened is logged and skipped.
-     *
-     * @return How many certificates were added.
-     */
-    std::size_t addStoreAuthorities(X509_STORE* store, std::span<wchar_t const* const> storeNames);
-#endif
 }

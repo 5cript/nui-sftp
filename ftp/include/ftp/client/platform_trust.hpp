@@ -15,7 +15,7 @@ namespace FileTransferProtocol
         Trusted,
         /** @brief The system does not trust it, could not be asked or the check was stopped. */
         Refused,
-        /** @brief The platform has no check of its own beyond the authorities OpenSSL loaded. */
+        /** @brief The platform has no check of its own, OpenSSL loaded the authorities of the system. */
         Unavailable,
     };
 
