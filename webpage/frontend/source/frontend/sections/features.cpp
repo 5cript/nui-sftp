@@ -76,6 +76,15 @@ namespace NuiSftpPage::Sections
                         screenshotUrl("session.png"),
                     },
                     {
+                        "ftp",
+                        "FTP and FTPS",
+                        "FTP servers open in the same file view, unencrypted or over explicit or implicit TLS, "
+                        "with synchronization, file tracking and archives. Certificates are checked against "
+                        "the authorities your system trusts, and one that nobody vouches for is shown to you "
+                        "before a password is sent.",
+                        {"Explicit or implicit TLS", "Certificate check", "Parallel transfers"},
+                    },
+                    {
                         "history_snippets",
                         "Command history and snippets",
                         "Commands you run in a terminal are recorded per host, so you can search them, sort them "

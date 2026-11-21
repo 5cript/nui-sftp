@@ -61,7 +61,7 @@ namespace NuiSftpPage::Sections
                             " font-family: 'Inter', sans-serif;"
                             " font-size: 13px;"
                             " line-height: 1.5",
-                }("A cross platform ssh and sftp client"),
+                }("A cross platform ssh, sftp and ftp client"),
                 div{
                     class_ = "repo-meta"
                 }(span{}(b{}("C++")), span{}(b{}("MIT"), text{std::string_view{" license"}}())),
@@ -71,6 +71,7 @@ namespace NuiSftpPage::Sections
                             " margin-top: 4px;"
                             " font-size: 11px",
                 }(span{style = kRepoTagStyle}("sftp"),
+                    span{style = kRepoTagStyle}("ftp"),
                     span{style = kRepoTagStyle}("ssh"),
                     span{style = kRepoTagStyle}("cpp")));
         }

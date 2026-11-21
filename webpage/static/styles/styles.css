@@ -896,7 +896,7 @@ h2.section-title {
 
 /* ---------- features grid (small recap) ---------- */
 .features-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
 }
 .feature-mini {
   padding: 18px;

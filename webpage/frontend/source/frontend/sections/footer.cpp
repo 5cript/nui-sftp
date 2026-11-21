@@ -28,7 +28,7 @@ namespace NuiSftpPage::Sections
                     class_ = "brand"
                 }(div{class_ = "brand-mark lg"}(brandMarkSvg()),
                     span{style = "font-weight: 700; font-size: 18px"}("NuiSftp")),
-                p{}("An SFTP and SSH client for Windows, Linux and macOS. Free and open source.")
+                p{}("An SFTP, FTP and SSH client for Windows, Linux and macOS. Free and open source.")
             );
         }
 
