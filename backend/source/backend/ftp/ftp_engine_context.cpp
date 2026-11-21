@@ -13,8 +13,8 @@
 namespace
 {
     /**
-     * @brief The engine threads on one io_context. An exception that escapes a handler is logged and its thread runs
-     *        on.
+     * @brief The engine threads on one io_context. An exception that escapes a handler is logged and ends the
+     *        application: the operation of that handler is lost and what it left half done is not to be trusted.
      */
     class EngineThreads
     {
@@ -56,13 +56,7 @@ namespace
         }
 
       private:
-        void run()
-        {
-            while (!context_.stopped())
-                runUntilStoppedOrThrown();
-        }
-
-        void runUntilStoppedOrThrown()
+        void run() noexcept
         {
             try
             {
@@ -70,13 +64,15 @@ namespace
             }
             catch (std::exception const& exception)
             {
-                Log::error(
-                    "FTP engine: A handler threw, the engine thread goes on: {}", Utility::errorMessage(exception)
+                Log::critical(
+                    "FTP engine: A handler threw, the application ends: {}", Utility::errorMessage(exception)
                 );
+                std::terminate();
             }
             catch (...)
             {
-                Log::error("FTP engine: A handler threw something that is no exception, the engine thread goes on.");
+                Log::critical("FTP engine: A handler threw something that is no exception, the application ends.");
+                std::terminate();
             }
         }
 

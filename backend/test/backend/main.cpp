@@ -99,6 +99,8 @@ int main(int argc, char** argv)
     temporaryRoot = processTemporary.path();
 
     ::testing::InitGoogleTest(&argc, argv);
+    // The death tests start threads, so their child has to be a process of its own from the start.
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ::testing::AddGlobalTestEnvironment(new Test::NuiEnvGuard{});
     return RUN_ALL_TESTS();
 }
