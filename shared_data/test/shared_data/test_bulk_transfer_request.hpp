@@ -72,17 +72,23 @@ namespace SharedData::Test
                         .sizeBytes = 7,
                         .mtime = 1700000000u,
                         .mtimeNsec = 5u},
+                    {.source = remote("/srv/listed.txt"),
+                        .destination = local("listed.txt"),
+                        .mtime = 1699999980u,
+                        .mtimePrecision = TimePrecision::Minute},
                 },
             .localRoot = local(""),
         };
         const nlohmann::json json = request;
         const auto read = json.get<BulkDownloadRequest>();
-        ASSERT_EQ(read.entries.size(), 1u);
+        ASSERT_EQ(read.entries.size(), 2u);
         EXPECT_EQ(read.entries[0].source.value(), "/srv/a.txt");
         EXPECT_EQ(read.entries[0].destination, local("a.txt"));
         EXPECT_EQ(read.entries[0].sizeBytes, 7u);
         EXPECT_EQ(read.entries[0].mtime, 1700000000u);
         EXPECT_EQ(read.entries[0].mtimeNsec, 5u);
+        EXPECT_EQ(read.entries[0].mtimePrecision, TimePrecision::Second);
+        EXPECT_EQ(read.entries[1].mtimePrecision, TimePrecision::Minute);
         EXPECT_EQ(read.localRoot, local(""));
         EXPECT_FALSE(read.remoteRoot);
     }

@@ -19,8 +19,11 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <iterator>
@@ -1721,6 +1724,63 @@ namespace Test
         EXPECT_EQ(completed, (std::set<std::string>{card.value(), entryIds[1].value()}));
         EXPECT_EQ(localNames(root), (std::set<std::string>{"Pictures", "file1.txt"}));
         EXPECT_EQ(localNames(root / "Pictures"), (std::set<std::string>{"image1.png", "image2.jpg"}));
+    }
+
+    TEST_F(OperationQueueTests, ABulkDownloadAsksForTheTimeOfAFileItsRequestTellsRounded)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue(notInheritingOptions());
+        setPaused(false);
+
+        // 2023-11-14 22:13:57 UTC, which a listing to the minute tells as 22:13:00.
+        constexpr std::uint64_t sourceTime{1700000037u};
+        auto setting = sftp->later(
+            RemoteIo::SetModificationTime{
+                .path = remote("/home/test/file1.txt"),
+                .modificationTime = std::chrono::system_clock::time_point{std::chrono::seconds{sourceTime}},
+            }
+        );
+        ASSERT_EQ(setting.wait_for(std::chrono::seconds{10}), std::future_status::ready);
+        ASSERT_TRUE(setting.get().has_value());
+
+        const auto local = localDirectory_.path() / "file1.txt";
+        const SharedData::BulkDownloadRequest request{
+            .entries = {
+                {.source = remote("/home/test/file1.txt"),
+                    .destination = toLocal(local),
+                    .sizeBytes = std::string{"Fake file content"}.size(),
+                    .mtime = sourceTime - sourceTime % 60u,
+                    .mtimePrecision = SharedData::TimePrecision::Minute},
+            },
+        };
+        const auto entryId = Ids::generateOperationId();
+        EXPECT_EQ(
+            runOnStrand(
+                [&]()
+                {
+                    return queue->addBulkDownloadOperation(
+                        sftp,
+                        request,
+                        [&entryId](std::size_t)
+                        {
+                            return entryId;
+                        },
+                        Ids::generateOperationId()
+                    );
+                }
+            ),
+            1u
+        );
+
+        workUntilCompletions(1);
+        const auto finished = completions();
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_EQ(finished.front().reason, SharedData::OperationCompletionReason::Completed);
+        const auto since = std::chrono::file_clock::to_sys(std::filesystem::last_write_time(local)).time_since_epoch();
+        EXPECT_EQ(
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(since).count()), sourceTime
+        );
     }
 
     TEST_F(OperationQueueTests, AdoptedBulkUploadIsQueuedAgainUnderItsCardId)

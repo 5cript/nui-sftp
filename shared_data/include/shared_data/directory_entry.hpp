@@ -1,5 +1,6 @@
 #pragma once
 
+#include <utility/describe.hpp>
 #include <utility/directory_traversal.hpp>
 
 #include <paths/relative_path.hpp>
@@ -34,6 +35,7 @@ namespace SharedData
         /** @brief FTP's LIST of an older entry: a year instead of a time of day. */
         Day,
     };
+    BOOST_DESCRIBE_ENUM(TimePrecision, Second, Minute, Day)
 
     /**
      * @brief How many seconds @p precision covers.

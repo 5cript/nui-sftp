@@ -63,8 +63,8 @@ namespace SharedData
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
         /**
-         * @brief How exact mtime is, a download asks the server where it was rounded. The backend fills it from its
-         *        sync scan, it is not in the request the frontend sends.
+         * @brief How exact mtime is, as the listing or the scan told it. A download asks the server where it is
+         *        rounded.
          */
         TimePrecision mtimePrecision{TimePrecision::Second};
         /** @brief See @ref BulkUploadEntry::mayOverwrite. */
@@ -75,7 +75,7 @@ namespace SharedData
     BOOST_DESCRIBE_STRUCT(
         BulkDownloadEntry,
         (),
-        (source, destination, sizeBytes, isDirectory, withoutContent, mtime, mtimeNsec, mayOverwrite)
+        (source, destination, sizeBytes, isDirectory, withoutContent, mtime, mtimeNsec, mtimePrecision, mayOverwrite)
     )
 
     /**
