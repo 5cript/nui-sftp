@@ -29,8 +29,7 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
         {
             if (params.engagedStatus)
                 return "margin-top: 20px; padding-top: 32px;";
-            // A top margin would collapse into the subgroup in a block box but not in a grid, moving the frame line
-            // away from the title.
+            // The title is placed from the top of the subgroup, a top margin would move the frame line away from it.
             if (params.groupTitle)
                 return "padding-top: 16px;";
             return "";
