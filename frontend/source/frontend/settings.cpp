@@ -1408,124 +1408,61 @@ Nui::ElementRenderer Settings::inheritableSettings()
                 .text = language->getObserved("settings", "inheritableSettingsInfoMessage"),
                 .styleVariant = Snc::StyleVariant::Primary,
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sshOptions,
                 .content = impl_->sshOptions.render(),
                 .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
                 .currentGroupKey = &impl_->sshOptions.groupKey,
                 .groupKeys = &impl_->sshOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.ftpOptions,
                 .content = impl_->ftpOptions.render(),
                 .headerTitle = language->getObserved("settings", "ftpOptionsGroupName"),
                 .currentGroupKey = &impl_->ftpOptions.groupKey,
                 .groupKeys = &impl_->ftpOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sftpOptions,
                 .content = impl_->sftpOptions.render(),
                 .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
                 .currentGroupKey = &impl_->sftpOptions.groupKey,
                 .groupKeys = &impl_->sftpOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.terminalOptions,
                 .content = impl_->terminalOptions.render(),
                 .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
                 .currentGroupKey = &impl_->terminalOptions.groupKey,
                 .groupKeys = &impl_->terminalOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.queueOptions,
                 .content = impl_->queueOptions.render(),
                 .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
                 .currentGroupKey = &impl_->queueOptions.groupKey,
                 .groupKeys = &impl_->queueOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.historyOptions,
                 .content = impl_->historyOptions.render(),
                 .headerTitle = language->getObserved("settings", "historyOptionsGroupName"),
                 .currentGroupKey = &impl_->historyOptions.groupKey,
                 .groupKeys = &impl_->historyOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.termios,
                 .content = impl_->termiosSettings.render(),
                 .headerTitle = language->getObserved("settings", "termiosGroupName"),
                 .currentGroupKey = &impl_->termiosSettings.groupKey,
                 .groupKeys = &impl_->termiosSettings.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheritable
             })
         );
         // clang-format on
@@ -1804,41 +1741,23 @@ Nui::ElementRenderer Settings::currentSession()
             // the connection-relevant fields (host, port, etc.) are visible
             // without scrolling. Sort/startup/layout controls live further
             // down — they're rarely-touched session metadata.
-            div{
-                class_ = "settings-visibility-box",
-                style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {
-                    return type == Persistence::TerminalEngineType::ssh ? "" : "display: none;";
-                }),
-            }(
-                h1{
-                    class_ = "settings-header"
-                }(language->getObserved("settings", "sessionOptions", "sshSessionServerOptions")),
+            engineServerSettings(
+                Persistence::TerminalEngineType::ssh,
+                "sshSessionServerOptions",
                 impl_->currentSessionOptions.sshSessionOptions.renderServerSettings([this]() {
                     onChange();
                 })
             ),
-            div{
-                class_ = "settings-visibility-box",
-                style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {
-                    return type == Persistence::TerminalEngineType::ftp ? "" : "display: none;";
-                }),
-            }(
-                h1{
-                    class_ = "settings-header"
-                }(language->getObserved("settings", "sessionOptions", "ftpSessionServerOptions")),
+            engineServerSettings(
+                Persistence::TerminalEngineType::ftp,
+                "ftpSessionServerOptions",
                 impl_->currentSessionOptions.ftpSessionOptions.renderServerSettings([this]() {
                     onChange();
                 })
             ),
-            div{
-                class_ = "settings-visibility-box",
-                style = observe(impl_->currentSessionOptions.terminalEngineType.state()).generate([](Persistence::TerminalEngineType type) {
-                    return type == Persistence::TerminalEngineType::shell ? "" : "display: none;";
-                }),
-            }(
-                h1{
-                    class_ = "settings-header"
-                }(language->getObserved("settings", "sessionOptions", "localSessionOptions")),
+            engineServerSettings(
+                Persistence::TerminalEngineType::shell,
+                "localSessionOptions",
                 subgroup({.onChange =
                         [this]()
                     {
@@ -1862,18 +1781,9 @@ Nui::ElementRenderer Settings::currentSession()
             group({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.overarchingSettings,
                 .content = std::move(overarchingSettings),
-                .headerTitle = language->getObserved("settings", "sessionOptions", "basicSettings"),
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .headerTitle = language->getObserved("settings", "sessionOptions", "basicSettings")
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sshOptions,
                 .content = impl_->currentSessionOptions.sshSessionOptions.sshOptions.render(),
                 .headerTitle = language->getObserved("settings", "sshOptionsGroupName"),
@@ -1881,18 +1791,9 @@ Nui::ElementRenderer Settings::currentSession()
                 .groupKeys = &impl_->currentSessionOptions.sshSessionOptions.sshOptions.groupKeys,
                 .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
                 .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
-                .engineTypeFilterValues = {Persistence::TerminalEngineType::ssh},
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .engineTypeFilterValues = {Persistence::TerminalEngineType::ssh}
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.ftpOptions,
                 .content = impl_->currentSessionOptions.ftpSessionOptions.ftpOptions.render(),
                 .headerTitle = language->getObserved("settings", "ftpOptionsGroupName"),
@@ -1900,18 +1801,9 @@ Nui::ElementRenderer Settings::currentSession()
                 .groupKeys = &impl_->currentSessionOptions.ftpSessionOptions.ftpOptions.groupKeys,
                 .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
                 .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
-                .engineTypeFilterValues = {Persistence::TerminalEngineType::ftp},
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .engineTypeFilterValues = {Persistence::TerminalEngineType::ftp}
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.sftpOptions,
                 .content = impl_->currentSessionOptions.sftpOptions.render(),
                 .headerTitle = language->getObserved("settings", "sftpOptionsGroupName"),
@@ -1919,84 +1811,39 @@ Nui::ElementRenderer Settings::currentSession()
                 .groupKeys = &impl_->currentSessionOptions.sftpOptions.groupKeys,
                 .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
                 .engineTypeFilter = &impl_->currentSessionOptions.terminalEngineType.state(),
-                .engineTypeFilterValues = {Persistence::TerminalEngineType::ssh, Persistence::TerminalEngineType::ftp},
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .engineTypeFilterValues = {Persistence::TerminalEngineType::ssh, Persistence::TerminalEngineType::ftp}
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.terminalOptions,
                 .content = impl_->currentSessionOptions.terminalOptions.render(),
                 .headerTitle = language->getObserved("settings", "terminalOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.terminalOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.terminalOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.queueOptions,
                 .content = impl_->currentSessionOptions.queueOptions.render(),
                 .headerTitle = language->getObserved("settings", "queueOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.queueOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.queueOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.historyOptions,
                 .content = impl_->currentSessionOptions.historyOptions.render(),
                 .headerTitle = language->getObserved("settings", "historyOptionsGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.historyOptions.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.historyOptions.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting
             }),
-            group({
+            optionsGroup({
                 .isCollapsed = impl_->collapsibleStates.sessionCollapsibles.termios,
                 .content = impl_->currentSessionOptions.termios.render(),
                 .headerTitle = language->getObserved("settings", "termiosGroupName"),
                 .currentGroupKey = &impl_->currentSessionOptions.termios.groupKey,
                 .groupKeys = &impl_->currentSessionOptions.termios.groupKeys,
-                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting,
-                .addGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    addGroup(currentGroupKey, groupKeys);
-                },
-                .removeGroup = [this](auto& currentGroupKey, auto& groupKeys){
-                    removeGroup(currentGroupKey, groupKeys);
-                },
-                .onChangeGroup = [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior){
-                    onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
-                }
+                .inheritanceBehavior = SettingGroupParameters::InheritanceBehavior::Inheriting
             })
         );
         // clang-format on
@@ -2126,4 +1973,49 @@ void Settings::onChangeGroup(
             saveSession(**impl_->activeSession);
         reloadInheritance();
     }
+}
+
+Nui::ElementRenderer Settings::optionsGroup(SettingGroupParameters&& params)
+{
+    params.addGroup = [this](auto& currentGroupKey, auto& groupKeys)
+    {
+        addGroup(currentGroupKey, groupKeys);
+    };
+    params.removeGroup = [this](auto& currentGroupKey, auto& groupKeys)
+    {
+        removeGroup(currentGroupKey, groupKeys);
+    };
+    params.onChangeGroup =
+        [this](auto& currentGroupKey, auto const& newValue, auto& groupKeys, auto inheritanceBehavior)
+    {
+        onChangeGroup(currentGroupKey, newValue, groupKeys, inheritanceBehavior);
+    };
+    return group(std::move(params));
+}
+
+Nui::ElementRenderer Settings::engineServerSettings(
+    Persistence::TerminalEngineType engineType,
+    std::string const& titleKey,
+    Nui::ElementRenderer content
+)
+{
+    using namespace Nui::Attributes;
+    using Nui::Elements::div;
+    using Nui::Elements::h1;
+
+    // clang-format off
+    return div{
+        class_ = "settings-visibility-box",
+        style = Nui::observe(impl_->currentSessionOptions.terminalEngineType.state()).generate(
+            [engineType](Persistence::TerminalEngineType type) {
+                return type == engineType ? "" : "display: none;";
+            }
+        ),
+    }(
+        h1{
+            class_ = "settings-header"
+        }(language->getObserved("settings", "sessionOptions", titleKey.c_str())),
+        std::move(content)
+    );
+    // clang-format on
 }

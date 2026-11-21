@@ -120,6 +120,22 @@ class Settings
         SettingGroupParameters::InheritanceBehavior inheritanceBehavior
     );
 
+    /**
+     * @brief A settings group whose option groups this page adds, removes and switches.
+     */
+    Nui::ElementRenderer optionsGroup(SettingGroupParameters&& params);
+
+    /**
+     * @brief The server settings of one engine type under their header, shown while the session has that type.
+     *
+     * @param titleKey The language key of the header, below "settings" and "sessionOptions".
+     */
+    Nui::ElementRenderer engineServerSettings(
+        Persistence::TerminalEngineType engineType,
+        std::string const& titleKey,
+        Nui::ElementRenderer content
+    );
+
   private:
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
