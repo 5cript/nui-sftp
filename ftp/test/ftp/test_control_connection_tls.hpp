@@ -941,7 +941,8 @@ namespace FileTransferProtocol::Test
     TEST_F(ControlConnectionTlsTests, RenegotiationRequestEndsTheConnection)
     {
         // The client answers with a no_renegotiation alert, an OpenSSL server ends the connection on it. Nothing is
-        // written meanwhile, Asio would keep the alert behind a write in flight until the next one.
+        // written meanwhile, the alert leaves even when the read that made it came in before the NOOP's write was
+        // through.
         server_->addConnection(explicitTls({.maximumVersion = TLS1_2_VERSION})
                 .expect("NOOP")
                 .reply("200 Fine")

@@ -1,4 +1,5 @@
 #include <ftp/client/control_connection.hpp>
+#include <ftp/client/read_after_write_stream.hpp>
 #include <ftp/protocol/protocol_error.hpp>
 #include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
@@ -206,6 +207,8 @@ namespace FileTransferProtocol
     class ControlConnection::Transport : public std::enable_shared_from_this<Transport>
     {
       public:
+        using TlsStream = asio::ssl::stream<Detail::ReadAfterWriteStream<RecordingSocket>>;
+
         explicit Transport(asio::strand<asio::any_io_executor> const& strand)
             : socket_{strand}
             , closeTimer_{strand}
@@ -227,7 +230,7 @@ namespace FileTransferProtocol
             tls_.emplace(RecordingSocket{socket_, received_}, handle.release());
         }
 
-        asio::ssl::stream<RecordingSocket>& tls()
+        TlsStream& tls()
         {
             return *tls_;
         }
@@ -371,7 +374,7 @@ namespace FileTransferProtocol
         asio::ip::tcp::socket socket_;
         /** @brief The first bytes the TLS stream read, see RecordingSocket. */
         std::string received_{};
-        std::optional<asio::ssl::stream<RecordingSocket>> tls_{};
+        std::optional<TlsStream> tls_{};
         /** @brief Bounds a close over TLS. */
         asio::steady_timer closeTimer_;
         /** @brief Takes what the server sends after the end of TLS, the drain holds the transport. */
