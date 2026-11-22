@@ -85,6 +85,7 @@ namespace FileTransferProtocol::Test
             thread_.stop();
             engine_.reset();
             LoginConformance::TearDown();
+            expectWorkspaceRemoved(endpoint_, workspace_);
         }
 
         Paths::RemotePath remotePathOf(std::string_view name) const

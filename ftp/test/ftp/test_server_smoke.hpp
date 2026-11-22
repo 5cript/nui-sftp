@@ -120,6 +120,9 @@ namespace FileTransferProtocol::Test
         const auto size = client_.command("SIZE chunk.bin");
         ASSERT_TRUE(size.has_value()) << size.error();
         EXPECT_EQ(size->text, "213 16384");
+
+        const auto removed = removeWorkspace(endpoint_, *workspace);
+        EXPECT_TRUE(removed.has_value()) << removed.error();
     }
 
     INSTANTIATE_TEST_SUITE_P(

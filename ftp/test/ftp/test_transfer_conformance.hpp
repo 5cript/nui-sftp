@@ -80,6 +80,12 @@ namespace FileTransferProtocol::Test
             ASSERT_NO_FATAL_FAILURE(logInOnce());
         }
 
+        void TearDown() override
+        {
+            LoginConformance::TearDown();
+            expectWorkspaceRemoved(endpoint_, workspace_);
+        }
+
         /**
          * @brief A login whose certificate, for TLS, was pinned after a first refused attempt.
          */

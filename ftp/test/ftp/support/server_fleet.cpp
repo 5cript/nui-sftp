@@ -282,6 +282,14 @@ namespace FileTransferProtocol::Test
         return workspace;
     }
 
+    std::expected<void, std::string> removeWorkspace(ServerEndpoint const& endpoint, std::string_view workspace)
+    {
+        const auto removed = Docker::executeIn(endpoint.container, fmt::format("rm -rf {}", Docker::quote(workspace)));
+        if (removed.exitCode != 0)
+            return std::unexpected(fmt::format("Removing the workspace on {}: {}", endpoint.server, removed.output));
+        return {};
+    }
+
     std::expected<void, std::string> startFleet(std::filesystem::path const& file)
     {
         // A run that stopped halfway left its containers behind.

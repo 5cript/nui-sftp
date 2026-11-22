@@ -59,6 +59,11 @@ namespace FileTransferProtocol::Test
     std::expected<std::string, std::string> prepareWorkspace(ServerEndpoint const& endpoint);
 
     /**
+     * @brief Removes a directory of prepareWorkspace(). The workspaces lie on a tmpfs, which holds them until then.
+     */
+    std::expected<void, std::string> removeWorkspace(ServerEndpoint const& endpoint, std::string_view workspace);
+
+    /**
      * @brief Builds the images, starts every variant of every selected server and writes the endpoints to @p file.
      *        The containers keep running until stopFleet(). Without docker the file says why the suites skip.
      */

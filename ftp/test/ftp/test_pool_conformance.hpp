@@ -61,6 +61,7 @@ namespace FileTransferProtocol::Test
             for (auto const& pool : pools_)
                 run(pool, pool->close());
             LoginConformance::TearDown();
+            expectWorkspaceRemoved(endpoint_, workspace_);
         }
 
         virtual std::string_view variant() const

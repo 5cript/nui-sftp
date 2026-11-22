@@ -50,6 +50,17 @@ namespace FileTransferProtocol::Test
                 connection->close();
         }
 
+        /**
+         * @brief Removes the workspace of a case, if it got one.
+         */
+        static void expectWorkspaceRemoved(ServerEndpoint const& endpoint, std::string const& workspace)
+        {
+            if (workspace.empty())
+                return;
+            const auto removed = removeWorkspace(endpoint, workspace);
+            EXPECT_TRUE(removed.has_value()) << removed.error();
+        }
+
         std::string const& server() const
         {
             return std::get<0>(GetParam());
