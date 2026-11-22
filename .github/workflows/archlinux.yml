@@ -29,6 +29,9 @@ jobs:
       # daemon, next to this one. Without docker they fail on purpose.
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock
+      # ThreadSanitizer restarts its tests with ASLR off when the runner's address layout does not fit it, and the
+      # default seccomp profile refuses that personality.
+      options: --security-opt seccomp=unconfined
 
     steps:
       - name: Install dependencies
