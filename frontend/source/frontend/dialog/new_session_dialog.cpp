@@ -1,6 +1,5 @@
 #include <frontend/icon_from_name.hpp>
 #include <frontend/dialog/new_session_dialog.hpp>
-#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/session_icon_options.hpp>
 #include <frontend/dialog/localized_button_labels.hpp>
 #include <frontend/settings/ftp_session_options.hpp>

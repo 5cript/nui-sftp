@@ -109,7 +109,6 @@ target_sources(
         dialog/new_session_dialog.cpp
         dialog/file_property_dialog.cpp
         dialog/direct_connect_dialog.cpp
-        dialog/dialog_buttons_keyboard_support.cpp
         dialog/archive_transfer_dialog.cpp
         dialog/snippet_import_dialog.cpp
         dialog/snippet_presets_dialog.cpp

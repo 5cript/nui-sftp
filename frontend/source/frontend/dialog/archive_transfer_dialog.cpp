@@ -1,5 +1,4 @@
 #include <frontend/dialog/archive_transfer_dialog.hpp>
-#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 #include <shared_data/file_operations/compression_level_range.hpp>
@@ -15,6 +14,7 @@
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 #include <nui/event_system/observed_value_combinator.hpp>
 
 #include <fmt/format.h>
@@ -306,7 +306,6 @@ Nui::ElementRenderer ArchiveTransferDialog::dialogBody()
                         id = fmt::format("{}-filename", impl_->id),
                         "spellcheck"_attr = "false",
                         "keydown"_event = [this](Nui::WebApi::KeyboardEvent event){
-                            dialogButtonContainerKeydown(event);
                             if (event.key() == "Enter") {
                                 event.preventDefault();
                                 impl_->confirmOnClose = true;
