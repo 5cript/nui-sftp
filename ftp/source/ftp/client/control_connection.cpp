@@ -1,5 +1,6 @@
 #include <ftp/client/control_connection.hpp>
 #include <ftp/client/read_after_write_stream.hpp>
+#include <ftp/client/tls_record_trail.hpp>
 #include <ftp/protocol/protocol_error.hpp>
 #include <ftp/protocol/reply_code.hpp>
 #include <ftp/protocol/reply_error.hpp>
@@ -129,7 +130,7 @@ namespace FileTransferProtocol
         constexpr std::size_t recordedBytes = 512u;
 
         /**
-         * @brief The socket under the TLS stream, keeping the first bytes the server sent and those of the latest read.
+         * @brief The socket under the TLS stream, keeping the first bytes the server sent and following its records.
          *        A server that refuses an implicit TLS connection answers in plaintext, vsftpd over its limit with a
          *        421. vsftpd also writes its fatal errors into an established TLS connection in plaintext.
          */
@@ -139,10 +140,10 @@ namespace FileTransferProtocol
             using executor_type = asio::ip::tcp::socket::executor_type;
             using lowest_layer_type = asio::ip::tcp::socket::lowest_layer_type;
 
-            RecordingSocket(asio::ip::tcp::socket& socket, std::string& received, std::string& latest)
+            RecordingSocket(asio::ip::tcp::socket& socket, std::string& received, TlsRecordTrail& trail)
                 : socket_{&socket}
                 , received_{&received}
-                , latest_{&latest}
+                , trail_{&trail}
             {}
 
             executor_type get_executor()
@@ -171,17 +172,15 @@ namespace FileTransferProtocol
                         slot,
                         asio::bind_executor(
                             executor,
-                            [received = received_,
-                                latest = latest_,
-                                buffers,
-                                handler = std::forward<HandlerT>(handler)](
+                            [received = received_, trail = trail_, buffers, handler = std::forward<HandlerT>(handler)](
                                 boost::system::error_code error, std::size_t size
                             ) mutable
                             {
-                                latest->resize(std::min(size, recordedBytes));
-                                asio::buffer_copy(asio::buffer(*latest), buffers);
+                                std::string bytes(size, '\0');
+                                asio::buffer_copy(asio::buffer(bytes), buffers);
                                 const auto missing = recordedBytes - std::min(recordedBytes, received->size());
-                                received->append(*latest, 0u, std::min(latest->size(), missing));
+                                received->append(bytes, 0u, std::min(bytes.size(), missing));
+                                trail->feed(bytes);
                                 std::move(handler)(error, size);
                             }
                         )
@@ -198,7 +197,7 @@ namespace FileTransferProtocol
           private:
             asio::ip::tcp::socket* socket_;
             std::string* received_;
-            std::string* latest_;
+            TlsRecordTrail* trail_;
         };
     }
 
@@ -229,7 +228,7 @@ namespace FileTransferProtocol
         void secure(SslHandle handle)
         {
             // The stream takes the handle over.
-            tls_.emplace(RecordingSocket{socket_, received_, latest_}, handle.release());
+            tls_.emplace(RecordingSocket{socket_, received_, trail_}, handle.release());
         }
 
         TlsStream& tls()
@@ -256,13 +255,13 @@ namespace FileTransferProtocol
         }
 
         /**
-         * @brief The line of a reply the latest read brought in plaintext, maybe cut short: vsftpd writes its code,
-         *        its text and the line end apart.
+         * @brief The line of a reply the server sent in plaintext behind its TLS records, maybe cut short: vsftpd
+         *        writes its code, its text and the line end apart.
          */
         std::optional<std::string_view> plaintextReplyLine() const
         {
-            const std::string_view latest{latest_};
-            const auto line = latest.substr(0u, latest.find_first_of("\r\n"));
+            const auto outside = trail_.outsideRecords();
+            const auto line = outside.substr(0u, outside.find_first_of("\r\n"));
             if (!replyCodeOf(line))
                 return std::nullopt;
             return line;
@@ -389,8 +388,8 @@ namespace FileTransferProtocol
         asio::ip::tcp::socket socket_;
         /** @brief The first bytes the TLS stream read, see RecordingSocket. */
         std::string received_{};
-        /** @brief The bytes of the latest read of the TLS stream, see RecordingSocket. */
-        std::string latest_{};
+        /** @brief What the server sent behind its TLS records, see RecordingSocket. */
+        TlsRecordTrail trail_{};
         std::optional<TlsStream> tls_{};
         /** @brief Bounds a close over TLS. */
         asio::steady_timer closeTimer_;
