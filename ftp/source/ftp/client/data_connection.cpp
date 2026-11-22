@@ -56,12 +56,14 @@ namespace FileTransferProtocol
         /**
          * @brief @p error, or an error for a TLS operation on @p handle that moved @p moved bytes without one because
          *        the stream failed before. OpenSSL 4 answers such an operation with SSL_ERROR_SSL and an empty error
-         *        queue, which Asio completes as success; OpenSSL 3 gave this error. A failed stream is in its
-         *        handshake again.
+         *        queue, which Asio completes as success; OpenSSL 3 answers a read behind a fatal alert with the end
+         *        of the stream. A failed stream is in its handshake again, where no data ends.
          */
         boost::system::error_code failedStreamAsError(boost::system::error_code error, std::size_t moved, SSL* handle)
         {
-            if (error || moved > 0u || SSL_in_init(handle) != 1)
+            if (moved > 0u || SSL_in_init(handle) != 1)
+                return error;
+            if (error && error != asio::error::eof && error != asio::ssl::error::stream_truncated)
                 return error;
             return asio::ssl::error::unspecified_system_error;
         }
