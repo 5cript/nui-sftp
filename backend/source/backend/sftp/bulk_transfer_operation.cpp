@@ -7,8 +7,6 @@
 #include <iterator>
 #include <optional>
 
-using namespace std::chrono_literals;
-
 namespace
 {
     /**
@@ -479,7 +477,7 @@ void BulkTransferOperation::emitProgress(bool force)
     std::ranges::transform(
         indexedFailures_, std::back_inserter(update.failedEntryIndices), &SharedData::IndexedFailure::index
     );
-    update.bytesPerSecond = updateBulkBytesPerSecond(update.bytesCurrent);
+    update.bytesPerSecond = rate_.sample(update.bytesCurrent, now);
     update.inFlight.reserve(slots_.size() + deferred_.size());
     for (auto const& slot : slots_)
     {
@@ -513,35 +511,6 @@ bool BulkTransferOperation::isBufferShortage(Error const& error) noexcept
 {
     return error.remoteError.has_value() &&
         error.remoteError->wrapperError == RemoteIo::WrapperErrors::BufferUnavailable;
-}
-
-std::int64_t BulkTransferOperation::updateBulkBytesPerSecond(std::uint64_t bytesNow)
-{
-    // Sample cadence and smoothing factor chosen so the displayed rate updates slowly enough to
-    // be readable. EWMA dampens the jump between samples.
-    constexpr auto sampleInterval = 1000ms;
-    constexpr double smoothingAlpha = 0.3;
-
-    const auto now = std::chrono::steady_clock::now();
-    if (lastBpsSampleTime_.time_since_epoch().count() == 0)
-    {
-        lastBpsSampleTime_ = now;
-        lastBpsSampleBytes_ = bytesNow;
-        return bulkBytesPerSecond_;
-    }
-    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBpsSampleTime_);
-    if (duration < sampleInterval)
-        return bulkBytesPerSecond_;
-    const std::uint64_t bytesDelta = bytesNow >= lastBpsSampleBytes_ ? (bytesNow - lastBpsSampleBytes_) : 0;
-    const double rawBps = static_cast<double>(bytesDelta * 1000) / static_cast<double>(duration.count());
-    // First real sample seeds the average directly to avoid a slow ramp-up from zero.
-    const double smoothed = bulkBytesPerSecond_ == 0
-        ? rawBps
-        : smoothingAlpha * rawBps + (1.0 - smoothingAlpha) * static_cast<double>(bulkBytesPerSecond_);
-    bulkBytesPerSecond_ = static_cast<std::int64_t>(smoothed);
-    lastBpsSampleTime_ = now;
-    lastBpsSampleBytes_ = bytesNow;
-    return bulkBytesPerSecond_;
 }
 
 int BulkTransferOperation::parallelWorkDoable(int parallel) const noexcept
@@ -793,6 +762,9 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(
 
 void BulkTransferOperation::pause(bool doPause)
 {
+    // No progress is taken while paused, the pause would count as time in which nothing moved.
+    if (!doPause)
+        rate_.restart();
     for (auto& slot : slots_)
     {
         if (slot.child)

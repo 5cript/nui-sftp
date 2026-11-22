@@ -3,6 +3,7 @@
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/scan_phase.hpp>
+#include <backend/sftp/transfer_rate.hpp>
 #include <log/toast.hpp>
 #include <remote_io/remote_file_system.hpp>
 #include <shared_data/directory_entry.hpp>
@@ -383,14 +384,6 @@ class BulkTransferOperation : public Operation
     void emitProgress(bool force);
     static bool isBufferShortage(Error const& error) noexcept;
 
-    /**
-     * @brief Update and return the bulk-level bytes/second.
-     * @param bytesNow Cumulative bytes transferred so far (completed files + in-flight bytes).
-     * @return Signed bps value to propagate to the frontend. Sampled on a fixed cadence and
-     *         smoothed; between samples the last value is returned unchanged.
-     */
-    std::int64_t updateBulkBytesPerSecond(std::uint64_t bytesNow);
-
   private:
     /**
      * @brief Where the entries came from. A scanned tree always holds its root, so an empty one
@@ -431,9 +424,7 @@ class BulkTransferOperation : public Operation
     std::vector<SharedData::IndexedFailure> indexedFailures_{};
     // Rolling bulk-level throughput. Per-file rates reset between files, which made the number
     // flicker; sampling the cumulative byte count keeps one coherent rate per bulk.
-    std::chrono::steady_clock::time_point lastBpsSampleTime_{};
-    std::uint64_t lastBpsSampleBytes_{0};
-    std::int64_t bulkBytesPerSecond_{0};
+    TransferRate rate_{};
     std::chrono::steady_clock::time_point lastEmit_{};
 };
 

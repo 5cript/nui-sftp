@@ -3,6 +3,7 @@
 #include <backend/rpc_helper.hpp>
 #include <backend/sftp/local_copy_operation.hpp>
 #include <backend/sftp/local_delete_operation.hpp>
+#include <backend/sftp/transfer_rate.hpp>
 #include <ids/ids.hpp>
 #include <paths/local_path.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
@@ -156,8 +157,15 @@ class LocalOperationQueue
         std::optional<Ids::SessionId> owner;
         bool held;
         bool priority;
+        /** @brief The rate of a copy, none for a delete. */
+        std::shared_ptr<TransferRate> rate{};
 
         Operation& base() const;
+        /**
+         * @brief Holds or lets go of the operation. A copy let go of restarts its rate sample, it was not worked on
+         *        while held.
+         */
+        void hold(bool doHold);
         std::vector<std::pair<std::string, Operation::Error>> const& failed() const;
     };
 
