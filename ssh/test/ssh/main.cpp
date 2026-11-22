@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <vector>
 
 std::filesystem::path programDirectory;
 /** @brief The temporary directory of this process alone, so tests running in parallel share no files. */
@@ -25,7 +26,10 @@ int main(int argc, char** argv)
     const Utility::ProcessTemporaryDirectory processTemporary{programDirectory / "temp"};
     temporaryRoot = processTemporary.path();
 
-    ::testing::InitGoogleTest(&argc, argv);
+    // GoogleTest removes its flags from the arguments it gets. ThreadSanitizer finds the environment it hands
+    // llvm-symbolizer behind the end of the original ones, which stay untouched for it.
+    std::vector<char*> arguments{argv, argv + argc + 1};
+    ::testing::InitGoogleTest(&argc, arguments.data());
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     return RUN_ALL_TESTS();
 }

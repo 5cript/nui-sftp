@@ -7,8 +7,13 @@
 
 #include <gtest/gtest.h>
 
+#include <vector>
+
 int main(int argc, char** argv)
 {
-    ::testing::InitGoogleTest(&argc, argv);
+    // GoogleTest removes its flags from the arguments it gets. ThreadSanitizer finds the environment it hands
+    // llvm-symbolizer behind the end of the original ones, which stay untouched for it.
+    std::vector<char*> arguments{argv, argv + argc + 1};
+    ::testing::InitGoogleTest(&argc, arguments.data());
     return RUN_ALL_TESTS();
 }
