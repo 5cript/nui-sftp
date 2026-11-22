@@ -53,7 +53,12 @@ namespace FileTransferProtocol::Test
 
         constexpr std::chrono::seconds readyWait{20};
         constexpr std::string_view fixturesPath = "/srv/ftptest/fixtures";
-        constexpr std::string_view workspaceFormat = "/srv/ftptest/t-{}-{}";
+        /**
+         * @brief A tmpfs: every test copies the fixtures, gigabytes in a run, and on the docker disk their write back
+         *        held up every container start and removal of the run for minutes.
+         */
+        constexpr std::string_view workspaceRoot = "/srv/ftptest/workspaces";
+        constexpr std::string_view workspaceFormat = "/srv/ftptest/workspaces/t-{}-{}";
 
         /**
          * @brief What a run has of the fleet. Containers are only set when this process started them.
@@ -115,6 +120,7 @@ namespace FileTransferProtocol::Test
         startVariant(ServerProfile const& profile, std::string const& name, ServerVariant const& variant, Fleet& fleet)
         {
             auto arguments = ownNetworkArguments();
+            arguments.insert(arguments.end(), {"--tmpfs", std::string{workspaceRoot}});
             arguments.insert(arguments.end(), profile.runArguments.begin(), profile.runArguments.end());
             arguments.insert(arguments.end(), variant.runArguments.begin(), variant.runArguments.end());
 
