@@ -769,6 +769,12 @@ void OperationQueue::discardKept(
     );
 }
 
+void OperationQueue::forgetKept(Ids::OperationId const& id)
+{
+    if (keptTransfers_->take(id))
+        Log::info("OperationQueue: forgot the kept transfer '{}', its partial files stay.", id.value());
+}
+
 void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
 {
     const WakeOnReturn wakeOnReturn{*this};
@@ -3113,6 +3119,20 @@ void OperationQueue::registerRpc()
                     return reply(SharedData::error("OperationQueue no longer exists"));
 
                 self->cancelAll(partialFilesOnCancel(keepPartialFiles));
+                return reply(SharedData::success());
+            }
+        );
+
+    on(rpcName("forgetKept"))
+        .perform(
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, std::vector<Ids::OperationId> const& operationIds)
+            {
+                auto self = weak.lock();
+                if (!self)
+                    return reply(SharedData::error("OperationQueue no longer exists"));
+
+                for (auto const& operationId : operationIds)
+                    self->forgetKept(operationId);
                 return reply(SharedData::success());
             }
         );

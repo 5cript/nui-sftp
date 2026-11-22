@@ -712,6 +712,63 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(partial));
     }
 
+    TEST_F(OperationQueueTests, AKeptDownloadThatIsForgottenLeavesItsPartialFile)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", 8 * 1024 * 1024}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        const auto partial = localDirectory_.path() / "big.bin.filepart";
+        ASSERT_TRUE(runOnStrand([&]() {
+            return queue->addDownloadOperation(
+                sftp,
+                operationId,
+                toLocal(localDirectory_.path() / "big.bin"),
+                remote("/home/test/big.bin"),
+                false,
+                false,
+                false,
+                false
+            );
+        }).has_value());
+        // Worked until it waits for its transfer, nothing else drives it then.
+        for (int step = 0; step < 100 && runOnStrand([&]() {
+                 return queue->work() || queue->drainBatch();
+             });
+             ++step)
+        {
+        }
+        ASSERT_TRUE(std::filesystem::exists(partial));
+        runOnStrand([&]() {
+            queue->cancel(operationId, OperationQueue::PartialFilesOnCancel::Kept);
+        });
+        workUntilCompletions(1);
+        ASSERT_TRUE(completions().front().keptPartialFiles);
+        const auto keptSize = std::filesystem::file_size(partial);
+
+        runOnStrand([&]() {
+            queue->cancelAll();
+        });
+        EXPECT_EQ(keptTransfers_->size(), 1u);
+        runOnStrand([&]() {
+            queue->forgetKept(operationId);
+        });
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+        EXPECT_FALSE(runOnStrand([&]() {
+            return queue->continueKept(sftp, operationId);
+        }).has_value());
+        runOnStrand([&]() {
+            queue->discardKept(sftp, operationId);
+        });
+        ASSERT_TRUE(std::filesystem::exists(partial));
+        EXPECT_EQ(std::filesystem::file_size(partial), keptSize);
+    }
+
     TEST_F(OperationQueueTests, ACanceledDownloadDeletesItsPartialFileAsConfigured)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

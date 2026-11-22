@@ -120,6 +120,12 @@ class OperationQueue
     void discardKept(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id);
 
     /**
+     * @brief Forgets the transfer @p id that kept its partial files when it was canceled. The files stay, nothing
+     *        continues or discards them under @p id anymore.
+     */
+    void forgetKept(Ids::OperationId const& id);
+
+    /**
      * @brief Cancels the upload @p id like cancel(), the temporary file it wrote to stays for a later upload or goes,
      *        see @p partial.
      */
