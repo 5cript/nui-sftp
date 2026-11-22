@@ -46,33 +46,26 @@ namespace NuiFileExplorer
     }
 
     DefaultPlacesProvider::DefaultPlacesProvider(Nui::RpcHub& hub)
-        : hub_{&hub}
-    {
-        registerRpc();
-    }
+        : listPlaces_{std::make_unique<Nui::RpcHub::AutoUnregister>(hub.autoRegisterFunction(
+              "NuiFileExplorer::DefaultPlaces::list",
+              [hubPtr = &hub](std::string responseId)
+              {
+                  nlohmann::json result = nlohmann::json::array();
+
+                  for (auto const& def : windowsFolders)
+                  {
+                      auto resolved = resolveKnownFolder(*def.folderId);
+                      if (resolved.empty())
+                          continue;
+                      result.push_back({
+                          {"kind", def.kind},
+                          {"name", def.name},
+                          {"path", resolved},
+                      });
+                  }
+                  hubPtr->callRemote(responseId, {{"success", true}, {"places", result}});
+              }
+          ))}
+    {}
     DefaultPlacesProvider::~DefaultPlacesProvider() = default;
-
-    void DefaultPlacesProvider::registerRpc()
-    {
-        listPlaces_ = std::make_unique<Nui::RpcHub::AutoUnregister>(hub_->autoRegisterFunction(
-            "NuiFileExplorer::DefaultPlaces::list",
-            [hub = hub_](std::string responseId)
-            {
-                nlohmann::json result = nlohmann::json::array();
-
-                for (auto const& def : windowsFolders)
-                {
-                    auto resolved = resolveKnownFolder(*def.folderId);
-                    if (resolved.empty())
-                        continue;
-                    result.push_back({
-                        {"kind", def.kind},
-                        {"name", def.name},
-                        {"path", resolved},
-                    });
-                }
-                hub->callRemote(responseId, {{"success", true}, {"places", result}});
-            }
-        ));
-    }
 }

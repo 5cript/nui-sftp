@@ -1,5 +1,4 @@
 #include <frontend/sync_dialog/sync_progress_dialog.hpp>
-#include <frontend/session_components/operation_queue.hpp>
 #include <frontend/components/icon_panel.hpp>
 #include <frontend/svgs/decline.hpp>
 
@@ -69,9 +68,8 @@ struct SyncProgressDialog::Implementation
     std::shared_ptr<bool> cancelToken_{std::make_shared<bool>(false)};
 };
 
-SyncProgressDialog::SyncProgressDialog(OperationQueue* operationQueue)
-    : operationQueue_{operationQueue}
-    , impl_{std::make_unique<Implementation>()}
+SyncProgressDialog::SyncProgressDialog()
+    : impl_{std::make_unique<Implementation>()}
 {}
 
 SyncProgressDialog::~SyncProgressDialog() = default;

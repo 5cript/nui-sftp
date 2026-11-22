@@ -958,7 +958,7 @@ Nui::ElementRenderer Settings::operator()()
 
     Log::info("Settings::operator()()");
     Nui::ScopeExit onLeaveOperator(
-        [this]() noexcept
+        []() noexcept
         {
             Log::info("Settings::operator()() complete");
         }

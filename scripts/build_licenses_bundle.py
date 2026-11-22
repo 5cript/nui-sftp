@@ -178,12 +178,18 @@ def write_header(header_path: Path, json_text: str) -> None:
         "\n"
         "#include <string_view>\n"
         "\n"
+        "// The literal is longer than the 65536 characters a compiler has to support, clang takes any length.\n"
+        "#pragma clang diagnostic push\n"
+        "#pragma clang diagnostic ignored \"-Woverlength-strings\"\n"
+        "\n"
         "namespace LicenseData\n"
         "{\n"
         f"    inline constexpr std::string_view json = R\"{HEADER_DELIM}(\n"
         f"{json_text}\n"
         f"){HEADER_DELIM}\";\n"
-        "}\n",
+        "}\n"
+        "\n"
+        "#pragma clang diagnostic pop\n",
         encoding="utf-8",
     )
 
