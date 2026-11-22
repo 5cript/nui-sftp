@@ -68,6 +68,11 @@ namespace FileTransferProtocol::Test
         actions.emplace_back(Hold{});
         return *this;
     }
+    DataPlan& DataPlan::sendBeneathTls(std::string bytes)
+    {
+        actions.emplace_back(SendBeneathTls{.bytes = std::move(bytes)});
+        return *this;
+    }
 
     DataPlan& DataPlan::tls(TlsBehaviour behaviour)
     {

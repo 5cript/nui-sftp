@@ -108,6 +108,12 @@ namespace FileTransferProtocol::Test
                 co_return error;
             }
 
+            asio::awaitable<error_code> writeBeneathTls(asio::const_buffer buffer)
+            {
+                const auto [error, size] = co_await asio::async_write(socket_, buffer, noThrow);
+                co_return error;
+            }
+
             asio::awaitable<error_code> handshake(std::shared_ptr<ssl::context> context)
             {
                 context_ = std::move(context);
@@ -758,6 +764,16 @@ namespace FileTransferProtocol::Test
             {
                 co_await stoppedSignal_.wait();
                 co_return false;
+            }
+
+            asio::awaitable<bool> perform(DataPlan::SendBeneathTls const& step)
+            {
+                if (const auto error = co_await transport_->writeBeneathTls(asio::buffer(step.bytes)); error)
+                {
+                    server_.record(connection_, Kind::DataEnded, endReason(error));
+                    co_return false;
+                }
+                co_return true;
             }
 
           private:
