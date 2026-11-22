@@ -116,8 +116,7 @@ if (NOT WIN32)
     add_test(NAME FtpServerFleetStart COMMAND nui-sftp-ftp-fleet start "${FTP_FLEET_ENDPOINTS}")
     add_test(NAME FtpServerFleetStop COMMAND nui-sftp-ftp-fleet stop "${FTP_FLEET_ENDPOINTS}")
     set_tests_properties(FtpServerFleetStart PROPERTIES FIXTURES_SETUP FtpServerFleet TIMEOUT 900)
-    # Docker removes containers slowly while the shell suites create theirs.
-    set_tests_properties(FtpServerFleetStop PROPERTIES FIXTURES_CLEANUP FtpServerFleet TIMEOUT 600)
+    set_tests_properties(FtpServerFleetStop PROPERTIES FIXTURES_CLEANUP FtpServerFleet)
 endif()
 
 # A configure of its own with -DCODE_COVERAGE=ON, a report to look at that no test fails on. The instrumented libraries

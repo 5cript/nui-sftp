@@ -18,6 +18,7 @@
 
 #    include <algorithm>
 #    include <cctype>
+#    include <charconv>
 #    include <climits>
 #    include <chrono>
 #    include <cstdlib>
@@ -439,7 +440,8 @@ namespace Test
                     return shell_->output().find("nui-ready") != std::string::npos;
                 },
                 std::chrono::seconds{30}
-            )) << "the container never started:\n"
+            )) << "the container never started, docker reports it as: "
+               << DockerShells::containerStatus(containerName_) << "it wrote:\n"
                << shell_->output();
             shell_->holdStartUntilFirstWait([name = containerName_]() {
                 Docker::run(fmt::format("docker kill --signal=USR1 {}", Docker::quote(name)));
@@ -794,14 +796,30 @@ namespace Test
 
     TEST_P(BashCaptureTests, LoopDoesNotForkPerIteration)
     {
+        if (GetParam().image.empty())
+            GTEST_SKIP() << "counting forks needs a pid namespace of the shell's own, the containers give it one";
         install();
         ASSERT_EQ(sync(), Commands{});
 
-        // The DEBUG trap fires on every iteration; a fork each time would take tens of seconds.
-        const auto loop = std::string{"for ((i = 0; i < 20000; ++i)); do :; done"};
-        const auto start = std::chrono::steady_clock::now();
-        EXPECT_EQ(commandsFor(loop + "\n"), Commands{loop});
-        EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{5});
+        // The DEBUG trap fires on every iteration. Only the shell forks in its container, so the pids of a child
+        // started before and after the loop are apart by its forks in between.
+        const auto iterations = 1000;
+        const auto line = fmt::format(
+            "nui_pid=$(sh -c 'echo $$'); for ((i = 0; i < {}; ++i)); do :; done; "
+            "echo \"nui-pids=$(($(sh -c 'echo $$') - nui_pid))\"",
+            iterations
+        );
+        EXPECT_EQ(commandsFor(line + "\n"), Commands{line});
+
+        auto const& output = shell_->output();
+        const std::string_view label{"nui-pids="};
+        const auto shown = output.rfind(label);
+        ASSERT_NE(shown, std::string::npos) << tail(output);
+        auto pidsTaken = 0;
+        const auto parsed =
+            std::from_chars(output.data() + shown + label.size(), output.data() + output.size(), pidsTaken);
+        ASSERT_EQ(parsed.ec, std::errc{}) << tail(output);
+        EXPECT_LT(pidsTaken, iterations) << tail(output);
     }
 
     TEST_P(BashCaptureTests, PromptCommandAddedAfterTheHookSwallowsNothing)
