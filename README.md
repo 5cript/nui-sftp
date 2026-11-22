@@ -86,14 +86,18 @@ There will not be support for any other systems (Mobile Devices or BSD).
 # Feature List
 
 ## Synchronization
-You can synchronize folders between your local machine and the server. This will automatically upload/download files that are changed in the source folder to the target folder. You can also choose to only synchronize in one direction (upload or download).
+Compare a local and a remote folder and review the differences before anything is transferred. Choose the files to upload, download or delete, synchronize in both directions or only one, and leave out hidden files or whatever `.gitignore` lists.
 ![Synchronize](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/synchronize.png)
+
+## File Tracking
+Open a remote file in its default application or in one you pick. nui-sftp watches the local copy and uploads it again every time you save. A local file or folder can be uploaded and watched the same way. The File Tracking panel lists every watch with its state, its failed uploads and the conflicts with changes made on the server. For a conflict you choose to replace the server's version or to keep it.
+![FileTracking](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/live_edit.png)
 
 ## FTP Servers
 Connect to FTP servers, unencrypted or over explicit or implicit TLS. Transfers, synchronization, File Tracking and archives work in an FTP session as they do over SFTP, in the same file view. Certificates are checked against the certificate authorities trusted by your system. A certificate they do not vouch for, a self-signed one for example, can be reviewed and trusted manually. An FTP session has no terminals, as the FTP protocol has no shell.
 
 ## Local Shell
-Run a PTY on your local machine with a file view.
+Run the shells of your own machine next to your remote sessions, with a file view. The shell command is configurable, and a local shell can also be opened as a tab inside a remote session. The flatpak is the exception: it runs in an isolated environment, where a shell does not see the programs of your system. Use the AppImage or the AUR package if you need local shells.
 ![LocalShellSession](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/local.png)
 
 ## Command History & Snippets
@@ -103,48 +107,60 @@ Commands you need often can be saved as snippets, sorted into folders and tagged
 
 ## Settings
 When a user might want to change the behavior of the app, I decided: Let's make it configurable.
-The search box in the settings header (Ctrl+F) finds any setting in the defaults and in every server.
+Servers inherit their settings from named defaults and override only what differs. The search box in the settings header (Ctrl+F) finds any setting in the defaults and in every server.
 ![Settings](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/settings.png)
 
 ## Theming & Customizability
-Includes a bright theme and more theme colors. Can be fully customized by overwriting CSS (although that's more of a power user feature).
+Three themes (Blue, Nebula and Plain), each with a dark and a light mode that can follow the system. Can be fully customized by overwriting CSS (although that's more of a power user feature).
 ![BrightTheme](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/theming.png)
 
 ## Download & Upload directly as Archive
-You can download and upload files and folders directly as tar archives, no manual packing required.
+You can download and upload files and folders directly as tar archives, no manual packing required. The archive is packed while it is transferred, as `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.zst` or `.tar.xz` with a compression level of your choice.
 ![DownloadAsArchive](https://s3.g.s4.mega.io/jgemkib4a5fte35rktt5wxrwkw4ejk4ybemkf/nui-sftp-releases/images/Screenshots/download_as_archive.png)
 
 ## SSH
-- Keyboard interactive password auth.
+- Password auth, the password is asked for when connecting.
 - Key auth with optional passphrase.
 - Automatic key auth via SSH directory.
-- SSH agent support on Linux.
+- SSH agent support on Linux and macOS.
+- Several users per server, each with their own keys.
+- ProxyJump and ProxyCommand.
+- Reads your SSH configuration file (can be turned off).
 - Multi channel support (multiple ptys and sftp at the same time).
+- Direct Connect: open a session to a host without adding it as a server.
+- Reconnects when the connection is lost and restores the session.
 
 ## SFTP
 - Download & Upload, Single files and directories.
+- Several transfers at the same time, and several files at once within a directory transfer.
 - Download & Upload to tar archives streamingly, no manual packing required.
 - Folder Synchronization.
-- Download & live-observe changes that automatically resync to the server.
+- File Tracking: Open a remote file or upload a local one, and every change you save is uploaded again.
+- Continue interrupted downloads and uploads.
 - Delete file.
 - Rename file.
 - Create file.
 - Create directory.
-- Pause/Continue operations.
-- Cancel operations.
-- Reorder operations in the queue.
-- Show file properties.
 - Recursive folder delete.
+- Show file properties.
+- Asks the user to overwrite files on upload/download.
+- Unsafe fast mode that speeds up many small files, see [File transfer behavior](docs/file-transfer-behavior.md).
+
+## Operation Queue
+- Pause/Continue the queue.
+- Cancel operations and delete or keep their partial files. Kept partial files can be continued or deleted later.
+- Reorder operations while the queue is paused, or move one to the top.
+- Transfer speed and progress per operation.
+- Failed operations are kept in a list of their own.
 
 ## FTP & FTPS
 - Plain FTP, explicit FTP over TLS and implicit FTP over TLS.
-- Everything of the SFTP list above, with the same file view, queue and synchronization.
+- Everything of the SFTP and Operation Queue lists above, with the same file view, queue and synchronization.
 - Certificates are verified with the certificate authorities of the system, on Linux, Windows and macOS.
 - An unverified certificate (self-signed, expired, issued for another server) is shown with its details and fingerprints. You can reject it, trust it once or trust it always.
 - Anonymous login and several users per server.
 - Passwords are asked for when connecting and never stored.
 - Several connections per session: one for browsing, the others for parallel transfers.
-- Continues interrupted uploads and downloads.
 - Keeps idle sessions alive and logs in again when the server closed the connection.
 - Passive mode (EPSV and PASV).
 
@@ -152,21 +168,28 @@ You can download and upload files and folders directly as tar archives, no manua
 - Flexible Layout - organize widgets as you like
 - Save and Load Layouts.
 - Run multiple SSH, FTP or Local Shell Session in parallel.
+- Notification log.
+- English and German.
 
 ## Settings UI
 - If it's configurable, it's in the settings.
 
 ## File View UI
+- Local and remote files side by side.
 - Grid view.
-- Table view.
+- Table view with sortable and resizable columns.
 - Box drag select for icon view.
+- Places, favorites and devices. Remote favorites are kept per server.
+- Path bar with suggestions.
 - Auto refresh after operation complete.
 - Resize left vs right.
 - Upload drag and drop (within view and into the app).
 - Download drag and drop (within view).
+- Local files: copy and move (drag and drop or cut/copy/paste), rename, delete, open, open with and show in the file manager.
 - Searching files.
 - Sorting files.
-- Asks the user to overwrite files on upload/download.
+- Show or hide hidden files.
+- Keyboard: F2 rename, F5 refresh, Delete, Enter, Backspace, Ctrl+C/X/V and selecting by typing a name.
 
 # Documentation
 - [File transfer behavior](docs/file-transfer-behavior.md): how uploads check, replace and continue files, per protocol.
@@ -176,8 +199,8 @@ You can download and upload files and folders directly as tar archives, no manua
 - FTP servers without Unix-like paths (VMS, MVS).
 - Windows SSH agent support, waiting for official libssh support, before I resort to patches: https://gitlab.com/libssh/libssh-mirror/-/issues/277
 - GSSAPI auth: Will make work when a need arises
-- KeypassXc database integration: lots of work for tiny use cases. It's a cool idea for later.
+- KeePassXC database integration: lots of work for tiny use cases. It's a cool idea for later.
 
 # Known Problems
 
-- Cannot use mouse side keys for history navigation (yet) because of a bug in WebKit that shows them as "button 0".
+- Cannot use mouse side keys for history navigation (yet).
