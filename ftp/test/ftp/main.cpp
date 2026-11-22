@@ -26,6 +26,7 @@
 #include "test_transfer_conformance.hpp"
 #include "test_metadata_conformance.hpp"
 #include "test_printable.hpp"
+#include "test_read_after_write_stream.hpp"
 #include "test_reply_code.hpp"
 #include "test_reply_error.hpp"
 #include "test_reply_framer.hpp"
