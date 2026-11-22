@@ -5,7 +5,6 @@
 #include <frontend/session_components/operation_queue.hpp>
 #include <frontend/session_components/session_layout_initializer.hpp>
 #include <frontend/terminal/frontend_session_manager.hpp>
-#include <frontend/terminal/ssh_engine.hpp>
 #include <log/log.hpp>
 
 #include <nui-file-explorer/side.hpp>
@@ -267,13 +266,12 @@ void SessionSnapshotManager::apply(SessionSnapshot const& snapshot)
         }
         impl_->operationQueue->enqueueResumable(op);
     }
-    if (!bulkResumeIds.empty() && impl_->frontendSessionManager->value() &&
-        impl_->frontendSessionManager->value()->engine().engineName() == "ssh")
+    auto* const manager = impl_->frontendSessionManager->value().get();
+    auto* const remoteSession = manager ? manager->engine().remoteSession() : nullptr;
+    if (!bulkResumeIds.empty() && remoteSession)
     {
-        auto* sshTerminalEngine =
-            static_cast<SshTerminalEngine*>(&impl_->frontendSessionManager->value()->engine());
         Nui::val args = Nui::val::object();
-        args.set("sessionId", sshTerminalEngine->sshSessionId().value());
+        args.set("sessionId", remoteSession->sessionId().value());
         Nui::val opIds = Nui::val::array();
         for (std::size_t idx = 0; idx < bulkResumeIds.size(); ++idx)
             opIds.set(idx, bulkResumeIds[idx]);

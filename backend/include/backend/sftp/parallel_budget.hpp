@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 /**
@@ -23,6 +24,7 @@ struct EligibleOperation
  *
  * @param queue Anything indexable whose elements expose `.second` as a pointer-like Operation.
  * @param budget Slots available this tick; treated as at least 1.
+ * @return The head of @p queue in order, entry i for queue[i], none skipped: the queue works its first that many.
  */
 template <typename QueueT>
 std::vector<EligibleOperation> collectEligibleOperations(QueueT const& queue, int budget)
@@ -39,4 +41,26 @@ std::vector<EligibleOperation> collectEligibleOperations(QueueT const& queue, in
             break;
     }
     return eligible;
+}
+
+/**
+ * @brief The transfer slots of a queue and the most of them a single bulk may take.
+ */
+struct ParallelLimits
+{
+    int parallelism;
+    int bulkConcurrency;
+};
+
+/**
+ * @brief Lowers @p parallelism to @p maxParallelTransfers when that is set, never below one, and keeps
+ *        @p bulkConcurrency below the result so another operation keeps a slot while there are two.
+ */
+inline ParallelLimits
+parallelLimits(int parallelism, int bulkConcurrency, std::optional<std::size_t> maxParallelTransfers)
+{
+    auto limited = std::max(1, parallelism);
+    if (maxParallelTransfers && *maxParallelTransfers < static_cast<std::size_t>(limited))
+        limited = std::max(1, static_cast<int>(*maxParallelTransfers));
+    return {.parallelism = limited, .bulkConcurrency = std::clamp(bulkConcurrency, 1, std::max(1, limited - 1))};
 }

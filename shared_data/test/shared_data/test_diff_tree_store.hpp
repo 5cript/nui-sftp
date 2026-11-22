@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -204,6 +205,33 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(plan[0].mtime, 2000u);
         EXPECT_EQ(plan[0].mtimeNsec, 42u);
         EXPECT_EQ(plan[0].relKey, "socket.cpp");
+    }
+
+    TEST(DiffTreeStoreTests, PlanCarriesHowExactTheTimeOfARemoteFileIs)
+    {
+        auto rounded = makeFile("rounded.txt", 16, 2040);
+        rounded.mtimePrecision = TimePrecision::Minute;
+        auto below = makeFile("below.txt", 4, 86400);
+        below.mtimePrecision = TimePrecision::Day;
+        DiffStores stores{
+            makeDir("", {makeFile("rounded.txt", 9, 1000)}),
+            makeDir("", {makeDir("new", {below}), rounded, makeFile("exact.txt", 3, 2000)}),
+            {.direction = Direction::Download},
+        };
+
+        const auto plan = stores.downloads.buildPlan({"new", "rounded.txt", "exact.txt"}, stores.trees());
+
+        std::map<std::string, TimePrecision> precisions{};
+        for (auto const& entry : plan)
+            precisions[entry.relKey] = entry.mtimePrecision;
+        EXPECT_EQ(
+            precisions,
+            (std::map<std::string, TimePrecision>{
+                {"exact.txt", TimePrecision::Second},
+                {"new/below.txt", TimePrecision::Day},
+                {"rounded.txt", TimePrecision::Minute},
+            })
+        );
     }
 
     TEST(DiffTreeStoreTests, PlanForANewerLocalFileCarriesLocalSizeAndMtime)

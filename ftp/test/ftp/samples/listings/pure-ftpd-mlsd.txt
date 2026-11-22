@@ -1,0 +1,13 @@
+type=OS.unix=slink:;size=9;modify=20261001123456;UNIX.mode=0777;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d06; link-to-plain.txt
+type=file;size=7;modify=20261001123456;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d08; name with spaces.txt
+type=file;size=4;modify=20200102030405;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d09; old.txt
+type=dir;sizd=4096;modify=20261001123456;UNIX.mode=0755;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d0b; subdir
+type=OS.unix=slink:;size=6;modify=20261001123456;UNIX.mode=0777;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d07; link-to-subdir
+type=file;size=6;modify=20261001123456;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d04; a -> b.txt
+type=file;size=7;modify=20261001123456;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d03; .hidden
+type=cdir;sizd=4096;modify=20261001123456;UNIX.mode=0755;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d01; .
+type=OS.unix=slink:;size=14;modify=20261001123456;UNIX.mode=0777;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d05; dangling-link
+type=file;size=8;modify=20261001123456;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d02;  leading space.txt
+type=file;size=5;modify=20261001123456;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d0d; ünïcödé-名前.txt
+type=file;size=11;modify=20261001123456;UNIX.mode=0644;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002d0a; plain.txt
+type=pdir;sizd=4096;modify=20261027234716;UNIX.mode=0700;UNIX.uid=1000;UNIX.gid=1000;unique=7bg1002cfc; ..

@@ -202,22 +202,28 @@ void SessionLayoutInitializer::rebuildTabAddMenuInto(Implementation& impl)
         using namespace ScriptNuiComponents;
         using namespace std::string_literals;
 
-        const bool isSsh = std::holds_alternative<Persistence::SshSessionOptions>(impl.engineOptions->engine);
+        // FTP sessions have no terminals of their own, local shells only.
+        const bool isFtp = std::holds_alternative<Persistence::FtpSessionOptions>(impl.engineOptions->engine);
+        const bool isRemote =
+            isFtp || std::holds_alternative<Persistence::SshSessionOptions>(impl.engineOptions->engine);
 
         std::vector<PopupMenu::Entry> items;
         items.reserve(8);
 
         items.push_back(PopupMenu::sectionHeader(language->get("sessionFrontend", "newTab")));
 
-        items.push_back(PopupMenu::item(
-            language->get("sessionFrontend", "terminal"),
-            std::string{},
-            [&impl]()
-            {
-                Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "terminal"s);
-                impl.tabAddMenu.close();
-            }
-        ));
+        if (!isFtp)
+        {
+            items.push_back(PopupMenu::item(
+                language->get("sessionFrontend", "terminal"),
+                std::string{},
+                [&impl]()
+                {
+                    Nui::val::global("contentPanelManager").call<void>("fullfillLastAddRequest", "terminal"s);
+                    impl.tabAddMenu.close();
+                }
+            ));
+        }
 
         items.push_back(PopupMenu::item(
             language->get("sessionFrontend", "fileExplorer"),
@@ -257,7 +263,7 @@ void SessionLayoutInitializer::rebuildTabAddMenuInto(Implementation& impl)
             impl.commandSnippetsElement.value() != nullptr
         ));
 
-        if (isSsh)
+        if (isRemote)
         {
             items.push_back(PopupMenu::item(
                 language->get("sessionFrontend", "operationQueue"),

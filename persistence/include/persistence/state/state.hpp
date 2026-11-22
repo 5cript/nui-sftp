@@ -7,6 +7,7 @@
 #include <persistence/state/session_layouts.hpp>
 #include <persistence/state/termios.hpp>
 #include <persistence/state/ssh_options.hpp>
+#include <persistence/state/ftp_options.hpp>
 #include <persistence/state/ui_options.hpp>
 #include <persistence/state/queue_options.hpp>
 #include <persistence/state/history_options.hpp>
@@ -15,8 +16,10 @@
 #include <persistence/state/localization_options.hpp>
 #include <persistence/state/log_options.hpp>
 
+#include <array>
 #include <map>
 #include <string>
+#include <string_view>
 
 namespace Persistence
 {
@@ -31,6 +34,10 @@ namespace Persistence
         std::string historyOptions{"default"};
         std::string sshOptions{"default"};
         std::string sftpOptions{"default"};
+        std::string ftpOptions{"default"};
+
+        /** @brief Missing in the configs of versions before FTP, see DefaultMissingMember. */
+        static constexpr std::array<std::string_view, 1u> silentlyDefaulted{"ftpOptions"};
 
         /**
          * @brief Points the inheritable options of the session at these groups.
@@ -40,15 +47,19 @@ namespace Persistence
     BOOST_DESCRIBE_STRUCT(
         InheritableReferences,
         (),
-        (terminalOptions, termios, queueOptions, historyOptions, sshOptions, sftpOptions)
+        (terminalOptions, termios, queueOptions, historyOptions, sshOptions, sftpOptions, ftpOptions)
     )
 
     struct State : public DefaultMissingMember
     {
+        /** @brief Missing in the configs of versions before FTP, see DefaultMissingMember. */
+        static constexpr std::array<std::string_view, 1u> silentlyDefaulted{"ftpOptions"};
+
         std::map<std::string, TerminalOptions> terminalOptions{};
         std::map<std::string, Termios> termios{};
         std::map<std::string, SshOptions> sshOptions{};
         std::map<std::string, SftpOptions> sftpOptions{};
+        std::map<std::string, FtpOptions> ftpOptions{};
         std::map<std::string, SessionOptions> sessions{};
         std::map<std::string, QueueOptions> queueOptions{};
         std::map<std::string, HistoryOptions> historyOptions{};
@@ -67,6 +78,10 @@ namespace Persistence
          * @brief The layouts shared by the sessions of a type. Missing until gathered from the servers.
          */
         std::optional<SessionLayouts> sessionLayouts{};
+        /**
+         * @brief Threads of the engine all FTP sessions share, read at startup. Two when unset, at least one.
+         */
+        std::optional<int> ftpEngineThreads{};
         /**
          * @brief The sessions whose engine type this version does not know, or that name none, as written. Not
          * described: to_json writes them back among the sessions, except where a session of this version has the
@@ -112,6 +127,7 @@ namespace Persistence
             termios,
             sshOptions,
             sftpOptions,
+            ftpOptions,
             uiOptions,
             logOptions,
             localizationOptions,
@@ -122,8 +138,18 @@ namespace Persistence
             lastDirectConnect,
             lastDirectConnectInheritables,
             appliedMigrations,
-            sessionLayouts)
+            sessionLayouts,
+            ftpEngineThreads)
     )
+
+    /** @brief The most threads the FTP engine starts, whatever the config asks for. */
+    inline constexpr int maximumFtpEngineThreads = 64;
+
+    /**
+     * @brief The FTP engine threads @p state asks for, two when unset, at least one and at most
+     *        maximumFtpEngineThreads.
+     */
+    int ftpEngineThreadsOf(State const& state);
 
     /**
      * @brief Reads the state, setting the sessions this version cannot read aside into State::unreadSessions.

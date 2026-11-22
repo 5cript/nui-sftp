@@ -26,6 +26,7 @@
 @import "./dialog/file_property_dialog.css";
 @import "./dialog/multi_input_dialog.css";
 @import "./dialog/confirm_dialog.css";
+@import "./dialog/certificate_trust_prompter.css";
 @import "./dialog/input_dialog.css";
 @import "./dialog/archive_transfer_dialog.css";
 @import "./dialog/snippet_import_dialog.css";
@@ -228,6 +229,7 @@
     --nui-file-grid-tile-hover-border: rgba(255, 255, 255, 0.35);
 
     --nui-file-grid-origin-accent: var(--theme-color);
+    --nui-file-grid-origin-warning-color: var(--script-nui-components-toast-warning, #e0a02e);
 
     /* Loading placeholder — flat grayscale plate with slight transparency (dark default). */
     --nui-file-grid-loading-placeholder-background: rgba(255, 255, 255, 0.08);
@@ -286,6 +288,7 @@
     --nui-file-grid-tile-hover-border: rgba(0, 0, 0, 0.28);
 
     --nui-file-grid-origin-accent: color-mix(in srgb, var(--theme-color) 80%, var(--anti-brightness-mixin) var(--anti-brightness-mixin-percent));
+    --nui-file-grid-origin-warning-color: color-mix(in srgb, var(--script-nui-components-toast-warning, #e0a02e) 70%, var(--anti-brightness-mixin) 30%);
 
     /* Loading placeholder (light mode). */
     --nui-file-grid-loading-placeholder-background: rgba(0, 0, 0, 0.05);

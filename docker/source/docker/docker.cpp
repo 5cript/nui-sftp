@@ -92,4 +92,24 @@ namespace Docker
     {
         run(fmt::format("docker rm -f {}", quote(name)));
     }
+
+    std::expected<std::string, std::string> containerAddress(std::string_view name)
+    {
+        const auto inspect = run(fmt::format(
+            "docker inspect --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}} {{{{end}}}}' {}",
+            quote(name)
+        ));
+        if (inspect.exitCode != 0)
+            return std::unexpected{fmt::format("inspecting {} failed: {}", name, inspect.output)};
+        auto address = inspect.output.substr(0, inspect.output.find_first_of(" \r\n"));
+        if (address.empty())
+            return std::unexpected{fmt::format("{} has no network address", name)};
+        return address;
+    }
+
+    CommandResult executeIn(std::string_view name, std::string_view command, std::string_view user)
+    {
+        const auto userArgument = user.empty() ? std::string{} : fmt::format("--user {} ", quote(user));
+        return run(fmt::format("docker exec {}{} sh -c {}", userArgument, quote(name), quote(command)));
+    }
 }

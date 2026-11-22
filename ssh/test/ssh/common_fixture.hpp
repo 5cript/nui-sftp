@@ -150,7 +150,7 @@ namespace SecureShell::Test
             std::function<void()> onExit = {}
         )
         {
-            channel->startReading(
+            const auto reading = channel->startReading(
                 onStdout ? onStdout : [](std::string const&) {},
                 onStderr ? onStderr : [](std::string const) {},
                 [onExit = std::move(onExit)]()
@@ -159,6 +159,7 @@ namespace SecureShell::Test
                         onExit();
                 }
             );
+            EXPECT_TRUE(reading) << reading.error();
         }
 
         void channelStartReading(

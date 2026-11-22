@@ -213,7 +213,9 @@ else()
         add_subdirectory("${CMAKE_SOURCE_DIR}/dependencies/roar")
     endif()
 
+    add_subdirectory("${CMAKE_SOURCE_DIR}/remote_io/source/remote_io")
     add_subdirectory("${CMAKE_SOURCE_DIR}/ssh/source/ssh")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/ftp/source/ftp")
     add_subdirectory("${CMAKE_SOURCE_DIR}/tar-archive/source/tar_archive")
     add_subdirectory("${CMAKE_SOURCE_DIR}/command-store/source/command-store")
 	add_subdirectory("${CMAKE_SOURCE_DIR}/backend/source/backend")
@@ -265,7 +267,20 @@ else()
     if (NUI_SFTP_ENABLE_TESTING)
         include(./_cmake/dependencies/gtest.cmake)
         enable_testing()
+        include(./_cmake/code-coverage.cmake)
+        set(NUI_SFTP_COVERAGE_EXCLUDES ".*/test/.*" ".*/dependencies/.*" "/usr/.*" ".*/build/.*")
+        # The merged reports show the FTP code and remote_io only, not the headers of other libraries they include.
+        # Quoted for the shell like the excludes of the module, which runs its commands unquoted.
+        set(NUI_SFTP_COVERAGE_SOURCES "-include-filename-regex='${CMAKE_SOURCE_DIR}/(ftp|remote_io)/'")
+        add_code_coverage_all_targets(
+            LLVM_EXCLUDE ${NUI_SFTP_COVERAGE_EXCLUDES}
+            LLVM_COV_REPORT_OPTIONS ${NUI_SFTP_COVERAGE_SOURCES}
+            LLVM_COV_EXPORT_OPTIONS ${NUI_SFTP_COVERAGE_SOURCES}
+            LLVM_COV_HTML_OPTIONS ${NUI_SFTP_COVERAGE_SOURCES}
+        )
+        add_subdirectory(remote_io/test/remote_io)
         add_subdirectory(ssh/test/ssh)
+        add_subdirectory(ftp/test/ftp)
         add_subdirectory(backend/test/backend)
         add_subdirectory(utility/test/utility)
         add_subdirectory(paths/test/paths)

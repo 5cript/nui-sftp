@@ -1,5 +1,7 @@
 #include <shared_data/directory_entry.hpp>
 
+#include <utility/enum_string_convert.hpp>
+
 namespace SharedData
 {
     void to_json(nlohmann::json& j, DirectoryEntry const& entry)
@@ -32,6 +34,8 @@ namespace SharedData
             j["createTime"] = entry.createTime;
         if (entry.createTimeNsec != 0)
             j["createTimeNsec"] = entry.createTimeNsec;
+        if (entry.mtimePrecision != TimePrecision::Second)
+            j["mtimePrecision"] = Utility::enumToString(entry.mtimePrecision);
         if (!entry.acl.empty())
             j["acl"] = entry.acl;
         if (entry.linkTarget)
@@ -62,6 +66,8 @@ namespace SharedData
         getOptional("createTimeNsec", entry.createTimeNsec);
         getOptional("mtime", entry.mtime);
         getOptional("mtimeNsec", entry.mtimeNsec);
+        if (auto found = j.find("mtimePrecision"); found != j.end() && !found->is_null())
+            entry.mtimePrecision = Utility::enumFromString<TimePrecision>(found->get<std::string>());
         getOptional("acl", entry.acl);
         if (auto found = j.find("linkTarget"); found != j.end() && !found->is_null())
             entry.linkTarget = found->get<std::string>();

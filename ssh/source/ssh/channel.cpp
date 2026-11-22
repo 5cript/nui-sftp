@@ -1,9 +1,16 @@
 #include <ssh/channel.hpp>
 #include <ssh/session.hpp>
 
+#include <exception>
+#include <utility>
+
 namespace SecureShell
 {
-    Channel::Channel(Session* owner, std::unique_ptr<ProcessingStrand> strand, std::unique_ptr<ssh::Channel> channel)
+    Channel::Channel(
+        Session* owner,
+        std::unique_ptr<RemoteIo::ProcessingStrand> strand,
+        std::unique_ptr<ssh::Channel> channel
+    )
         : owner_{owner}
         , strand_{std::move(strand)}
         , channel_{std::move(channel)}
@@ -65,19 +72,32 @@ namespace SecureShell
         }
         return promise->get_future();
     }
-    int Channel::onData(ssh_session, ssh_channel, void* data, uint32_t length, int isStderr, void* self)
+    int Channel::onData(ssh_session, ssh_channel, void* data, uint32_t length, int isStderr, void* self) noexcept
     {
         auto* channel = static_cast<Channel*>(self);
-        if (channel->closing_)
+        if (channel->closing_ || channel->handlerException_)
             return static_cast<int>(length);
-        std::string const text{static_cast<char const*>(data), length};
-        if (isStderr != 0)
-            channel->onStderr_(text);
-        else
-            channel->onStdout_(text);
+        try
+        {
+            std::string const text{static_cast<char const*>(data), length};
+            if (isStderr != 0)
+                channel->onStderr_(text);
+            else
+                channel->onStdout_(text);
+        }
+        catch (...)
+        {
+            channel->handlerException_ = std::current_exception();
+            channel->strand_->wake();
+        }
         return static_cast<int>(length);
     }
-    void Channel::onEnd(ssh_session, ssh_channel, void* self)
+    void Channel::rethrowHandlerException()
+    {
+        if (handlerException_)
+            std::rethrow_exception(std::exchange(handlerException_, nullptr));
+    }
+    void Channel::onEnd(ssh_session, ssh_channel, void* self) noexcept
     {
         // Seen while another task read the socket: the read task reports it in the next cycle.
         static_cast<Channel*>(self)->strand_->wake();
@@ -98,9 +118,10 @@ namespace SecureShell
             ssh_remove_channel_callbacks(channel_->getCChannel(), &callbacks_);
         callbacksRegistered_ = false;
     }
-    ProcessingThread::PermanentTaskStatus Channel::readTask()
+    RemoteIo::ProcessingThread::PermanentTaskStatus Channel::readTask()
     {
-        using enum ProcessingThread::PermanentTaskStatus;
+        using enum RemoteIo::ProcessingThread::PermanentTaskStatus;
+        rethrowHandlerException();
         if (!onStdout_ || !onStderr_ || !onExit_ || !channel_)
             return Done;
 
@@ -136,7 +157,10 @@ namespace SecureShell
             return rdy;
         };
 
-        if (readOne(true) < 0 || readOne(false) < 0)
+        const auto ended = readOne(true) < 0 || readOne(false) < 0;
+        // libssh may have called onData() from the reads above.
+        rethrowHandlerException();
+        if (ended)
         {
             removeCallbacks();
             if (!closing_)
@@ -146,7 +170,7 @@ namespace SecureShell
         // Without callbacks output read by other calls waits in the buffer, which only polling finds.
         return callbacksRegistered_ ? AwaitInput : Poll;
     }
-    void Channel::startReading(
+    std::expected<void, std::string> Channel::startReading(
         std::function<void(std::string const&)> onStdout,
         std::function<void(std::string const&)> onStderr,
         std::function<void()> onExit
@@ -157,7 +181,7 @@ namespace SecureShell
         onExit_ = std::move(onExit);
 
         auto [success, id] = strand_->pushPermanentTask(
-            std::function<ProcessingThread::PermanentTaskStatus()>{
+            std::function<RemoteIo::ProcessingThread::PermanentTaskStatus()>{
                 [this]()
                 {
                     return readTask();
@@ -165,9 +189,7 @@ namespace SecureShell
             }
         );
         if (!success)
-        {
-            // TODO: Do I want to throw here?
-            throw std::runtime_error("Failed to start reading.");
-        }
+            return std::unexpected{std::string{"The task that reads the channel was refused"}};
+        return {};
     }
 }

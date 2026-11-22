@@ -264,6 +264,8 @@ class SideModel
                 entry.mtime = item.mtime;
                 entry.mtimeNsec = item.mtimeNsec;
             }
+            if constexpr (requires { entry.mtimePrecision; })
+                entry.mtimePrecision = item.mtimePrecision;
             candidates.push_back(std::move(entry));
         }
         return candidates;

@@ -22,6 +22,8 @@ namespace SharedData::Sync
         std::uint64_t sizeBytes{0};
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        /** @brief How exact the scan told mtime, a download asks the server where it was rounded. */
+        TimePrecision mtimePrecision{TimePrecision::Second};
         bool isDirectory{false};
     };
 }

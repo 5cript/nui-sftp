@@ -12,9 +12,9 @@
 #include <unordered_map>
 #include <vector>
 
-namespace SecureShell
+namespace RemoteIo
 {
-    class SftpSession;
+    class IRemoteFileSystem;
 }
 
 /**
@@ -84,7 +84,7 @@ namespace RemoteDeleteGuardDetail
  *        reached through a symlink: the parent of each target is canonicalized by the server, once per parent, and
  *        the target's name appended unresolved, because deleting a link removes the link.
  *
- * One guard serves one request. It runs on the session strand and waits for the SFTP strand.
+ * One guard serves one request. It runs on the session strand and waits for the file system.
  */
 class RemoteDeleteGuard
 {
@@ -94,7 +94,7 @@ class RemoteDeleteGuard
      *        and stored there once known. While it is unknown the guard logs it and only refuses by text.
      */
     RemoteDeleteGuard(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         std::optional<Paths::RemotePath>& knownHome,
         std::chrono::milliseconds timeout
     );
@@ -121,7 +121,7 @@ class RemoteDeleteGuard
     std::expected<std::optional<Paths::RemotePath>, RemoteDeleteRefusal>
     lookUpCanonical(Paths::RemotePath const& directory, Paths::RemotePath const& target);
 
-    SecureShell::SftpSession* sftp_;
+    RemoteIo::IRemoteFileSystem* fileSystem_;
     std::optional<Paths::RemotePath>* knownHome_;
     std::chrono::milliseconds timeout_;
     bool homeUnknown_{false};

@@ -1,13 +1,12 @@
 #include <backend/sftp/compared_state_check.hpp>
 #include <log/log.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
 #include <paths/native.hpp>
 #include <utility/error_message.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <utility/rename.hpp>
 
 #include <fmt/format.h>
-
-#include <libssh/sftp.h>
 
 namespace ComparedStateCheck
 {
@@ -85,26 +84,71 @@ namespace ComparedStateCheck
         }
     }
 
-    std::expected<SharedData::ComparedState, SecureShell::SftpError>
-    remoteStateOfInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
+    namespace
     {
-        const auto information = sftp.lstatInStrand(path);
-        if (!information)
+        /**
+         * @brief @p information of @p path in the terms of a compare, with the literal of a symlink.
+         */
+        std::expected<SharedData::ComparedState, RemoteIo::RemoteError> stateOfInStrand(
+            RemoteIo::IRemoteFileSystem& fileSystem,
+            Paths::RemotePath const& path,
+            std::expected<RemoteIo::FileInformation, RemoteIo::RemoteError> const& information
+        )
         {
-            if (information.error().sftpError == SSH_FX_NO_SUCH_FILE)
-                return SharedData::ComparedState{};
-            return std::unexpected(information.error());
-        }
-        auto state = SharedData::comparedStateOf(*information);
-        if (state.type != SharedData::FileType::Symlink)
-            return state;
-        return sftp.readLinkInStrand(path).transform(
-            [&state](std::string literal)
+            if (!information)
             {
-                state.linkTarget = std::move(literal);
-                return state;
+                if (information.error().kind == RemoteIo::RemoteErrorKind::NoSuchFile)
+                    return SharedData::ComparedState{};
+                return std::unexpected(information.error());
             }
-        );
+            auto state = SharedData::comparedStateOf(*information);
+            if (state.type != SharedData::FileType::Symlink)
+                return state;
+            return fileSystem.inStrand(RemoteIo::ReadLink{.path = path})
+                .transform(
+                    [&state](std::string literal)
+                    {
+                        state.linkTarget = std::move(literal);
+                        return state;
+                    }
+                );
+        }
+
+        /**
+         * @brief What is at @p path now, to tell whether it is still @p compared: the probe where the file system
+         *        answers one, the lstat where the probe found a difference it may have made itself.
+         */
+        std::expected<SharedData::ComparedState, RemoteIo::RemoteError> stateToCompareInStrand(
+            RemoteIo::IRemoteFileSystem& fileSystem,
+            Paths::RemotePath const& path,
+            SharedData::ComparedState const& compared
+        )
+        {
+            if (!fileSystem.capabilities().probeEntries)
+                return remoteStateOfInStrand(fileSystem, path);
+            auto probed = stateOfInStrand(fileSystem, path, fileSystem.inStrand(RemoteIo::ProbeEntry{.path = path}));
+            if (!probed || SharedData::unchangedSinceCompare(compared, *probed) || !probeMayMislead(compared, *probed))
+                return probed;
+            return remoteStateOfInStrand(fileSystem, path);
+        }
+    }
+
+    std::expected<SharedData::ComparedState, RemoteIo::RemoteError>
+    remoteStateOfInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path)
+    {
+        return stateOfInStrand(fileSystem, path, fileSystem.inStrand(RemoteIo::Lstat{.path = path}));
+    }
+
+    bool probeMayMislead(SharedData::ComparedState const& compared, SharedData::ComparedState const& probed)
+    {
+        if (!compared.exists || !probed.exists)
+            return false;
+        if (compared.type == SharedData::FileType::Symlink)
+            return probed.type != SharedData::FileType::Symlink;
+        if (compared.type != probed.type || compared.size != probed.size)
+            return false;
+        return probed.mtime == 0u || compared.mtimePrecision != SharedData::TimePrecision::Second ||
+            probed.mtimePrecision != SharedData::TimePrecision::Second;
     }
 
     std::expected<void, Operation::Error>
@@ -130,16 +174,18 @@ namespace ComparedStateCheck
     }
 
     std::expected<void, Operation::Error> requireUnchangedRemoteInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& path,
         std::optional<SharedData::ComparedState> const& compared
     )
     {
         if (!compared)
             return {};
-        const auto current = remoteStateOfInStrand(sftp, path);
+        const auto current = stateToCompareInStrand(fileSystem, path, *compared);
         if (!current)
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::SftpError, .sftpError = current.error()});
+            return std::unexpected(
+                Operation::Error{.type = Operation::ErrorType::SftpError, .remoteError = current.error()}
+            );
         if (!SharedData::unchangedSinceCompare(*compared, *current))
             return std::unexpected(changedError(path.value()));
         return {};
@@ -171,7 +217,7 @@ namespace ComparedStateCheck
     }
 
     std::expected<void, Operation::Error> moveRemoteIntoPlaceInStrand(
-        SecureShell::SftpSession& sftp,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& from,
         Paths::RemotePath const& to,
         bool replace,
@@ -181,11 +227,12 @@ namespace ComparedStateCheck
         Log::Toast failureToast
     )
     {
-        return requireUnchangedRemoteInStrand(sftp, to, compared)
+        return requireUnchangedRemoteInStrand(fileSystem, to, compared)
             .and_then(
                 [&]() -> std::expected<void, Operation::Error>
                 {
-                    const auto moved = sftp.moveIntoPlaceInStrand(from, to, replace, asideSuffix, sourceType);
+                    const auto moved =
+                        RemoteIo::moveIntoPlaceInStrand(fileSystem, from, to, replace, asideSuffix, sourceType);
                     if (!moved)
                     {
                         Log::error(

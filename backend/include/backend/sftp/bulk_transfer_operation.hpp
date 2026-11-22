@@ -4,7 +4,7 @@
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/scan_phase.hpp>
 #include <log/toast.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <shared_data/directory_entry.hpp>
 #include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
@@ -87,7 +87,7 @@ class BulkTransferOperation : public Operation
     std::expected<void, Error> cancel(bool adoptCancelState) override;
     void pause(bool doPause) override;
     void keepPartialFiles() override;
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
     bool usesStrand() const noexcept override
@@ -219,7 +219,7 @@ class BulkTransferOperation : public Operation
     }
 
   protected:
-    BulkTransferOperation(std::weak_ptr<SecureShell::SftpSession> sftp, CommonOptions common);
+    BulkTransferOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, CommonOptions common);
 
     /**
      * @brief Flat-list mode: every entry is a file or a directory created without content, @p paths holds both of
@@ -268,11 +268,11 @@ class BulkTransferOperation : public Operation
     }
 
     /**
-     * @brief The session the children are given, held weakly like the bulk's own.
+     * @brief The file system the children are given, held weakly like the bulk's own.
      */
-    std::weak_ptr<SecureShell::SftpSession> const& sftp() const noexcept
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem() const noexcept
     {
-        return sftp_;
+        return fileSystem_;
     }
 
     CommonOptions const& common() const noexcept
@@ -281,16 +281,24 @@ class BulkTransferOperation : public Operation
     }
 
     /**
+     * @brief Whether a child transferring @p size bytes takes the asynchronous path, see takesAsynchronousPath.
+     */
+    bool childTakesAsynchronousPath(std::uint64_t size) const;
+
+    /**
      * @brief Tree mode only: creates the bulk's root directory from entries()[0].
      */
     virtual std::expected<void, Error>
-    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) = 0;
+    prepareRootInStrand(RemoteIo::IRemoteFileSystem& fileSystem, SharedData::DirectoryEntry const& root) = 0;
 
     /**
      * @brief Creates the directory described by the entry at @p entryIndex.
      */
-    virtual std::expected<void, Error>
-    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) = 0;
+    virtual std::expected<void, Error> createDirectoryInStrand(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        std::size_t entryIndex,
+        EntryPaths const& paths
+    ) = 0;
 
     /**
      * @brief Builds the child transfer for the file at @p entryIndex.
@@ -347,9 +355,9 @@ class BulkTransferOperation : public Operation
         bool finished{false};
     };
 
-    std::expected<WorkStatus, Error> start(SecureShell::SftpSession& sftp);
-    std::expected<WorkStatus, Error> step(SecureShell::SftpSession& sftp);
-    std::expected<void, Error> fillSlots(SecureShell::SftpSession& sftp);
+    std::expected<WorkStatus, Error> start(RemoteIo::IRemoteFileSystem& fileSystem);
+    std::expected<WorkStatus, Error> step(RemoteIo::IRemoteFileSystem& fileSystem);
+    std::expected<void, Error> fillSlots(RemoteIo::IRemoteFileSystem& fileSystem);
 
     /**
      * @brief Works every slot once.
@@ -363,7 +371,7 @@ class BulkTransferOperation : public Operation
      *
      * @param since The buffer provider's release count before the step that found no buffer.
      */
-    void wakeOnBufferRelease(SecureShell::SftpSession& sftp, std::size_t since);
+    void wakeOnBufferRelease(RemoteIo::IRemoteFileSystem& fileSystem, std::size_t since);
     /**
      * @brief Counts the entry of @p slot as done, as @p transferred or as a failure recorded for the user.
      */
@@ -395,7 +403,7 @@ class BulkTransferOperation : public Operation
         Flat,
     };
 
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     CommonOptions common_;
     std::unique_ptr<ScanPhaseDriver> scanPhase_{};
     EntrySource entrySource_{EntrySource::None};

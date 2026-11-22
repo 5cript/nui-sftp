@@ -49,9 +49,9 @@ SettingScope SettingIdentity::scope() const
     return scope_;
 }
 
-std::optional<Persistence::TerminalEngineType> const& SettingIdentity::engineType() const
+std::vector<Persistence::TerminalEngineType> const& SettingIdentity::engineTypes() const
 {
-    return engineType_;
+    return engineTypes_;
 }
 
 Nui::Observed<std::optional<std::string>>* SettingIdentity::groupKey() const

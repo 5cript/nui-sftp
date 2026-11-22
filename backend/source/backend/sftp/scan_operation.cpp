@@ -1,14 +1,15 @@
 #include <backend/sftp/scan_operation.hpp>
 #include <log/log.hpp>
+#include <remote_io/remote_file_system.hpp>
 
-#include <ssh/sftp_session.hpp>
-#include <ssh/file_stream.hpp>
-
-#include <string>
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <utility>
 
-ScanOperation::ScanOperation(std::weak_ptr<SecureShell::SftpSession> sftp, ScanOperationOptions options)
-    : sftp_{std::move(sftp)}
+ScanOperation::ScanOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, ScanOperationOptions options)
+    : fileSystem_{std::move(fileSystem)}
     , remotePath_{std::move(options.remotePath)}
     , progressCallback_{std::move(options.progressCallback)}
     , futureTimeout_{options.futureTimeout}
@@ -24,34 +25,28 @@ ScanOperation::~ScanOperation() = default;
 namespace
 {
     std::optional<std::string>
-    readRemoteFile(SecureShell::SftpSession& sftp, Paths::RemotePath const& path, std::chrono::seconds timeout)
+    readIgnoreFile(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& path, std::chrono::seconds timeout)
     {
-        auto openFut =
-            sftp.openFile(path, SecureShell::SftpSession::OpenType::Read, std::filesystem::perms::owner_read);
-        if (openFut.wait_for(timeout) != std::future_status::ready)
+        constexpr auto maximumSize = ScanOperation::maximumIgnoreFileSize;
+        // A read of its own, it does not wait for a connection the queue's transfers hold. One byte more tells a cut.
+        auto read = fileSystem.later(RemoteIo::ReadFile{.path = path, .maximumSize = maximumSize + 1u});
+        if (read.wait_for(timeout) != std::future_status::ready)
             return std::nullopt;
-        auto openResult = openFut.get();
-        if (!openResult.has_value())
+        auto content = read.get();
+        if (!content.has_value())
             return std::nullopt;
-        auto stream = openResult.value().lock();
-        if (!stream)
-            return std::nullopt;
-
-        std::string contents;
-        auto readFut = stream->readAll([&contents](std::string_view chunk) {
-            contents.append(chunk);
-            return true;
-        });
-        if (readFut.wait_for(timeout) != std::future_status::ready)
+        if (content->size() > maximumSize)
         {
-            stream->close();
-            return std::nullopt;
+            // A rule cut in two would match what it never meant to.
+            content->resize(maximumSize);
+            content->erase(content->find_last_of('\n') + 1u);
+            Log::warn(
+                "ScanOperation: '{}' is over {} bytes, the rules after its last whole line there are dropped.",
+                path.value(),
+                maximumSize
+            );
         }
-        auto readResult = readFut.get();
-        stream->close();
-        if (!readResult.has_value())
-            return std::nullopt;
-        return contents;
+        return std::move(content).value();
     }
 }
 
@@ -62,11 +57,11 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
         return std::vector<SharedData::DirectoryEntry>{};
     rootScanned_ = true;
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(channelClosedError());
     const auto path = remotePath_ / relative;
-    auto fut = sftp->listDirectory(path);
+    auto fut = fileSystem->later(RemoteIo::ListDirectory{.path = path});
     if (fut.wait_for(futureTimeout_) != std::future_status::ready)
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>({.type = ErrorType::FutureTimeout});
 
@@ -75,17 +70,18 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
     {
         // A directory below the root that vanished or denies listing has unknown content, a sync tree
         // keeps it as unreadable instead of failing or treating it as empty.
-        const auto sftpError = result.error().sftpError;
-        const bool deniedOrVanished = sftpError == SSH_FX_PERMISSION_DENIED || sftpError == SSH_FX_NO_SUCH_FILE;
+        const auto kind = result.error().kind;
+        const bool deniedOrVanished =
+            kind == RemoteIo::RemoteErrorKind::PermissionDenied || kind == RemoteIo::RemoteErrorKind::NoSuchFile;
         if (buildTree_ && !relative.empty() && deniedOrVanished)
         {
             Log::warn("ScanOperation: Cannot list '{}': {}", path.value(), result.error().toString());
             return std::unexpected(
-                Error{.type = ErrorType::DirectoryUnreadable, .sftpError = result.error(), .extraInfo = path.value()}
+                Error{.type = ErrorType::DirectoryUnreadable, .remoteError = result.error(), .extraInfo = path.value()}
             );
         }
         return enterErrorState<std::vector<SharedData::DirectoryEntry>>(
-            {.type = ErrorType::SftpError, .sftpError = result.error()}
+            {.type = ErrorType::SftpError, .remoteError = result.error()}
         );
     }
 
@@ -111,7 +107,7 @@ ScanOperation::scanner(Paths::RelativePath const& relative)
             continue;
         if (entry.type != SharedData::DirectoryEntry::FileType::Regular)
             continue;
-        if (auto content = readRemoteFile(*sftp, path / *entry.nameSegment(), futureTimeout_))
+        if (auto content = readIgnoreFile(*fileSystem, path / *entry.nameSegment(), futureTimeout_))
             ignoreMatcher_.addFile(relative, *content);
     }
 
@@ -226,7 +222,7 @@ std::expected<void, ScanOperation::Error> ScanOperation::cancel(bool adoptCancel
     return {};
 }
 
-SecureShell::ProcessingStrand* ScanOperation::strand() const
+RemoteIo::ProcessingStrand* ScanOperation::strand() const
 {
-    return strandOf(sftp_);
+    return strandOf(fileSystem_);
 }

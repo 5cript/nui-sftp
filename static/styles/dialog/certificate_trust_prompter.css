@@ -1,0 +1,45 @@
+.certificate-trust-prompt {
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.certificate-trust-prompt-text {
+    margin: 0;
+    line-height: 1.4;
+}
+
+.certificate-trust-prompt-problems {
+    margin: 0;
+    padding-left: 20px;
+    line-height: 1.4;
+}
+
+.certificate-trust-prompt-details {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    align-items: baseline;
+}
+
+.certificate-trust-prompt-label {
+    color: var(--subdued-text);
+    white-space: nowrap;
+}
+
+.certificate-trust-prompt-value {
+    overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.certificate-trust-prompt-fingerprint {
+    font-family: monospace;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.certificate-trust-prompt-fingerprint-group {
+    white-space: nowrap;
+}

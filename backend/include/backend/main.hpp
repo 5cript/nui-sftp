@@ -1,17 +1,19 @@
 #pragma once
 
+#include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/process/process_store.hpp>
 #include <backend/session_manager.hpp>
 #include <persistence/state_holder.hpp>
 #include <backend/rpc_filesystem.hpp>
 #include <backend/rpc_system.hpp>
+#include <backend/ftp/certificate_trust_prompter.hpp>
 #include <backend/password/password_prompter.hpp>
 #include <backend/theme_finder.hpp>
 #include <backend/program_options.hpp>
 #include <backend/opener.hpp>
 #include <command-store/command_store.hpp>
 #include <command-store/command_store_rpc.hpp>
-#include <ssh/async/processing_thread.hpp>
+#include <remote_io/async/processing_thread.hpp>
 #include <events/app_wide_events.hpp>
 #include <nui-file-explorer/support/default_places.hpp>
 #ifdef _WIN32
@@ -65,6 +67,12 @@ class Main
     {
         LoggerSetup(Persistence::StateHolder& stateHolder);
     } loggerSetup_;
+    /**
+     * @brief Made once the state is loaded. Destroyed after the session manager, whose shutdown() closes the FTP
+     *        sessions, and after the window joined its pool, where a handler may still hold an FTP file system: its
+     *        strands must not outlive these threads.
+     */
+    std::unique_ptr<FtpEngineContext> ftpEngine_;
     Nui::Window window_;
     Nui::RpcHub hub_;
     std::unique_ptr<Opener> opener_;
@@ -76,6 +84,8 @@ class Main
     std::unique_ptr<RpcSystem> rpcSystem_;
     ProcessStore processes_;
     PasswordPrompter prompter_;
+    std::shared_ptr<FtpConnect::CertificateTrustStore> trustStore_;
+    CertificateTrustPrompter trustPrompter_;
     std::optional<CommandStore::Store> commandStore_;
     /** @brief StoreRpc, or UnavailableStoreRpc when the store could not be opened. */
     std::unique_ptr<RpcHelper::StrandRpc> commandStoreRpc_;

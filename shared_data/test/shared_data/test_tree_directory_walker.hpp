@@ -83,6 +83,21 @@ namespace SharedData::Sync::Test
         EXPECT_EQ(childNames(*tree), (std::vector<std::string>{"B", "a", "a-b", "a.b", "b", "\xc3\xbc"}));
     }
 
+    TEST(TreeDirectoryWalkerTests, ANodeKeepsThePrecisionOfItsTime)
+    {
+        FakeFilesystem filesystem;
+        filesystem.directories["/root"].push_back(
+            DirectoryEntry{
+                .name = "listed", .type = FileType::Regular, .mtime = 60, .mtimePrecision = TimePrecision::Day
+            }
+        );
+
+        const auto tree = walkFake(filesystem);
+        ASSERT_TRUE(tree.has_value());
+        ASSERT_EQ(tree->children.size(), 1u);
+        EXPECT_EQ(tree->children.front().mtimePrecision, TimePrecision::Day);
+    }
+
     TEST(TreeDirectoryWalkerTests, SubtreeMetricsAccumulateBottomUp)
     {
         FakeFilesystem filesystem;

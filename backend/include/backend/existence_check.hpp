@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -26,7 +26,7 @@ constexpr std::size_t remoteListingThreshold = 10;
  *        children looked up one by one, and so has a name only a case or normalization variant of is listed.
  */
 std::expected<std::vector<bool>, std::string> remotePathsExist(
-    SecureShell::SftpSession& session,
+    RemoteIo::IRemoteFileSystem& fileSystem,
     std::vector<std::string> const& paths,
     std::chrono::milliseconds timeout
 );

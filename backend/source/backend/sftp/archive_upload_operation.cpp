@@ -5,6 +5,8 @@
 
 #include <log/log.hpp>
 #include <paths/native.hpp>
+#include <persistence/state/sftp_options.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
 #include <utility/permissions.hpp>
 
 #include <chrono>
@@ -20,14 +22,13 @@
 namespace
 {
     /**
-     * @brief ByteSink that writes through an SFTP FileStream using writeInStrand.
-     *        SFTP's sftp_write does not require the file's total size in advance,
-     *        so this works for streaming archive uploads.
+     * @brief ByteSink that writes through a remote file stream using writeInStrand. The stream needs no total size in
+     *        advance, so this works for streaming archive uploads.
      */
-    class SftpFileByteSink final : public TarArchive::ByteSink
+    class RemoteFileByteSink final : public TarArchive::ByteSink
     {
       public:
-        explicit SftpFileByteSink(std::weak_ptr<SecureShell::IFileStream> stream)
+        explicit RemoteFileByteSink(std::weak_ptr<RemoteIo::IRemoteFileStream> stream)
             : stream_{std::move(stream)}
         {}
 
@@ -38,7 +39,7 @@ namespace
             auto stream = stream_.lock();
             if (!stream)
                 return std::unexpected(TarArchive::makeError(
-                    TarArchive::TarErrorCode::IoError, "remote SFTP stream expired mid-upload"
+                    TarArchive::TarErrorCode::IoError, "remote file stream expired mid-upload"
                 ));
             const auto writeResult = stream->writeInStrand(std::string_view{
                 reinterpret_cast<char const*>(bytes.data()), bytes.size(),
@@ -46,27 +47,28 @@ namespace
             if (!writeResult.has_value())
                 return std::unexpected(TarArchive::makeError(
                     TarArchive::TarErrorCode::IoError,
-                    "SFTP writeInStrand failed: " + writeResult.error().message
+                    fmt::format("Writing the remote archive failed: {}", writeResult.error().message)
                 ));
             return {};
         }
 
+        /**
+         * @brief Leaves the stream open, the operation finishes the transfer and keeps the server's error.
+         */
         std::expected<void, TarArchive::TarError> finish() override
         {
-            if (auto stream = stream_.lock(); stream)
-                stream->close(false);
             return {};
         }
 
       private:
-        std::weak_ptr<SecureShell::IFileStream> stream_;
+        std::weak_ptr<RemoteIo::IRemoteFileStream> stream_;
     };
 
     SharedData::OperationError archiveErrorToOperationError(TarArchive::TarError const& tarError)
     {
         return SharedData::OperationError{
             .type = SharedData::OperationErrorType::UnknownError,
-            .sftpError = std::nullopt,
+            .remoteError = std::nullopt,
             .extraInfo = tarError.toString(),
         };
     }
@@ -131,9 +133,9 @@ bool ArchiveUploadOperation::isPayloadEntry(ResolvedEntry const& entry) const no
     return entry.header.type == SharedData::FileType::Regular;
 }
 
-ArchiveUploadOperation::ArchiveUploadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, Options options)
+ArchiveUploadOperation::ArchiveUploadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, Options options)
     : Operation{}
-    , sftp_{std::move(sftp)}
+    , fileSystem_{std::move(fileSystem)}
     , options_{std::move(options)}
 {
     remoteArchivePath_ = options_.remoteArchivePath;
@@ -156,10 +158,10 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         return result;
     }
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<WorkStatus>(channelClosedError());
-    auto future = sftp->performPromise(
+    auto future = fileSystem->performPromise(
         [this]()
         {
             return workInStrand();
@@ -190,8 +192,8 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         return enterErrorState<WorkStatus>(*incompleteScan_);
     }
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp && !hasEnded())
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem && !hasEnded())
         return enterErrorState<WorkStatus>(channelClosedError());
 
     switch (state_)
@@ -203,6 +205,8 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         }
         case Preparing:
         {
+            if (awaitsConnection())
+                return WorkStatus::Waiting;
             if (options_.remoteArchivePath.empty())
                 return enterErrorState<WorkStatus>({.type = ErrorType::InvalidPath});
             if (options_.localPaths.empty())
@@ -210,7 +214,9 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
                     {.type = ErrorType::InvalidPath, .extraInfo = "archive has no source paths"}
                 );
 
-            const auto prepareResult = prepareInStrand(*sftp);
+            const auto prepareResult = prepareInStrand(*fileSystem);
+            if (!prepareResult.has_value() && waitsForConnection(prepareResult.error()))
+                return awaitConnection();
             if (!prepareResult.has_value())
                 return enterErrorState<WorkStatus>(prepareResult.error());
             state_ = Prepared;
@@ -255,7 +261,7 @@ std::expected<Operation::WorkStatus, Operation::Error> ArchiveUploadOperation::w
         }
         case Finalizing:
         {
-            const auto finaliseResult = finaliseArchiveInStrand(*sftp);
+            const auto finaliseResult = finaliseArchiveInStrand(*fileSystem);
             if (!finaliseResult.has_value())
                 return enterErrorState<WorkStatus>(finaliseResult.error());
             state_ = Completed;
@@ -401,7 +407,7 @@ void ArchiveUploadOperation::appendPrescannedFromScan(
     }
 }
 
-std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(SecureShell::SftpSession& sftp)
+std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     if (remoteArchivePath_.empty() || remoteArchivePath_.isRoot() || tempPath_.empty())
     {
@@ -413,44 +419,47 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Se
         );
     }
 
-    const auto flattenResult = flattenRoots();
-    if (!flattenResult.has_value())
-        return std::unexpected(flattenResult.error());
-
+    // Flattened once, preparing again after a wait for a connection only opens again. Flattening to nothing fails.
     if (resolvedEntries_.empty())
-        return std::unexpected(Error{
-            .type = ErrorType::FileNotFound,
-            .extraInfo = "no local files could be stat'd",
-        });
+    {
+        const auto flattenResult = flattenRoots();
+        if (!flattenResult.has_value())
+            return std::unexpected(flattenResult.error());
+
+        if (resolvedEntries_.empty())
+            return std::unexpected(
+                Error{
+                    .type = ErrorType::FileNotFound,
+                    .extraInfo = "no local files could be stat'd",
+                }
+            );
+    }
 
     // Fail early instead of packing everything first, the final rename refuses to replace it anyway.
-    if (!options_.mayOverwrite && sftp.lstatInStrand(remoteArchivePath_).has_value())
+    if (!options_.mayOverwrite && fileSystem.inStrand(RemoteIo::Lstat{.path = remoteArchivePath_}).has_value())
         return std::unexpected(Error{.type = ErrorType::FileExists});
 
     // Written under the temp name, so a failed or cancelled upload never leaves a truncated destination.
-    using OpenType = SecureShell::SftpSession::OpenType;
-    const auto openResult = sftp.openFileInStrand(
-        tempPath_, OpenType::Write | OpenType::Create | OpenType::Truncate, std::filesystem::perms{0644u}
-    );
+    const auto openResult = fileSystem.inStrand(wakingOpen(
+        tempPath_,
+        RemoteIo::OpenMode::Write | RemoteIo::OpenMode::Create | RemoteIo::OpenMode::Truncate,
+        std::filesystem::perms{0644u}
+    ));
     if (!openResult.has_value())
     {
-        Log::error(
-            "ArchiveUploadOperation: cannot open remote '{}': {}",
-            options_.remoteArchivePath.value(),
-            openResult.error().message
-        );
-        return std::unexpected(
-            Error{
+        return std::unexpected(loggedOpenFailure(
+            {
                 .type = ErrorType::SftpError,
-                .sftpError = openResult.error(),
+                .remoteError = openResult.error(),
                 .extraInfo = fmt::format("Opening remote archive file: {}", options_.remoteArchivePath.value()),
-            }
-        );
+            },
+            fmt::format("ArchiveUploadOperation: cannot open remote '{}'", options_.remoteArchivePath.value())
+        ));
     }
     remoteStream_ = openResult.value();
     tempCreated_ = true;
 
-    // Wrap the SFTP terminal sink in the requested codec. Auto means derive
+    // Wrap the remote file sink in the requested codec. Auto means derive
     // from the user-facing remote path so the bytes on the wire match the
     // declared file extension.
     const auto resolvedCodec = options_.compression == TarArchive::Compression::Auto
@@ -458,9 +467,7 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Se
         : options_.compression;
 
     auto wrappedSink = TarArchive::wrapSinkWithCodec(
-        std::make_unique<SftpFileByteSink>(remoteStream_),
-        resolvedCodec,
-        options_.compressionOptions
+        std::make_unique<RemoteFileByteSink>(remoteStream_), resolvedCodec, options_.compressionOptions
     );
     if (!wrappedSink)
     {
@@ -473,17 +480,19 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::prepareInStrand(Se
 
     writer_ = TarArchive::Writer::makeFromSink(std::move(*wrappedSink));
 
-    buffer_ = sftp.bufferProvider().lease(totalPayloadBytes_);
+    buffer_ = fileSystem.bufferProvider().lease(totalPayloadBytes_);
     if (buffer_.empty())
     {
         Log::error("ArchiveUploadOperation: No transfer buffer available from pool.");
-        return std::unexpected(Error{
-            .type = ErrorType::SftpError,
-            .sftpError = SecureShell::SftpError{
-                .message = "No buffer available from pool",
-                .wrapperError = SecureShell::WrapperErrors::BufferUnavailable,
-            },
-        });
+        return std::unexpected(
+            Error{
+                .type = ErrorType::SftpError,
+                .remoteError = RemoteIo::RemoteError{
+                    .message = "No buffer available from pool",
+                    .wrapperError = RemoteIo::WrapperErrors::BufferUnavailable,
+                },
+            }
+        );
     }
     return {};
 }
@@ -587,9 +596,7 @@ std::expected<bool, Operation::Error> ArchiveUploadOperation::readChunkInStrand(
 
     currentEntryBytesRead_ += bytesRead;
     totalBytesTransferred_ += bytesRead;
-    throughputMeter_->addBytesTransferred(
-        static_cast<SecureShell::AsyncTransferContext::SignedSizeType>(bytesRead)
-    );
+    throughputMeter_->addBytesTransferred(static_cast<RemoteIo::AsyncTransferContext::SignedSizeType>(bytesRead));
     throughputMeter_->calculateBytesPerSecond();
     options_.progressCallback(
         0u, totalPayloadBytes_, totalBytesTransferred_, throughputMeter_->bytesPerSecond()
@@ -647,7 +654,8 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseEntryInStr
     return {};
 }
 
-std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInStrand(SecureShell::SftpSession& sftp)
+std::expected<void, Operation::Error>
+ArchiveUploadOperation::finaliseArchiveInStrand(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     if (!writer_)
         return std::unexpected(Error{
@@ -666,11 +674,20 @@ std::expected<void, Operation::Error> ArchiveUploadOperation::finaliseArchiveInS
         return std::unexpected(archiveErrorToOperationError(finaliseResult.error()));
     }
 
-    if (auto stream = remoteStream_.lock(); stream)
-        stream->close(false);
+    const auto finished = finishTransferInStrand(remoteStream_);
     remoteStream_.reset();
+    if (!finished)
+    {
+        Log::error(
+            "ArchiveUploadOperation: The server did not confirm the archive '{}': {}",
+            options_.remoteArchivePath.value(),
+            finished.error().toString()
+        );
+        return finished;
+    }
 
-    const auto moved = sftp.moveIntoPlaceInStrand(
+    const auto moved = RemoteIo::moveIntoPlaceInStrand(
+        fileSystem,
         tempPath_,
         remoteArchivePath_,
         options_.mayOverwrite,
@@ -727,19 +744,19 @@ void ArchiveUploadOperation::cleanup()
     currentLocalFile_.close();
     writer_.reset();
     if (auto stream = remoteStream_.lock(); stream)
-        stream->close(false);
+        stream->close();
     remoteStream_.reset();
 
     if (tempCreated_)
     {
         tempCreated_ = false;
-        const auto sftp = openSession(sftp_);
-        if (!sftp)
+        const auto fileSystem = openSession(fileSystem_);
+        if (!fileSystem)
             Log::warn("ArchiveUploadOperation: The channel is closed, '{}' stays on the server.", tempPath_.value());
-        else if (sftp->strand()->withinProcessingThread())
-            std::ignore = sftp->removeFileInStrand(tempPath_);
+        else if (fileSystem->strand()->withinProcessingThread())
+            std::ignore = fileSystem->inStrand(RemoteIo::RemoveFile{.path = tempPath_});
         else
-            std::ignore = sftp->removeFile(tempPath_).wait_for(options_.futureTimeout);
+            std::ignore = fileSystem->later(RemoteIo::RemoveFile{.path = tempPath_}).wait_for(options_.futureTimeout);
     }
 }
 

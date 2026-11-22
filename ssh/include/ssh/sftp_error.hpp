@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ssh/async/unfinished_task_result.hpp>
+#include <remote_io/remote_error.hpp>
 
 #include <fmt/format.h>
 
@@ -8,26 +8,7 @@
 
 namespace SecureShell
 {
-    // New values also go into BOOST_DESCRIBE_ENUM in shared_data/file_operations/operation_error.hpp, or converting an
-    // error that carries them to json throws.
-    enum class WrapperErrors
-    {
-        None,
-        OwnerNull,
-        SharedPtrDestroyed,
-        // This happens when the client does not respect the server max_write_length.
-        // See: https://api.libssh.org/stable/structsftp__limits__struct.html
-        ShortWrite,
-        FileNull,
-        TaskPushFailed,
-        BufferUnavailable,
-        // The remote file ended before the expected number of bytes was read.
-        UnexpectedEndOfFile,
-        // The local side of a transfer could not be read or written.
-        LocalIoFailure,
-        // The remote path is unset or invalid, nothing was sent to the server.
-        InvalidPath,
-    };
+    using WrapperErrors = RemoteIo::WrapperErrors;
 
     struct SftpError
     {
@@ -120,18 +101,6 @@ namespace SecureShell
                 message,
                 static_cast<int>(wrapperError)
             );
-        }
-    };
-
-    template <>
-    struct UnfinishedTaskResult<SftpError>
-    {
-        SftpError operator()() const
-        {
-            return SftpError{
-                .message = "The task did not finish, the SFTP session is closed or its thread stopped",
-                .wrapperError = WrapperErrors::TaskPushFailed,
-            };
         }
     };
 }

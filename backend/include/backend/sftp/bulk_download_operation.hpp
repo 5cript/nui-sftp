@@ -30,7 +30,7 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::chrono::milliseconds progressEmitInterval{100};
     };
 
-    BulkDownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, BulkDownloadOperationOptions options);
+    BulkDownloadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, BulkDownloadOperationOptions options);
     ~BulkDownloadOperation() override;
     BulkDownloadOperation(BulkDownloadOperation const&) = delete;
     BulkDownloadOperation(BulkDownloadOperation&&) = delete;
@@ -52,6 +52,8 @@ class BulkDownloadOperation : public BulkTransferOperation
         std::uint64_t sizeBytes;
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        /** @brief See SharedData::BulkDownloadEntry::mtimePrecision. */
+        SharedData::TimePrecision mtimePrecision{SharedData::TimePrecision::Second};
         bool mayOverwrite{false};
         /** @brief A directory created without its content, with the link check of every local directory. */
         bool isDirectory{false};
@@ -78,9 +80,12 @@ class BulkDownloadOperation : public BulkTransferOperation
 
   protected:
     std::expected<void, Error>
-    prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root) override;
-    std::expected<void, Error>
-    createDirectoryInStrand(SecureShell::SftpSession& sftp, std::size_t entryIndex, EntryPaths const& paths) override;
+    prepareRootInStrand(RemoteIo::IRemoteFileSystem& fileSystem, SharedData::DirectoryEntry const& root) override;
+    std::expected<void, Error> createDirectoryInStrand(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        std::size_t entryIndex,
+        EntryPaths const& paths
+    ) override;
     std::unique_ptr<Operation> makeChild(
         std::size_t entryIndex,
         EntryPaths const& paths,

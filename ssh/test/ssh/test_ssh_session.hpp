@@ -2,6 +2,7 @@
 
 #include "common_fixture.hpp"
 #include <ssh/session.hpp>
+#include <ssh/sftp_session.hpp>
 #include <paths/native.hpp>
 #include <nui/utility/scope_exit.hpp>
 
@@ -321,6 +322,35 @@ namespace SecureShell::Test
         EXPECT_FALSE(session.has_value());
     }
 
+    TEST(SshTimeoutTests, WithoutATimeoutEveryCallAfterTheConnectGetsThirtySeconds)
+    {
+        EXPECT_EQ(callTimeoutOf(Persistence::SshOptions{}), std::chrono::seconds{30});
+    }
+
+    TEST(SshTimeoutTests, ZeroTimeoutsAreNoTimeout)
+    {
+        Persistence::SshOptions options{};
+        options.connectTimeoutSeconds = 0;
+        options.connectTimeoutUSeconds = 0;
+        EXPECT_EQ(callTimeoutOf(options), std::chrono::seconds{30});
+    }
+
+    TEST(SshTimeoutTests, EveryCallGetsTheTimeoutOfTheProfile)
+    {
+        Persistence::SshOptions seconds{};
+        seconds.connectTimeoutSeconds = 3;
+        EXPECT_EQ(callTimeoutOf(seconds), std::chrono::seconds{3});
+
+        Persistence::SshOptions microseconds{};
+        microseconds.connectTimeoutUSeconds = 500'000;
+        EXPECT_EQ(callTimeoutOf(microseconds), std::chrono::milliseconds{500});
+
+        Persistence::SshOptions both{};
+        both.connectTimeoutSeconds = 2;
+        both.connectTimeoutUSeconds = 250'000;
+        EXPECT_EQ(callTimeoutOf(both), std::chrono::milliseconds{2250});
+    }
+
     TEST_F(SshSessionTests, ConnectFailsWithWrongAddressWithinTheTimeout)
     {
         // Shorter than the fixture's, where the address is routed the connect waits all of it.
@@ -514,8 +544,9 @@ namespace SecureShell::Test
 
         channel->close();
 
-        std::promise<void> awaiter{};
-        EXPECT_THROW(channelStartReading(channel, awaiter), std::runtime_error);
+        const auto reading = channel->startReading([](std::string const&) {}, [](std::string const&) {}, []() {});
+        ASSERT_FALSE(reading) << "a closed channel is read";
+        EXPECT_FALSE(reading.error().empty());
     }
 
     TEST_F(SshSessionTests, CannotWriteAfterChannelClose)
@@ -750,6 +781,90 @@ namespace SecureShell::Test
         channel->write("\r");
         EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
         EXPECT_EQ(exited.get_future().wait_for(5s), std::future_status::ready);
+    }
+
+    TEST_F(SshSessionTests, ATaskThatThrowsEndsTheSessionAsALostConnection)
+    {
+        auto [result, processThread] = createSftpServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        std::promise<void> lost{};
+        std::atomic_bool reported{false};
+        auto expectedSession = makePasswordTestSession(
+            result->port,
+            [&lost, &reported]()
+            {
+                if (!reported.exchange(true))
+                    lost.set_value();
+            }
+        );
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedSftp = session->createSftpSession().get();
+        ASSERT_TRUE(expectedSftp.has_value());
+        const auto sftp = expectedSftp.value().lock();
+        ASSERT_TRUE(sftp);
+
+        ASSERT_TRUE(sftp->strand()->pushTask(
+            []()
+            {
+                throw std::runtime_error("boom");
+            }
+        ));
+        EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
+        // The session's thread is gone, the next task is refused.
+        EXPECT_FALSE(sftp->strand()->pushTask([]() {}));
+    }
+
+    TEST_F(SshSessionTests, AnOutputHandlerThatThrowsEndsTheSessionAsALostConnection)
+    {
+        auto [result, processThread] = createSshServer();
+        ASSERT_TRUE(result);
+        auto joiner = Nui::ScopeExit{[&]() noexcept
+            {
+                result->command("exit");
+                if (processThread.joinable())
+                    processThread.join();
+            }};
+
+        std::promise<void> lost{};
+        std::atomic_bool reported{false};
+        auto expectedSession = makePasswordTestSession(
+            result->port,
+            [&lost, &reported]()
+            {
+                if (!reported.exchange(true))
+                    lost.set_value();
+            }
+        );
+        ASSERT_TRUE(expectedSession.has_value());
+        auto session = std::move(expectedSession).value();
+        session->start();
+
+        auto expectedChannel = session->createPtyChannel({}).get();
+        ASSERT_TRUE(expectedChannel.has_value());
+        const auto channel = expectedChannel.value().lock();
+        ASSERT_TRUE(channel);
+        // The shell greets, whichever call of libssh reads that hands it to the handler.
+        channelStartReading(
+            channel,
+            [](std::string const&)
+            {
+                throw std::runtime_error("boom");
+            }
+        );
+
+        EXPECT_EQ(lost.get_future().wait_for(5s), std::future_status::ready);
+        // The session's thread is gone, the next task is refused.
+        EXPECT_FALSE(channel->write("exit\r"));
     }
 
     TEST_F(SshSessionTests, ClosingATerminalWhileTheThreadWaitsOnTheConnectionReturns)

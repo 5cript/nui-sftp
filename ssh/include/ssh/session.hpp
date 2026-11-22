@@ -1,13 +1,16 @@
 #pragma once
 
-#include <ssh/async/processing_thread.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/async/processing_thread.hpp>
+#include <remote_io/connection.hpp>
+#include <remote_io/remote_error.hpp>
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/termios.hpp>
 #include <ssh/channel.hpp>
 
 #include <libssh/libsshpp.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <expected>
 #include <map>
 #include <string>
@@ -20,7 +23,7 @@ namespace SecureShell
 {
     class SftpSession;
 
-    class Session
+    class Session : public RemoteIo::IConnection
     {
       public:
         friend class Channel;
@@ -28,7 +31,7 @@ namespace SecureShell
         friend class FileStream;
 
         Session(std::function<void()> onConnectionLoss);
-        ~Session();
+        ~Session() override;
         Session(Session const&) = delete;
         Session& operator=(Session const&) = delete;
         Session(Session&&) = delete;
@@ -43,7 +46,22 @@ namespace SecureShell
          * @brief Starts processing the session and channels.
          *
          */
-        void start();
+        void start() override;
+
+        /**
+         * @brief Sets how long every libssh call waits for the server, before start.
+         * @return What libssh returned, SSH_OK when it took the timeout.
+         */
+        int setCallTimeout(std::chrono::microseconds timeout);
+
+        /**
+         * @brief How long a libssh call waits for the server, see setCallTimeout. The maximum when it was never set,
+         *        libssh then waits forever.
+         */
+        std::chrono::microseconds callTimeout() const
+        {
+            return callTimeout_;
+        }
 
         struct PtyCreationOptions
         {
@@ -70,16 +88,29 @@ namespace SecureShell
          *
          * @return std::future<std::expected<std::weak_ptr<SftpSession>, int>>
          */
-        std::future<std::expected<std::weak_ptr<SftpSession>, SftpError>> createSftpSession();
+        std::future<std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>> createSftpSession();
+
+        /**
+         * @brief An SFTP session as the protocol neutral file system, see createSftpSession.
+         */
+        std::future<std::expected<std::weak_ptr<RemoteIo::IRemoteFileSystem>, RemoteIo::RemoteError>>
+        createFileSystem() override;
 
         std::string getErrorMessage();
 
       private:
+        std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError> createSftpSessionInThread();
+
         void channelRemoveItself(Channel* channel, bool isBackElement);
         void removeAllChannels();
 
         void sftpSessionRemoveItself(SftpSession* sftpSession, bool isBackElement);
         void removeAllSftpSessions();
+
+        /**
+         * @brief Calls the connection loss callback once, never while the session shuts down.
+         */
+        void reportConnectionLoss();
 
         /**
          * @brief Shuts down the session and closes all channels.
@@ -91,7 +122,10 @@ namespace SecureShell
 
       private:
         std::function<void()> onConnectionLoss_;
-        SecureShell::ProcessingThread processingThread_;
+        /** @brief Set once the loss was reported or the session shuts down. */
+        std::atomic_bool connectionLossReported_{false};
+        std::chrono::microseconds callTimeout_{std::chrono::microseconds::max()};
+        RemoteIo::ProcessingThread processingThread_;
         ssh::Session session_;
         std::shared_ptr<Channel> hiddenChannel_;
         std::vector<std::shared_ptr<Channel>> channels_;
@@ -107,6 +141,13 @@ namespace SecureShell
         std::optional<int> port;
         std::optional<std::string> password;
     };
+
+    /**
+     * @brief How long every libssh call after the connect waits for the server: the timeout @p options set, 30 s when
+     *        they set none, since libssh then waits forever and file system calls rely on it to end. A ConnectTimeout
+     *        of the ssh config bounds the connect only.
+     */
+    std::chrono::microseconds callTimeoutOf(Persistence::SshOptions const& options);
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
         Persistence::SshSessionOptions const& sessionOptions,

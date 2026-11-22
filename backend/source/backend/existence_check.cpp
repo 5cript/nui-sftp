@@ -5,7 +5,6 @@
 #include <paths/paths.hpp>
 
 #include <fmt/format.h>
-#include <libssh/sftp.h>
 
 #include <filesystem>
 #include <optional>
@@ -42,16 +41,16 @@ namespace
      * @brief Whether @p path exists, nothing but "no such file" counts as absent.
      */
     std::expected<bool, std::string> remotePathExists(
-        SecureShell::SftpSession& session,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& path,
         std::chrono::milliseconds timeout
     )
     {
-        auto future = session.lstat(path);
+        auto future = fileSystem.later(RemoteIo::Lstat{.path = path});
         if (future.wait_for(timeout) != std::future_status::ready)
             return std::unexpected(fmt::format("'{}': stat timed out", path.value()));
         const auto result = future.get();
-        if (!result && result.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        if (!result && result.error().kind != RemoteIo::RemoteErrorKind::NoSuchFile)
             return std::unexpected(fmt::format("'{}': {}", path.value(), result.error().toString()));
         return result.has_value();
     }
@@ -60,18 +59,22 @@ namespace
      * @brief The names in @p parent, without resolving symlinks. Nothing for a directory that cannot be listed
      *        because of its permissions, like a drop box; an empty set for one that does not exist yet.
      */
-    std::expected<std::optional<std::unordered_set<std::string>>, std::string>
-    listNames(SecureShell::SftpSession& session, Paths::RemotePath const& parent, std::chrono::milliseconds timeout)
+    std::expected<std::optional<std::unordered_set<std::string>>, std::string> listNames(
+        RemoteIo::IRemoteFileSystem& fileSystem,
+        Paths::RemotePath const& parent,
+        std::chrono::milliseconds timeout
+    )
     {
-        auto future = session.listDirectory(parent, /*resolveLinks=*/false);
+        auto future = fileSystem.later(RemoteIo::ListDirectory{.path = parent, .resolveLinks = false});
         if (future.wait_for(timeout) != std::future_status::ready)
             return std::unexpected(fmt::format("'{}': listing timed out", parent.value()));
         const auto result = future.get();
         if (!result)
         {
-            if (result.error().sftpError == SSH_FX_NO_SUCH_FILE)
+            const auto kind = result.error().kind;
+            if (kind == RemoteIo::RemoteErrorKind::NoSuchFile)
                 return std::unordered_set<std::string>{};
-            if (result.error().sftpError == SSH_FX_PERMISSION_DENIED)
+            if (kind == RemoteIo::RemoteErrorKind::PermissionDenied)
                 return std::nullopt;
             return std::unexpected(fmt::format("'{}': {}", parent.value(), result.error().toString()));
         }
@@ -87,7 +90,7 @@ namespace
      *        while it holds a case or normalization variant is looked up, since the server may fold names.
      */
     std::expected<void, std::string> checkByListing(
-        SecureShell::SftpSession& session,
+        RemoteIo::IRemoteFileSystem& fileSystem,
         Paths::RemotePath const& parent,
         std::vector<Paths::RemotePath> const& paths,
         std::vector<std::size_t> const& indices,
@@ -95,14 +98,14 @@ namespace
         std::vector<bool>& results
     )
     {
-        auto names = listNames(session, parent, timeout);
+        auto names = listNames(fileSystem, parent, timeout);
         if (!names)
             return std::unexpected(names.error());
         if (!*names)
         {
             for (const auto index : indices)
             {
-                auto exists = remotePathExists(session, paths[index], timeout);
+                auto exists = remotePathExists(fileSystem, paths[index], timeout);
                 if (!exists)
                     return std::unexpected(exists.error());
                 results[index] = *exists;
@@ -130,7 +133,7 @@ namespace
                 results[index] = false;
                 continue;
             }
-            auto exists = remotePathExists(session, paths[index], timeout);
+            auto exists = remotePathExists(fileSystem, paths[index], timeout);
             if (!exists)
                 return std::unexpected(exists.error());
             results[index] = *exists;
@@ -140,7 +143,7 @@ namespace
 }
 
 std::expected<std::vector<bool>, std::string> remotePathsExist(
-    SecureShell::SftpSession& session,
+    RemoteIo::IRemoteFileSystem& fileSystem,
     std::vector<std::string> const& paths,
     std::chrono::milliseconds timeout
 )
@@ -168,13 +171,13 @@ std::expected<std::vector<bool>, std::string> remotePathsExist(
     {
         if (indices.size() >= remoteListingThreshold)
         {
-            if (auto checked = checkByListing(session, parent, remotePaths, indices, timeout, results); !checked)
+            if (auto checked = checkByListing(fileSystem, parent, remotePaths, indices, timeout, results); !checked)
                 return std::unexpected(checked.error());
             continue;
         }
         for (const auto index : indices)
         {
-            auto exists = remotePathExists(session, remotePaths[index], timeout);
+            auto exists = remotePathExists(fileSystem, remotePaths[index], timeout);
             if (!exists)
                 return std::unexpected(exists.error());
             results[index] = *exists;

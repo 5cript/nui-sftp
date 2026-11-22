@@ -5,19 +5,32 @@
 #include <nlohmann/json.hpp>
 #include <fmt/format.h>
 
-#include <vector>
+#include <algorithm>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace Persistence
 {
+    /**
+     * @brief Gives the members a config misses their defaults and reports them, except the members the derived type
+     *        lists in a static `silentlyDefaulted`: those a version added with a complete default, which every config
+     *        of an earlier version misses.
+     */
     struct DefaultMissingMember
     {
         template <typename DerivedType, typename ElementT>
         void handleMissingElement(DerivedType& derived, ElementT& element, char const* name)
         {
-            defaultedMissingMembers_.emplace_back(name);
             derived.*element = DerivedType{}.*element;
+            if constexpr (requires { DerivedType::silentlyDefaulted; })
+            {
+                if (std::ranges::find(DerivedType::silentlyDefaulted, std::string_view{name}) !=
+                    std::ranges::end(DerivedType::silentlyDefaulted))
+                    return;
+            }
+            defaultedMissingMembers_.emplace_back(name);
         }
 
         template <typename DerivedT, typename ElementT>

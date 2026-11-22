@@ -15,13 +15,6 @@ namespace Docker
         {
             return fmt::format("{}", fmt::join(arguments | std::views::transform(quote), " "));
         }
-
-        std::string trimmed(std::string text)
-        {
-            while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
-                text.pop_back();
-            return text;
-        }
     }
 
     std::expected<Container, std::string> Container::start(Options const& options)
@@ -67,24 +60,18 @@ namespace Docker
         return *this;
     }
 
+    std::string Container::release() && noexcept
+    {
+        return std::exchange(name_, {});
+    }
+
     std::expected<std::string, std::string> Container::ipAddress() const
     {
-        const auto inspect = run(fmt::format(
-            "docker inspect --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}} {{{{end}}}}' {}",
-            quote(name_)
-        ));
-        if (inspect.exitCode != 0)
-            return std::unexpected{fmt::format("inspecting {} failed: {}", name_, inspect.output)};
-        auto address = trimmed(inspect.output);
-        address = address.substr(0, address.find(' '));
-        if (address.empty())
-            return std::unexpected{fmt::format("{} has no network address", name_)};
-        return address;
+        return containerAddress(name_);
     }
 
     CommandResult Container::execute(std::string_view command, std::string_view user) const
     {
-        const auto userArgument = user.empty() ? std::string{} : fmt::format("--user {} ", quote(user));
-        return run(fmt::format("docker exec {}{} sh -c {}", userArgument, quote(name_), quote(command)));
+        return executeIn(name_, command, user);
     }
 }

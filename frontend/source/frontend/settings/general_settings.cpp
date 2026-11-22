@@ -1,5 +1,6 @@
 #include <frontend/settings/general_settings.hpp>
 #include <frontend/settings/addressable_setting.hpp>
+#include <frontend/settings/nullopt_reset.hpp>
 #include <frontend/dialog/input_dialog.hpp>
 
 using namespace std::string_literals;
@@ -18,6 +19,7 @@ GeneralSettings::GeneralSettings(
     , localFilesystemFactory_{factory.within({"localFilesystemOptionsGroupHeader"})}
     , fileTrackingFactory_{factory.within({"fileTrackingOptionsGroupHeader"})}
     , layoutsFactory_{factory.within({"layoutsGroupHeader"})}
+    , connectionsFactory_{factory.within({"connectionsGroupHeader"})}
     , localization{
         .language = {
             {"en_US", "de_DE"},
@@ -348,6 +350,26 @@ GeneralSettings::GeneralSettings(
             confirmDialog,
             inputDialog,
         },
+        .ftp = LayoutSetting{
+            layoutsFactory_.identity({"general", "layouts", "ftp"}),
+            onChange,
+            [obtainCurrentLayout]() {
+                return obtainCurrentLayout(Persistence::TerminalEngineType::ftp);
+            },
+            confirmDialog,
+            inputDialog,
+        },
+    }
+    , connections{
+        .ftpEngineThreads = NumberSetting<int, true>{
+            connectionsFactory_.identity({"general", "connections", "ftpEngineThreads"}),
+            onChange,
+            nulloptReset(connections.ftpEngineThreads, onChange),
+            NumberSetting<int, true>::ConstructionArgs{
+                .minValue = 1,
+                .maxValue = Persistence::maximumFtpEngineThreads,
+            },
+        },
     }
     , logOptions(factory.within({"loggingAndErrorReportingGroupHeader"}), onChange)
     , availableThemesListener{
@@ -370,7 +392,9 @@ GeneralSettings::GeneralSettings(
             }
         )
     }
-{}
+{
+    connections.ftpEngineThreads.fallback(Persistence::ftpEngineThreadsOf(Persistence::State{}));
+}
 
 void GeneralSettings::updateThemes(std::vector<std::filesystem::path> paths)
 {
@@ -428,6 +452,10 @@ void GeneralSettings::applyToState(Persistence::State& state) const
         state.sessionLayouts.emplace();
     state.sessionLayouts->ssh = layouts.ssh.value();
     state.sessionLayouts->shell = layouts.shell.value();
+    state.sessionLayouts->ftp = layouts.ftp.value();
+
+    if (connections.ftpEngineThreads.valueIsValid())
+        state.ftpEngineThreads = connections.ftpEngineThreads.value();
 }
 void GeneralSettings::loadFromState(Persistence::State const& state)
 {
@@ -471,6 +499,9 @@ void GeneralSettings::loadFromState(Persistence::State const& state)
     const auto sessionLayouts = state.sessionLayouts.value_or(Persistence::SessionLayouts{});
     layouts.ssh.value(sessionLayouts.ssh);
     layouts.shell.value(sessionLayouts.shell);
+    layouts.ftp.value(sessionLayouts.ftp);
+
+    connections.ftpEngineThreads.value(state.ftpEngineThreads);
 }
 void GeneralSettings::assumeDefaultsFrom(Persistence::State const&)
 {
@@ -538,7 +569,8 @@ Nui::ElementRenderer GeneralSettings::render(
 
         auto layoutsUi = fragment(
             layouts.ssh(),
-            layouts.shell()
+            layouts.shell(),
+            layouts.ftp()
         );
         // clang-format on
 
@@ -580,6 +612,14 @@ Nui::ElementRenderer GeneralSettings::render(
                 .isCollapsed = collapsibleStates.fileTrackingOptions,
                 .content = std::move(fileTrackingOptionsUi),
                 .headerTitle = language->getObserved("settings", "fileTrackingOptionsGroupHeader"),
+                .addGroup = addGroup,
+                .removeGroup = removeGroup,
+                .onChangeGroup = onChange,
+            }),
+            group({
+                .isCollapsed = collapsibleStates.connections,
+                .content = connections.ftpEngineThreads(),
+                .headerTitle = language->getObserved("settings", "connectionsGroupHeader"),
                 .addGroup = addGroup,
                 .removeGroup = removeGroup,
                 .onChangeGroup = onChange,

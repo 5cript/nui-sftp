@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ssh/file_stream_interface.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
 #include <ssh/file_information.hpp>
 
 #include <libssh/sftp.h>
@@ -25,54 +25,54 @@ namespace SecureShell
         ~FileStream() override;
         FileStream(FileStream const&) = delete;
         FileStream& operator=(FileStream const&) = delete;
-        FileStream(FileStream&&);
-        FileStream& operator=(FileStream&&);
+        FileStream(FileStream&&) = delete;
+        FileStream& operator=(FileStream&&) = delete;
 
         /**
          * @brief Moves the file pointer to the specified position.
          *
          * @param pos Where to move the file pointer to.
          */
-        std::future<std::expected<void, SftpError>> seek(std::size_t pos) override;
+        std::future<std::expected<void, RemoteIo::RemoteError>> seek(std::size_t pos) override;
 
         /**
          * @brief In-strand variant of seek. Must be called from within the processing thread.
          */
-        std::expected<void, SftpError> seekInStrand(std::size_t pos) override;
+        std::expected<void, RemoteIo::RemoteError> seekInStrand(std::size_t pos) override;
 
         /**
          * @brief Tells the current position in the file.
          *
-         * @return std::future<std::expected<std::size_t, SftpError>> The current position or an error.
+         * @return std::future<std::expected<std::size_t, RemoteIo::RemoteError>> The current position or an error.
          */
-        std::future<std::expected<std::size_t, SftpError>> tell() override;
+        std::future<std::expected<std::size_t, RemoteIo::RemoteError>> tell() override;
 
         /**
          * @brief In-strand variant of tell. Must be called from within the processing thread.
          */
-        std::expected<std::size_t, SftpError> tellInStrand() override;
+        std::expected<std::size_t, RemoteIo::RemoteError> tellInStrand() override;
 
         /**
          * @brief Retrieves information about the file.
          *
-         * @return std::future<std::expected<FileInformation, SftpError>>
+         * @return std::future<std::expected<FileInformation, RemoteIo::RemoteError>>
          */
-        std::future<std::expected<FileInformation, SftpError>> stat() override;
+        std::future<std::expected<FileInformation, RemoteIo::RemoteError>> stat() override;
 
         /**
          * @brief In-strand variant of stat. Must be called from within the processing thread.
          */
-        std::expected<FileInformation, SftpError> statInStrand() override;
+        std::expected<FileInformation, RemoteIo::RemoteError> statInStrand() override;
 
         /**
          * @brief Rewind the file to the beginning.
          */
-        std::future<std::expected<void, SftpError>> rewind() override;
+        std::future<std::expected<void, RemoteIo::RemoteError>> rewind() override;
 
         /**
          * @brief In-strand variant of rewind. Must be called from within the processing thread.
          */
-        std::expected<void, SftpError> rewindInStrand() override;
+        std::expected<void, RemoteIo::RemoteError> rewindInStrand() override;
 
         /**
          * @brief Reads some bytes from the file. Not necessarily fills the buffer. bufferSize MUST be less than or
@@ -80,22 +80,24 @@ namespace SecureShell
          *
          * @param buffer
          * @param bufferSize
-         * @return std::future<std::expected<std::size_t, SftpError>>
+         * @return std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
          */
-        std::future<std::expected<std::size_t, SftpError>> readSome(char* buffer, std::size_t bufferSize) override;
+        std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
+        readSome(char* buffer, std::size_t bufferSize) override;
 
         /**
          * @brief In-strand variant of readSome. Must be called from within the processing thread.
          */
-        std::expected<std::size_t, SftpError> readSomeInStrand(char* buffer, std::size_t bufferSize) override;
+        std::expected<std::size_t, RemoteIo::RemoteError>
+        readSomeInStrand(char* buffer, std::size_t bufferSize) override;
 
         /**
          * @brief Reads all bytes from the file.
          *
          * @param onRead Function called when data is read.
-         * @return std::future<std::expected<std::size_t, SftpError>> The number of bytes read or an error.
+         * @return std::future<std::expected<std::size_t, RemoteIo::RemoteError>> The number of bytes read or an error.
          */
-        std::future<std::expected<std::size_t, SftpError>>
+        std::future<std::expected<std::size_t, RemoteIo::RemoteError>>
         readAll(std::function<bool(std::string_view data)> onRead) override;
 
         /**
@@ -105,14 +107,14 @@ namespace SecureShell
          *
          * @param buffer
          * @param bufferSize
-         * @return std::future<std::expected<void, SftpError>>
+         * @return std::future<std::expected<void, RemoteIo::RemoteError>>
          */
-        std::future<std::expected<void, SftpError>> write(std::string_view data) override;
+        std::future<std::expected<void, RemoteIo::RemoteError>> write(std::string_view data) override;
 
         /**
          * @brief In-strand variant of write. Must be called from within the processing thread.
          */
-        std::expected<void, SftpError> writeInStrand(std::string_view data) override;
+        std::expected<void, RemoteIo::RemoteError> writeInStrand(std::string_view data) override;
 
         /**
          * @brief Returns the maximum number of bytes that can be written in a single pure write operation.
@@ -135,9 +137,9 @@ namespace SecureShell
          * @param buffer The buffer to read into. This function assumes EXCLUSIVE access.
          * @param bufferSize The size of the buffer.
          * @param onRead Called when data is read. Return false to stop reading.
-         * @return std::shared_ptr<AsyncTransferContext>
+         * @return std::shared_ptr<RemoteIo::AsyncTransferContext>
          */
-        std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> readAsync(
+        std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>> readAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -147,14 +149,14 @@ namespace SecureShell
         /**
          * @brief In-strand variant of readAsync. Must be called from within the processing thread.
          */
-        std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> readAsyncInStrand(
+        std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError> readAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
             std::function<bool(SignedSizeType)> onRead
         ) override;
 
-        std::future<std::expected<std::shared_ptr<AsyncTransferContext>, SftpError>> writeAsync(
+        std::future<std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError>> writeAsync(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
@@ -164,12 +166,18 @@ namespace SecureShell
         /**
          * @brief In-strand variant of writeAsync. Must be called from within the processing thread.
          */
-        std::expected<std::shared_ptr<AsyncTransferContext>, SftpError> writeAsyncInStrand(
+        std::expected<std::shared_ptr<RemoteIo::AsyncTransferContext>, RemoteIo::RemoteError> writeAsyncInStrand(
             SignedSizeType totalFileSize,
             char* buffer,
             SignedSizeType bufferSize,
             std::function<SignedSizeType(SignedSizeType)> doRead
         ) override;
+
+        /**
+         * @brief Closes the file, the answer to the CLOSE carries errors the server only reports then, like those of a
+         *        network filesystem. The stream reads and writes no more, closeInStrand still removes it.
+         */
+        std::expected<void, RemoteIo::RemoteError> finishInStrand() override;
 
         /**
          * @brief Brings this class into an invalid state and returns the sftp_file. The ownership of the file is
@@ -179,25 +187,30 @@ namespace SecureShell
          */
         sftp_file release() override;
 
+        void close() override;
+
         /**
          * @brief Closes the file and removes itself from the sftp session.
+         * @param isBackElement Whether this is the last stream of the session, which is then removed faster.
          */
-        void close(bool isBackElement = false) override;
+        void close(bool isBackElement);
+
+        void closeInStrand() override;
 
         /**
          * @brief In-strand variant of close. Must be called from within the processing thread.
          */
-        void closeInStrand(bool isBackElement = false) override;
+        void closeInStrand(bool isBackElement);
 
-        ProcessingStrand* strand() const override;
+        RemoteIo::ProcessingStrand* strand() const override;
 
       private:
         std::function<void(sftp_file)> makeFileDeleter();
 
         /**
-         * @brief A transfer context whose resume wakes this stream's processing thread.
+         * @brief A transfer context that wakes this stream's processing thread when it resumes, fails or is canceled.
          */
-        std::shared_ptr<AsyncTransferContext> makeTransferContext();
+        std::shared_ptr<RemoteIo::AsyncTransferContext> makeTransferContext();
 
         /**
          * @brief Lets closing the file first wait for the requests @p pipeline still has in flight, whose answers
@@ -212,9 +225,24 @@ namespace SecureShell
         template <typename FunctionT>
         auto performPromise(FunctionT&& func);
 
-        SftpError lastError() const;
+        /**
+         * @brief SftpSession::awaitServer of the session of this stream, the bare call when it is gone.
+         */
+        template <typename FunctionT, typename... ArgumentTs>
+        auto awaitServer(FunctionT&& function, ArgumentTs&&... arguments);
 
-        void writePart(std::string_view toWrite, std::function<void(std::expected<void, SftpError>&&)> onWriteComplete);
+        /**
+         * @brief The open file whose answers in flight can still be waited for, null when it is closed or its channel
+         *        was given up.
+         */
+        sftp_file answeringFile() const;
+
+        RemoteIo::RemoteError lastError() const;
+
+        void writePart(
+            std::string_view toWrite,
+            std::function<void(std::expected<void, RemoteIo::RemoteError>&&)> onWriteComplete
+        );
 
       private:
         std::weak_ptr<SftpSession> sftp_;

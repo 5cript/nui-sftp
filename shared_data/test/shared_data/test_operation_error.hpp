@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shared_data/file_operations/operation_error.hpp>
+#include <ssh/sftp_error.hpp>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -9,22 +10,61 @@ namespace SharedData::Test
 {
     TEST(OperationErrorTests, EveryWrapperErrorSurvivesJson)
     {
-        using SecureShell::WrapperErrors;
+        using RemoteIo::WrapperErrors;
         for (int value = static_cast<int>(WrapperErrors::None); value <= static_cast<int>(WrapperErrors::InvalidPath);
              ++value)
         {
-            const SecureShell::SftpError error{.message = "refused", .wrapperError = static_cast<WrapperErrors>(value)};
+            const RemoteIo::RemoteError error{.message = "refused", .wrapperError = static_cast<WrapperErrors>(value)};
             nlohmann::json json{};
             ASSERT_NO_THROW(json = error) << "wrapper error " << value;
-            EXPECT_EQ(json.get<SecureShell::SftpError>().wrapperError, error.wrapperError) << "wrapper error " << value;
+            EXPECT_EQ(json.get<RemoteIo::RemoteError>().wrapperError, error.wrapperError) << "wrapper error " << value;
         }
+    }
+
+    TEST(OperationErrorTests, EveryKindSurvivesJson)
+    {
+        using RemoteIo::RemoteErrorKind;
+        for (
+            int value = static_cast<int>(RemoteErrorKind::None); value <= static_cast<int>(RemoteErrorKind::Failure);
+            ++value
+        )
+        {
+            const RemoteIo::RemoteError error{.kind = static_cast<RemoteErrorKind>(value)};
+            nlohmann::json json{};
+            ASSERT_NO_THROW(json = error) << "kind " << value;
+            EXPECT_EQ(json.get<RemoteIo::RemoteError>().kind, error.kind) << "kind " << value;
+        }
+    }
+
+    TEST(OperationErrorTests, RemoteErrorReachesTheOtherSide)
+    {
+        const OperationError error{
+            .type = OperationErrorType::SftpError,
+            .remoteError = RemoteIo::RemoteError{
+                .kind = RemoteIo::RemoteErrorKind::QuotaExceeded,
+                .protocol = RemoteIo::Protocol::Ftp,
+                .protocolCode = 552,
+                .message = "Quota exceeded",
+                .wrapperError = RemoteIo::WrapperErrors::ShortWrite,
+            },
+        };
+
+        const nlohmann::json json = error;
+        const auto read = json.get<OperationError>();
+
+        ASSERT_TRUE(read.remoteError.has_value());
+        EXPECT_EQ(read.remoteError->kind, RemoteIo::RemoteErrorKind::QuotaExceeded);
+        EXPECT_EQ(read.remoteError->protocol, RemoteIo::Protocol::Ftp);
+        EXPECT_EQ(read.remoteError->protocolCode, 552);
+        EXPECT_EQ(read.remoteError->message, "Quota exceeded");
+        EXPECT_EQ(read.remoteError->wrapperError, RemoteIo::WrapperErrors::ShortWrite);
     }
 
     TEST(OperationErrorTests, ExtraInfoReachesTheOtherSide)
     {
         const OperationError error{
             .type = OperationErrorType::FileExists,
-            .sftpError = SecureShell::SftpError{.message = "exists", .sftpError = 11},
+            .remoteError = RemoteIo::RemoteError{.kind = RemoteIo::RemoteErrorKind::AlreadyExists, .message = "exists"},
             .extraInfo = "no free name is left",
         };
 

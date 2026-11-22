@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/file_tracking/failure_reason.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 
 #include <gtest/gtest.h>
 
@@ -19,6 +20,7 @@ namespace Test::FailureReason
     using SharedData::OperationCompletionReason;
     using SharedData::OperationErrorType;
     using SharedData::UploadFailureReason;
+    using RemoteIo::RemoteErrorKind;
 
     namespace FailureReasonTestDetail
     {
@@ -27,11 +29,11 @@ namespace Test::FailureReason
             return Paths::LocalPath::fromUtf8(path, Paths::LocalPlatform::Posix).value();
         }
 
-        inline SharedData::OperationError sftpFailure(int code, std::string message = {})
+        inline SharedData::OperationError remoteFailure(RemoteErrorKind kind, std::string message = {})
         {
             return {
                 .type = OperationErrorType::SftpError,
-                .sftpError = SecureShell::SftpError{.message = std::move(message), .sftpError = code},
+                .remoteError = RemoteIo::RemoteError{.kind = kind, .message = std::move(message)},
             };
         }
 
@@ -80,30 +82,32 @@ namespace Test::FailureReason
 
     TEST(FailureReasonTests, ALocalProblemComesBeforeTheServersAnswer)
     {
-        auto error = sftpFailure(3);
+        auto error = remoteFailure(RemoteErrorKind::PermissionDenied);
         error.localProblem = LocalFileProblem::PermissionDenied;
         EXPECT_EQ(failureInfoOf(error).reason, UploadFailureReason::PermissionDeniedLocally);
     }
 
-    TEST(FailureReasonTests, PermissionDeniedByTheServerIsCodeThree)
+    TEST(FailureReasonTests, PermissionDeniedByTheServerIsDeniedOnTheServer)
     {
-        const auto failure = failureInfoOf(sftpFailure(3));
+        const auto failure = failureInfoOf(remoteFailure(RemoteErrorKind::PermissionDenied));
         EXPECT_EQ(failure.reason, UploadFailureReason::PermissionDeniedOnServer);
     }
 
     TEST(FailureReasonTests, NoSpaceAndAnExceededQuotaAreNoSpaceOnTheServer)
     {
-        EXPECT_EQ(failureInfoOf(sftpFailure(14)).reason, UploadFailureReason::NoSpaceOnServer);
-        EXPECT_EQ(failureInfoOf(sftpFailure(15)).reason, UploadFailureReason::NoSpaceOnServer);
+        EXPECT_EQ(failureInfoOf(remoteFailure(RemoteErrorKind::NoSpace)).reason, UploadFailureReason::NoSpaceOnServer);
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::QuotaExceeded)).reason, UploadFailureReason::NoSpaceOnServer
+        );
     }
 
-    TEST(FailureReasonTests, OtherCodesAreRefusedByTheServerWithItsMessage)
+    TEST(FailureReasonTests, OtherKindsAreRefusedByTheServerWithItsMessage)
     {
-        const auto failure = failureInfoOf(sftpFailure(4, "Disk quota exceeded"));
+        const auto failure = failureInfoOf(remoteFailure(RemoteErrorKind::Failure, "Disk quota exceeded"));
         EXPECT_EQ(failure.reason, UploadFailureReason::ServerRefused);
         EXPECT_EQ(failure.detail, "Disk quota exceeded");
 
-        const auto noSuchFile = failureInfoOf(sftpFailure(2));
+        const auto noSuchFile = failureInfoOf(remoteFailure(RemoteErrorKind::NoSuchFile));
         EXPECT_EQ(noSuchFile.reason, UploadFailureReason::ServerRefused);
         EXPECT_EQ(noSuchFile.detail, "No such file");
     }
@@ -122,30 +126,68 @@ namespace Test::FailureReason
             failureInfoOf(SharedData::OperationError{.type = OperationErrorType::FutureTimeout}).reason,
             UploadFailureReason::ConnectionProblem
         );
-        EXPECT_EQ(failureInfoOf(sftpFailure(6)).reason, UploadFailureReason::ConnectionProblem);
-        EXPECT_EQ(failureInfoOf(sftpFailure(7)).reason, UploadFailureReason::ConnectionProblem);
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::NoConnection)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::ConnectionLost)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::TimedOut)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::ConnectionLimit)).reason,
+            UploadFailureReason::ConnectionProblem
+        );
+    }
+
+    TEST(FailureReasonTests, NoFreeConnectionAnUntrustedOrInsecureServerAndAFailedLoginAreConnectionProblems)
+    {
+        EXPECT_EQ(failureInfoOf(remoteFailure(RemoteErrorKind::Busy)).reason, UploadFailureReason::ConnectionProblem);
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::TrustRequired)).reason, UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::NoSecureConnection)).reason,
+            UploadFailureReason::ConnectionProblem
+        );
+        EXPECT_EQ(
+            failureInfoOf(remoteFailure(RemoteErrorKind::AuthenticationFailed)).reason,
+            UploadFailureReason::ConnectionProblem
+        );
+    }
+
+    TEST(FailureReasonTests, ACancelledOrTruncatedTransferIsNoRefusalOfTheServer)
+    {
+        const auto cancelled = failureInfoOf(remoteFailure(RemoteErrorKind::Cancelled, "Cancelled"));
+        EXPECT_EQ(cancelled.reason, UploadFailureReason::Unknown);
+        const auto truncated = failureInfoOf(remoteFailure(RemoteErrorKind::Truncated, "The file ended early"));
+        EXPECT_EQ(truncated.reason, UploadFailureReason::Unknown);
+        ASSERT_TRUE(truncated.detail.has_value());
+        EXPECT_NE(truncated.detail->find("The file ended early"), std::string::npos);
     }
 
     TEST(FailureReasonTests, AGoneSessionOrAnSshErrorIsAConnectionProblem)
     {
-        const auto wrapped = [](SecureShell::WrapperErrors wrapperError)
+        const auto wrapped = [](RemoteIo::WrapperErrors wrapperError)
         {
             return failureInfoOf(
                 SharedData::OperationError{
                     .type = OperationErrorType::SftpError,
-                    .sftpError = SecureShell::SftpError{.message = "gone", .wrapperError = wrapperError},
+                    .remoteError = RemoteIo::RemoteError{.message = "gone", .wrapperError = wrapperError},
                 }
             )
                 .reason;
         };
-        EXPECT_EQ(wrapped(SecureShell::WrapperErrors::SharedPtrDestroyed), UploadFailureReason::ConnectionProblem);
-        EXPECT_EQ(wrapped(SecureShell::WrapperErrors::OwnerNull), UploadFailureReason::ConnectionProblem);
-        EXPECT_EQ(wrapped(SecureShell::WrapperErrors::LocalIoFailure), UploadFailureReason::UnreadableLocally);
+        EXPECT_EQ(wrapped(RemoteIo::WrapperErrors::SharedPtrDestroyed), UploadFailureReason::ConnectionProblem);
+        EXPECT_EQ(wrapped(RemoteIo::WrapperErrors::OwnerNull), UploadFailureReason::ConnectionProblem);
+        EXPECT_EQ(wrapped(RemoteIo::WrapperErrors::LocalIoFailure), UploadFailureReason::UnreadableLocally);
         EXPECT_EQ(
             failureInfoOf(
                 SharedData::OperationError{
                     .type = OperationErrorType::SftpError,
-                    .sftpError = SecureShell::SftpError{.message = "Socket error", .sshError = -1},
+                    .remoteError =
+                        SecureShell::toRemoteError(SecureShell::SftpError{.message = "Socket error", .sshError = -1}),
                 }
             )
                 .reason,
@@ -186,27 +228,37 @@ namespace Test::FailureReason
             UploadFailureReason::UnreadableLocally
         );
         EXPECT_EQ(
-            indexed({.type = OperationErrorType::SftpError, .sftpErrorCode = 3}).reason,
+            indexed({.type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::PermissionDenied})
+                .reason,
             UploadFailureReason::PermissionDeniedOnServer
         );
         EXPECT_EQ(
-            indexed({.type = OperationErrorType::SftpError, .sftpErrorCode = 14}).reason,
+            indexed({.type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::NoSpace}).reason,
             UploadFailureReason::NoSpaceOnServer
         );
         EXPECT_EQ(
-            indexed({.type = OperationErrorType::SftpError, .sftpErrorCode = 15}).reason,
+            indexed({.type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::QuotaExceeded}).reason,
             UploadFailureReason::NoSpaceOnServer
         );
         EXPECT_EQ(
-            indexed({.type = OperationErrorType::SftpError, .sftpErrorCode = 7}).reason,
+            indexed({.type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::ConnectionLost}).reason,
             UploadFailureReason::ConnectionProblem
         );
         EXPECT_EQ(indexed({.type = OperationErrorType::ChannelClosed}).reason, UploadFailureReason::ConnectionProblem);
         EXPECT_EQ(indexed({.type = OperationErrorType::FutureTimeout}).reason, UploadFailureReason::ConnectionProblem);
 
-        const auto refused = indexed({.type = OperationErrorType::SftpError, .sftpErrorCode = 4});
+        const auto refused =
+            indexed({.type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::Failure});
         EXPECT_EQ(refused.reason, UploadFailureReason::ServerRefused);
         EXPECT_EQ(refused.detail, "Failure");
+
+        const auto told = indexed({
+            .type = OperationErrorType::SftpError,
+            .remoteErrorKind = RemoteErrorKind::Failure,
+            .remoteMessage = "Directory not empty",
+        });
+        EXPECT_EQ(told.reason, UploadFailureReason::ServerRefused);
+        EXPECT_EQ(told.detail, "Directory not empty");
 
         const auto unknown = indexed({.type = OperationErrorType::SizeMismatch});
         EXPECT_EQ(unknown.reason, UploadFailureReason::Unknown);
@@ -236,7 +288,9 @@ namespace Test::FailureReason
     TEST(FailureReasonTests, AFailedUploadTellsWhyAndOneWithoutAnErrorIsUnknown)
     {
         const auto failed = uploadEndOf(
-            completedAs(OperationCompletionReason::Failed, sftpFailure(3)), local("/home/user/a.txt"), false
+            completedAs(OperationCompletionReason::Failed, remoteFailure(RemoteErrorKind::PermissionDenied)),
+            local("/home/user/a.txt"),
+            false
         );
         EXPECT_EQ(failed.reason, OperationCompletionReason::Failed);
         EXPECT_FALSE(failed.changedOnServer);
@@ -289,7 +343,7 @@ namespace Test::FailureReason
                 SharedData::OperationError{
                     .type = OperationErrorType::OpenFailure, .localProblem = LocalFileProblem::Locked
                 }},
-            {"/home/user/project/refused.txt", sftpFailure(3)},
+            {"/home/user/project/refused.txt", remoteFailure(RemoteErrorKind::PermissionDenied)},
             {"/home/user/project/changed.txt",
                 SharedData::OperationError{.type = OperationErrorType::ChangedSinceCompare}},
             {"project/entry", SharedData::OperationError{.type = OperationErrorType::InvalidName}},
@@ -326,10 +380,10 @@ namespace Test::FailureReason
             {.index = 4u, .type = OperationErrorType::OpenFailure, .localProblem = LocalFileProblem::Locked},
             {.index = 1u, .type = OperationErrorType::ChangedSinceCompare},
             {.index = 2u, .type = OperationErrorType::FileNotFound},
-            {.index = 3u, .type = OperationErrorType::SftpError, .sftpErrorCode = 4},
+            {.index = 3u, .type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::Failure},
         };
         completed.failedEntries = {
-            {"/home/user/refused.txt", sftpFailure(4, "Read-only file system")},
+            {"/home/user/refused.txt", remoteFailure(RemoteErrorKind::Failure, "Read-only file system")},
             {"/home/user/locked.txt",
                 SharedData::OperationError{
                     .type = OperationErrorType::OpenFailure,
@@ -368,7 +422,9 @@ namespace Test::FailureReason
     TEST(FailureReasonTests, AnEntryLeftOutWithoutAnErrorOfItsOwnTellsItsIndexedFailure)
     {
         auto completed = completedAs(OperationCompletionReason::Completed);
-        completed.indexedFailures = {{.index = 0u, .type = OperationErrorType::SftpError, .sftpErrorCode = 3}};
+        completed.indexedFailures = {
+            {.index = 0u, .type = OperationErrorType::SftpError, .remoteErrorKind = RemoteErrorKind::PermissionDenied}
+        };
 
         const auto ends = entryEndsOf(completed, {local("/home/user/a.txt")});
         ASSERT_EQ(ends.size(), 1u);

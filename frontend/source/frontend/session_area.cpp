@@ -40,7 +40,7 @@ struct ReconnectState
     /// id if its snapshot lumino layout is ever cleared.
     std::optional<std::string> layoutName;
     /// The user the session logged in as, kept across the retries.
-    std::optional<Persistence::SshUser> loginUser;
+    std::optional<Session::LoginUser> loginUser;
     /**
      * @brief The options of a direct connect, which is not in the settings and reconnects with the options it was
      * opened with.
@@ -66,7 +66,47 @@ namespace
     {
         if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
             return ssh->maxReconnectAttempts;
+        if (auto const* ftp = std::get_if<Persistence::FtpSessionOptions>(&options.engine))
+            return ftp->maxReconnectAttempts;
         return -1;
+    }
+
+    /**
+     * @brief The longest wait between two reconnect attempts of @p options, in milliseconds.
+     */
+    int maximumReconnectBackoffOf(Persistence::SessionOptions const& options)
+    {
+        if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
+            return ssh->maxReconnectBackoffMs;
+        if (auto const* ftp = std::get_if<Persistence::FtpSessionOptions>(&options.engine))
+            return ftp->maxReconnectBackoffMs;
+        return 16000;
+    }
+
+    /**
+     * @brief Makes @p user the one the remote session of @p options logs in as.
+     */
+    void selectLoginUser(Persistence::SessionOptions& options, Session::LoginUser const& user)
+    {
+        auto* const ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine);
+        auto const* const sshUser = std::get_if<Persistence::SshUser>(&user);
+        if (ssh && sshUser)
+            return ssh->selectUserLike(*sshUser);
+        auto* const ftp = std::get_if<Persistence::FtpSessionOptions>(&options.engine);
+        auto const* const ftpUser = std::get_if<Persistence::FtpUser>(&user);
+        if (ftp && ftpUser)
+            ftp->selectUserLike(*ftpUser);
+    }
+
+    /**
+     * @brief Makes the user at @p userIndex the one the remote session of @p options logs in as.
+     */
+    void selectLoginUser(Persistence::SessionOptions& options, std::size_t userIndex)
+    {
+        if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&options.engine))
+            ssh->selectUser(userIndex);
+        if (auto* ftp = std::get_if<Persistence::FtpSessionOptions>(&options.engine))
+            ftp->selectUser(userIndex);
     }
 
     /**
@@ -464,8 +504,7 @@ void SessionArea::addSession(
             }
 
             auto [engineKey, engine] = *iter;
-            if (auto* ssh = std::get_if<Persistence::SshSessionOptions>(&engine.engine))
-                ssh->selectUser(userIndex);
+            selectLoginUser(engine, userIndex);
 
             const auto tabId = impl_->tabs.add(name, true);
             Log::info("Adding session: {} with layout {}. Tab ID: {}", name, impl_->toolbar->selectedLayout(), tabId);
@@ -627,9 +666,8 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
                 }
                 reconnectState.engineOptions = sessionIter->second;
             }
-            auto* ssh = std::get_if<Persistence::SshSessionOptions>(&reconnectState.engineOptions.engine);
-            if (ssh && reconnectState.loginUser)
-                ssh->selectUserLike(*reconnectState.loginUser);
+            if (reconnectState.loginUser)
+                selectLoginUser(reconnectState.engineOptions, *reconnectState.loginUser);
             reconnectState.uiOptions = state.uiOptions;
 
             // Build the ProtoSession, hook it up, start it.  The proto
@@ -646,6 +684,10 @@ void SessionArea::replaceAtTabId(int tabId, SessionSnapshot snapshot, int attemp
             };
             protoParams.onFailed = [this, tabId](ProtoSession*, std::string const& info) {
                 onProtoFailed(tabId, info);
+            };
+            // The next attempt would ask for the password again: the session stays lost until the user reconnects.
+            protoParams.onLoginCancelled = [this, tabId](ProtoSession*) {
+                abortReconnectCycle(tabId);
             };
             // A failure that is retried shows in the lost-connection overlay, the last one also as a toast.
             protoParams.failureToast = isFinalAttempt(reconnectState) ? Log::Toast::Show : Log::Toast::Skip;
@@ -788,9 +830,7 @@ void SessionArea::scheduleReconnectRetry(int tabId)
         return;
     }
 
-    int maxBackoffMs = 16000;
-    if (auto const* ssh = std::get_if<Persistence::SshSessionOptions>(&reconnectState.engineOptions.engine))
-        maxBackoffMs = ssh->maxReconnectBackoffMs;
+    const int maxBackoffMs = maximumReconnectBackoffOf(reconnectState.engineOptions);
 
     // Exponential backoff: 1s → 2s → 4s → 8s → 16s (capped at maxBackoffMs).
     const int clampedAttempt = std::min(reconnectState.attempt, 30); // prevent shift overflow

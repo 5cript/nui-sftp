@@ -42,6 +42,7 @@ namespace SharedData::Sync
         std::uint64_t size{0};
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        TimePrecision mtimePrecision{TimePrecision::Second};
         std::filesystem::perms permissions{std::filesystem::perms::unknown};
         /** @brief For symlinks: the raw link literal. What the diff compares by. */
         std::optional<std::string> linkTarget{};

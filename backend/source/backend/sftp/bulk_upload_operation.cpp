@@ -1,6 +1,8 @@
 #include <backend/sftp/bulk_upload_operation.hpp>
-#include <constants/sftp.hpp>
+#include <backend/sftp/unsafe_fast_mode.hpp>
+#include <backend/sftp/upload_operation.hpp>
 #include <log/log.hpp>
+#include <remote_io/remote_file_system_helpers.hpp>
 #include <utility/checked_symlink_status.hpp>
 #include <utility/permissions.hpp>
 
@@ -27,10 +29,10 @@ namespace
 }
 
 BulkUploadOperation::BulkUploadOperation(
-    std::weak_ptr<SecureShell::SftpSession> sftp,
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
     BulkUploadOperationOptions options
 )
-    : BulkTransferOperation{std::move(sftp), toCommon(options)}
+    : BulkTransferOperation{std::move(fileSystem), toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
 {}
 
@@ -58,15 +60,23 @@ std::expected<BulkUploadOperation::WorkStatus, BulkUploadOperation::Error> BulkU
     return BulkTransferOperation::work();
 }
 
-std::expected<void, BulkUploadOperation::Error>
-BulkUploadOperation::prepareRootInStrand(SecureShell::SftpSession& sftp, SharedData::DirectoryEntry const& root)
+std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::prepareRootInStrand(
+    RemoteIo::IRemoteFileSystem& fileSystem,
+    SharedData::DirectoryEntry const& root
+)
 {
+    // Refused once for the whole tree rather than for each of its files.
+    if (uploadPathOf(individualOptions_.unsafeFastMode, 0u, fileSystem.capabilities().probeEntries) ==
+        UploadPath::Refused)
+        return std::unexpected(
+            UploadOperation::uncheckableDestination(common().remotePath, individualOptions_.failureToast)
+        );
     // Base directory of the upload, everything after this will be relative to this:
-    return createRemoteDirectoryInStrand(sftp, common().remotePath, root);
+    return createRemoteDirectoryInStrand(fileSystem, common().remotePath, root);
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createDirectoryInStrand(
-    SecureShell::SftpSession& sftp,
+    RemoteIo::IRemoteFileSystem& fileSystem,
     std::size_t entryIndex,
     EntryPaths const& paths
 )
@@ -74,28 +84,30 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createDirec
     // A scanned directory comes after its parent, a prescanned one may be the first entry below it.
     if (prescanned() && individualOptions_.createMissingDirectories)
     {
-        if (auto parents = createMissingParentsInStrand(sftp, paths.remote); !parents)
+        if (auto parents = createMissingParentsInStrand(fileSystem, paths.remote); !parents)
             return parents;
     }
-    return createRemoteDirectoryInStrand(sftp, paths.remote, entries()[entryIndex]);
+    return createRemoteDirectoryInStrand(fileSystem, paths.remote, entries()[entryIndex]);
 }
 
-std::expected<void, BulkUploadOperation::Error>
-BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& path)
+std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createMissingParentsInStrand(
+    RemoteIo::IRemoteFileSystem& fileSystem,
+    Paths::RemotePath const& path
+)
 {
     auto const& root = common().remotePath;
     std::vector<Paths::RemotePath> missing;
     for (auto parent = path.parent(); parent && *parent != root && parent->isWithin(root); parent = parent->parent())
     {
-        const auto stat = sftp.lstatInStrand(*parent);
+        const auto stat = RemoteIo::probeEntryInStrand(fileSystem, *parent);
         if (stat)
             break;
-        if (stat.error().sftpError != SSH_FX_NO_SUCH_FILE)
+        if (stat.error().kind != RemoteIo::RemoteErrorKind::NoSuchFile)
         {
             return std::unexpected(
                 Error{
                     .type = ErrorType::SftpError,
-                    .sftpError = stat.error(),
+                    .remoteError = stat.error(),
                     .extraInfo = fmt::format("Inspecting remote directory: {}", parent->value())
                 }
             );
@@ -105,19 +117,21 @@ BulkUploadOperation::createMissingParentsInStrand(SecureShell::SftpSession& sftp
     const SharedData::DirectoryEntry directory{.type = SharedData::FileType::Directory};
     for (auto const& parent : missing | std::views::reverse)
     {
-        if (auto created = createRemoteDirectoryInStrand(sftp, parent, directory); !created)
+        if (auto created = createRemoteDirectoryInStrand(fileSystem, parent, directory); !created)
             return created;
     }
     return {};
 }
 
 std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemoteDirectoryInStrand(
-    SecureShell::SftpSession& sftp,
+    RemoteIo::IRemoteFileSystem& fileSystem,
     Paths::RemotePath const& path,
     SharedData::DirectoryEntry const& entry
 )
 {
-    const auto result = sftp.createDirectoryIfItDoesntExistInStrand(path, determinePerms(entry));
+    const auto result = fileSystem.inStrand(
+        RemoteIo::CreateDirectoryIfItDoesntExist{.path = path, .permissions = determinePerms(entry)}
+    );
     if (!result.has_value())
     {
         Log::error(
@@ -128,7 +142,7 @@ std::expected<void, BulkUploadOperation::Error> BulkUploadOperation::createRemot
         return std::unexpected(
             Error{
                 .type = ErrorType::SftpError,
-                .sftpError = result.error(),
+                .remoteError = result.error(),
                 .extraInfo = fmt::format("Creating remote directory: {}", path.value())
             }
         );
@@ -149,22 +163,24 @@ std::unique_ptr<Operation> BulkUploadOperation::makeChild(
     uploadOptions.localPath = paths.local;
     uploadOptions.mayOverwrite = uploadOptions.mayOverwrite || paths.mayOverwrite;
     uploadOptions.comparedDestination = paths.comparedDestination;
-    uploadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
+    uploadOptions.bigFileOptimized = childTakesAsynchronousPath(entry.size);
     uploadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
         onProgress(current, max);
     };
 
-    return std::make_unique<UploadOperation>(sftp(), std::move(uploadOptions));
+    return std::make_unique<UploadOperation>(fileSystem(), std::move(uploadOptions));
 }
 
 bool BulkUploadOperation::isSkippableError(Error const& error) const
 {
-    // Local read problems (no sftp error attached) and missing or unwritable remote targets do
+    // Local read problems (no remote error attached) and missing or unwritable remote targets do
     // not compromise the rest of the bulk.
-    return !error.sftpError ||
-        (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
-            error.sftpError->sftpError == SSH_FX_FAILURE);
+    using RemoteIo::RemoteErrorKind;
+    return !error.remoteError ||
+        (error.remoteError->kind == RemoteErrorKind::NoSuchFile ||
+            error.remoteError->kind == RemoteErrorKind::PermissionDenied ||
+            error.remoteError->kind == RemoteErrorKind::Failure);
 }
 
 std::filesystem::perms BulkUploadOperation::determinePerms(SharedData::DirectoryEntry const& entry) const

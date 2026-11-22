@@ -1,0 +1,122 @@
+#include <ftp/client/control_connection.hpp>
+#include <ftp/engine/call.hpp>
+
+#include <boost/asio/cancellation_type.hpp>
+
+#include <ranges>
+#include <utility>
+
+namespace FileTransferProtocol
+{
+    void CallGroup::end(RemoteIo::RemoteError error)
+    {
+        std::unordered_map<std::uint64_t, Ender> waiting{};
+        {
+            std::scoped_lock lock{mutex_};
+            if (ended_)
+                return;
+            ended_ = error;
+            waiting = std::exchange(waiting_, {});
+        }
+        for (auto const& ender : waiting | std::views::values)
+            ender(error);
+    }
+
+    std::optional<std::uint64_t> CallGroup::join(Ender ender)
+    {
+        std::scoped_lock lock{mutex_};
+        if (ended_)
+            return std::nullopt;
+        const auto key = ++nextKey_;
+        waiting_.emplace(key, std::move(ender));
+        return key;
+    }
+
+    void CallGroup::leave(std::uint64_t key)
+    {
+        Ender leaving{};
+        {
+            std::scoped_lock lock{mutex_};
+            const auto found = waiting_.find(key);
+            if (found == waiting_.end())
+                return;
+            leaving = std::move(found->second);
+            waiting_.erase(found);
+        }
+    }
+
+    std::optional<RemoteIo::RemoteError> CallGroup::endedWith() const
+    {
+        std::scoped_lock lock{mutex_};
+        return ended_;
+    }
+
+    void CallScope::touch(std::shared_ptr<ControlConnection> const& connection)
+    {
+        touched_.push_back(connection);
+    }
+
+    void CallScope::closeTouched()
+    {
+        for (auto const& touched : touched_)
+        {
+            if (const auto connection = touched.lock())
+                connection->close();
+        }
+    }
+
+    void CallScope::allowMore(std::chrono::milliseconds more)
+    {
+        if (allowMore_)
+            allowMore_(more);
+    }
+
+    void CallScope::onAllowMore(AllowMore allowMore)
+    {
+        allowMore_ = std::move(allowMore);
+    }
+
+    namespace Detail
+    {
+        CallState::CallState(boost::asio::any_io_executor const& sessionStrand, SyncLimits limits)
+            : limits_{limits}
+            , timer_{sessionStrand}
+        {}
+
+        SyncLimits const& CallState::limits() const
+        {
+            return limits_;
+        }
+
+        void CallState::extendBackstop(std::chrono::milliseconds more)
+        {
+            limits_.backstop += more;
+        }
+
+        std::shared_ptr<CallScope> const& CallState::scope() const
+        {
+            return scope_;
+        }
+
+        boost::asio::cancellation_slot CallState::slot()
+        {
+            return signal_.slot();
+        }
+
+        boost::asio::steady_timer& CallState::timer()
+        {
+            return timer_;
+        }
+
+        void CallState::cancel()
+        {
+            draining_ = true;
+            signal_.emit(boost::asio::cancellation_type::terminal);
+        }
+
+        bool CallState::draining() const
+        {
+            return draining_;
+        }
+    }
+}

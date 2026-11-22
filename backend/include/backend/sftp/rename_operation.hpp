@@ -1,7 +1,7 @@
 #pragma once
 
 #include <backend/sftp/operation.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <paths/remote_path.hpp>
 
 #include <chrono>
@@ -18,7 +18,7 @@ class RenameOperation : public Operation
         std::chrono::seconds futureTimeout{5};
     };
 
-    RenameOperation(std::weak_ptr<SecureShell::SftpSession> sftp, RenameOperationOptions options);
+    RenameOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, RenameOperationOptions options);
     ~RenameOperation() override = default;
 
     RenameOperation(RenameOperation const&) = delete;
@@ -26,7 +26,7 @@ class RenameOperation : public Operation
     RenameOperation& operator=(RenameOperation const&) = delete;
     RenameOperation& operator=(RenameOperation&&) = delete;
 
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
     // See ScanOperation for rationale — opt out of the queue's batched strand umbrella
     // until this op is converted to the *InStrand style.
@@ -64,7 +64,7 @@ class RenameOperation : public Operation
     }
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     Paths::RemotePath sourcePath_;
     Paths::RemotePath destinationPath_;
     std::chrono::seconds futureTimeout_;

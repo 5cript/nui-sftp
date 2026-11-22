@@ -109,6 +109,17 @@ namespace SharedData::Sync::Test
     }
 
     /**
+     * @brief A file whose time a listing showed with @p precision, as FTP's LIST does.
+     */
+    inline ScanNode
+    makeListedFile(std::string const& name, std::uint64_t size, std::uint64_t mtime, TimePrecision precision)
+    {
+        auto node = makeFile(name, size, mtime);
+        node.mtimePrecision = precision;
+        return node;
+    }
+
+    /**
      * @brief Builds a symlink node with a given raw link target.
      */
     inline ScanNode makeSymlink(std::string const& name, std::string const& target, std::uint64_t mtime = 0)
@@ -231,6 +242,59 @@ namespace SharedData::Sync::Test
         diffScanTrees(
             makeDir("", {makeFile("file.txt", 6, 100)}),
             makeDir("", {makeFile("file.txt", 5, 200)}),
+            {},
+            sink
+        );
+        EXPECT_TRUE(sink.uploads.empty());
+        EXPECT_EQ(sink.downloads.size(), 1u);
+    }
+
+    TEST(SyncDiffTests, AListedRemoteTimeMatchesTheLocalTimeWithinItsMinuteOrDay)
+    {
+        // 1700000037 is 2023-11-14 22:13:57 UTC, its minute starts at 1699999980 and its day at 1699920000.
+        for (
+            auto const& remote :
+            {makeListedFile("file.txt", 5, 1699999980u, TimePrecision::Minute),
+                makeListedFile("file.txt", 5, 1699920000u, TimePrecision::Day)}
+        )
+        {
+            CollectingSink sink;
+            diffScanTrees(makeDir("", {makeFile("file.txt", 5, 1700000037u)}), makeDir("", {remote}), {}, sink);
+            EXPECT_TRUE(sink.uploads.empty());
+            EXPECT_TRUE(sink.downloads.empty());
+        }
+    }
+
+    TEST(SyncDiffTests, ALaterListedMinuteIsNewerAndTheSameMinuteGoesToTheUpload)
+    {
+        CollectingSink nextMinute;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 5, 1700000037u)}),
+            makeDir("", {makeListedFile("file.txt", 5, 1700000040u, TimePrecision::Minute)}),
+            {},
+            nextMinute
+        );
+        EXPECT_TRUE(nextMinute.uploads.empty());
+        EXPECT_EQ(nextMinute.downloads.size(), 1u);
+
+        // Another size within the minute the listing showed: the local time is not older.
+        CollectingSink sameMinute;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 6, 1700000037u)}),
+            makeDir("", {makeListedFile("file.txt", 5, 1699999980u, TimePrecision::Minute)}),
+            {},
+            sameMinute
+        );
+        EXPECT_EQ(sameMinute.uploads.size(), 1u);
+        EXPECT_TRUE(sameMinute.downloads.empty());
+    }
+
+    TEST(SyncDiffTests, ExactTimesStillDifferBySeconds)
+    {
+        CollectingSink sink;
+        diffScanTrees(
+            makeDir("", {makeFile("file.txt", 5, 1700000037u)}),
+            makeDir("", {makeFile("file.txt", 5, 1700000038u)}),
             {},
             sink
         );

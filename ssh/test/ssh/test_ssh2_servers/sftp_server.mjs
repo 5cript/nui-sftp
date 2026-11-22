@@ -164,9 +164,13 @@ let realpathDotMode = 'conforming';
 // Fault injection and server behaviour switches, configured over the command line interface.
 const faults = {
     failReadsAfter: null,
+    // READs after this many bytes are never answered, like a server that hangs mid transfer.
+    stallReadsAfter: null,
     // Largest answer to a READ, null for what was asked. Emulates servers that answer reads short.
     capReads: null,
     failWritesAfter: null,
+    // WRITEs after this many bytes are never answered, like a server that hangs mid transfer.
+    stallWritesAfter: null,
     dropAfterBytes: null,
     failRenames: false,
     // Renames that still succeed before failRenames applies, null for none.
@@ -174,9 +178,21 @@ const faults = {
     // Renames that fail before renames succeed again, null for all.
     renamesFailing: null,
     failHardlinks: false,
+    // The status failing hard links answer, permission denied unless set.
+    hardlinkFailureStatus: null,
     failRemoves: false,
+    // CLOSE closes the handle but answers failure, like a network filesystem reporting a deferred write error.
+    failCloses: false,
+    // Closes that fail before closes succeed again, null for all.
+    closesFailing: null,
     deniedDirectories: new Set(),
     deniedStats: new Set(),
+    // STAT of these paths is never answered, like a server that hangs on them.
+    unansweredStats: new Set(),
+    // STAT of these paths ends the SFTP channel instead of answering, like an SFTP server process that dies.
+    endingStats: new Set(),
+    // A missing path below a missing directory answers NO_SUCH_PATH, like servers of SFTP versions 4 to 6.
+    answerNoSuchPath: false,
     bytesRead: 0,
     bytesWritten: 0,
 };
@@ -193,6 +209,8 @@ const changeOpenSftpSessions = (change) => {
     for (const watcher of openSftpSessionsWatchers)
         watcher();
 };
+// The flags of the last OPEN as they came over the wire, null before the first.
+let lastOpenFlags = null;
 
 // True when this rename has to fail. Counts down the renames allowed before failing.
 const renameFails = () => {
@@ -295,6 +313,33 @@ const resolveFileName = (path) => {
     return linuxified;
 }
 
+const noSuchPathStatus = 10;
+
+// ssh2 sends only the status codes of SFTP version 3, so a NO_SUCH_FILE status goes through ssh2, which keeps its flow
+// control, and gets its code replaced on the way out. A status ssh2 had to buffer goes out unchanged later.
+function sendStatusCode(sftpStream, reqid, code) {
+    const protocol = sftpStream._protocol;
+    const chunks = [];
+    sftpStream._protocol = { channelData: (_id, data) => chunks.push(Buffer.from(data)) };
+    try {
+        sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+    } finally {
+        sftpStream._protocol = protocol;
+    }
+    const packet = Buffer.concat(chunks);
+    const codeOffset = 9;
+    if (packet.length < codeOffset + 4)
+        return;
+    packet.writeUInt32BE(code, codeOffset);
+    protocol.channelData(sftpStream.outgoing.id, packet);
+}
+
+function sendMissing(sftpStream, reqid, path) {
+    if (faults.answerNoSuchPath && fakeFilesystem.find(pathUtil.posix.dirname(path)) === undefined)
+        return sendStatusCode(sftpStream, reqid, noSuchPathStatus);
+    return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+}
+
 const server = new Server({
     hostKeys: [fs.readFileSync('key.private')],
     debug: (message) => {
@@ -362,6 +407,7 @@ const server = new Server({
                     filename = resolveFileName(filename);
 
                     logMessage('OPEN', filename, flags, attrs);
+                    lastOpenFlags = flags;
 
                     let result = fakeFilesystem.find(filename);
                     // OPEN follows symlinks like a real server.
@@ -376,7 +422,7 @@ const server = new Server({
                             const parent = fakeFilesystem.find(parentPath);
                             if (parent === undefined || parent.type !== 'directory') {
                                 logMessage('Parent not found');
-                                return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                                return sendMissing(sftpStream, reqid, filename);
                             }
 
                             const name = pathUtil.basename(filename);
@@ -384,7 +430,7 @@ const server = new Server({
                         }
                         else if (flags & OPEN_MODE.READ) {
                             logMessage('File not found');
-                            return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                            return sendMissing(sftpStream, reqid, filename);
                         }
                     } else {
                         // Like a real server: CREAT with EXCL refuses anything that exists.
@@ -419,6 +465,11 @@ const server = new Server({
                     const handle = handles.get(handleString);
                     if (!handle) {
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
+                    // Before the offset check, which would answer the writes behind an unanswered one.
+                    if (faults.stallWritesAfter !== null && faults.bytesWritten >= faults.stallWritesAfter) {
+                        logMessage('Fault: leaving WRITE unanswered');
+                        return;
                     }
 
                     // Fake the write operation
@@ -496,6 +547,10 @@ const server = new Server({
                         logMessage('Fault: dropping the connection during READ');
                         return client.end();
                     }
+                    if (faults.stallReadsAfter !== null && faults.bytesRead >= faults.stallReadsAfter) {
+                        logMessage('Fault: leaving READ unanswered');
+                        return;
+                    }
                     if (faults.failReadsAfter !== null && faults.bytesRead >= faults.failReadsAfter) {
                         logMessage('Fault: failing READ');
                         return sftpStream.status(reqid, STATUS_CODE.FAILURE);
@@ -517,6 +572,12 @@ const server = new Server({
                     }
                     handles.delete(handleString);
 
+                    if (faults.failCloses && faults.closesFailing !== 0) {
+                        if (faults.closesFailing !== null)
+                            --faults.closesFailing;
+                        logMessage('Fault: failing close');
+                        return sftpStream.status(reqid, STATUS_CODE.FAILURE);
+                    }
                     sftpStream.status(reqid, STATUS_CODE.OK);
 
                     logMessage('File closed');
@@ -555,6 +616,15 @@ const server = new Server({
                     path = resolveFileName(path);
 
                     logMessage('STAT', path);
+
+                    if (faults.unansweredStats.has(path)) {
+                        logMessage('Fault: leaving STAT unanswered');
+                        return;
+                    }
+                    if (faults.endingStats.has(path)) {
+                        logMessage('Fault: ending the SFTP channel');
+                        return sftpStream.end();
+                    }
 
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
@@ -727,7 +797,7 @@ const server = new Server({
                     if (name === 'hardlink@openssh.com') {
                         if (faults.failHardlinks) {
                             logMessage('Fault: failing hardlink');
-                            return sftpStream.status(reqid, STATUS_CODE.PERMISSION_DENIED);
+                            return sftpStream.status(reqid, faults.hardlinkFailureStatus ?? STATUS_CODE.PERMISSION_DENIED);
                         }
                         if (newResult !== undefined || oldResult.type !== 'file')
                             return sftpStream.status(reqid, STATUS_CODE.FAILURE);
@@ -923,7 +993,7 @@ const server = new Server({
                     const result = fakeFilesystem.find(path);
                     if (result === undefined) {
                         logMessage('File not found');
-                        return sftpStream.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+                        return sendMissing(sftpStream, reqid, path);
                     }
 
                     logMessage(result.stat);
@@ -973,11 +1043,19 @@ cli.on('failReadsAfter', (command) => {
     faults.failReadsAfter = nullableBytes(command);
     faults.bytesRead = 0;
 });
+cli.on('stallReadsAfter', (command) => {
+    faults.stallReadsAfter = nullableBytes(command);
+    faults.bytesRead = 0;
+});
 cli.on('capReads', (command) => {
     faults.capReads = nullableBytes(command);
 });
 cli.on('failWritesAfter', (command) => {
     faults.failWritesAfter = nullableBytes(command);
+    faults.bytesWritten = 0;
+});
+cli.on('stallWritesAfter', (command) => {
+    faults.stallWritesAfter = nullableBytes(command);
     faults.bytesWritten = 0;
 });
 cli.on('dropAfterBytes', (command) => {
@@ -990,12 +1068,18 @@ cli.on('failRenames', (command) => {
     faults.renamesBeforeFailure = command.after === undefined ? null : Number(command.after);
     faults.renamesFailing = command.count === undefined ? null : Number(command.count);
 });
-// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks.
+// Hard links answer permission denied, like a filesystem without them or Linux protected_hardlinks. 'unsupported' as
+// status answers OP_UNSUPPORTED, like OpenSSH on a filesystem whose link() is ENOSYS.
 cli.on('failHardlinks', (command) => {
     faults.failHardlinks = command.enabled !== false;
+    faults.hardlinkFailureStatus = command.status === 'unsupported' ? STATUS_CODE.OP_UNSUPPORTED : null;
 });
 cli.on('failRemoves', (command) => {
     faults.failRemoves = command.enabled !== false;
+});
+cli.on('failCloses', (command) => {
+    faults.failCloses = command.enabled !== false;
+    faults.closesFailing = command.count === undefined ? null : Number(command.count);
 });
 cli.on('denyDirectory', (command) => {
     faults.deniedDirectories.add(command.path);
@@ -1003,6 +1087,15 @@ cli.on('denyDirectory', (command) => {
 // LSTAT of the path answers permission denied.
 cli.on('denyStat', (command) => {
     faults.deniedStats.add(command.path);
+});
+cli.on('leaveStatUnanswered', (command) => {
+    faults.unansweredStats.add(command.path);
+});
+cli.on('endSftpChannelOnStat', (command) => {
+    faults.endingStats.add(command.path);
+});
+cli.on('answerNoSuchPath', (command) => {
+    faults.answerNoSuchPath = command.enabled !== false;
 });
 cli.on('resetRequestCounts', () => {
     requestCounts = {};
@@ -1024,6 +1117,7 @@ cli.on('waitForOpenSftpSessions', (command) => new Promise((resolve) => {
     openSftpSessionsWatchers.add(check);
     check();
 }));
+cli.on('lastOpenFlags', () => ({ flags: lastOpenFlags }));
 cli.on('advertise', (command) => {
     advertisedExtensions[command.name] = command.data ?? '1';
 });

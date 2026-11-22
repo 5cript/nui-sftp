@@ -55,6 +55,15 @@ namespace Test::DockerShells
         return reason;
     }
 
+    /**
+     * @brief What docker says of the container @p name: created, running, exited, or that it has none of the name.
+     */
+    inline std::string containerStatus(std::string const& name)
+    {
+        return Docker::run(fmt::format("docker inspect --format '{{{{.State.Status}}}}' {}", Docker::quote(name)))
+            .output;
+    }
+
     inline std::string uniqueContainerName()
     {
         return Docker::uniqueContainerName("nui-sftp-shell-test");

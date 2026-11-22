@@ -1,0 +1,5 @@
+# OpenSSL is not instrumented, ThreadSanitizer sees none of its atomics. OpenSSL 4 keeps the methods it fetched in a
+# list without a lock: one thread allocates an entry, copies the property query into it and publishes it atomically,
+# another finds it with strcmp. The name of the frame needs the debug symbols of libcrypto (debuginfod), without them
+# the frame stays unnamed and the report shows.
+race:ossl_method_store_atomic_find_in_list

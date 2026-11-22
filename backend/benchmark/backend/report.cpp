@@ -3,7 +3,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <map>
 #include <optional>
+#include <string>
 
 namespace Benchmark
 {
@@ -30,18 +32,26 @@ namespace Benchmark
             return static_cast<double>(bytes) / (1024.0 * 1024.0) / std::max(Seconds{duration}.count(), 1e-9);
         }
 
+        double millisecondsPerMebibyte(std::chrono::nanoseconds processor, std::uint64_t bytes)
+        {
+            return Seconds{processor}.count() * 1000.0 / std::max(static_cast<double>(bytes) / (1024.0 * 1024.0), 1e-9);
+        }
+
         std::optional<std::chrono::nanoseconds> baselineMedian(
             std::vector<Measurement> const& measurements,
             Measurement const& of,
-            std::string const& baselineClient
+            std::map<Protocol, std::string> const& baselineClients
         )
         {
+            const auto baselineClient = baselineClients.find(of.protocol);
+            if (baselineClient == baselineClients.end())
+                return std::nullopt;
             const auto baseline = std::ranges::find_if(
                 measurements,
                 [&](Measurement const& candidate)
                 {
                     return candidate.workload == of.workload && candidate.direction == of.direction &&
-                        candidate.client == baselineClient && candidate.failure.empty() &&
+                        candidate.client == baselineClient->second && candidate.failure.empty() &&
                         !candidate.durations.empty();
                 }
             );
@@ -50,10 +60,18 @@ namespace Benchmark
             return median(baseline->durations);
         }
 
+        std::string describeBaselines(std::map<Protocol, std::string> const& baselineClients)
+        {
+            std::string described{};
+            for (auto const& [protocol, client] : baselineClients)
+                described += fmt::format("{}{} for {}", described.empty() ? "" : ", ", client, toString(protocol));
+            return described;
+        }
+
         std::string row(
             Measurement const& measurement,
             std::vector<Measurement> const& measurements,
-            std::string const& baselineClient
+            std::map<Protocol, std::string> const& baselineClients
         )
         {
             auto const& workload = *measurement.workload;
@@ -63,9 +81,10 @@ namespace Benchmark
             if (!measurement.failure.empty() || measurement.durations.empty())
             {
                 return fmt::format(
-                    "| {} | {} | {} | failed: {} | | | | | |\n",
+                    "| {} | {} | {} | {} | failed: {} | | | | | | |\n",
                     label,
                     toString(measurement.direction),
+                    toString(measurement.protocol),
                     measurement.client,
                     measurement.failure
                 );
@@ -74,19 +93,21 @@ namespace Benchmark
             const auto middle = median(measurement.durations);
             const auto [fastest, slowest] = std::ranges::minmax(measurement.durations);
             const auto seconds = std::max(Seconds{middle}.count(), 1e-9);
-            const auto baseline = baselineMedian(measurements, measurement, baselineClient);
+            const auto baseline = baselineMedian(measurements, measurement, baselineClients);
             const auto relative = baseline ? fmt::format("{:.0f} %", 100.0 * Seconds{*baseline}.count() / seconds)
                                            : std::string{"-"};
             return fmt::format(
-                "| {} | {} | {} | {} | {} | {} | {:.1f} | {:.0f} | {} |\n",
+                "| {} | {} | {} | {} | {} | {} | {} | {:.1f} | {:.0f} | {:.3f} | {} |\n",
                 label,
                 toString(measurement.direction),
+                toString(measurement.protocol),
                 measurement.client,
                 formatDuration(middle),
                 formatDuration(fastest),
                 formatDuration(slowest),
                 mebibytesPerSecond(workload.totalBytes(), middle),
                 static_cast<double>(workload.fileCount) / seconds,
+                millisecondsPerMebibyte(median(measurement.processorTimes), workload.totalBytes()),
                 relative
             );
         }
@@ -111,38 +132,55 @@ namespace Benchmark
             "\n"
             "- Date: {}\n"
             "- Server: {} in docker at {}, files on a tmpfs\n"
-            "- Client library: libssh {}\n"
+            "- Client library: libssh {}; FTP: the app's own client, a ring of {} per asynchronous transfer\n"
             "- Processors: {}\n"
             "- Runs per row: {}, the median is shown\n"
+            "- CPU: user and system time of the benchmark process and the programs it ran, all threads, the median\n"
+            "- Baselines, each row is compared with the one of its protocol: {}\n"
             "\n"
-            "| Workload | Direction | Client | Median | Fastest | Slowest | MiB/s | Files/s | Speed vs {} |\n"
-            "|---|---|---|---:|---:|---:|---:|---:|---:|\n",
+            "| Workload | Direction | Protocol | Client | Median | Fastest | Slowest | MiB/s | Files/s | CPU ms/MiB | "
+            "Speed vs baseline |\n"
+            "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n",
             context.date,
             context.serverVersion,
             context.serverAddress,
             context.libsshVersion,
+            context.ftpRing,
             context.processors,
             context.repeats,
-            context.baselineClient
+            describeBaselines(context.baselineClients)
         );
         for (auto const& measurement : measurements)
-            report += row(measurement, measurements, context.baselineClient);
+            report += row(measurement, measurements, context.baselineClients);
 
         report +=
             "\n"
             "## Clients\n"
             "\n"
-            "- **nui-sftp**: the app's operations driven like Session::doOperationQueueWork drives the queue: worked "
-            "again right away after progress, asleep while a transfer runs until it wakes the queue.\n"
+            "- **nui-sftp**: the app's operations without the queue, each driven like Session::doOperationQueueWork "
+            "drives the queue: worked again right away after progress, asleep while a transfer runs until it wakes "
+            "the queue.\n"
+            "- **nui-sftp queue**: the same transfer added to an OperationQueue with the default options and worked as "
+            "Session works it, timed from the add until the completion.\n"
+            "- **nui-sftp queue per file**: every file of a directory added to that queue as an operation of its own, "
+            "which the queue runs side by side.\n"
             "- **nui-sftp unsafe fast**: the same in the unsafe fast mode, files below 1 MiB go straight to their "
             "destination without the safety checks.\n"
             "- **libssh sftp_aio**: libssh directly on the same kind of connection, one file after another with 8 MiB "
             "of requests in flight.\n"
             "- **OpenSSH sftp**: the host's sftp program in batch mode, its start and login measured with an empty "
             "batch and subtracted.\n"
+            "- **nui-sftp ftp**, **nui-sftp ftps**: the app's operations over its FTP client, ftps with AUTH TLS and the "
+            "certificate pinned, each session on the default two engine threads with up to three transfer connections "
+            "beside the one for commands. The unsafe fast and queue variants as above.\n"
+            "- **1 thread**, **4 threads**: the same with the engine on an io_context of one thread or a thread_pool of "
+            "four.\n"
+            "- **curl ftp**, **curl ftps**: the host's curl program, one per transfer, the files of a directory with "
+            "--parallel as many at once as the app's bulk transfers; ftps with AUTH TLS. Its start and login are "
+            "measured with a request for the size of a file and subtracted.\n"
             "\n"
-            "Single files of 16 KiB or more go through the asynchronous transfer, smaller ones through one blocking "
-            "call per work(). Directories are bulk transfers that scan first, the scan is part of the time. The "
+            "Over SFTP single files of 16 KiB or more go through the asynchronous transfer, smaller ones through one "
+            "blocking call per work(); over FTP every file goes through the asynchronous transfer. Directories are bulk transfers that scan first, the scan is part of the time. The "
             "local files are in the page cache, so the host's disk hardly takes part.\n";
         if (!context.notes.empty())
         {

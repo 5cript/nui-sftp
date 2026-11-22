@@ -1,7 +1,6 @@
 #include <backend/sftp/bulk_download_operation.hpp>
 #include <utility/error_message.hpp>
 #include <paths/native.hpp>
-#include <constants/sftp.hpp>
 #include <log/log.hpp>
 #include <utility/link_safe_remove.hpp>
 #include <utility/permissions.hpp>
@@ -26,10 +25,10 @@ namespace
 }
 
 BulkDownloadOperation::BulkDownloadOperation(
-    std::weak_ptr<SecureShell::SftpSession> sftp,
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
     BulkDownloadOperationOptions options
 )
-    : BulkTransferOperation{std::move(sftp), toCommon(options)}
+    : BulkTransferOperation{std::move(fileSystem), toCommon(options)}
     , individualOptions_{std::move(options.individualOptions)}
 {
     individualOptions_.verifiedDirectories = std::make_shared<Utility::VerifiedDirectories>();
@@ -43,14 +42,14 @@ SharedData::OperationType BulkDownloadOperation::type() const
 }
 
 std::expected<void, BulkDownloadOperation::Error>
-BulkDownloadOperation::prepareRootInStrand(SecureShell::SftpSession&, SharedData::DirectoryEntry const& root)
+BulkDownloadOperation::prepareRootInStrand(RemoteIo::IRemoteFileSystem&, SharedData::DirectoryEntry const& root)
 {
     // Base directory of the download, everything after this will be relative to this:
     return createLocalDirectory(common().localPath, root);
 }
 
 std::expected<void, BulkDownloadOperation::Error> BulkDownloadOperation::createDirectoryInStrand(
-    SecureShell::SftpSession&,
+    RemoteIo::IRemoteFileSystem&,
     std::size_t entryIndex,
     EntryPaths const& paths
 )
@@ -123,7 +122,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
     downloadOptions.localPath = paths.local;
     downloadOptions.mayOverwrite = downloadOptions.mayOverwrite || paths.mayOverwrite;
     downloadOptions.comparedDestination = paths.comparedDestination;
-    downloadOptions.bigFileOptimized = entry.size >= Constants::bigFileCutOff;
+    downloadOptions.bigFileOptimized = childTakesAsynchronousPath(entry.size);
     downloadOptions.progressCallback = [onProgress = std::move(onProgress)](auto, auto max, auto current, auto)
     {
         onProgress(current, max);
@@ -131,7 +130,7 @@ std::unique_ptr<Operation> BulkDownloadOperation::makeChild(
     downloadOptions.entry = entry;
     downloadOptions.linkFreeRoot = common().localPath;
 
-    return std::make_unique<DownloadOperation>(sftp(), std::move(downloadOptions));
+    return std::make_unique<DownloadOperation>(fileSystem(), std::move(downloadOptions));
 }
 
 bool BulkDownloadOperation::isSkippableError(Error const& error) const
@@ -144,9 +143,11 @@ bool BulkDownloadOperation::isSkippableError(Error const& error) const
         error.type == ErrorType::LinkInLocalPath || error.type == ErrorType::FileExists ||
         error.type == ErrorType::ChangedSinceCompare)
         return true;
-    return error.sftpError &&
-        (error.sftpError->sftpError == SSH_FX_NO_SUCH_FILE || error.sftpError->sftpError == SSH_FX_PERMISSION_DENIED ||
-            error.sftpError->sftpError == SSH_FX_FAILURE);
+    using RemoteIo::RemoteErrorKind;
+    return error.remoteError &&
+        (error.remoteError->kind == RemoteErrorKind::NoSuchFile ||
+            error.remoteError->kind == RemoteErrorKind::PermissionDenied ||
+            error.remoteError->kind == RemoteErrorKind::Failure);
 }
 
 bool BulkDownloadOperation::isSkippableDirectoryError(Error const& error) const
@@ -214,6 +215,7 @@ void BulkDownloadOperation::setPrescannedFileList(std::vector<PrescannedFile> fi
         entry.size = file.isDirectory ? 0u : file.sizeBytes;
         entry.mtime = file.mtime;
         entry.mtimeNsec = file.mtimeNsec;
+        entry.mtimePrecision = file.mtimePrecision;
         totalBytes += entry.size;
         entries.push_back(std::move(entry));
         paths.push_back(
@@ -256,6 +258,7 @@ BulkDownloadOperation::resumeRequest(SharedData::BulkDownloadRequest request) co
             .withoutContent = entry.isDirectory(),
             .mtime = entry.mtime,
             .mtimeNsec = entry.mtimeNsec,
+            .mtimePrecision = entry.mtimePrecision,
             .mayOverwrite = paths->mayOverwrite,
             .comparedDestination = paths->comparedDestination,
         });

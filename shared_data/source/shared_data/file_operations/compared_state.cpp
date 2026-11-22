@@ -9,6 +9,7 @@ namespace SharedData
             .type = entry.type,
             .size = entry.size,
             .mtime = entry.mtime,
+            .mtimePrecision = entry.mtimePrecision,
             .linkTarget = entry.type == FileType::Symlink ? entry.linkTarget : std::nullopt,
         };
     }
@@ -28,7 +29,8 @@ namespace SharedData
             case FileType::Symlink:
                 return compared.linkTarget == current.linkTarget;
             default:
-                return compared.size == current.size && compared.mtime == current.mtime;
+                return compared.size == current.size &&
+                    compareTimes(compared.mtime, compared.mtimePrecision, current.mtime, current.mtimePrecision) == 0;
         }
     }
 }

@@ -3,51 +3,47 @@
 #include <shared_data/shared_data.hpp>
 #include <shared_data/file_operations/local_file_problem.hpp>
 #include <shared_data/file_operations/operation_error_type.hpp>
-#include <ssh/sftp_error.hpp>
+#include <remote_io/remote_error.hpp>
 
-namespace SecureShell
+namespace RemoteIo
 {
-    BOOST_DESCRIBE_ENUM(
-        WrapperErrors,
-        None,
-        OwnerNull,
-        SharedPtrDestroyed,
-        ShortWrite,
-        FileNull,
-        TaskPushFailed,
-        BufferUnavailable,
-        UnexpectedEndOfFile,
-        LocalIoFailure,
-        InvalidPath
-    )
-    BOOST_DESCRIBE_STRUCT(SftpError, (), (message, sshError, sftpError, wrapperError))
-
-    inline void from_json(nlohmann::json const& json, WrapperErrors& error)
+    template <typename EnumType>
+    requires boost::describe::has_describe_enumerators<EnumType>::value
+    void from_json(nlohmann::json const& json, EnumType& value)
     {
-        SharedData::from_json(json, error);
+        SharedData::from_json(json, value);
     }
-    inline void to_json(nlohmann::json& json, WrapperErrors const& error)
+    template <typename EnumType>
+    requires boost::describe::has_describe_enumerators<EnumType>::value
+    void to_json(nlohmann::json& json, EnumType const& value)
     {
-        SharedData::to_json(json, error);
-    }
-    inline void from_json(nlohmann::json const& json, SftpError& error)
-    {
-        SharedData::from_json(json, error);
-    }
-    inline void to_json(nlohmann::json& json, SftpError const& error)
-    {
-        SharedData::to_json(json, error);
+        SharedData::to_json(json, value);
     }
 #ifdef __EMSCRIPTEN__
-    inline void from_val(Nui::val const& val, WrapperErrors& error)
+    template <typename EnumType>
+    requires boost::describe::has_describe_enumerators<EnumType>::value
+    void from_val(Nui::val const& val, EnumType& value)
     {
-        SharedData::from_val(val, error);
+        SharedData::from_val(val, value);
     }
-    inline void to_val(Nui::val& val, WrapperErrors const& error)
+    template <typename EnumType>
+    requires boost::describe::has_describe_enumerators<EnumType>::value
+    void to_val(Nui::val& val, EnumType const& value)
     {
-        SharedData::to_val(val, error);
+        SharedData::to_val(val, value);
     }
 #endif
+
+    BOOST_DESCRIBE_STRUCT(RemoteError, (), (kind, protocol, protocolCode, message, wrapperError))
+
+    inline void from_json(nlohmann::json const& json, RemoteError& error)
+    {
+        SharedData::from_json(json, error);
+    }
+    inline void to_json(nlohmann::json& json, RemoteError const& error)
+    {
+        SharedData::to_json(json, error);
+    }
 }
 
 namespace SharedData
@@ -55,7 +51,7 @@ namespace SharedData
     struct OperationError
     {
         OperationErrorType type;
-        std::optional<SecureShell::SftpError> sftpError = std::nullopt;
+        std::optional<RemoteIo::RemoteError> remoteError = std::nullopt;
         std::optional<std::string> extraInfo = std::nullopt;
         /** @brief Why the local file could not be read or written, for an error on the local side. */
         std::optional<LocalFileProblem> localProblem = std::nullopt;
@@ -63,12 +59,12 @@ namespace SharedData
         std::string toString() const
         {
             const auto enumString = boost::describe::enum_to_string(type, "INVALID_ENUM_VALUE");
-            if (sftpError.has_value())
+            if (remoteError.has_value())
             {
                 if (extraInfo)
-                    return fmt::format("{}: {}. {}.", enumString, sftpError->toString(), *extraInfo);
+                    return fmt::format("{}: {}. {}.", enumString, remoteError->toString(), *extraInfo);
                 else
-                    return fmt::format("{}: {}.", enumString, sftpError->toString());
+                    return fmt::format("{}: {}.", enumString, remoteError->toString());
             }
             if (extraInfo)
             {
@@ -77,5 +73,5 @@ namespace SharedData
             return enumString;
         }
     };
-    BOOST_DESCRIBE_STRUCT(OperationError, (), (type, sftpError, extraInfo, localProblem))
+    BOOST_DESCRIBE_STRUCT(OperationError, (), (type, remoteError, extraInfo, localProblem))
 }

@@ -1526,7 +1526,7 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
             operation->setError(completed.error.value_or(
                 SharedData::OperationError{
                     .type = SharedData::OperationErrorType::UnknownError,
-                    .sftpError = std::nullopt,
+                    .remoteError = std::nullopt,
                     .extraInfo = language->get("operationQueue", "unknownError")
                 }
             ));

@@ -5,12 +5,12 @@
 #include <backend/sftp/rename_operation.hpp>
 #include <backend/sftp/upload_operation.hpp>
 #include <utility/permissions.hpp>
+#include "operation_runs.hpp"
 #include "real_server_tests.hpp"
 
 #include <expected>
 #include <fstream>
 #include <string>
-#include <thread>
 
 extern std::filesystem::path temporaryRoot;
 
@@ -60,24 +60,6 @@ namespace Test
             if (readFuture.wait_for(10s) != std::future_status::ready || !readFuture.get().has_value())
                 return "<read failed>";
             return data;
-        }
-
-        /**
-         * @brief Works an operation until it completes or fails. Async transfers run on the strand,
-         *        so MoreWork is retried with a short pause.
-         */
-        template <typename OperationT>
-        static std::expected<Operation::WorkStatus, Operation::Error> runToEnd(OperationT& operation)
-        {
-            const auto deadline = std::chrono::steady_clock::now() + 20s;
-            while (std::chrono::steady_clock::now() < deadline)
-            {
-                auto result = operation.work();
-                if (!result.has_value() || result.value() == Operation::WorkStatus::Complete)
-                    return result;
-                std::this_thread::sleep_for(2ms);
-            }
-            return std::unexpected(Operation::Error{.type = Operation::ErrorType::FutureTimeout});
         }
 
       protected:
@@ -490,6 +472,67 @@ namespace Test
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content");
     }
 
+    TEST_F(TransferFailureTests, UploadWhoseCloseTheServerRefusesKeepsExistingRemoteFile)
+    {
+        for (const bool bigFileOptimized : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(sftpServer);
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+            const auto localPath = localDirectory_.path() / "upload.txt";
+            writeLocalFile(localPath, alphabet(65536));
+            // The server closes the file but reports that its writes did not all land.
+            ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+            UploadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/file1.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = true,
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_FALSE(result.has_value()) << bigFileOptimized;
+            EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError) << bigFileOptimized;
+            ASSERT_TRUE(serverStartResult->command("failCloses", {{"enabled", false}}));
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt"), "Fake file content") << bigFileOptimized;
+            // A later upload would continue it and put the refused bytes in place.
+            EXPECT_EQ(readRemoteFile(*sftp, "/home/test/file1.txt.filepart"), "<missing>") << bigFileOptimized;
+        }
+    }
+
+    TEST_F(TransferFailureTests, DownloadWhoseCloseTheServerRefusesKeepsExistingFile)
+    {
+        for (const bool bigFileOptimized : {false, true})
+        {
+            CREATE_SERVER_AND_JOINER(sftpServer);
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+            const auto localPath = localDirectory_.path() / "file1.txt";
+            writeLocalFile(localPath, "original content");
+            ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+            DownloadOperation operation{
+                sftp,
+                {
+                    .remotePath = remote("/home/test/file1.txt"),
+                    .localPath = toLocal(localPath),
+                    .mayOverwrite = true,
+                    // Kept partial files must not keep the refused one.
+                    .doCleanup = false,
+                    .bigFileOptimized = bigFileOptimized,
+                }
+            };
+
+            const auto result = runToEnd(operation);
+            ASSERT_FALSE(result.has_value()) << bigFileOptimized;
+            EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError) << bigFileOptimized;
+            EXPECT_EQ(readLocalFile(localPath), "original content") << bigFileOptimized;
+            EXPECT_FALSE(std::filesystem::exists(localPath.generic_string() + ".filepart")) << bigFileOptimized;
+        }
+    }
+
     TEST_F(TransferFailureTests, AsyncUploadResumesFromPartialRemoteFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -622,6 +665,35 @@ namespace Test
         const auto result = runToEnd(operation);
         ASSERT_FALSE(result.has_value());
         ASSERT_TRUE(serverStartResult->command("failWritesAfter", {{"bytes", nullptr}}));
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar"), "old archive");
+        EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar.filepart"), "<missing>");
+    }
+
+    TEST_F(TransferFailureTests, ArchiveUploadWhoseCloseTheServerRefusesKeepsExistingRemoteArchive)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/backup.tar"}, {"content", "old archive"}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        const auto localPath = localDirectory_.path() / "packed.txt";
+        writeLocalFile(localPath, alphabet(4096));
+        ASSERT_TRUE(serverStartResult->command("failCloses", nlohmann::json::object()));
+
+        ArchiveUploadOperation operation{
+            sftp,
+            {
+                .localPaths = {toLocal(localPath)},
+                .remoteArchivePath = remote("/home/test/backup.tar"),
+                .compression = TarArchive::Compression::None,
+                .mayOverwrite = true,
+            }
+        };
+
+        const auto result = runToEnd(operation);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, Operation::ErrorType::SftpError);
+        ASSERT_TRUE(serverStartResult->command("failCloses", {{"enabled", false}}));
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar"), "old archive");
         EXPECT_EQ(readRemoteFile(*sftp, "/home/test/backup.tar.filepart"), "<missing>");
     }

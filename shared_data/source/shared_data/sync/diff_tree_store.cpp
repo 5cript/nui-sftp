@@ -86,6 +86,7 @@ namespace SharedData::Sync
             .type = node->type,
             .size = node->size,
             .mtime = node->mtime,
+            .mtimePrecision = node->mtimePrecision,
             .linkTarget = node->type == FileType::Symlink ? node->linkTarget : std::nullopt,
         };
     }
@@ -233,6 +234,7 @@ namespace SharedData::Sync
                 .sizeBytes = node.type == FileType::Directory ? 0u : node.size,
                 .mtime = node.mtime,
                 .mtimeNsec = node.mtimeNsec,
+                .mtimePrecision = node.mtimePrecision,
                 .isDirectory = node.type == FileType::Directory,
             };
         };
@@ -280,6 +282,7 @@ namespace SharedData::Sync
                 .action = action,
                 .mtime = directory.mtime,
                 .mtimeNsec = directory.mtimeNsec,
+                .mtimePrecision = directory.mtimePrecision,
                 .isDirectory = true,
             }
         );
@@ -300,6 +303,7 @@ namespace SharedData::Sync
                     .sizeBytes = child.size,
                     .mtime = child.mtime,
                     .mtimeNsec = child.mtimeNsec,
+                    .mtimePrecision = child.mtimePrecision,
                 }
             );
         }
@@ -347,6 +351,7 @@ namespace SharedData::Sync
                         : (scan ? scan->size : (sourceIsLocal ? node.localSize : node.remoteSize)),
                     .mtime = scan ? scan->mtime : (sourceIsLocal ? node.localMtime : node.remoteMtime),
                     .mtimeNsec = scan ? scan->mtimeNsec : 0u,
+                    .mtimePrecision = scan ? scan->mtimePrecision : TimePrecision::Second,
                     .isDirectory = node.isDirectory,
                 }
             );

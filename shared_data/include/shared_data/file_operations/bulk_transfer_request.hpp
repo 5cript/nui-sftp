@@ -62,6 +62,11 @@ namespace SharedData
         /** @brief Modification time of the remote file, restored on the local copy so the next sync sees no change. */
         std::uint64_t mtime{0};
         std::uint32_t mtimeNsec{0};
+        /**
+         * @brief How exact mtime is, as the listing or the scan told it. A download asks the server where it is
+         *        rounded.
+         */
+        TimePrecision mtimePrecision{TimePrecision::Second};
         /** @brief See @ref BulkUploadEntry::mayOverwrite. */
         bool mayOverwrite{false};
         /** @brief See @ref BulkUploadEntry::comparedDestination. */
@@ -70,7 +75,7 @@ namespace SharedData
     BOOST_DESCRIBE_STRUCT(
         BulkDownloadEntry,
         (),
-        (source, destination, sizeBytes, isDirectory, withoutContent, mtime, mtimeNsec, mayOverwrite)
+        (source, destination, sizeBytes, isDirectory, withoutContent, mtime, mtimeNsec, mtimePrecision, mayOverwrite)
     )
 
     /**

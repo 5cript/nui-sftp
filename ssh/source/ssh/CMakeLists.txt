@@ -1,20 +1,17 @@
 find_package(fmt CONFIG REQUIRED)
 
-# The ssh tests build a second copy instrumented with ThreadSanitizer.
-function(add_secure_shell_library name)
+# The ssh tests build a second copy instrumented with ThreadSanitizer, linked to an instrumented remote_io.
+function(add_secure_shell_library name remoteIo)
     set(SECURE_SHELL_SOURCE_DIRECTORY "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
     # Imported targets are only visible in the directory that found them, the test directory calls this too.
     include("${SECURE_SHELL_SOURCE_DIRECTORY}/../../../_cmake/dependencies/libssh.cmake")
     add_library(
         ${name}
         STATIC
-            ${SECURE_SHELL_SOURCE_DIRECTORY}/async/buffer_provider.cpp
-            ${SECURE_SHELL_SOURCE_DIRECTORY}/async/processing_thread.cpp
-            ${SECURE_SHELL_SOURCE_DIRECTORY}/async/socket_wait.cpp
-            ${SECURE_SHELL_SOURCE_DIRECTORY}/async/transfer_context.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/session.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/channel.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/sftp_session.cpp
+            ${SECURE_SHELL_SOURCE_DIRECTORY}/sftp_error_conversion.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/file_stream.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/file_information.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/key_file.cpp
@@ -32,6 +29,7 @@ function(add_secure_shell_library name)
         ${name}
         PUBLIC
             ssh
+            ${remoteIo}
             ids
             persistence
             utility
@@ -43,4 +41,4 @@ function(add_secure_shell_library name)
     endif()
 endfunction()
 
-add_secure_shell_library(secure-shell)
+add_secure_shell_library(secure-shell remote-io)

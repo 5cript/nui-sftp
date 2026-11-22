@@ -253,6 +253,14 @@
     }
 }
 
+.setting-read-only-text {
+    font-family: monospace;
+    overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
+    color: var(--subdued-text);
+}
+
 .setting-colorbox {
     width: 24px;
     height: 24px;
@@ -279,31 +287,8 @@
     align-items: center;
     gap: 10px;
 
-    &>.setting-number-input {
+    &>.script-nui-text-input {
         flex-grow: 1;
-    }
-}
-
-.setting-number-input {
-    width: auto;
-
-    &::-webkit-outer-spin-button,
-    &::-webkit-inner-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
-    }
-
-    &[type=number],
-    &[type=text] {
-        -moz-appearance: textfield;
-        appearance: textfield;
-        line-height: normal;
-        box-sizing: border-box;
-        text-overflow: ellipsis;
-        flex: 1 1 0%;
-        outline: none;
-        font-style: normal;
-        text-align: start;
     }
 }
 

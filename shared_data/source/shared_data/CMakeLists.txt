@@ -10,7 +10,13 @@ add_library(
         sync/enqueue_minimizer.cpp
 )
 
-target_include_directories(shared-data PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../include" "${CMAKE_CURRENT_SOURCE_DIR}/../../../ssh/include")
+target_include_directories(
+    shared-data
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../ssh/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../remote_io/include"
+)
 
 target_link_libraries(shared-data PRIVATE core-target PUBLIC utility ids paths fmt::fmt)
 

@@ -43,6 +43,11 @@ class SettingFactory
     SettingFactory forEngine(Persistence::TerminalEngineType engineType) const;
 
     /**
+     * @brief A factory whose settings only apply to sessions of the given engines.
+     */
+    SettingFactory forEngines(std::vector<Persistence::TerminalEngineType> engineTypes) const;
+
+    /**
      * @brief A factory whose settings belong to options that are selected by a group key.
      */
     SettingFactory forGroup(Nui::Observed<std::optional<std::string>>& groupKey) const;
@@ -61,6 +66,6 @@ class SettingFactory
     SettingsSearchIndex* index_;
     SettingScope scope_;
     std::vector<std::vector<std::string>> breadcrumb_{};
-    std::optional<Persistence::TerminalEngineType> engineType_{};
+    std::vector<Persistence::TerminalEngineType> engineTypes_{};
     Nui::Observed<std::optional<std::string>>* groupKey_{nullptr};
 };

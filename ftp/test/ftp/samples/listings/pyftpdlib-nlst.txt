@@ -1,0 +1,11 @@
+ leading space.txt
+.hidden
+a -> b.txt
+dangling-link
+link-to-plain.txt
+link-to-subdir
+name with spaces.txt
+old.txt
+plain.txt
+subdir
+ünïcödé-名前.txt

@@ -1,4 +1,5 @@
 #include <backend/sftp/bulk_transfer_operation.hpp>
+#include <backend/sftp/transfer_path.hpp>
 #include <log/log.hpp>
 #include <utility/directory_traversal.hpp>
 
@@ -12,28 +13,38 @@ namespace
 {
     /**
      * @brief The skipped entry at @p index with why @p error says it was skipped: the local problem of a local
-     *        failure, the server's status code of one the server answered with.
+     *        failure, the kind of a remote one and the message of a plain remote failure.
      */
     SharedData::IndexedFailure indexedFailureOf(std::size_t index, Operation::Error const& error)
     {
-        const auto serverCode = [&error]() -> std::optional<int>
+        const auto remoteKind = [&error]() -> std::optional<RemoteIo::RemoteErrorKind>
         {
-            if (!error.sftpError || error.sftpError->sftpError == SSH_FX_OK)
+            if (!error.remoteError || error.remoteError->kind == RemoteIo::RemoteErrorKind::None)
                 return std::nullopt;
-            return error.sftpError->sftpError;
+            return error.remoteError->kind;
+        }();
+        const auto remoteMessage = [&error, &remoteKind]() -> std::optional<std::string>
+        {
+            if (remoteKind != RemoteIo::RemoteErrorKind::Failure || error.remoteError->message.empty())
+                return std::nullopt;
+            return error.remoteError->message;
         }();
         return SharedData::IndexedFailure{
             .index = static_cast<std::uint32_t>(index),
             .type = error.type,
             .localProblem = error.localProblem,
-            .sftpErrorCode = serverCode,
+            .remoteErrorKind = remoteKind,
+            .remoteMessage = remoteMessage,
         };
     }
 }
 
-BulkTransferOperation::BulkTransferOperation(std::weak_ptr<SecureShell::SftpSession> sftp, CommonOptions common)
+BulkTransferOperation::BulkTransferOperation(
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem,
+    CommonOptions common
+)
     : Operation{}
-    , sftp_{std::move(sftp)}
+    , fileSystem_{std::move(fileSystem)}
     , common_{std::move(common)}
     , budget_{std::max(1, common_.concurrency)}
 {}
@@ -54,10 +65,10 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
         return result;
     }
 
-    const auto sftp = openSession(sftp_);
-    if (!sftp)
+    const auto fileSystem = openSession(fileSystem_);
+    if (!fileSystem)
         return enterErrorState<WorkStatus>(channelClosedError());
-    auto fut = sftp->performPromise(
+    auto fut = fileSystem->performPromise(
         [this]()
         {
             return workInStrand();
@@ -90,10 +101,10 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
         case (Prepared):
         case (Running):
         {
-            const auto sftp = openSession(sftp_);
-            if (!sftp)
+            const auto fileSystem = openSession(fileSystem_);
+            if (!fileSystem)
                 return enterErrorState<WorkStatus>(channelClosedError());
-            return state() == NotStarted ? start(*sftp) : step(*sftp);
+            return state() == NotStarted ? start(*fileSystem) : step(*fileSystem);
         }
         case (Finalizing):
         {
@@ -128,7 +139,7 @@ std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error> B
 }
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error>
-BulkTransferOperation::start(SecureShell::SftpSession& sftp)
+BulkTransferOperation::start(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     if (entrySource_ == EntrySource::None)
     {
@@ -172,7 +183,7 @@ BulkTransferOperation::start(SecureShell::SftpSession& sftp)
                 Error{.type = ErrorType::ImplementationError, .extraInfo = "A tree needs both roots."}
             );
         }
-        const auto result = prepareRootInStrand(sftp, root);
+        const auto result = prepareRootInStrand(fileSystem, root);
         if (!result.has_value())
             return enterErrorState<WorkStatus>(result.error());
         finishedEntries_[0] = true;
@@ -185,7 +196,7 @@ BulkTransferOperation::start(SecureShell::SftpSession& sftp)
 }
 
 std::expected<BulkTransferOperation::WorkStatus, BulkTransferOperation::Error>
-BulkTransferOperation::step(SecureShell::SftpSession& sftp)
+BulkTransferOperation::step(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     if (cursor_ > entries_.size())
     {
@@ -198,8 +209,8 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
 
     const auto slotsBefore = slots_.size();
     const auto completedBefore = completedEntries_;
-    const auto releasesBefore = sftp.bufferProvider().releaseCount();
-    if (const auto filled = fillSlots(sftp); !filled.has_value())
+    const auto releasesBefore = fileSystem.bufferProvider().releaseCount();
+    if (const auto filled = fillSlots(fileSystem); !filled.has_value())
         return enterErrorState<WorkStatus>(filled.error());
     // Report newly started files before stepping them: small files finish within this very
     // step and would otherwise never be seen in flight.
@@ -220,7 +231,7 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
     // Counted after the erase: an entry deferred again for want of a buffer did not start.
     const bool progressed = *stepped || slots_.size() > slotsBefore || completedEntries_ != completedBefore;
     if (!progressed && !deferred_.empty())
-        wakeOnBufferRelease(sftp, releasesBefore);
+        wakeOnBufferRelease(fileSystem, releasesBefore);
 
     if (slots_.empty() && deferred_.empty() && cursor_ == entries_.size())
     {
@@ -236,7 +247,8 @@ BulkTransferOperation::step(SecureShell::SftpSession& sftp)
     return progressed ? WorkStatus::MoreWork : WorkStatus::Waiting;
 }
 
-std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlots(SecureShell::SftpSession& sftp)
+std::expected<void, BulkTransferOperation::Error>
+BulkTransferOperation::fillSlots(RemoteIo::IRemoteFileSystem& fileSystem)
 {
     // Directories are created inline and each blocks the strand (a round trip or two on
     // upload), so a step creates only a few before yielding to the queue.
@@ -278,7 +290,7 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::fillSlo
         {
             // Created inline while the cursor passes it, so files listed after it only start once
             // it exists. Scan order lists parents before children.
-            const auto result = createDirectoryInStrand(sftp, index, *paths);
+            const auto result = createDirectoryInStrand(fileSystem, index, *paths);
             if (!result.has_value())
             {
                 // Without a tree, nothing else depends on a directory entry.
@@ -393,12 +405,12 @@ std::expected<bool, BulkTransferOperation::Error> BulkTransferOperation::stepSlo
     return progressed;
 }
 
-void BulkTransferOperation::wakeOnBufferRelease(SecureShell::SftpSession& sftp, std::size_t since)
+void BulkTransferOperation::wakeOnBufferRelease(RemoteIo::IRemoteFileSystem& fileSystem, std::size_t since)
 {
     if (!wake_ || awaitedRelease_ == since)
         return;
     awaitedRelease_ = since;
-    sftp.bufferProvider().notifyOnRelease(since, wake_);
+    fileSystem.bufferProvider().notifyOnRelease(since, wake_);
 }
 
 void BulkTransferOperation::finishSlot(Slot& slot, bool transferred)
@@ -499,8 +511,8 @@ void BulkTransferOperation::emitProgress(bool force)
 
 bool BulkTransferOperation::isBufferShortage(Error const& error) noexcept
 {
-    return error.sftpError.has_value() &&
-        error.sftpError->wrapperError == SecureShell::WrapperErrors::BufferUnavailable;
+    return error.remoteError.has_value() &&
+        error.remoteError->wrapperError == RemoteIo::WrapperErrors::BufferUnavailable;
 }
 
 std::int64_t BulkTransferOperation::updateBulkBytesPerSecond(std::uint64_t bytesNow)
@@ -649,6 +661,12 @@ BulkTransferOperation::entryPaths(std::size_t entryIndex) const
     return BulkTransferDetail::treeEntryPaths(entries_, entryIndex, common_.remotePath, common_.localPath);
 }
 
+bool BulkTransferOperation::childTakesAsynchronousPath(std::uint64_t size) const
+{
+    const auto locked = fileSystem_.lock();
+    return takesAsynchronousPath(locked ? locked->capabilities() : RemoteIo::Capabilities{}, size);
+}
+
 namespace BulkTransferDetail
 {
     std::expected<BulkTransferOperation::EntryPaths, Operation::Error> treeEntryPaths(
@@ -745,12 +763,12 @@ std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(
 
     // Each child's cancel and destructor would block on the processing thread separately;
     // hop once and do all of them there.
-    const auto sftp = openSession(sftp_);
-    if (!slots_.empty() && sftp && !sftp->strand()->withinProcessingThread())
+    const auto fileSystem = openSession(fileSystem_);
+    if (!slots_.empty() && fileSystem && !fileSystem->strand()->withinProcessingThread())
     {
         // Only wait, never get(): a finalized strand hands back an exceptional future and this
         // runs from the destructor too.
-        auto fut = sftp->performPromise(
+        auto fut = fileSystem->performPromise(
             [this, adoptCancelState]() -> bool
             {
                 cancelChildrenInStrand(adoptCancelState);
@@ -782,7 +800,7 @@ void BulkTransferOperation::pause(bool doPause)
     }
 }
 
-SecureShell::ProcessingStrand* BulkTransferOperation::strand() const
+RemoteIo::ProcessingStrand* BulkTransferOperation::strand() const
 {
-    return strandOf(sftp_);
+    return strandOf(fileSystem_);
 }

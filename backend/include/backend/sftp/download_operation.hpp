@@ -2,9 +2,8 @@
 
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/unsafe_fast_mode.hpp>
-#include <ssh/async/buffer_provider.hpp>
-#include <ssh/file_stream.hpp>
-#include <ssh/sftp_session.hpp>
+#include <remote_io/async/buffer_provider.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <paths/local_path.hpp>
 #include <paths/remote_path.hpp>
@@ -15,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 
 class DownloadOperation : public Operation
@@ -67,14 +67,14 @@ class DownloadOperation : public Operation
         UnsafeFastMode unsafeFastMode{};
     };
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         if (auto stream = fileStream_.lock(); stream)
             return stream->strand();
-        return strandOf(sftp_);
+        return strandOf(fileSystem_);
     }
 
-    DownloadOperation(std::weak_ptr<SecureShell::SftpSession> sftp, DownloadOperationOptions options);
+    DownloadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, DownloadOperationOptions options);
     ~DownloadOperation() override;
     DownloadOperation(DownloadOperation const&) = delete;
     DownloadOperation(DownloadOperation&&) = delete;
@@ -148,14 +148,14 @@ class DownloadOperation : public Operation
     std::expected<bool, Error> readOnceInStrand();
 
     std::expected<void, Error> handleSymlink();
-    std::expected<void, Error> handleSymlinkInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> handleSymlinkInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
-    bool commitBufferToFile(SecureShell::IFileStream::SignedSizeType bytesRead);
+    bool commitBufferToFile(RemoteIo::IRemoteFileStream::SignedSizeType bytesRead);
 
     /// Runs the remote-heavy portion of prepare() under a single strand umbrella.
-    std::expected<void, Error> prepareInStrand(SecureShell::SftpSession& sftp);
+    std::expected<void, Error> prepareInStrand(RemoteIo::IRemoteFileSystem& fileSystem);
 
-    std::expected<void, Error> openOrAdoptFileInStrand(SecureShell::IFileStream& stream);
+    std::expected<void, Error> openOrAdoptFileInStrand(RemoteIo::IRemoteFileStream& stream);
 
     /**
      * @brief The unsafe fast mode's open: the destination itself, created or emptied. Only links in its path are
@@ -166,7 +166,7 @@ class DownloadOperation : public Operation
     /**
      * @brief Leases the transfer buffer for chunks of at most @p lengthLimit bytes.
      */
-    std::expected<void, Error> leaseBufferInStrand(SecureShell::SftpSession& sftp, std::size_t lengthLimit);
+    std::expected<void, Error> leaseBufferInStrand(RemoteIo::IRemoteFileSystem& fileSystem, std::size_t lengthLimit);
 
     /**
      * @brief The local file the download writes to: the destination in the unsafe fast mode, else the temp file.
@@ -184,8 +184,8 @@ class DownloadOperation : public Operation
      */
     std::expected<void, Error> refuseLinkedPath(std::filesystem::path const& path) const;
 
-    std::expected<SecureShell::SftpSession::DeepLinkResult, Error>
-    readSymlinkInStrand(SecureShell::SftpSession& sftp, Paths::RemotePath const& remoteFullPath);
+    std::expected<RemoteIo::DeepLinkResult, Error>
+    readSymlinkInStrand(RemoteIo::IRemoteFileSystem& fileSystem, Paths::RemotePath const& remoteFullPath);
 
     /**
      * @brief The error of a file that ended before its listed size arrived.
@@ -203,20 +203,33 @@ class DownloadOperation : public Operation
     std::expected<void, Error> openEmptyWrittenFile();
 
     /**
-     * @brief The permissions of the finished file: inherited, configured, or those of a new file.
+     * @brief What the server tells of the file at the end of the transfer, asked where the finished file inherits its
+     *        permissions or where the entry's time is rounded. The unsafe fast mode asks for neither where the listing
+     *        showed the permissions.
+     * @return Nothing where nothing was asked, or where only the time was and the server did not tell it.
      */
-    std::expected<std::filesystem::perms, Error> finalPermissionsInStrand();
+    std::expected<std::optional<RemoteIo::FileInformation>, Error> remoteStateAtEndInStrand();
 
     /**
-     * @brief Gives @p path the modification time of the remote file. A failure is only logged.
+     * @brief The permissions of the finished file: inherited from @p atEnd or the entry, configured, or those of a new
+     *        file.
      */
-    void applyModificationTime(std::filesystem::path const& path) const;
+    std::filesystem::perms finalPermissions(std::optional<RemoteIo::FileInformation> const& atEnd) const;
+
+    /**
+     * @brief Gives @p path the modification time of the remote file: the one in @p atEnd where it is exact to the
+     *        second, else the entry's. A failure is only logged.
+     */
+    void applyModificationTime(
+        std::filesystem::path const& path,
+        std::optional<RemoteIo::FileInformation> const& atEnd
+    ) const;
 
     void cleanup();
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
-    std::weak_ptr<SecureShell::IFileStream> fileStream_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
+    std::weak_ptr<RemoteIo::IRemoteFileStream> fileStream_;
     DownloadOperationOptions options_;
     /** @brief options_.remotePath, unset when none was given. */
     Paths::RemotePath remotePath_{};
@@ -225,8 +238,8 @@ class DownloadOperation : public Operation
     /** @brief Where the download is written before it replaces localNativePath_, empty when no local path was given. */
     std::filesystem::path tempNativePath_{};
     std::ofstream localFile_;
-    SecureShell::BufferLease buffer_;
-    std::shared_ptr<SecureShell::AsyncTransferContext> asyncTransferContext_;
+    RemoteIo::BufferLease buffer_;
+    std::shared_ptr<RemoteIo::AsyncTransferContext> asyncTransferContext_;
     /** @brief Bytes already present in an adopted partial file. */
     std::uint64_t resumeOffset_{0u};
     /** @brief Bytes of the content in the temp file so far, an adopted partial file included. */

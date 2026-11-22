@@ -2,13 +2,14 @@
 
 #include <libssh/libsshpp.hpp>
 #include <libssh/sftp.h>
-#include <ssh/async/buffer_provider.hpp>
-#include <ssh/async/processing_thread.hpp>
-#include <ssh/async/processing_strand.hpp>
+#include <remote_io/async/buffer_provider.hpp>
+#include <remote_io/async/processing_thread.hpp>
+#include <remote_io/async/processing_strand.hpp>
+#include <remote_io/remote_error.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <ssh/async/transfer_chunk_controller.hpp>
 #include <ssh/file_information.hpp>
 #include <ssh/file_stream.hpp>
-#include <ssh/sftp_error.hpp>
 #include <ssh/session.hpp>
 #include <paths/remote_path.hpp>
 #include <utility/user_directories.hpp>
@@ -16,9 +17,11 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <future>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <expected>
 #include <filesystem>
@@ -31,16 +34,22 @@ namespace SecureShell
 {
     class Session;
 
-    class SftpSession : public std::enable_shared_from_this<SftpSession>
+    /**
+     * @brief The SFTP channel of a session as a remote file system. Every operation completes when it starts, on the
+     *        processing thread of the strand.
+     */
+    class SftpSession : public RemoteIo::RemoteFileSystemImplementation<SftpSession>
     {
       public:
-        using Error = SftpError;
+        using Error = RemoteIo::RemoteError;
         /** @brief The libssh SFTP session, which sftp_free ends on the server too. */
         using NativeSession = std::unique_ptr<sftp_session_struct, decltype(&sftp_free)>;
+        using DeepLinkResult = RemoteIo::DeepLinkResult;
         friend class FileStream;
+        friend class RemoteIo::RemoteFileSystemImplementation<SftpSession>;
 
-        SftpSession(Session* owner, std::unique_ptr<ProcessingStrand> strand, NativeSession session);
-        ~SftpSession();
+        SftpSession(Session* owner, std::unique_ptr<RemoteIo::ProcessingStrand> strand, NativeSession session);
+        ~SftpSession() override;
         SftpSession(SftpSession const&) = delete;
         SftpSession& operator=(SftpSession const&) = delete;
         SftpSession(SftpSession&&) = delete;
@@ -51,28 +60,53 @@ namespace SecureShell
             return session_.get();
         }
 
-        bool close(bool isBackElement = false);
+        bool close() override;
 
-        template <typename FunctionT>
-        void perform(FunctionT&& func)
-        {
-            strand_->pushTask(std::forward<FunctionT>(func));
-        }
+        /**
+         * @brief Closes the session and every stream of it.
+         * @param isBackElement Whether this is the last SFTP session of its owner, which is then removed faster.
+         * @return false when it was closed already.
+         */
+        bool close(bool isBackElement);
 
-        template <
-            typename FunctionT,
-            typename UnfinishedFunc = UnfinishedTaskResult<std::invoke_result_t<std::decay_t<FunctionT>>>>
-        auto performPromise(FunctionT&& func, UnfinishedFunc unfinished = {})
-            -> std::future<std::invoke_result_t<std::decay_t<FunctionT>>>
+        /**
+         * @brief Rename replaces an existing destination when the server has posix-rename@openssh.com, a plain SFTP
+         *        rename refuses it.
+         */
+        RemoteIo::Capabilities capabilities() const override
         {
-            return strand_->pushPromiseTask(std::forward<FunctionT>(func), std::move(unfinished));
+            return capabilities_;
         }
 
         /**
          * @brief Retrieves the last error that occurred. May contain success. A closed connection, channel or session
-         *        is SSH_FX_CONNECTION_LOST, whatever the server answered before.
+         *        is ConnectionLost, whatever the server answered before. So is a call that timed out and a packet
+         *        libssh could not read whole, which also end the session, see giveUpChannel. On the processing thread.
          */
-        SftpError lastError() const;
+        Error lastError();
+
+        /**
+         * @brief Calls @p function, a libssh call that waits for the server, with @p arguments and keeps how long it
+         *        waited for lastError: libssh sets no error when it gives up waiting. On the processing thread.
+         */
+        template <typename FunctionT, typename... ArgumentTs>
+        auto awaitServer(FunctionT&& function, ArgumentTs&&... arguments)
+        {
+            const auto started = std::chrono::steady_clock::now();
+            auto result = std::invoke(std::forward<FunctionT>(function), std::forward<ArgumentTs>(arguments)...);
+            lastServerWait_ =
+                std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started);
+            return result;
+        }
+
+        /**
+         * @brief Whether the channel was given up, see giveUpChannel. Nothing sent before is answered any more, a wait
+         *        for it would last the whole timeout. On the processing thread.
+         */
+        bool givenUp() const
+        {
+            return givenUp_.has_value();
+        }
 
         /**
          * @brief Lists the contents of a directory.
@@ -239,6 +273,15 @@ namespace SecureShell
         std::expected<void, Error> statInStrand(Paths::RemotePath const& path, sftp_attributes attributes);
 
         /**
+         * @brief Sets the access and modification time of a path. Must be called from within the processing thread.
+         * @return Unsupported for a time SFTP cannot carry, before 1970 or after 2106.
+         */
+        std::expected<void, Error> setModificationTimeInStrand(
+            Paths::RemotePath const& path,
+            std::chrono::system_clock::time_point modificationTime
+        );
+
+        /**
          * @brief Sets the owner of a file or directory.
          *
          * @param path
@@ -282,13 +325,8 @@ namespace SecureShell
         renameInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
 
         /**
-         * @brief Renames without replacing @p destination. Fails with SSH_FX_FILE_ALREADY_EXISTS when it exists.
-         *
-         * A regular file moves atomically through hardlink@openssh.com where the server has it and the link
-         * succeeds. Otherwise a server without posix-rename@openssh.com refuses an existing destination itself,
-         * and on one with it the destination is checked before the rename, which leaves a window.
-         *
-         * @param sourceType The type of @p source when the caller knows it, saves an lstat.
+         * @brief RemoteIo::renameNoReplaceInStrand on this session. A regular file moves atomically through
+         *        hardlink@openssh.com where the server has it and the link succeeds.
          */
         std::expected<void, Error> renameNoReplaceInStrand(
             Paths::RemotePath const& source,
@@ -297,11 +335,7 @@ namespace SecureShell
         );
 
         /**
-         * @brief Renames over an existing @p destination.
-         *
-         * Atomic with posix-rename@openssh.com. Otherwise the destination is moved aside to @p asideSuffix first
-         * and moved back when the rename fails; if moving it back fails too, the error names where it is kept.
-         * A leftover aside is removed when the destination exists, and put back when it does not.
+         * @brief RemoteIo::renameReplaceInStrand on this session, atomic with posix-rename@openssh.com.
          */
         std::expected<void, Error> renameReplaceInStrand(
             Paths::RemotePath const& source,
@@ -310,8 +344,7 @@ namespace SecureShell
         );
 
         /**
-         * @brief Moves a finished transfer from @p source to @p destination with @ref renameReplaceInStrand when
-         *        @p replace is set, otherwise with @ref renameNoReplaceInStrand.
+         * @brief RemoteIo::moveIntoPlaceInStrand on this session.
          */
         std::expected<void, Error> moveIntoPlaceInStrand(
             Paths::RemotePath const& source,
@@ -395,7 +428,7 @@ namespace SecureShell
          */
         std::expected<sftp_limits_struct, Error> limitsInStrand();
 
-        ProcessingStrand* strand() const
+        RemoteIo::ProcessingStrand* strand() const override
         {
             return strand_.get();
         }
@@ -416,20 +449,11 @@ namespace SecureShell
         /**
          * @brief Shared buffer pool for this session's file transfers.
          */
-        IBufferProvider& bufferProvider() noexcept
+        RemoteIo::IBufferProvider& bufferProvider() noexcept override
         {
             return *bufferProvider_;
         }
 
-        struct DeepLinkResult
-        {
-            /** @brief The content of the link at the given path, as stored on the server. */
-            std::string linkContent;
-            /** @brief The end of the link chain. */
-            Paths::RemotePath linkTarget;
-            /** @brief The attributes of @ref linkTarget, empty when it does not exist. */
-            std::optional<FileInformation> targetInfo;
-        };
         std::future<std::expected<DeepLinkResult, Error>>
         readLinkDeep(Paths::RemotePath const& path, int maxDepth = 10);
 
@@ -455,13 +479,82 @@ namespace SecureShell
          */
         std::expected<void, Error> createSymLinkInStrand(std::string const& target, Paths::RemotePath const& linkPath);
 
+      protected:
+        void dispatch(std::function<void()> start) override;
+
       private:
+        template <typename OperationT>
+        void startOperation(RemoteIo::Pending<OperationT> pending)
+        {
+            pending.complete(runWhileOpen(pending.operation));
+        }
+
+        /**
+         * @brief inStrand without its completion, which SFTP never defers.
+         */
+        template <typename OperationT>
+        RemoteIo::OperationResult<OperationT> runInStrand(OperationT const& operation)
+        {
+            assert(strand_->withinProcessingThread());
+            if (RemoteIo::hasUnsetPath(operation))
+                return std::unexpected(unsetPathError());
+            return runWhileOpen(operation);
+        }
+
+        /**
+         * @brief Runs @p operation unless the session is closed, whose null libssh session most libssh calls
+         *        dereference.
+         */
+        template <typename OperationT>
+        RemoteIo::OperationResult<OperationT> runWhileOpen(OperationT const& operation)
+        {
+            if (!session_)
+                return std::unexpected(lastError());
+            return run(operation);
+        }
+
+        RemoteIo::OperationResult<RemoteIo::ListDirectory> run(RemoteIo::ListDirectory const& operation);
+        RemoteIo::OperationResult<RemoteIo::Stat> run(RemoteIo::Stat const& operation);
+        RemoteIo::OperationResult<RemoteIo::Lstat> run(RemoteIo::Lstat const& operation);
+        /**
+         * @brief An Lstat, which costs one request over SFTP.
+         */
+        RemoteIo::OperationResult<RemoteIo::ProbeEntry> run(RemoteIo::ProbeEntry const& operation);
+        RemoteIo::OperationResult<RemoteIo::CreateNewDirectory> run(RemoteIo::CreateNewDirectory const& operation);
+        RemoteIo::OperationResult<RemoteIo::CreateDirectoryIfItDoesntExist>
+        run(RemoteIo::CreateDirectoryIfItDoesntExist const& operation);
+        RemoteIo::OperationResult<RemoteIo::CreateEmptyFile> run(RemoteIo::CreateEmptyFile const& operation);
+        RemoteIo::OperationResult<RemoteIo::RemoveFile> run(RemoteIo::RemoveFile const& operation);
+        RemoteIo::OperationResult<RemoteIo::RemoveEmptyDirectory> run(RemoteIo::RemoveEmptyDirectory const& operation);
+        RemoteIo::OperationResult<RemoteIo::RemoveAll> run(RemoteIo::RemoveAll const& operation);
+        RemoteIo::OperationResult<RemoteIo::FilterOutEmptyDirectories>
+        run(RemoteIo::FilterOutEmptyDirectories const& operation);
+        RemoteIo::OperationResult<RemoteIo::Rename> run(RemoteIo::Rename const& operation);
+        RemoteIo::OperationResult<RemoteIo::LinkIntoPlace> run(RemoteIo::LinkIntoPlace const& operation);
+        RemoteIo::OperationResult<RemoteIo::OpenFile> run(RemoteIo::OpenFile const& operation);
+        RemoteIo::OperationResult<RemoteIo::ReadFile> run(RemoteIo::ReadFile const& operation);
+        RemoteIo::OperationResult<RemoteIo::SetModificationTime> run(RemoteIo::SetModificationTime const& operation);
+        RemoteIo::OperationResult<RemoteIo::HomeDirectory> run(RemoteIo::HomeDirectory const& operation);
+        RemoteIo::OperationResult<RemoteIo::CanonicalHomeDirectory>
+        run(RemoteIo::CanonicalHomeDirectory const& operation);
+        RemoteIo::OperationResult<RemoteIo::CanonicalPath> run(RemoteIo::CanonicalPath const& operation);
+        RemoteIo::OperationResult<RemoteIo::ReadTransferLimits> run(RemoteIo::ReadTransferLimits const& operation);
+        RemoteIo::OperationResult<RemoteIo::ReadLinkDeep> run(RemoteIo::ReadLinkDeep const& operation);
+        RemoteIo::OperationResult<RemoteIo::ReadLink> run(RemoteIo::ReadLink const& operation);
+        RemoteIo::OperationResult<RemoteIo::CreateSymLink> run(RemoteIo::CreateSymLink const& operation);
+
+        /**
+         * @brief Opens @p path with the sftp_open @p flags and keeps the stream until it is closed.
+         */
+        std::expected<std::shared_ptr<FileStream>, Error>
+        openStreamInStrand(Paths::RemotePath const& path, int flags, std::filesystem::perms permissions);
+
         /**
          * @brief Asserts the call runs in the processing thread. Refuses a closed session, whose null libssh session
          *        most libssh calls dereference, and an unset path, which the server would take as the start directory.
          */
         template <typename... PathTs>
-        std::expected<void, Error> requireSetInStrand(PathTs const&... paths) const
+        std::expected<void, Error> requireSetInStrand(PathTs const&... paths)
         {
             assert(strand_->withinProcessingThread());
             if (!session_)
@@ -471,44 +564,36 @@ namespace SecureShell
             return {};
         }
 
-        static SftpError unsetPathError();
+        static Error unsetPathError();
 
         /**
          * @brief The absolute path the server canonicalizes @p path to.
          */
         std::expected<Paths::RemotePath, Error> canonicalizeInStrand(char const* path);
 
-        static SftpError alreadyExists(Paths::RemotePath const& destination);
-
-        /**
-         * @brief Moves the regular file @p source to @p destination by a hard link and removing @p source, or by a
-         *        rename when the server refuses the link and @p destination does not exist.
-         */
-        std::expected<void, Error>
-        hardlinkIntoPlaceInStrand(Paths::RemotePath const& source, Paths::RemotePath const& destination);
-
-        /**
-         * @brief Renames @p destination to @p aside, removing a file left at @p aside first when the rename fails.
-         */
-        std::expected<void, Error> moveAsideInStrand(Paths::RemotePath const& destination, Paths::RemotePath const& aside);
-
-        /**
-         * @brief Reads a file into a string, stopping after maximumSize bytes.
-         */
-        std::expected<std::string, Error>
-        readSmallFileInStrand(Paths::RemotePath const& path, std::size_t maximumSize);
-
         void fileStreamRemoveItself(FileStream* stream, bool isBackElement);
         void removeAllFileStreams();
 
+        /**
+         * @brief Gives the channel up after a call that timed out or a packet libssh could not read whole, both leave
+         *        the SFTP stream out of step: closes it, so every later call on it fails at once instead of reading on,
+         *        and reports the connection as lost, which ends the session. Later errors keep @p reason.
+         */
+        void giveUpChannel(std::string reason);
+
       private:
         Session* owner_;
-        std::unique_ptr<ProcessingStrand> strand_;
+        std::unique_ptr<RemoteIo::ProcessingStrand> strand_;
         /** @brief Freed by close on the processing thread, null afterwards. */
         NativeSession session_;
-        std::shared_ptr<IBufferProvider> bufferProvider_;
+        /** @brief How long the last call through awaitServer waited, until lastError takes it. */
+        std::chrono::microseconds lastServerWait_{};
+        /** @brief Why the channel was given up, see giveUpChannel. */
+        std::optional<std::string> givenUp_{};
+        std::shared_ptr<RemoteIo::IBufferProvider> bufferProvider_;
         std::vector<std::shared_ptr<FileStream>> fileStreams_;
         TransferChunkController chunkController_{};
+        RemoteIo::Capabilities capabilities_;
     };
 
     constexpr inline auto operator|(SftpSession::OpenType a, SftpSession::OpenType b)

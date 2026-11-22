@@ -6,11 +6,15 @@ set(roots
     backend
     command-store/include
     command-store/source
+    ftp/include
+    ftp/source
     log
     nui-file-explorer/source/nui-file-explorer/support
     paths/include
     persistence/include
     persistence/source
+    remote_io/include
+    remote_io/source
     shared_data/include
     shared_data/source
     ssh/include

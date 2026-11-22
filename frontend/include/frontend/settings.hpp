@@ -89,6 +89,7 @@ class Settings
     void loadTermiosSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadSshSettingsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadSftpOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
+    void loadFtpOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadTerminalOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadQueueOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
     void loadHistoryOptionsFromStateByKey(std::optional<std::string> const& key, Persistence::State const& state);
@@ -117,6 +118,22 @@ class Settings
         std::optional<std::string> const& newValue,
         Nui::Observed<std::vector<std::string>>& groupKeys,
         SettingGroupParameters::InheritanceBehavior inheritanceBehavior
+    );
+
+    /**
+     * @brief A settings group whose option groups this page adds, removes and switches.
+     */
+    Nui::ElementRenderer optionsGroup(SettingGroupParameters&& params);
+
+    /**
+     * @brief The server settings of one engine type under their header, shown while the session has that type.
+     *
+     * @param titleKey The language key of the header, below "settings" and "sessionOptions".
+     */
+    Nui::ElementRenderer engineServerSettings(
+        Persistence::TerminalEngineType engineType,
+        std::string const& titleKey,
+        Nui::ElementRenderer content
     );
 
   private:

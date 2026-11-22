@@ -1,5 +1,6 @@
 #include <ssh/session.hpp>
 #include <ssh/sequential.hpp>
+#include <ssh/sftp_error_conversion.hpp>
 #include <ssh/sftp_session.hpp>
 #include <paths/native.hpp>
 #include <ssh/ssh_key.hpp>
@@ -7,6 +8,9 @@
 
 #include <fmt/format.h>
 #include <libssh/sftp.h>
+
+#include <algorithm>
+#include <chrono>
 
 namespace SecureShell
 {
@@ -62,13 +66,20 @@ namespace SecureShell
 
     void Session::start()
     {
+        // Without its thread the session runs nothing more, which the owner learns as a lost connection.
+        processingThread_.onFailure(
+            [this](std::string const&)
+            {
+                reportConnectionLoss();
+            }
+        );
         processingThread_.start(std::chrono::milliseconds{1});
         // Asked on the processing thread before every wait, libssh closes the socket on a fatal error.
         const auto watching = processingThread_.watchSocket(
             [this]()
             {
                 auto* const session = session_.getCSession();
-                return SocketWait::Watched{
+                return RemoteIo::SocketWait::Watched{
                     .socket = ssh_get_fd(session),
                     .writable = (ssh_get_poll_flags(session) & SSH_WRITE_PENDING) != 0,
                 };
@@ -104,7 +115,7 @@ namespace SecureShell
             return;
         }
 
-        hiddenChannel_->startReading(
+        const auto reading = hiddenChannel_->startReading(
             [](auto const&)
             {
                 // not yet needed
@@ -113,16 +124,38 @@ namespace SecureShell
             {
                 // not yet needed
             },
-            [onConnectionLoss = onConnectionLoss_]()
+            [this]()
             {
-                if (onConnectionLoss)
-                    onConnectionLoss();
+                reportConnectionLoss();
             }
         );
+        if (!reading)
+            Log::error("Failed to read the control/monitoring channel: {}", reading.error());
+    }
+
+    int Session::setCallTimeout(std::chrono::microseconds timeout)
+    {
+        long seconds = std::chrono::duration_cast<std::chrono::seconds>(timeout).count();
+        long microseconds = (timeout - std::chrono::seconds{seconds}).count();
+        if (const auto result = ssh_options_set(session_.getCSession(), SSH_OPTIONS_TIMEOUT, &seconds);
+            result != SSH_OK)
+            return result;
+        if (const auto result = ssh_options_set(session_.getCSession(), SSH_OPTIONS_TIMEOUT_USEC, &microseconds);
+            result != SSH_OK)
+            return result;
+        callTimeout_ = timeout;
+        return SSH_OK;
+    }
+
+    void Session::reportConnectionLoss()
+    {
+        if (!connectionLossReported_.exchange(true) && onConnectionLoss_)
+            onConnectionLoss_();
     }
 
     void Session::shutdown()
     {
+        connectionLossReported_ = true;
         removeAllChannels();
         removeAllSftpSessions();
         processingThread_.stop();
@@ -244,42 +277,72 @@ namespace SecureShell
         );
     }
 
-    std::future<std::expected<std::weak_ptr<SftpSession>, SftpError>> Session::createSftpSession()
+    std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError> Session::createSftpSessionInThread()
+    {
+        SftpSession::NativeSession sftp{sftp_new(session_.getCSession()), &sftp_free};
+        if (!sftp)
+        {
+            return std::unexpected(toRemoteError(
+                SftpError{
+                    .message = session_.getError(),
+                    .sshError = session_.getErrorCode(),
+                    .sftpError = 0,
+                }
+            ));
+        }
+
+        auto result = sftp_init(sftp.get());
+        if (result != SSH_OK)
+        {
+            return std::unexpected(toRemoteError(
+                SftpError{
+                    .message = session_.getError(),
+                    .sshError = session_.getErrorCode(),
+                    .sftpError = sftp_get_error(sftp.get()),
+                }
+            ));
+        }
+
+        // Kept before the caller hears of it, who may shut the session down and walk the list right away.
+        auto sftpSession = std::make_shared<SftpSession>(this, processingThread_.createStrand(), std::move(sftp));
+        sftpSessions_.push_back(sftpSession);
+        return sftpSession;
+    }
+
+    std::future<std::expected<std::weak_ptr<SftpSession>, RemoteIo::RemoteError>> Session::createSftpSession()
     {
         return processingThread_.pushPromiseTask(
-            [this]() -> std::expected<std::weak_ptr<SftpSession>, SftpError>
+            [this]()
             {
-                SftpSession::NativeSession sftp{sftp_new(session_.getCSession()), &sftp_free};
-                if (!sftp)
-                {
-                    return std::unexpected(
-                        SftpError{
-                            .message = session_.getError(),
-                            .sshError = session_.getErrorCode(),
-                            .sftpError = 0,
-                        }
-                    );
-                }
-
-                auto result = sftp_init(sftp.get());
-                if (result != SSH_OK)
-                {
-                    return std::unexpected(
-                        SftpError{
-                            .message = session_.getError(),
-                            .sshError = session_.getErrorCode(),
-                            .sftpError = sftp_get_error(sftp.get()),
-                        }
-                    );
-                }
-
-                // Kept before the caller hears of it, who may shut the session down and walk the list right away.
-                auto sftpSession =
-                    std::make_shared<SftpSession>(this, processingThread_.createStrand(), std::move(sftp));
-                sftpSessions_.push_back(sftpSession);
-                return sftpSession;
+                return createSftpSessionInThread();
             }
         );
+    }
+
+    std::future<std::expected<std::weak_ptr<RemoteIo::IRemoteFileSystem>, RemoteIo::RemoteError>>
+    Session::createFileSystem()
+    {
+        return processingThread_.pushPromiseTask(
+            [this]()
+            {
+                return createSftpSessionInThread().transform(
+                    [](std::weak_ptr<SftpSession> const& sftpSession) -> std::weak_ptr<RemoteIo::IRemoteFileSystem>
+                    {
+                        return sftpSession;
+                    }
+                );
+            }
+        );
+    }
+
+    std::chrono::microseconds callTimeoutOf(Persistence::SshOptions const& options)
+    {
+        constexpr auto withoutTimeout = std::chrono::seconds{30};
+        const auto timeout = std::chrono::seconds{std::max(0, options.connectTimeoutSeconds.value_or(0))} +
+            std::chrono::microseconds{std::max(0, options.connectTimeoutUSeconds.value_or(0))};
+        if (timeout == std::chrono::microseconds::zero())
+            return withoutTimeout;
+        return timeout;
     }
 
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
@@ -552,6 +615,11 @@ namespace SecureShell
                 // clear last attempted option, option setting succeeded, so remove it for the error message
                 lastAttemptedAppliedOption = std::nullopt;
                 return static_cast<ssh::Session&>(*session).connect();
+            },
+            [&]
+            {
+                // After the connect, which keeps the 10 s libssh gives it without a timeout.
+                return session->setCallTimeout(callTimeoutOf(sshOptions));
             },
 #ifdef _WIN32
             []()

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <backend/file_tracking/tracking_state.hpp>
+#include <shared_data/file_operations/compared_state.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_tracking/upload_failure.hpp>
 #include <shared_data/file_tracking/watch_progress.hpp>
@@ -23,6 +24,26 @@ namespace FileTracking
         /** @brief The file the server had there, nothing when it had none. */
         std::optional<ServerState> file{};
     };
+
+    /**
+     * @brief What an upload must find at its destination to replace it, from what the tracker expects there. A file
+     *        the server lost counts as changed, the tracker asks before it recreates it.
+     */
+    inline std::optional<SharedData::ComparedState> comparedStateOf(std::optional<ExpectedDestination> const& expected)
+    {
+        if (!expected)
+            return std::nullopt;
+        if (!expected->file)
+            return SharedData::ComparedState{};
+        return SharedData::ComparedState{
+            .exists = true,
+            .type = SharedData::FileType::Regular,
+            .size = expected->file->size,
+            .mtime = expected->file->mtime,
+            .mtimePrecision = expected->file->mtimePrecision,
+            .mustStillExist = true,
+        };
+    }
 
     /**
      * @brief An upload a Tracker queues, it replaces what the server has at the destination.

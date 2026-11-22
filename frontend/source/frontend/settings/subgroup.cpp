@@ -25,7 +25,15 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
 
     try
     {
-        const bool hasHeader = params.engagedStatus || params.groupTitle;
+        const auto contentStyle = [&params]() -> std::string
+        {
+            if (params.engagedStatus)
+                return "margin-top: 20px; padding-top: 32px;";
+            // The title is placed from the top of the subgroup, a top margin would move the frame line away from it.
+            if (params.groupTitle)
+                return "padding-top: 16px;";
+            return "";
+        }();
         const auto headerStyle = [&params]() -> std::string
         {
             if (params.engagedStatus)
@@ -67,7 +75,7 @@ Nui::ElementRenderer subgroup(SubgroupParameters&& params, Nui::ElementRenderer 
             ),
             div{
                 class_ = "settings-subgroup-content",
-                style = params.engagedStatus ? "margin-top: 20px; padding-top: 32px;" : (hasHeader ? "margin-top: 12px; padding-top: 16px;" : "")
+                style = contentStyle
             }(
                 std::move(content)
             )

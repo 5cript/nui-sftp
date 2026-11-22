@@ -15,6 +15,8 @@ target_link_libraries(
         secure-shell
         utility
         backend
+        remote-io-test-doubles
+        nui-sftp-ftp-test-support
         GTest::gtest
         GTest::gmock_main
         GTest::gtest_main

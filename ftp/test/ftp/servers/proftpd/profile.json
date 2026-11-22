@@ -1,0 +1,21 @@
+{
+    "image": "nui-sftp-ftp-test-proftpd",
+    "runArguments": ["--init"],
+    "ports": {"plain": 21, "explicit": 21, "implicit": 990},
+    "users": [{"name": "ftptest", "password": "ftptest"}],
+    "variants": {
+        "default": {"command": ["default"]},
+        "throttled": {
+            "command": ["throttled"],
+            "runArguments": ["--cap-add", "NET_ADMIN", "--sysctl", "net.ipv4.tcp_wmem=4096 16384 65536"]
+        },
+        "limits": {"command": ["limits"]}
+    },
+    "expectations": {
+        "features": {"mlsd": true, "mlst": true, "mfmt": true, "utf8": true, "epsv": true},
+        "advertised": ["AUTH TLS", "EPRT", "EPSV", "MDTM", "MFMT", "PBSZ", "PROT", "REST STREAM", "SIZE", "TVFS", "UTF8"],
+        "modificationTime": "mfmt",
+        "repliesTell550Causes": true,
+        "resumesDataSessions": true
+    }
+}

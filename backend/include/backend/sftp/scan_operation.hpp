@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/scan_walkers.hpp>
+#include <remote_io/remote_file_system.hpp>
 #include <nui/utility/move_detector.hpp>
 #include <shared_data/ignore_rules.hpp>
 #include <shared_data/sync/scan_node.hpp>
@@ -14,11 +14,17 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <cstddef>
 #include <cstdint>
 
 class ScanOperation : public Operation
 {
   public:
+    /**
+     * @brief Ignore files are applied up to their last whole line within this size, no real one comes near it.
+     */
+    static constexpr std::size_t maximumIgnoreFileSize = 1024u * 1024u;
+
     struct ScanOperationOptions
     {
         std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
@@ -38,9 +44,9 @@ class ScanOperation : public Operation
         std::vector<std::string> excludedSuffixes{};
     };
 
-    SecureShell::ProcessingStrand* strand() const override;
+    RemoteIo::ProcessingStrand* strand() const override;
 
-    // work() here still waits on futures pushed to the SFTP strand; running it inside
+    // work() here still waits on futures of the file system's strand; running it inside
     // the queue's batched strand umbrella would self-deadlock. Opt out of batching until
     // this op is converted to the *InStrand style.
     bool usesStrand() const noexcept override
@@ -48,7 +54,7 @@ class ScanOperation : public Operation
         return false;
     }
 
-    ScanOperation(std::weak_ptr<SecureShell::SftpSession> sftp, ScanOperationOptions options);
+    ScanOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, ScanOperationOptions options);
     ~ScanOperation() override;
     ScanOperation(ScanOperation const&) = delete;
     ScanOperation(ScanOperation&&) = delete;
@@ -149,7 +155,7 @@ class ScanOperation : public Operation
     std::expected<std::vector<SharedData::DirectoryEntry>, Error> scanner(Paths::RelativePath const& relative);
 
   private:
-    std::weak_ptr<SecureShell::SftpSession> sftp_;
+    std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem_;
     Paths::RemotePath remotePath_;
     std::function<void(std::uint64_t totalBytes, std::uint64_t currentIndex, std::uint64_t totalScanned)>
         progressCallback_;

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ssh/file_stream.hpp>
 #include <backend/sftp/operation.hpp>
 #include <backend/sftp/scan_walkers.hpp>
 #include <log/toast.hpp>
@@ -51,7 +50,7 @@ class LocalScanOperation : public Operation
     LocalScanOperation& operator=(LocalScanOperation const&) = delete;
     LocalScanOperation& operator=(LocalScanOperation&&) = delete;
 
-    SecureShell::ProcessingStrand* strand() const override
+    RemoteIo::ProcessingStrand* strand() const override
     {
         return nullptr;
     }

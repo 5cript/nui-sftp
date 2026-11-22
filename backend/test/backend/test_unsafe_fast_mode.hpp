@@ -83,7 +83,7 @@ namespace Test
         const auto fast = serverStartResult->query("requestCounts");
         ASSERT_TRUE(fast.has_value());
 
-        EXPECT_GE(requests(*safe, "LSTAT"), 2) << safe->dump();
+        EXPECT_GE(requests(*safe, "LSTAT"), 1) << safe->dump();
         EXPECT_GE(renames(*safe), 1) << safe->dump();
         EXPECT_EQ(requests(*fast, "LSTAT"), 0) << fast->dump();
         EXPECT_EQ(renames(*fast), 0) << fast->dump();

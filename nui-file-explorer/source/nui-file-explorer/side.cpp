@@ -30,6 +30,7 @@
 #include <ui5-sap-icons/icons/scissors.hpp>
 #include <ui5-sap-icons/icons/laptop.hpp>
 #include <ui5-sap-icons/icons/it-host.hpp>
+#include <ui5-sap-icons/icons/warning.hpp>
 
 using namespace std::string_literals;
 
@@ -835,6 +836,11 @@ namespace NuiFileExplorer
         impl_->originHost = std::move(value);
     }
 
+    void Side::originWarning(std::optional<OriginWarning> value)
+    {
+        impl_->originWarning = std::move(value);
+    }
+
     void Side::setOnSynchronize(
         std::function<void(std::filesystem::path, std::filesystem::path)> callback
     )
@@ -912,7 +918,58 @@ namespace NuiFileExplorer
                 return impl_->originHost.value();
             }),
         }(
-            originIconAndKind()
+            originIconAndKind(),
+            originChipWarning()
+        );
+        // clang-format on
+    }
+
+    Nui::ElementRenderer Side::originChipWarning()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::span;
+
+        // clang-format off
+        return span{class_ = "nui-file-grid-origin-warning-host"}(
+            observe(impl_->originWarning),
+            [this]() -> Nui::ElementRenderer {
+                auto const& warning = impl_->originWarning.value();
+                if (!warning)
+                    return Nui::nil();
+                return span{
+                    class_ = "nui-file-grid-origin-warning",
+                    role = "img",
+                    "aria-label"_attr = warning->label,
+                    Nui::Attributes::title = fmt::format("{}\n{}", warning->label, warning->description),
+                }(
+                    Ui5Icons::warning()
+                );
+            }
+        );
+        // clang-format on
+    }
+
+    Nui::ElementRenderer Side::originCardWarning()
+    {
+        using namespace Nui::Attributes;
+        using Nui::Elements::div;
+        using Nui::Elements::span;
+
+        // clang-format off
+        return div{class_ = "nui-file-grid-origin-warning-host"}(
+            observe(impl_->originWarning),
+            [this]() -> Nui::ElementRenderer {
+                auto const& warning = impl_->originWarning.value();
+                if (!warning)
+                    return Nui::nil();
+                return div{
+                    class_ = "nui-file-grid-origin-card-warning",
+                    Nui::Attributes::title = warning->description,
+                }(
+                    Ui5Icons::warning(),
+                    span{}(warning->label)
+                );
+            }
         );
         // clang-format on
     }
@@ -951,7 +1008,8 @@ namespace NuiFileExplorer
                         div{}(host.empty() ? noBreakSpace : host)
                     );
                 }
-            )
+            ),
+            originCardWarning()
         );
         // clang-format on
     }
