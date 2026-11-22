@@ -440,7 +440,8 @@ namespace Test
                     return shell_->output().find("nui-ready") != std::string::npos;
                 },
                 std::chrono::seconds{30}
-            )) << "the container never started:\n"
+            )) << "the container never started, docker reports it as: "
+               << DockerShells::containerStatus(containerName_) << "it wrote:\n"
                << shell_->output();
             shell_->holdStartUntilFirstWait([name = containerName_]() {
                 Docker::run(fmt::format("docker kill --signal=USR1 {}", Docker::quote(name)));
