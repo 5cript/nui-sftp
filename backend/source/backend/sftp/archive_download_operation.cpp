@@ -720,6 +720,12 @@ std::expected<void, Operation::Error> ArchiveDownloadOperation::finaliseArchiveI
     return {};
 }
 
+void ArchiveDownloadOperation::pause(bool doPause)
+{
+    if (!doPause)
+        throughputMeter_->restartRateSample();
+}
+
 std::expected<void, Operation::Error> ArchiveDownloadOperation::cancel(bool adoptCancelState)
 {
     if (scanPhase_)

@@ -224,7 +224,7 @@ struct Session::Implementation
               },
               &this->isInLostConnectionState}
         , syncDialog{params.confirmDialog, &this->operationQueue}
-        , syncProgressDialog{&this->operationQueue}
+        , syncProgressDialog{}
         , disambiguateTitle{std::move(params.disambiguateTitle)}
         , requestReconnect{std::move(params.requestReconnect)}
         , onReconnectFailed{std::move(params.onReconnectFailed)}

@@ -208,4 +208,54 @@ namespace RemoteIo::Test
 
         EXPECT_EQ(context.bytesTransferred(), 128);
     }
+
+    TEST(TransferContextTests, TheRateIsTheBytesMovedSinceTheLastSample)
+    {
+        AsyncTransferContext context{};
+        const auto start = std::chrono::steady_clock::now() + std::chrono::hours{1};
+        context.restartRateSample();
+        context.calculateBytesPerSecond(start);
+
+        context.addBytesTransferred(3000);
+        context.calculateBytesPerSecond(start + std::chrono::seconds{2});
+
+        EXPECT_EQ(context.bytesPerSecond(), 1500);
+    }
+
+    TEST(TransferContextTests, TheRateStaysWithinTheSampleInterval)
+    {
+        AsyncTransferContext context{};
+        const auto start = std::chrono::steady_clock::now() + std::chrono::hours{1};
+        context.restartRateSample();
+        context.calculateBytesPerSecond(start);
+        context.addBytesTransferred(1000);
+        context.calculateBytesPerSecond(start + std::chrono::seconds{1});
+
+        context.addBytesTransferred(9000);
+        context.calculateBytesPerSecond(start + std::chrono::seconds{1} + AsyncTransferContext::sampleInterval / 2);
+
+        EXPECT_EQ(context.bytesPerSecond(), 1000);
+    }
+
+    TEST(TransferContextTests, ResumingKeepsThePauseOutOfTheRate)
+    {
+        AsyncTransferContext context{};
+        const auto start = std::chrono::steady_clock::now() + std::chrono::hours{1};
+        context.restartRateSample();
+        context.calculateBytesPerSecond(start);
+        context.addBytesTransferred(1000);
+        context.calculateBytesPerSecond(start + std::chrono::seconds{1});
+        ASSERT_EQ(context.bytesPerSecond(), 1000);
+
+        context.pause(true);
+        context.pause(false);
+        // A minute of pause, the first turn after it moves a few bytes.
+        context.addBytesTransferred(10);
+        context.calculateBytesPerSecond(start + std::chrono::seconds{61});
+        EXPECT_EQ(context.bytesPerSecond(), 1000);
+
+        context.addBytesTransferred(2000);
+        context.calculateBytesPerSecond(start + std::chrono::seconds{62});
+        EXPECT_EQ(context.bytesPerSecond(), 2000);
+    }
 }

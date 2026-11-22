@@ -92,9 +92,17 @@ namespace RemoteIo
 
     void AsyncTransferContext::pause(bool doPause)
     {
+        // Before the transfer shows as resumed, so its first calculation sees the restart.
+        if (!doPause)
+            restartRateSample();
         paused_.store(doPause);
         if (!doPause)
             wake();
+    }
+
+    void AsyncTransferContext::restartRateSample()
+    {
+        restartRateSample_.store(true);
     }
 
     void AsyncTransferContext::addBytesTransferred(SignedSizeType delta)
@@ -104,11 +112,19 @@ namespace RemoteIo
 
     void AsyncTransferContext::calculateBytesPerSecond()
     {
-        using namespace std::chrono_literals;
-        const auto now = std::chrono::high_resolution_clock::now();
+        calculateBytesPerSecond(std::chrono::steady_clock::now());
+    }
+
+    void AsyncTransferContext::calculateBytesPerSecond(std::chrono::steady_clock::time_point now)
+    {
+        if (restartRateSample_.exchange(false))
+        {
+            lastBytesTransferred_ = bytesTransferred_.load();
+            lastBpsCalculation_ = now;
+            return;
+        }
         const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastBpsCalculation_);
-        // Take at least 500ms between calculations to increase accuracy
-        if (duration > 500ms)
+        if (duration > sampleInterval)
         {
             const auto currentBytes = bytesTransferred_.load();
             const auto bytesThisCycle = currentBytes - lastBytesTransferred_.load();

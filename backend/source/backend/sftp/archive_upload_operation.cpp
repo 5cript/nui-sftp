@@ -707,6 +707,12 @@ ArchiveUploadOperation::finaliseArchiveInStrand(RemoteIo::IRemoteFileSystem& fil
     return {};
 }
 
+void ArchiveUploadOperation::pause(bool doPause)
+{
+    if (!doPause)
+        throughputMeter_->restartRateSample();
+}
+
 std::expected<void, Operation::Error> ArchiveUploadOperation::cancel(bool adoptCancelState)
 {
     if (scanPhase_)

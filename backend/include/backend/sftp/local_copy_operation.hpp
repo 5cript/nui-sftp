@@ -146,11 +146,11 @@ class LocalCopyOperation : public Operation
 
     struct FileCopy
     {
-        std::filesystem::path source;
-        std::filesystem::path destination;
-        std::filesystem::path partial;
-        std::ifstream input;
-        std::ofstream output;
+        std::filesystem::path source{};
+        std::filesystem::path destination{};
+        std::filesystem::path partial{};
+        std::ifstream input{};
+        std::ofstream output{};
         std::uint64_t copied{0};
         std::uint64_t total{0};
     };

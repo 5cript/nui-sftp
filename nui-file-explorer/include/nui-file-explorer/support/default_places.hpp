@@ -2,6 +2,8 @@
 
 #include <nui/rpc.hpp>
 
+#include <memory>
+
 namespace NuiFileExplorer
 {
     /**
@@ -15,7 +17,7 @@ namespace NuiFileExplorer
      * Returns a JSON array of @c {kind, name, path} objects. @c kind is a stable id (home, desktop, downloads,
      * documents, pictures, videos, movies, music) to pick icons and translations by, @c name is an English label.
      *
-     * Construct this in the backend Main and call @c registerRpc() once the hub is alive.
+     * Construct this in the backend Main once the hub is alive, the endpoint lives as long as the provider.
      */
     class DefaultPlacesProvider
     {
@@ -29,9 +31,6 @@ namespace NuiFileExplorer
         DefaultPlacesProvider& operator=(DefaultPlacesProvider&&) = delete;
 
       private:
-        void registerRpc();
-
-        Nui::RpcHub* hub_;
         std::unique_ptr<Nui::RpcHub::AutoUnregister> listPlaces_{};
     };
 }

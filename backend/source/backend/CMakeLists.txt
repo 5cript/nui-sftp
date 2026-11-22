@@ -55,6 +55,7 @@ add_library(
         sftp/scan_operation.cpp
         sftp/local_scan_operation.cpp
         sftp/bulk_transfer_operation.cpp
+        sftp/transfer_rate.cpp
         sftp/bulk_download_operation.cpp
         sftp/bulk_upload_operation.cpp
         sftp/bulk_resume_registry.cpp

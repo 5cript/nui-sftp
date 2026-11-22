@@ -1,5 +1,4 @@
 #include <frontend/dialog/multi_input_dialog.hpp>
-#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/dialog/localized_button_labels.hpp>
 #include <log/log.hpp>
 #include <utility/language.hpp>

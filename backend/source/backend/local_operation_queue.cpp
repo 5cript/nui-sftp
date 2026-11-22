@@ -25,18 +25,16 @@ namespace
     SharedData::BulkProgress bulkProgressOf(
         Ids::OperationId const& operationId,
         LocalCopyOperation::Progress const& progress,
-        std::chrono::steady_clock::duration elapsed
+        std::int64_t bytesPerSecond
     )
     {
-        const auto seconds = std::chrono::duration<double>(elapsed).count();
         auto bulk = SharedData::BulkProgress{
             .operationId = operationId,
             .fileCurrentIndex = progress.entriesDone,
             .fileCount = progress.entriesTotal,
             .bytesCurrent = progress.bytesDone,
             .bytesTotal = progress.bytesTotal,
-            .bytesPerSecond =
-                seconds > 0.0 ? static_cast<std::int64_t>(static_cast<double>(progress.bytesDone) / seconds) : 0,
+            .bytesPerSecond = bytesPerSecond,
             .inFlight = {},
             .failedEntryIndices = {},
         };
@@ -51,6 +49,13 @@ namespace
         }
         return bulk;
     }
+}
+
+void LocalOperationQueue::QueuedOperation::hold(bool doHold)
+{
+    if (held && !doHold && rate)
+        rate->restart();
+    held = doHold;
 }
 
 Operation& LocalOperationQueue::QueuedOperation::base() const
@@ -261,18 +266,21 @@ std::expected<void, std::string> LocalOperationQueue::addCopy(CopyRequest reques
     auto sourceParent = Paths::commonParentOf(std::span<Paths::LocalPath const>{sources});
     auto destinationParent = Paths::commonParentOf(std::span<Paths::LocalPath const>{destinations});
 
+    auto rate = std::make_shared<TransferRate>();
     auto operation = std::make_unique<LocalCopyOperation>(LocalCopyOperation::LocalCopyOperationOptions{
         .progress =
-            [weak = weak_from_this(), operationId = request.operationId, start = std::chrono::steady_clock::now()](
-                LocalCopyOperation::Progress const& progress
-            )
+            [weak = weak_from_this(),
+                operationId = request.operationId,
+                rate](LocalCopyOperation::Progress const& progress)
         {
             if (auto self = weak.lock(); self)
             {
                 RpcHelper::callRemoteSafely(
                     *self->hub_,
                     self->rpcName("onCopyProgress"),
-                    bulkProgressOf(operationId, progress, std::chrono::steady_clock::now() - start)
+                    bulkProgressOf(
+                        operationId, progress, rate->sample(progress.bytesDone, std::chrono::steady_clock::now())
+                    )
                 );
             }
         },
@@ -303,6 +311,7 @@ std::expected<void, std::string> LocalOperationQueue::addCopy(CopyRequest reques
         .owner = std::move(request.owner),
         .held = request.held,
         .priority = false,
+        .rate = std::move(rate),
     });
 
     RpcHelper::callRemoteSafely(
@@ -383,7 +392,7 @@ void LocalOperationQueue::hold(Ids::SessionId const& owner, bool held)
     for (auto& queued : operations_)
     {
         if (queued.owner == owner && !queued.priority)
-            queued.held = held;
+            queued.hold(held);
     }
     if (!held)
         schedule();
@@ -396,7 +405,7 @@ void LocalOperationQueue::release(Ids::SessionId const& owner)
         if (queued.owner != owner)
             continue;
         queued.owner.reset();
-        queued.held = false;
+        queued.hold(false);
     }
     schedule();
 }

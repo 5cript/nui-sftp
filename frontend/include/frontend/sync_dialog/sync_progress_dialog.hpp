@@ -11,12 +11,10 @@
 #include <functional>
 #include <memory>
 
-class OperationQueue;
-
 class SyncProgressDialog
 {
   public:
-    explicit SyncProgressDialog(OperationQueue* operationQueue);
+    SyncProgressDialog();
     ~SyncProgressDialog();
     SyncProgressDialog(SyncProgressDialog const&) = delete;
     SyncProgressDialog& operator=(SyncProgressDialog const&) = delete;
@@ -59,7 +57,6 @@ class SyncProgressDialog
     Nui::ElementRenderer operator()();
 
   private:
-    OperationQueue* operationQueue_;
     struct Implementation;
     std::unique_ptr<Implementation> impl_;
     Nui::MoveDetector moveDetector_;

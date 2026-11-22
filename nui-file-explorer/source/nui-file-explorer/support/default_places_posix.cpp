@@ -92,8 +92,7 @@ namespace NuiFileExplorer
     }
 
     DefaultPlacesProvider::DefaultPlacesProvider(Nui::RpcHub& hub)
-        : hub_{&hub}
-        , listPlaces_{std::make_unique<Nui::RpcHub::AutoUnregister>(hub.autoRegisterFunction(
+        : listPlaces_{std::make_unique<Nui::RpcHub::AutoUnregister>(hub.autoRegisterFunction(
               "NuiFileExplorer::DefaultPlaces::list",
               [hubPtr = &hub](std::string responseId)
               {
@@ -102,7 +101,4 @@ namespace NuiFileExplorer
           ))}
     {}
     DefaultPlacesProvider::~DefaultPlacesProvider() = default;
-
-    void DefaultPlacesProvider::registerRpc()
-    {}
 }

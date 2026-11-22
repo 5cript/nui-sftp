@@ -14,8 +14,10 @@
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/opensslv.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 
 #include <algorithm>
@@ -143,17 +145,30 @@ namespace FileTransferProtocol
                 std::chrono::seconds{parts.tm_sec};
         }
 
+        /**
+         * @brief The length of the content of @p string. OpenSSL 4.1 deprecated ASN1_STRING_length() for a function
+         *        that older versions lack.
+         */
+        std::size_t lengthOf(ASN1_STRING const* string)
+        {
+#if OPENSSL_VERSION_PREREQ(4, 1)
+            return ASN1_STRING_get_length(string);
+#else
+            return static_cast<std::size_t>(ASN1_STRING_length(string));
+#endif
+        }
+
         std::optional<std::string> addressText(ASN1_OCTET_STRING const* bytes)
         {
             const auto* const data = ASN1_STRING_get0_data(bytes);
-            const auto length = ASN1_STRING_length(bytes);
-            if (length == 4)
+            const auto length = lengthOf(bytes);
+            if (length == 4u)
             {
                 boost::asio::ip::address_v4::bytes_type address{};
                 std::copy_n(data, address.size(), address.begin());
                 return boost::asio::ip::address_v4{address}.to_string();
             }
-            if (length == 16)
+            if (length == 16u)
             {
                 boost::asio::ip::address_v6::bytes_type address{};
                 std::copy_n(data, address.size(), address.begin());
@@ -176,7 +191,7 @@ namespace FileTransferProtocol
                 {
                     const std::string_view text{
                         reinterpret_cast<char const*>(ASN1_STRING_get0_data(name->d.dNSName)),
-                        static_cast<std::size_t>(ASN1_STRING_length(name->d.dNSName)),
+                        lengthOf(name->d.dNSName),
                     };
                     names.push_back(fmt::format("DNS:{}", printable(text)));
                 }
@@ -510,7 +525,9 @@ namespace FileTransferProtocol
         }
         if (SSL_set_tlsext_host_name(handle.get(), settings.serverName.c_str()) != 1)
             return std::unexpected(refusedByOpenSsl("the server name indication"));
-        if (SSL_set1_host(handle.get(), settings.serverName.c_str()) != 1)
+        if (X509_VERIFY_PARAM_set1_host(
+                SSL_get0_param(handle.get()), settings.serverName.data(), settings.serverName.size()
+            ) != 1)
             return std::unexpected(refusedByOpenSsl("the name check"));
         // RFC 6125 6.4.3 lets a client refuse "f*.example.com", browsers do.
         SSL_set_hostflags(handle.get(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);

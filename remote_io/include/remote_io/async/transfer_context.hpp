@@ -38,7 +38,7 @@ namespace RemoteIo
         bool paused() const;
         /**
          * @brief Pauses or resumes the transfer. Resuming wakes the thread that drives it, which sleeps while every
-         *        transfer is paused.
+         *        transfer is paused, and restarts the rate sample.
          */
         void pause(bool doPause);
         /**
@@ -62,7 +62,20 @@ namespace RemoteIo
          * @brief The error a failed transfer ended with.
          */
         std::optional<RemoteError> error() const;
+        /**
+         * @brief Takes a new rate from the bytes moved since the last one, once sampleInterval passed. Called on the
+         *        thread that drives the transfer.
+         */
         void calculateBytesPerSecond();
+        /**
+         * @brief calculateBytesPerSecond() at the given time.
+         */
+        void calculateBytesPerSecond(std::chrono::steady_clock::time_point now);
+        /**
+         * @brief Lets the next rate sample start at the next calculation, so time in which nothing was meant to move
+         *        counts for no rate. The rate stays as it is until then.
+         */
+        void restartRateSample();
 
         /**
          * @brief Calls @p observer once the transfer ended and at most every progressInterval while bytes move,
@@ -78,6 +91,8 @@ namespace RemoteIo
 
         /** @brief How often an observer hears of progress at most. */
         static constexpr auto progressInterval = std::chrono::milliseconds{100};
+        /** @brief The least time a rate is taken over, shorter samples are too inaccurate. */
+        static constexpr auto sampleInterval = std::chrono::milliseconds{500};
 
         /**
          * @brief Adds to the running bytes-transferred counter. Pair with periodic calls to
@@ -104,7 +119,8 @@ namespace RemoteIo
         std::atomic_bool paused_{false};
         std::atomic<SignedSizeType> bytesTransferred_{0};
         std::atomic<SignedSizeType> lastBytesTransferred_{0};
-        std::chrono::high_resolution_clock::time_point lastBpsCalculation_{std::chrono::high_resolution_clock::now()};
+        std::chrono::steady_clock::time_point lastBpsCalculation_{std::chrono::steady_clock::now()};
         std::atomic<SignedSizeType> bytesPerSecond_{0};
+        std::atomic_bool restartRateSample_{false};
     };
 }

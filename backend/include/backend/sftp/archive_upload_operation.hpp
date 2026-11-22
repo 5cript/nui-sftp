@@ -121,6 +121,10 @@ class ArchiveUploadOperation : public Operation
     }
 
     std::expected<void, Error> cancel(bool adoptCancelState) override;
+    /**
+     * @brief Restarts the rate sample on resume, a paused queue does not work on the archive.
+     */
+    void pause(bool doPause) override;
 
     /**
      * @brief Ingest a preceding LocalScanOperation's walk of @p localRootPath.

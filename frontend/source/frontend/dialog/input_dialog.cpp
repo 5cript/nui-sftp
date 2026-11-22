@@ -1,5 +1,4 @@
 #include <frontend/dialog/input_dialog.hpp>
-#include <frontend/dialog/dialog_buttons_keyboard_support.hpp>
 #include <frontend/dialog/localized_button_labels.hpp>
 #include <utility/language.hpp>
 #include <log/log.hpp>
@@ -13,6 +12,7 @@
 #include <nui/frontend/attributes.hpp>
 #include <nui/frontend/elements.hpp>
 #include <nui/frontend/dom/basic_element.hpp>
+#include <nui/frontend/api/keyboard_event.hpp>
 
 struct InputDialog::Implementation
 {
@@ -73,7 +73,6 @@ Nui::ElementRenderer InputDialog::dialogBody()
                         impl_->inputText = event.target()["value"].as<std::string>();
                     },
                     "keydown"_event = [this](Nui::WebApi::KeyboardEvent event){
-                        dialogButtonContainerKeydown(event);
                         if (event.key() == "Enter") {
                             event.preventDefault();
                             impl_->inputText = event.target()["value"].as<std::string>();
