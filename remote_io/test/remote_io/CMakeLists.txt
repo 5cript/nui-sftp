@@ -50,9 +50,11 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_sanitized_remote_io_test(
         tsan
         Tsan
-        "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1 suppressions=${CMAKE_SOURCE_DIR}/_cmake/tsan_suppressions.txt"
+        "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1"
         -fsanitize=thread -fno-omit-frame-pointer
     )
+    include("${CMAKE_SOURCE_DIR}/_cmake/tsan_suppressions.cmake")
+    add_tsan_default_suppressions(nui-sftp-remote-io-tsan-test)
 
     # Apple's clang has no LeakSanitizer.
     if (APPLE)

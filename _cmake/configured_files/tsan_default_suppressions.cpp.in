@@ -1,0 +1,5 @@
+// The ThreadSanitizer suppressions of _cmake/tsan_suppressions.txt, for a run without ctest as well.
+extern "C" const char* __tsan_default_suppressions()
+{
+    return R"suppressions(@TSAN_SUPPRESSIONS@)suppressions";
+}
