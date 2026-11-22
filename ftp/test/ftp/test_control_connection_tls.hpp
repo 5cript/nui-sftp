@@ -766,6 +766,58 @@ namespace FileTransferProtocol::Test
         expectNoPlaintextLogin(commandsAfterDisconnect(connection));
     }
 
+    struct PlaintextCase
+    {
+        std::string_view name{};
+        std::string bytes{};
+        /** @brief What the error has to name. */
+        std::string_view line{};
+    };
+
+    void PrintTo(PlaintextCase const& plaintext, std::ostream* stream)
+    {
+        *stream << plaintext.name;
+    }
+
+    /**
+     * @brief vsftpd writes a fatal error into an established TLS connection in plaintext, its code and text, its
+     *        reason and its line end apart.
+     */
+    class ControlConnectionPlaintextInTlsTests
+        : public ControlConnectionTlsTests
+        , public ::testing::WithParamInterface<PlaintextCase>
+    {};
+
+    TEST_P(ControlConnectionPlaintextInTlsTests, ReplyInPlaintextIsTheServersAnswer)
+    {
+        server_->addConnection(explicitTls().expect("NOOP").replyInPlaintext(GetParam().bytes).expectDisconnect());
+        const auto connection = makeConnection();
+        connect(connection);
+        const auto trusted = startTls(connection, settings());
+        ASSERT_TRUE(trusted) << trusted.error().toString();
+        const auto reply = execute(connection, command(Verb::Noop));
+        ASSERT_NO_FATAL_FAILURE(expectError(reply, RemoteIo::RemoteErrorKind::ConnectionLost));
+        EXPECT_NE(reply.error().message.find(GetParam().line), std::string::npos) << reply.error().toString();
+        EXPECT_EQ(stateOf(connection), ControlState::Dead);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        PlaintextInTls,
+        ControlConnectionPlaintextInTlsTests,
+        ::testing::Values(
+            PlaintextCase{
+                .name = "WholeLine",
+                .bytes = "500 OOPS: vsf_sysutil_bind\r\n",
+                .line = "500 OOPS: vsf_sysutil_bind",
+            },
+            PlaintextCase{.name = "CodeAlone", .bytes = "500 OOPS: ", .line = "500 OOPS:"}
+        ),
+        [](::testing::TestParamInfo<PlaintextCase> const& info)
+        {
+            return std::string{info.param.name};
+        }
+    );
+
     TEST_F(ControlConnectionTlsTests, HandshakeWithoutAnAnswerTimesOut)
     {
         server_->addConnection(Script{}.reply("220 Ready").expect("AUTH", "TLS").reply("234 Proceed").stall());

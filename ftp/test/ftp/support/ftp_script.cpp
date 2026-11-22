@@ -150,6 +150,11 @@ namespace FileTransferProtocol::Test
         steps.emplace_back(Send{.bytes = std::move(bytes)});
         return *this;
     }
+    Script& Script::replyInPlaintext(std::string bytes)
+    {
+        steps.emplace_back(Send{.bytes = std::move(bytes), .plaintext = true});
+        return *this;
+    }
     Script& Script::unsolicited(std::string_view text)
     {
         return reply(text);
