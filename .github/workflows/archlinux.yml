@@ -39,6 +39,7 @@ jobs:
             ninja \
             clang \
             lld \
+            llvm \
             git \
             zip \
             tar \
@@ -195,6 +196,10 @@ jobs:
       # After the uploads, so a failing test marks the release run red without holding back its assets.
       - name: Run Tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.skip_tests }}
+        # llvm-symbolizer names the frames of the uninstrumented libcrypto with its debug symbols, the TSan
+        # suppression of OpenSSL's method cache matches by that name.
+        env:
+          DEBUGINFOD_URLS: https://debuginfod.archlinux.org
         run: |
           ctest \
             --test-dir "${{ env.BUILD_DIR }}" \
