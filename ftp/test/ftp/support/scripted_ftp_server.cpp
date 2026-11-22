@@ -4,6 +4,7 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -36,6 +37,7 @@ namespace FileTransferProtocol::Test
         using boost::system::error_code;
         using tcp = asio::ip::tcp;
         using Kind = TranscriptEntry::Kind;
+        using namespace boost::asio::experimental::awaitable_operators;
 
         constexpr auto noThrow = asio::as_tuple(asio::use_awaitable);
         constexpr std::chrono::seconds closeNotifyWait{2};
@@ -185,7 +187,8 @@ namespace FileTransferProtocol::Test
                 return "end of stream";
             if (error == ssl::error::stream_truncated)
                 return "truncated";
-            if (error == asio::error::connection_reset)
+            // macOS fails a write into a connection that the peer reset with a broken pipe, a TLS read may write.
+            if (error == asio::error::connection_reset || error == asio::error::broken_pipe)
                 return "reset";
             return error.message();
         }
@@ -1120,8 +1123,35 @@ namespace FileTransferProtocol::Test
                     server_.fail(diff("a passive() before awaitData()", "none"));
                     co_return false;
                 }
-                co_await dataPlans_.back()->awaitEnd();
+                auto const data = dataPlans_.back();
+                if (serving_)
+                    co_await (data->awaitEnd() || stopDataOnAbortOrEnd(data));
+                co_await data->awaitEnd();
                 co_return true;
+            }
+
+            /**
+             * @brief Stops @p data, as a server does, on an ABOR or when the client closes the control connection. A
+             *        reset of the data connection right behind its last bytes may never arrive: the stack takes it for
+             *        out of order (RFC 5961), and macOS answers the challenge ACK of a closed port with nothing. Any
+             *        other command, and a control connection under TLS, waits for the end of the data.
+             */
+            asio::awaitable<void> stopDataOnAbortOrEnd(std::shared_ptr<DataSession> data)
+            {
+                auto& socket = transport_.socket();
+                const auto [waitError] = co_await socket.async_wait(tcp::socket::wait_read, noThrow);
+                if (waitError)
+                    co_return;
+                constexpr std::string_view abortVerb{"ABOR"};
+                std::array<char, abortVerb.size()> next{};
+                error_code peekError;
+                const auto peeked = socket.receive(asio::buffer(next), tcp::socket::message_peek, peekError);
+                if (peeked == 0u || peekError || std::string_view{next.data(), peeked} == abortVerb)
+                {
+                    data->stop();
+                    co_return;
+                }
+                co_await data->awaitEnd();
             }
 
             asio::awaitable<bool> perform(Script::StopData const&)
@@ -1142,6 +1172,7 @@ namespace FileTransferProtocol::Test
                     server_.fail(diff("serve() as the last step", fmt::format("{} steps behind it", behind)));
                     co_return false;
                 }
+                serving_ = true;
                 while (const auto line = co_await readLine())
                 {
                     lastVerb_ = line->substr(0u, line->find(' '));
@@ -1185,6 +1216,8 @@ namespace FileTransferProtocol::Test
             bool renegotiationRequested_{false};
             bool closed_{false};
             bool silent_{false};
+            /** @brief A responder answers the commands, see stopDataOnAbortOrEnd(). */
+            bool serving_{false};
         };
     }
 
