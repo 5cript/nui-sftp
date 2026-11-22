@@ -171,6 +171,8 @@ namespace FileTransferProtocol::Test
         struct Send
         {
             std::string bytes{};
+            /** @brief Written on the connection under the TLS. */
+            bool plaintext{false};
         };
         struct Delay
         {
@@ -247,6 +249,8 @@ namespace FileTransferProtocol::Test
         Script& reply(std::string_view text);
         /** @brief Sends @p bytes as they are. */
         Script& replyRaw(std::string bytes);
+        /** @brief Sends @p bytes as they are past the TLS, as vsftpd writes its fatal errors. */
+        Script& replyInPlaintext(std::string bytes);
         /** @brief Sends @p text without a command it could answer, the same bytes as reply(). */
         Script& unsolicited(std::string_view text);
         Script& delay(std::chrono::milliseconds duration);

@@ -104,6 +104,11 @@ namespace FileTransferProtocol::Test
                     const auto [error, size] = co_await asio::async_write(*tls_, buffer, noThrow);
                     co_return error;
                 }
+                co_return co_await writePlaintext(buffer);
+            }
+
+            asio::awaitable<error_code> writePlaintext(asio::const_buffer buffer)
+            {
                 const auto [error, size] = co_await asio::async_write(socket_, buffer, noThrow);
                 co_return error;
             }
@@ -914,7 +919,10 @@ namespace FileTransferProtocol::Test
 
             asio::awaitable<bool> perform(Script::Send const& step)
             {
-                co_await transport_.writeAll(asio::buffer(step.bytes));
+                if (step.plaintext)
+                    co_await transport_.writePlaintext(asio::buffer(step.bytes));
+                else
+                    co_await transport_.writeAll(asio::buffer(step.bytes));
                 co_return true;
             }
 

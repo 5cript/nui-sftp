@@ -269,6 +269,10 @@ namespace FileTransferProtocol
         void finishDrain(Reply markerReply);
         std::shared_ptr<PendingCommand> makeMarker() const;
         void takeEndOfStream(boost::system::error_code error);
+        /**
+         * @brief Why a read failed, the server's reply when it wrote one in plaintext into TLS.
+         */
+        RemoteIo::RemoteError readError(boost::system::error_code error) const;
         void writeNext();
         std::deque<std::shared_ptr<PendingCommand>>::iterator nextToWrite();
         /**

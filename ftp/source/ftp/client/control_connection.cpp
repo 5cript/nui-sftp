@@ -128,8 +128,9 @@ namespace FileTransferProtocol
         constexpr std::size_t recordedBytes = 512u;
 
         /**
-         * @brief The socket under the TLS stream, keeping the first bytes the server sent. A server that refuses an
-         *        implicit TLS connection answers in plaintext, vsftpd over its limit with a 421.
+         * @brief The socket under the TLS stream, keeping the first bytes the server sent and those of the latest read.
+         *        A server that refuses an implicit TLS connection answers in plaintext, vsftpd over its limit with a
+         *        421. vsftpd also writes its fatal errors into an established TLS connection in plaintext.
          */
         class RecordingSocket
         {
@@ -137,9 +138,10 @@ namespace FileTransferProtocol
             using executor_type = asio::ip::tcp::socket::executor_type;
             using lowest_layer_type = asio::ip::tcp::socket::lowest_layer_type;
 
-            RecordingSocket(asio::ip::tcp::socket& socket, std::string& received)
+            RecordingSocket(asio::ip::tcp::socket& socket, std::string& received, std::string& latest)
                 : socket_{&socket}
                 , received_{&received}
+                , latest_{&latest}
             {}
 
             executor_type get_executor()
@@ -160,11 +162,6 @@ namespace FileTransferProtocol
             template <typename BuffersT, typename HandlerT>
             void async_read_some(BuffersT const& buffers, HandlerT&& handler)
             {
-                if (received_->size() >= recordedBytes)
-                {
-                    socket_->async_read_some(buffers, std::forward<HandlerT>(handler));
-                    return;
-                }
                 auto slot = asio::get_associated_cancellation_slot(handler);
                 auto executor = asio::get_associated_executor(handler, socket_->get_executor());
                 socket_->async_read_some(
@@ -173,13 +170,17 @@ namespace FileTransferProtocol
                         slot,
                         asio::bind_executor(
                             executor,
-                            [received = received_, buffers, handler = std::forward<HandlerT>(handler)](
+                            [received = received_,
+                                latest = latest_,
+                                buffers,
+                                handler = std::forward<HandlerT>(handler)](
                                 boost::system::error_code error, std::size_t size
                             ) mutable
                             {
-                                std::string bytes(std::min(size, recordedBytes - received->size()), '\0');
-                                asio::buffer_copy(asio::buffer(bytes), buffers);
-                                received->append(bytes);
+                                latest->resize(std::min(size, recordedBytes));
+                                asio::buffer_copy(asio::buffer(*latest), buffers);
+                                const auto missing = recordedBytes - std::min(recordedBytes, received->size());
+                                received->append(*latest, 0u, std::min(latest->size(), missing));
                                 std::move(handler)(error, size);
                             }
                         )
@@ -196,6 +197,7 @@ namespace FileTransferProtocol
           private:
             asio::ip::tcp::socket* socket_;
             std::string* received_;
+            std::string* latest_;
         };
     }
 
@@ -224,7 +226,7 @@ namespace FileTransferProtocol
         void secure(SslHandle handle)
         {
             // The stream takes the handle over.
-            tls_.emplace(RecordingSocket{socket_, received_}, handle.release());
+            tls_.emplace(RecordingSocket{socket_, received_, latest_}, handle.release());
         }
 
         asio::ssl::stream<RecordingSocket>& tls()
@@ -248,6 +250,19 @@ namespace FileTransferProtocol
             if (replyClass != ReplyClass::TransientNegative && replyClass != ReplyClass::PermanentNegative)
                 return std::nullopt;
             return reply;
+        }
+
+        /**
+         * @brief The line of a reply the latest read brought in plaintext, maybe cut short: vsftpd writes its code,
+         *        its text and the line end apart.
+         */
+        std::optional<std::string_view> plaintextReplyLine() const
+        {
+            const std::string_view latest{latest_};
+            const auto line = latest.substr(0u, latest.find_first_of("\r\n"));
+            if (!replyCodeOf(line))
+                return std::nullopt;
+            return line;
         }
 
         SSL* tlsHandle()
@@ -371,6 +386,8 @@ namespace FileTransferProtocol
         asio::ip::tcp::socket socket_;
         /** @brief The first bytes the TLS stream read, see RecordingSocket. */
         std::string received_{};
+        /** @brief The bytes of the latest read of the TLS stream, see RecordingSocket. */
+        std::string latest_{};
         std::optional<asio::ssl::stream<RecordingSocket>> tls_{};
         /** @brief Bounds a close over TLS. */
         asio::steady_timer closeTimer_;
@@ -1015,7 +1032,7 @@ namespace FileTransferProtocol
             return;
         if (error != asio::error::eof)
         {
-            die(transportError("Reading from", error));
+            die(readError(error));
             return;
         }
         const auto finished = framer_.finish();
@@ -1024,6 +1041,18 @@ namespace FileTransferProtocol
             return;
         die(finished ? errorOf(RemoteErrorKind::ConnectionLost, "The server closed the control connection")
                      : finished.error());
+    }
+
+    RemoteIo::RemoteError ControlConnection::readError(boost::system::error_code error) const
+    {
+        const auto line =
+            error.category() == asio::error::get_ssl_category() ? transport_->plaintextReplyLine() : std::nullopt;
+        if (!line)
+            return transportError("Reading from", error);
+        return errorOf(
+            RemoteErrorKind::ConnectionLost,
+            fmt::format("The server ended TLS with a reply in plaintext: {}", printable(*line))
+        );
     }
 
     void ControlConnection::writeNext()
