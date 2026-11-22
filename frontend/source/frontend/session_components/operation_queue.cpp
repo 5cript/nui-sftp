@@ -2039,36 +2039,6 @@ void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
         cancelAll();
         return;
     }
-    const auto kept = impl_->keptOperationIds();
-    if (keepPartialFiles || kept.empty())
-    {
-        cancelAllInBackend(keepPartialFiles);
-        return;
-    }
-    auto buttonLabels = localizedButtonLabels();
-    buttonLabels.all = language->get("operationQueue", "cancelAllDeleteKept");
-    buttonLabels.no = language->get("operationQueue", "cancelAllKeepKept");
-    impl_->confirmDialog->open({
-        .styleVariant = ScriptNuiComponents::StyleVariant::Warning,
-        .headerText = language->get("operationQueue", "cancelAllKeptHeader"),
-        .text = fmt::format(fmt::runtime(language->get("operationQueue", "cancelAllKeptText")), kept.size()),
-        .buttons = ConfirmDialog::Button::All | ConfirmDialog::Button::No,
-        .focusButton = ConfirmDialog::Button::No,
-        .buttonLabels = std::move(buttonLabels),
-        .onClose = lifetime_.guarded(
-            [this](std::optional<ConfirmDialog::Button> button)
-            {
-                if (button == ConfirmDialog::Button::All)
-                    cancelAllInBackend(false);
-                else if (button == ConfirmDialog::Button::No)
-                    cancelAllInBackend(true);
-            }
-        ),
-    });
-}
-
-void OperationQueue::cancelAllInBackend(bool keepPartialFiles)
-{
     // Taken now: a completion of this cancel may turn more cards into kept ones before the reply.
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
@@ -2105,15 +2075,17 @@ void OperationQueue::removeCardsCanceledByAll(
             return !operation.card().keepsPartialFilesOnCancel(keepPartialFiles);
         }
     );
-    if (keepPartialFiles || keptBefore.empty() || !impl_->fileEngine)
+    if (keepPartialFiles || keptBefore.empty())
         return;
-    impl_->fileEngine->discardKept(
-        std::vector<Ids::OperationId>{keptBefore.begin(), keptBefore.end()},
-        [count = keptBefore.size()](bool success, std::string const& info)
+    // Their partial files stay, the backend only stops holding what continues them.
+    Nui::RpcClient::callWithBackChannel(
+        fmt::format("OperationQueue::{}::forgetKept", impl_->sessionId.value()),
+        [count = keptBefore.size()](SharedData::ErrorOrSuccess<> const& result)
         {
-            if (!success)
-                Log::error("Cannot delete the partial files of {} canceled transfer(s): {}", count, info);
-        }
+            if (!result)
+                Log::error("Cannot forget {} canceled transfer(s): {}", count, result.error.value());
+        },
+        std::vector<Ids::OperationId>{keptBefore.begin(), keptBefore.end()}
     );
 }
 
