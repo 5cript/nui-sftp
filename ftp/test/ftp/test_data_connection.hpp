@@ -71,6 +71,23 @@ namespace FileTransferProtocol::Test
             std::array<char, 16> buffer{};
             co_return co_await data->readSome(asio::buffer(buffer));
         }
+
+        /**
+         * @brief An application data record whose content no key decrypts.
+         */
+        std::string damagedRecord()
+        {
+            std::string record{"\x17\x03\x03\x00\x10", 5u};
+            record.append(16u, 'x');
+            return record;
+        }
+
+        template <typename ValueT>
+        void expectConnectionLost(std::expected<ValueT, RemoteIo::RemoteError> const& result)
+        {
+            ASSERT_FALSE(result) << "the operation on the failed stream succeeded";
+            EXPECT_EQ(result.error().kind, RemoteIo::RemoteErrorKind::ConnectionLost) << result.error().toString();
+        }
     }
 
     class DataConnectionTests : public ControlConnectionTlsTests
@@ -475,6 +492,93 @@ namespace FileTransferProtocol::Test
             script.expect("NOOP").reply("200 Fine").expect("EPSV").passive(std::move(plan)).beginData();
             return script;
         }
+
+        /**
+         * @brief Runs @p function like run(), but closes @p data where it does not end, which ends a loop on it.
+         */
+        template <typename FunctionT>
+        auto runOn(
+            std::shared_ptr<ControlConnection> const& connection,
+            std::shared_ptr<DataConnection> const& data,
+            FunctionT function
+        )
+        {
+            auto future = asio::co_spawn(connection->strand(), std::move(function), asio::use_future);
+            if (future.wait_for(20s) != std::future_status::ready)
+            {
+                ADD_FAILURE() << "The operation on the data connection did not end";
+                asio::post(
+                    connection->strand(),
+                    [data]()
+                    {
+                        data->close();
+                    }
+                );
+            }
+            return future.get();
+        }
+
+        std::expected<std::size_t, RemoteIo::RemoteError>
+        readFrom(std::shared_ptr<ControlConnection> const& connection, std::shared_ptr<DataConnection> const& data)
+        {
+            return runOn(connection, data, readOnce(data));
+        }
+
+        std::expected<void, RemoteIo::RemoteError>
+        writeTo(std::shared_ptr<ControlConnection> const& connection, std::shared_ptr<DataConnection> const& data)
+        {
+            return runOn(
+                connection,
+                data,
+                [data]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    co_return co_await data->writeAll(asio::buffer(std::string_view{"upload"}));
+                }
+            );
+        }
+
+        std::expected<void, RemoteIo::RemoteError> finishUploadOn(
+            std::shared_ptr<ControlConnection> const& connection,
+            std::shared_ptr<DataConnection> const& data
+        )
+        {
+            return runOn(
+                connection,
+                data,
+                [data]() -> asio::awaitable<std::expected<void, RemoteIo::RemoteError>>
+                {
+                    co_return co_await data->finishUpload();
+                }
+            );
+        }
+
+        /**
+         * @brief A secured data connection whose stream failed: the server sent a damaged record, the first read
+         *        reported it.
+         */
+        std::shared_ptr<DataConnection> failedData(std::shared_ptr<ControlConnection> const& connection)
+        {
+            const auto opened = openData(connection);
+            if (!opened)
+            {
+                ADD_FAILURE() << opened.error().toString();
+                return nullptr;
+            }
+            auto const data = *opened;
+            const auto secured = secure(connection, data, settings(), true);
+            if (!secured)
+            {
+                ADD_FAILURE() << secured.error().toString();
+                return nullptr;
+            }
+            expectConnectionLost(readFrom(connection, data));
+            return data;
+        }
+
+        Script damagedRecordScript()
+        {
+            return securedScript(DataPlan{}.tls().sendBeneathTls(damagedRecord()).stallAfter("")).expectDisconnect();
+        }
     };
 
     TEST_F(DataConnectionTlsTests, DataConnectionResumesTheControlSession)
@@ -609,5 +713,47 @@ namespace FileTransferProtocol::Test
         ASSERT_TRUE(secure(connection, *data, tls, true));
         expectText(readAll(connection, *data), "cut");
         EXPECT_TRUE((*data)->endedWithoutCloseNotify());
+    }
+
+    TEST_F(DataConnectionTlsTests, ReadBehindAFailedReadFails)
+    {
+        server_->addConnection(damagedRecordScript());
+        const auto connection = securedConnection(settings());
+        const auto data = failedData(connection);
+        ASSERT_TRUE(data);
+        expectConnectionLost(readFrom(connection, data));
+    }
+
+    TEST_F(DataConnectionTlsTests, WriteBehindAFailedReadFails)
+    {
+        server_->addConnection(damagedRecordScript());
+        const auto connection = securedConnection(settings());
+        const auto data = failedData(connection);
+        ASSERT_TRUE(data);
+        expectConnectionLost(writeTo(connection, data));
+    }
+
+    TEST_F(DataConnectionTlsTests, UploadEndBehindAFailedReadFails)
+    {
+        server_->addConnection(damagedRecordScript());
+        const auto connection = securedConnection(settings());
+        const auto data = failedData(connection);
+        ASSERT_TRUE(data);
+        expectConnectionLost(finishUploadOn(connection, data));
+    }
+
+    TEST_F(DataConnectionTlsTests, EveryOperationBehindAFailedHandshakeFails)
+    {
+        server_->addConnection(securedScript(DataPlan{}.tls({.insteadOfHandshake = fatalAlert()})).expectDisconnect());
+        const auto tls = settings();
+        const auto connection = securedConnection(tls);
+        const auto opened = openData(connection);
+        ASSERT_TRUE(opened) << opened.error().toString();
+        auto const data = *opened;
+        ASSERT_FALSE(secure(connection, data, tls, true));
+        expectConnectionLost(readFrom(connection, data));
+        expectConnectionLost(writeTo(connection, data));
+        // The end of the upload closes the data connection, so it goes last.
+        expectConnectionLost(finishUploadOn(connection, data));
     }
 }

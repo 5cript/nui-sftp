@@ -54,6 +54,19 @@ namespace FileTransferProtocol
         }
 
         /**
+         * @brief @p error, or an error for a TLS operation on @p handle that moved @p moved bytes without one because
+         *        the stream failed before. OpenSSL 4 answers such an operation with SSL_ERROR_SSL and an empty error
+         *        queue, which Asio completes as success; OpenSSL 3 gave this error. A failed stream is in its
+         *        handshake again.
+         */
+        boost::system::error_code failedStreamAsError(boost::system::error_code error, std::size_t moved, SSL* handle)
+        {
+            if (error || moved > 0u || SSL_in_init(handle) != 1)
+                return error;
+            return asio::ssl::error::unspecified_system_error;
+        }
+
+        /**
          * @brief A failed EPSV that PASV may replace: the server refused or garbled it, or its port could not be
          *        connected, while the control connection is fine.
          */
@@ -216,9 +229,10 @@ namespace FileTransferProtocol
             co_return std::unexpected(cancelled());
         const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
         reading_ = true;
-        const auto [error, size] =
+        const auto [readError, size] =
             tls_ ? co_await tls_->async_read_some(buffer, token) : co_await socket_.async_read_some(buffer, token);
         reading_ = false;
+        const auto error = tls_ ? failedStreamAsError(readError, size, tls_->native_handle()) : readError;
         const bool cancelledRead = isCancelled(co_await asio::this_coro::cancellation_state);
         const bool ended = error == asio::error::eof || error == asio::ssl::error::stream_truncated;
         // A server that let the inactivity timeout pass had its time for the handshake.
@@ -252,8 +266,9 @@ namespace FileTransferProtocol
         {
             writeStarted_ = true;
             const auto token = asio::cancel_after(options_.inactivityTimeout, useTuple);
-            const auto [error, size] = tls_ ? co_await tls_->async_write_some(buffer, token)
-                                            : co_await socket_.async_write_some(buffer, token);
+            const auto [writeError, size] = tls_ ? co_await tls_->async_write_some(buffer, token)
+                                                 : co_await socket_.async_write_some(buffer, token);
+            const auto error = tls_ ? failedStreamAsError(writeError, size, tls_->native_handle()) : writeError;
             if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
                 co_return std::unexpected(cancelled());
             if (error)
@@ -282,8 +297,9 @@ namespace FileTransferProtocol
         if (tls_)
         {
             // Waits for the server's close_notify, which it sends once it took everything.
-            const auto [error] =
+            const auto [shutdownError] =
                 co_await tls_->async_shutdown(asio::cancel_after(options_.inactivityTimeout, useTuple));
+            const auto error = failedStreamAsError(shutdownError, 0u, tls_->native_handle());
             if (isCancelled(co_await asio::this_coro::cancellation_state) || closed_)
                 co_return std::unexpected(cancelled());
             close();

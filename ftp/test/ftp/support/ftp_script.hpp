@@ -74,7 +74,11 @@ namespace FileTransferProtocol::Test
         };
         struct Hold
         {};
-        using Action = std::variant<Send, SendForever, ExpectUpload, Close, Reset, StallAfter, Hold>;
+        struct SendBeneathTls
+        {
+            std::string bytes{};
+        };
+        using Action = std::variant<Send, SendForever, ExpectUpload, Close, Reset, StallAfter, Hold, SendBeneathTls>;
 
         DataPlan& send(std::string bytes, std::size_t chunkSize = 0, std::chrono::milliseconds interval = {});
         /** @brief Sends until the client goes away or the control script calls stopData(), nothing can follow. */
@@ -90,6 +94,8 @@ namespace FileTransferProtocol::Test
         DataPlan& stallAfter(std::string bytes);
         /** @brief Neither reads, sends nor closes until stopData() or the end of the control connection. */
         DataPlan& hold();
+        /** @brief Sends @p bytes on the socket beneath TLS, a damaged record say. */
+        DataPlan& sendBeneathTls(std::string bytes);
         DataPlan& tls(TlsBehaviour behaviour = {});
         /** @brief Announces this address and port instead of the real ones. */
         DataPlan& announce(std::string address, std::uint16_t port);

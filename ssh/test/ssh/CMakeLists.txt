@@ -89,10 +89,12 @@ if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_sources(nui-sftp-ssh-tsan-test PRIVATE "${CMAKE_SOURCE_DIR}/utility/source/utility/node/node.cpp")
     target_compile_options(nui-sftp-ssh-tsan-test PRIVATE ${THREAD_SANITIZER_OPTIONS})
     target_link_options(nui-sftp-ssh-tsan-test PRIVATE -fsanitize=thread)
+    include("${CMAKE_SOURCE_DIR}/_cmake/tsan_suppressions.cmake")
+    add_tsan_default_suppressions(nui-sftp-ssh-tsan-test)
     gtest_discover_tests(
         nui-sftp-ssh-tsan-test
         TEST_PREFIX "Tsan."
-        PROPERTIES ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1 suppressions=${CMAKE_SOURCE_DIR}/_cmake/tsan_suppressions.txt"
+        PROPERTIES ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 second_deadlock_stack=1"
         DISCOVERY_TIMEOUT 60
     )
 endif()
