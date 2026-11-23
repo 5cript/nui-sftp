@@ -217,6 +217,8 @@ operationQueue:
   continueKept: "Fortsetzen"
   continueKeptTitle: "Die Übertragung mit ihren Teildateien fortsetzen"
   discardKept: "Teildateien löschen und entfernen"
+  removeKeepingPartialFiles: "Entfernen und Teildateien behalten"
+  moreRemoveOptions: "Weitere Entfernen-Optionen"
   deletingItem: "Lösche: '{}'"
   deletingSelectedIn: "Lösche ausgewählte Elemente in {}"
   deletingLocallyIn: "Lösche lokale Elemente in {}"

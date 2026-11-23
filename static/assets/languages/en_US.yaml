@@ -134,6 +134,8 @@ operationQueue:
   continueKept: "Continue"
   continueKeptTitle: "Continue the transfer from its partial files"
   discardKept: "Delete the partial files and remove"
+  removeKeepingPartialFiles: "Remove and keep the partial files"
+  moreRemoveOptions: "More remove options"
   deletingItem: "Deleting: '{}'"
   deletingSelectedIn: "Deleting selected items in {}"
   deletingLocallyIn: "Deleting local items in {}"
