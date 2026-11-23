@@ -101,6 +101,8 @@ class OperationQueue
     /**
      * @brief Goes on with the transfer @p id a cancel stopped with its partial files: queues it again under its id on
      *        @p fileSystem, a bulk without what it finished. It continues its partial files whatever tryContinue says.
+     *        A cancel of @p id that still waits for the batch out stores what it kept only then, so this waits for
+     *        that batch first. On the strand.
      * @return Why it was not queued: nothing kept under @p id, or it cannot continue. What it kept stays then, for
      *         discardKept.
      */
