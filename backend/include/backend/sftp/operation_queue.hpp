@@ -15,6 +15,7 @@
 #include <backend/rpc_helper.hpp>
 #include <shared_data/file_operations/operation_completed.hpp>
 #include <shared_data/file_operations/operation_mode.hpp>
+#include <shared_data/file_operations/partial_files_on_cancel.hpp>
 #include <shared_data/file_operations/bulk_transfer_request.hpp>
 #include <shared_data/file_operations/archive_download_root.hpp>
 #include <shared_data/file_operations/bulk_delete_request.hpp>
@@ -76,15 +77,7 @@ class OperationQueue
      */
     void limitParallelism(std::optional<std::size_t> maxParallelTransfers);
 
-    /**
-     * @brief What a cancel of the user's does with the partial files of a transfer.
-     */
-    enum class PartialFilesOnCancel
-    {
-        /** @brief Deleted when the transfer's doCleanup option says so. */
-        AsConfigured,
-        Kept,
-    };
+    using PartialFilesOnCancel = SharedData::PartialFilesOnCancel;
 
     /**
      * @brief Cancels every queued operation, each completes as cancelled. Those in the batch out are cancelled once
@@ -121,9 +114,10 @@ class OperationQueue
 
     /**
      * @brief Forgets the transfer @p id that kept its partial files when it was canceled. The files stay, nothing
-     *        continues or discards them under @p id anymore.
+     *        continues or discards them under @p id anymore. Behind a cancel of @p id that still waits for the batch
+     *        out, which stores what it kept only then.
      */
-    void forgetKept(Ids::OperationId const& id);
+    void forgetKept(Ids::OperationId id);
 
     /**
      * @brief Cancels the upload @p id like cancel(), the temporary file it wrote to stays for a later upload or goes,

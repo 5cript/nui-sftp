@@ -1067,6 +1067,11 @@ void UploadOperation::keepPartialFiles()
     partialFileOnCancel_ = PartialFile::Kept;
 }
 
+void UploadOperation::deletePartialFiles()
+{
+    partialFileOnCancel_ = PartialFile::Discarded;
+}
+
 std::optional<Operation::KeptPartialFiles> UploadOperation::keptPartialFiles() const
 {
     if (partialFileOnCancel_ == PartialFile::Discarded)

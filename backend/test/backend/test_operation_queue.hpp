@@ -235,6 +235,42 @@ namespace Test
         }
 
         /**
+         * @brief Queues the download of the remote big.bin to the local directory under @p operationId.
+         */
+        template <typename FileSystemT>
+        auto addBigDownload(FileSystemT const& sftp, Ids::OperationId const& operationId)
+        {
+            return runOnStrand([&]() {
+                return queue_->addDownloadOperation(
+                    sftp,
+                    operationId,
+                    toLocal(localDirectory_.path() / "big.bin"),
+                    remote("/home/test/big.bin"),
+                    false,
+                    false,
+                    false,
+                    false
+                );
+            });
+        }
+
+        /**
+         * @brief Queues the download of the remote big.bin, see addBigDownload, and works it until it waits for its
+         *        transfer, nothing else drives it then.
+         */
+        template <typename FileSystemT>
+        void startBigDownload(FileSystemT const& sftp, Ids::OperationId const& operationId)
+        {
+            ASSERT_TRUE(addBigDownload(sftp, operationId).has_value());
+            for (int step = 0; step < 100 && runOnStrand([this]() {
+                     return queue_->work() || queue_->drainBatch();
+                 });
+                 ++step)
+            {
+            }
+        }
+
+        /**
          * @brief What is at @p path on the server now, as a compare that ran right now would have seen it.
          */
         static SharedData::ComparedState remoteStateNow(SecureShell::SftpSession& sftp, std::string const& path)
@@ -636,25 +672,7 @@ namespace Test
         setPaused(false);
 
         const auto operationId = Ids::generateOperationId();
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDownloadOperation(
-                sftp,
-                operationId,
-                toLocal(localDirectory_.path() / "big.bin"),
-                remote("/home/test/big.bin"),
-                false,
-                false,
-                false,
-                false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
         runOnStrand([&]() {
             queue->cancel(operationId);
         });
@@ -676,25 +694,7 @@ namespace Test
 
         const auto operationId = Ids::generateOperationId();
         const auto partial = localDirectory_.path() / "big.bin.filepart";
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDownloadOperation(
-                sftp,
-                operationId,
-                toLocal(localDirectory_.path() / "big.bin"),
-                remote("/home/test/big.bin"),
-                false,
-                false,
-                false,
-                false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
         ASSERT_TRUE(std::filesystem::exists(partial));
 
         runOnStrand([&]() {
@@ -724,25 +724,7 @@ namespace Test
 
         const auto operationId = Ids::generateOperationId();
         const auto partial = localDirectory_.path() / "big.bin.filepart";
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDownloadOperation(
-                sftp,
-                operationId,
-                toLocal(localDirectory_.path() / "big.bin"),
-                remote("/home/test/big.bin"),
-                false,
-                false,
-                false,
-                false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
         ASSERT_TRUE(std::filesystem::exists(partial));
         runOnStrand([&]() {
             queue->cancel(operationId, OperationQueue::PartialFilesOnCancel::Kept);
@@ -769,6 +751,63 @@ namespace Test
         EXPECT_EQ(std::filesystem::file_size(partial), keptSize);
     }
 
+    TEST_F(OperationQueueTests, ForgettingAKeptDownloadWaitsForItsCancelBehindTheBatchOut)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", 8 * 1024 * 1024}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(addBigDownload(sftp, operationId).has_value());
+        // The strand is held, so the batch the work hands out cannot return before the cancel and the forget.
+        const auto keptWhileBatchOut = runOnStrand([&]() {
+            queue->work();
+            queue->cancel(operationId, OperationQueue::PartialFilesOnCancel::Kept);
+            const auto kept = keptTransfers_->size();
+            queue->forgetKept(operationId);
+            return kept;
+        });
+        ASSERT_EQ(keptWhileBatchOut, 0u) << "The cancel did not wait for a batch out";
+        workUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_TRUE(completions().front().keptPartialFiles);
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+    }
+
+    TEST_F(OperationQueueTests, CancelAllDeletingPartialFilesDeletesThoseOfADownloadWithoutCleanup)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", 8 * 1024 * 1024}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        Persistence::SftpOptions options{};
+        options.downloadOptions = Persistence::DownloadOptions{};
+        options.downloadOptions->doCleanup = false;
+        auto queue = makeQueue(std::move(options));
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        const auto partial = localDirectory_.path() / "big.bin.filepart";
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
+        ASSERT_TRUE(std::filesystem::exists(partial));
+
+        runOnStrand([&]() {
+            queue->cancelAll(OperationQueue::PartialFilesOnCancel::Deleted);
+        });
+        workUntilCompletions(1);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(completions().front().keptPartialFiles);
+        EXPECT_FALSE(std::filesystem::exists(partial));
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+    }
+
     TEST_F(OperationQueueTests, ACanceledDownloadDeletesItsPartialFileAsConfigured)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
@@ -781,25 +820,7 @@ namespace Test
 
         const auto operationId = Ids::generateOperationId();
         const auto partial = localDirectory_.path() / "big.bin.filepart";
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDownloadOperation(
-                sftp,
-                operationId,
-                toLocal(localDirectory_.path() / "big.bin"),
-                remote("/home/test/big.bin"),
-                false,
-                false,
-                false,
-                false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
         ASSERT_TRUE(std::filesystem::exists(partial));
 
         runOnStrand([&]() {
@@ -826,25 +847,7 @@ namespace Test
 
         const auto operationId = Ids::generateOperationId();
         const auto partial = localDirectory_.path() / "big.bin.filepart";
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDownloadOperation(
-                sftp,
-                operationId,
-                toLocal(localDirectory_.path() / "big.bin"),
-                remote("/home/test/big.bin"),
-                false,
-                false,
-                false,
-                false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
         ASSERT_TRUE(std::filesystem::exists(partial));
 
         runOnStrand([&]() {
@@ -1006,25 +1009,7 @@ namespace Test
 
         const auto operationId = Ids::generateOperationId();
         const auto partial = localDirectory_.path() / "big.bin.filepart";
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addDownloadOperation(
-                sftp,
-                operationId,
-                toLocal(localDirectory_.path() / "big.bin"),
-                remote("/home/test/big.bin"),
-                false,
-                false,
-                false,
-                false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigDownload(sftp, operationId));
         ASSERT_TRUE(std::filesystem::exists(partial));
         runOnStrand([&]() {
             queue->cancel(operationId, OperationQueue::PartialFilesOnCancel::Kept);

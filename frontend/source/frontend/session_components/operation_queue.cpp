@@ -51,6 +51,23 @@
 
 using namespace std::chrono_literals;
 
+namespace
+{
+    /**
+     * @brief Shows @p operation as canceled ahead of its completion, with what the completion will say of its partial
+     *        files in @p keepsPartialFiles, so the card does not show the other outcome until then.
+     * @return False for an operation that ended already: a completion that came first said what became of it.
+     */
+    bool showCanceled(DisplayedOperation& operation, bool keepsPartialFiles)
+    {
+        if (operation.isCompletedState())
+            return false;
+        operation.card().keptPartialFiles(keepsPartialFiles);
+        operation.state(SharedData::OperationState::Canceled);
+        return true;
+    }
+}
+
 struct OperationQueue::Implementation
 {
     Persistence::StateHolder* stateHolder;
@@ -226,29 +243,28 @@ struct OperationQueue::Implementation
     }
 
     /**
-     * @brief The live and history cards, sorted by how far they are.
+     * @brief The live and history cards as a Cancel All sees them, in the order priority, live, history.
      */
-    CardsBeforeCancelAll cardsBeforeCancelAll()
+    std::vector<CancelAll::Card> cancelAllCards()
     {
-        CardsBeforeCancelAll cards{};
-        const auto sort = [&cards](auto const& operation)
+        std::vector<CancelAll::Card> cards{};
+        const auto add = [&cards](DisplayedOperation& operation)
         {
-            if (!operation.isCompletedState())
-            {
-                cards.active.insert(operation.key());
-                return;
-            }
-            cards.ended.insert(operation.key());
-            if (operation.keptPartialFiles())
-                cards.kept.insert(operation.key());
+            cards.push_back({
+                .operationId = operation.key(),
+                .ended = operation.isCompletedState(),
+                .keptPartialFiles = operation.keptPartialFiles(),
+                .keepsWhenAsked = operation.card().keepsPartialFilesOnCancel(true),
+                .keepsAsConfigured = operation.card().keepsPartialFilesOnCancel(false),
+            });
         };
-        for (auto* live : {&operations, &priorityOperations})
+        for (auto* live : {&priorityOperations, &operations})
         {
             for (auto const& operation : live->observedValues().value())
-                sort(*operation);
+                add(*operation);
         }
         for (auto const& entry : history)
-            sort(*entry);
+            add(*entry);
         return cards;
     }
 
@@ -472,12 +488,19 @@ OperationQueue::~OperationQueue()
 void OperationQueue::cancelAll()
 {
     LocalOperationRouter::instance().cancelHostedBy(*this);
+    std::vector<Ids::OperationId> kept{};
+    for (auto const& card : impl_->cancelAllCards())
+    {
+        if (card.keptPartialFiles)
+            kept.push_back(card.operationId);
+    }
     impl_->eraseOperationsIf(
         [](DisplayedOperation&)
         {
             return true;
         }
     );
+    forgetKeptInBackend(std::move(kept));
     Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
@@ -507,16 +530,10 @@ void OperationQueue::cancelOperation(OperationCard const& operation, bool keepPa
                     );
                 }
 
-                // A completion that came first said what became of it.
                 auto* operation = impl_->findOperation(operationId);
-                if (operation && !operation->isCompletedState())
-                {
-                    // What the completion will say, so the card does not show the other outcome until then.
-                    operation->card().keptPartialFiles(
-                        operation->card().keepsPartialFilesOnCancel(keepPartialFiles)
-                    );
-                    operation->state(SharedData::OperationState::Canceled);
-                }
+                if (operation &&
+                    showCanceled(*operation, operation->card().keepsPartialFilesOnCancel(keepPartialFiles)))
+                    operation->card().reveal();
                 Nui::globalEventContext.executeActiveEventsImmediately();
             }
         );
@@ -1511,6 +1528,8 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
         );
         operation->failedEntries(std::move(completed.failedEntries));
     }
+    // A card that a cancel showed as ended already was revealed then, or belongs to a Cancel All.
+    const bool endsNow = !operation->isCompletedState();
     switch (completed.reason)
     {
         case (SharedData::OperationCompletionReason::Completed):
@@ -1550,6 +1569,8 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
                 static_cast<int>(completed.reason)
             );
     }
+    if (endsNow && operation->isCompletedState())
+        operation->card().reveal();
     impl_->transferProgressCallbacks.erase(completed.operationId.value());
     impl_->bulkProgressCallbacks.erase(completed.operationId.value());
     auto cbIt = impl_->completionCallbacks.find(completed.operationId.value());
@@ -2042,18 +2063,19 @@ void OperationQueue::togglePause()
     );
 }
 
-void OperationQueue::askBackendToCancelAll(CancelAllPartialFiles partialFiles)
+void OperationQueue::askBackendToCancelAll(SharedData::PartialFilesOnCancel partialFiles)
 {
     if (!isActive())
     {
         cancelAll();
         return;
     }
-    // Taken now: the completions of this cancel may come before the reply.
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         lifetime_.guarded(
-            [this, partialFiles, before = impl_->cardsBeforeCancelAll()](SharedData::ErrorOrSuccess<> const& result)
+            [this, partialFiles, before = CancelAll::cardsBefore(impl_->cancelAllCards())](
+                SharedData::ErrorOrSuccess<> const& result
+            )
             {
                 if (result)
                 {
@@ -2065,41 +2087,39 @@ void OperationQueue::askBackendToCancelAll(CancelAllPartialFiles partialFiles)
                     Log::error("Failed to cancel all operation queue: {}", result.error.value());
             }
         ),
-        partialFiles == CancelAllPartialFiles::Kept
+        Utility::enumToString(partialFiles)
     );
 }
 
-void OperationQueue::showCancelAll(CancelAllPartialFiles partialFiles, CardsBeforeCancelAll const& before)
+void OperationQueue::showCancelAll(SharedData::PartialFilesOnCancel partialFiles, CancelAll::CardsBefore const& before)
 {
-    LocalOperationRouter::instance().cancelHostedBy(*this);
+    const auto outcome = CancelAll::outcome(partialFiles, before, impl_->cancelAllCards());
+
+    const CancelAll::OperationIds removed{outcome.removed.begin(), outcome.removed.end()};
     impl_->eraseOperationsIf(
-        [&before](DisplayedOperation& operation)
+        [&removed](DisplayedOperation& operation)
         {
-            return before.ended.contains(operation.key());
+            return removed.contains(operation.key());
         }
     );
-    for (auto const& operationId : before.active)
+
+    std::vector<Ids::OperationId> canceled{};
+    canceled.reserve(outcome.canceled.size());
+    for (auto const& card : outcome.canceled)
     {
-        // A completion that came first said what became of it.
-        auto* operation = impl_->findOperation(operationId);
-        if (!operation || operation->isCompletedState())
-            continue;
-        // What the completion will say, so the card does not show the other outcome until then.
-        operation->card().keptPartialFiles(
-            operation->card().keepsPartialFilesOnCancel(partialFiles == CancelAllPartialFiles::Kept)
-        );
-        operation->state(SharedData::OperationState::Canceled);
+        canceled.push_back(card.operationId);
+        if (auto* operation = impl_->findOperation(card.operationId))
+            showCanceled(*operation, card.keepsPartialFiles);
     }
-    if (before.kept.empty())
-        return;
-    std::vector<Ids::OperationId> kept{before.kept.begin(), before.kept.end()};
-    if (partialFiles != CancelAllPartialFiles::Deleted)
-        return forgetKeptInBackend(std::move(kept));
-    if (!impl_->fileEngine)
+    // The local operations among them are not in the queue of the session, their cards hear of the end as well.
+    LocalOperationRouter::instance().cancelShownIn(*this, canceled);
+
+    forgetKeptInBackend(outcome.forgotten);
+    if (outcome.discarded.empty() || !impl_->fileEngine)
         return;
     impl_->fileEngine->discardKept(
-        kept,
-        [count = kept.size()](bool success, std::string const& info)
+        outcome.discarded,
+        [count = outcome.discarded.size()](bool success, std::string const& info)
         {
             if (!success)
                 Log::error("Cannot delete the partial files of {} canceled transfer(s): {}", count, info);
@@ -2109,17 +2129,35 @@ void OperationQueue::showCancelAll(CancelAllPartialFiles partialFiles, CardsBefo
 
 void OperationQueue::forgetKeptInBackend(std::vector<Ids::OperationId> operationIds)
 {
-    if (!isActive())
+    if (operationIds.empty())
         return;
     const auto count = operationIds.size();
+    if (isActive())
+    {
+        Nui::RpcClient::callWithBackChannel(
+            fmt::format("OperationQueue::{}::forgetKept", impl_->sessionId.value()),
+            [count](SharedData::ErrorOrSuccess<> const& result)
+            {
+                if (!result)
+                    Log::error("Cannot forget {} canceled transfer(s): {}", count, result.error.value());
+            },
+            std::move(operationIds)
+        );
+        return;
+    }
+    Nui::val ids = Nui::val::array();
+    for (auto const& operationId : operationIds)
+        ids.call<void>("push", operationId.value());
+    Nui::val parameters = Nui::val::object();
+    parameters.set("operationIds", ids);
     Nui::RpcClient::callWithBackChannel(
-        fmt::format("OperationQueue::{}::forgetKept", impl_->sessionId.value()),
-        [count](SharedData::ErrorOrSuccess<> const& result)
+        "SessionManager::forgetKeptTransfers",
+        [count](Nui::val reply)
         {
-            if (!result)
-                Log::error("Cannot forget {} canceled transfer(s): {}", count, result.error.value());
+            if (reply.hasOwnProperty("error"))
+                Log::error("Cannot forget {} canceled transfer(s): {}", count, reply["error"].as<std::string>());
         },
-        std::move(operationIds)
+        parameters
     );
 }
 
@@ -2554,7 +2592,8 @@ Nui::ElementRenderer OperationQueue::operator()()
                                 event.call<void>("stopPropagation");
                                 openCancelMenu(anchorId, true, [this](bool keepPartialFiles) {
                                     askBackendToCancelAll(
-                                        keepPartialFiles ? CancelAllPartialFiles::Kept : CancelAllPartialFiles::Deleted
+                                        keepPartialFiles ? SharedData::PartialFilesOnCancel::Kept
+                                                         : SharedData::PartialFilesOnCancel::Deleted
                                     );
                                 });
                             }

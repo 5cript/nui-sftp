@@ -80,6 +80,15 @@ class Operation
     }
 
     /**
+     * @brief The next cancel deletes the partial files like a transfer with doCleanup on, whatever the options say.
+     *        Called before cancel(true).
+     */
+    virtual void deletePartialFiles()
+    {
+        /* noop */
+    }
+
+    /**
      * @brief What a cancel leaves to continue, nothing for an operation that deletes its partial files on cancel or
      *        transfers no files.
      */

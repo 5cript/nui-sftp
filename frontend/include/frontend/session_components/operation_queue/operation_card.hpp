@@ -82,11 +82,6 @@ class OperationCard : public OperationCardInterface
         if (isCompletedState())
         {
             completionTime_ = std::chrono::steady_clock::now();
-            auto elem = cardElement_.lock();
-            if (elem)
-            {
-                elem->val().call<void>("scrollIntoView");
-            }
             if (onCompleteAction_)
             {
                 onCompleteAction_();
@@ -98,6 +93,12 @@ class OperationCard : public OperationCardInterface
     SharedData::OperationState state() const override
     {
         return state_.value();
+    }
+
+    void reveal() const override
+    {
+        if (const auto element = cardElement_.lock())
+            element->val().call<void>("scrollIntoView");
     }
 
     SharedData::OperationType type() const override

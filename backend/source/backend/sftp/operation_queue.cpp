@@ -769,10 +769,21 @@ void OperationQueue::discardKept(
     );
 }
 
-void OperationQueue::forgetKept(Ids::OperationId const& id)
+void OperationQueue::forgetKept(Ids::OperationId id)
 {
-    if (keptTransfers_->take(id))
-        Log::info("OperationQueue: forgot the kept transfer '{}', its partial files stay.", id.value());
+    onStrand(
+        [id = std::move(id)](OperationQueue& self)
+        {
+            self.onOperation(
+                id,
+                [&self, id]()
+                {
+                    if (self.keptTransfers_->take(id))
+                        Log::info("OperationQueue: forgot the kept transfer '{}', its partial files stay.", id.value());
+                }
+            );
+        }
+    );
 }
 
 void OperationQueue::cancelUpload(Ids::OperationId id, UploadOperation::PartialFile partial)
@@ -863,6 +874,8 @@ void OperationQueue::completeCancelledByUser(
 {
     if (partialFiles == PartialFilesOnCancel::Kept)
         operation.keepPartialFiles();
+    else if (partialFiles == PartialFilesOnCancel::Deleted)
+        operation.deletePartialFiles();
     std::ignore = operation.cancel(true);
     auto completed = makeCompletedOperation(OperationQueue::CompletionReason::Canceled, id, operation);
     completed.keptPartialFiles = rememberKeptPartialFiles(id, operation);
@@ -3112,13 +3125,13 @@ void OperationQueue::registerRpc()
 
     on(rpcName("cancelAll"))
         .perform(
-            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, bool keepPartialFiles)
+            [weak = weak_from_this()](RpcHelper::RpcOnce&& reply, PartialFilesOnCancel partialFiles)
             {
                 auto self = weak.lock();
                 if (!self)
                     return reply(SharedData::error("OperationQueue no longer exists"));
 
-                self->cancelAll(partialFilesOnCancel(keepPartialFiles));
+                self->cancelAll(partialFiles);
                 return reply(SharedData::success());
             }
         );

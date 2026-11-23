@@ -62,6 +62,7 @@ class BulkUploadOperation : public BulkTransferOperation
     std::optional<SharedData::BulkUploadRequest> resumeRequest(SharedData::BulkUploadRequest request) const;
 
     void keepPartialFiles() override;
+    void deletePartialFiles() override;
 
     /**
      * @brief The temporary files of the entries it has not finished, see unfinishedEntryIndices. Nothing when its

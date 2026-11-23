@@ -87,6 +87,7 @@ class BulkTransferOperation : public Operation
     std::expected<void, Error> cancel(bool adoptCancelState) override;
     void pause(bool doPause) override;
     void keepPartialFiles() override;
+    void deletePartialFiles() override;
     RemoteIo::ProcessingStrand* strand() const override;
 
     // The scan phase blocks on SFTP futures, so it runs off the strand like a standalone scan.
@@ -415,8 +416,11 @@ class BulkTransferOperation : public Operation
     std::deque<std::size_t> deferred_{};
     bool retryDeferred_{true};
     bool bufferShortageLogged_{false};
-    /** @brief A cancel keeps the partial files of the children, see keepPartialFiles. */
-    bool keepPartialFiles_{false};
+    /**
+     * @brief Whether a cancel keeps the partial files of the children, see keepPartialFiles and deletePartialFiles.
+     *        Nothing leaves it to their options.
+     */
+    std::optional<bool> childrenKeepPartialFiles_{};
     /** @brief The release count the queue waits beyond for a buffer, see wakeOnBufferRelease. */
     std::optional<std::size_t> awaitedRelease_{};
     std::size_t cursor_{0};

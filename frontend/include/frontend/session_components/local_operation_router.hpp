@@ -59,6 +59,11 @@ class LocalOperationRouter
      */
     void cancelHostedBy(OperationQueue const& queue);
 
+    /**
+     * @brief Cancels those of @p operationIds that are shown in @p queue. Their cards stay and hear of the end.
+     */
+    void cancelShownIn(OperationQueue const& queue, std::vector<Ids::OperationId> const& operationIds);
+
   private:
     LocalOperationRouter();
 
