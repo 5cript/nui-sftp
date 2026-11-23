@@ -182,6 +182,7 @@ class UploadOperation : public Operation
 
     void pause(bool doPause) override;
     void keepPartialFiles() override;
+    void deletePartialFiles() override;
     std::optional<KeptPartialFiles> keptPartialFiles() const override;
 
     std::expected<void, Error> prepare();

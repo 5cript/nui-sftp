@@ -263,6 +263,13 @@ class SessionManager
     void registerRpcDiscardBulkResume();
 
     /**
+     * @brief Handles "SessionManager::forgetKeptTransfers" with {operationIds}: takes the transfers that kept their
+     *        partial files out of the registry, the files stay. For a card that goes while no session is connected,
+     *        a connected one asks its queue, see OperationQueue::forgetKept.
+     */
+    void registerRpcForgetKeptTransfers();
+
+    /**
      * @brief Handles "FileTracking::countOrphaned" with {count} and "FileTracking::forceCleanup" with {removed}: the
      *        instance directories no live process holds, which the latter removes.
      */

@@ -1,4 +1,5 @@
 #include "test_attention_state.hpp"
+#include "test_cancel_all.hpp"
 #include "test_drop_text.hpp"
 #include "test_file_tracking_texts.hpp"
 #include "test_in_flight_row_list.hpp"

@@ -912,6 +912,11 @@ void DownloadOperation::keepPartialFiles()
     options_.doCleanup = false;
 }
 
+void DownloadOperation::deletePartialFiles()
+{
+    options_.doCleanup = true;
+}
+
 std::optional<Operation::KeptPartialFiles> DownloadOperation::keptPartialFiles() const
 {
     if (options_.doCleanup)

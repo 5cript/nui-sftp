@@ -44,7 +44,8 @@ struct KeptTransfer
 /**
  * @brief Process-lifetime store of the transfers canceled keeping their partial files, keyed by operation id. Owned by
  *        SessionManager and shared by the queues of its sessions, so a card can continue or discard after a reconnect
- *        replaced the session that canceled it. Entries stay until a continue or discard takes them. Thread-safe.
+ *        replaced the session that canceled it. Entries stay until a continue, a discard or a card that is removed
+ *        alone takes them. Thread-safe.
  */
 class KeptTransferRegistry
 {

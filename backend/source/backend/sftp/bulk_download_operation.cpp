@@ -274,6 +274,12 @@ void BulkDownloadOperation::keepPartialFiles()
     BulkTransferOperation::keepPartialFiles();
 }
 
+void BulkDownloadOperation::deletePartialFiles()
+{
+    individualOptions_.doCleanup = true;
+    BulkTransferOperation::deletePartialFiles();
+}
+
 std::optional<Operation::KeptPartialFiles> BulkDownloadOperation::keptPartialFiles() const
 {
     if (individualOptions_.doCleanup)

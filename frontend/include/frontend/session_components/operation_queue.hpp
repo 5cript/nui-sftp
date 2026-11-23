@@ -5,7 +5,9 @@
 #include <frontend/events/frontend_events.hpp>
 #include <frontend/terminal/file_engine.hpp>
 #include <frontend/resumable_op.hpp>
+#include <frontend/session_components/operation_queue/cancel_all.hpp>
 
+#include <shared_data/file_operations/partial_files_on_cancel.hpp>
 #include <shared_data/file_operations/transfer_progress.hpp>
 #include <shared_data/file_operations/bulk_progress.hpp>
 #include <shared_data/file_operations/bulk_delete_progress.hpp>
@@ -370,46 +372,24 @@ class OperationQueue
     void cancelAll();
     void togglePause();
     /**
-     * @brief What Cancel All does with partial files.
+     * @brief Cancels every operation and removes the cards that ended before, see showCancelAll. The partial files of
+     *        the transfers it cancels go as @p partialFiles says: as their doCleanup option says, all of them, or none.
      */
-    enum class CancelAllPartialFiles
-    {
-        /** @brief Those of the transfers it cancels go as their doCleanup option says, those kept before stay. */
-        AsConfigured,
-        /** @brief Like AsConfigured, and those kept before are deleted too. */
-        Deleted,
-        /** @brief Those of the transfers it cancels and those kept before stay. */
-        Kept,
-    };
+    void askBackendToCancelAll(
+        SharedData::PartialFilesOnCancel partialFiles = SharedData::PartialFilesOnCancel::AsConfigured
+    );
 
     /**
-     * @brief The cards of the queue when Cancel All was asked for, see showCancelAll.
+     * @brief Shows what a Cancel All did, see CancelAll::outcome: the operations it canceled stay as canceled cards,
+     *        the cards that ended before go. Of those, the ones that kept their partial files lose them only when
+     *        @p partialFiles is Deleted.
      */
-    struct CardsBeforeCancelAll
-    {
-        using OperationIds = std::unordered_set<Ids::OperationId, Ids::IdHash>;
-
-        /** @brief Not ended yet. */
-        OperationIds active{};
-        /** @brief Ended, the ones that kept their partial files included. */
-        OperationIds ended{};
-        /** @brief Canceled keeping their partial files. */
-        OperationIds kept{};
-    };
+    void showCancelAll(SharedData::PartialFilesOnCancel partialFiles, CancelAll::CardsBefore const& before);
 
     /**
-     * @brief Cancels every operation and removes the cards that ended before, see showCancelAll.
-     */
-    void askBackendToCancelAll(CancelAllPartialFiles partialFiles = CancelAllPartialFiles::AsConfigured);
-
-    /**
-     * @brief Shows what a Cancel All did: the operations it canceled stay as canceled cards, the cards that ended
-     *        before go. Of those, the ones that kept their partial files lose them only when @p partialFiles says so.
-     */
-    void showCancelAll(CancelAllPartialFiles partialFiles, CardsBeforeCancelAll const& before);
-
-    /**
-     * @brief Makes the backend forget the kept transfers @p operationIds, their partial files stay.
+     * @brief Makes the backend forget the kept transfers @p operationIds, their partial files stay. The queue of the
+     *        session is asked while connected, it orders this behind a cancel that is still on its way. Without a
+     *        session the registry of the kept transfers is asked, which outlives the sessions.
      */
     void forgetKeptInBackend(std::vector<Ids::OperationId> operationIds);
 

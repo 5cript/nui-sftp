@@ -33,6 +33,21 @@ namespace
         }
     }
 
+    void cancelInBackend(Ids::OperationId const& operationId)
+    {
+        Nui::RpcClient::callWithBackChannel(
+            "LocalOperationQueue::cancel",
+            [operationId](SharedData::ErrorOrSuccess<> const& result)
+            {
+                if (!result)
+                    Log::warn(
+                        "Failed to cancel the local operation '{}': {}", operationId.value(), result.error.value()
+                    );
+            },
+            operationId
+        );
+    }
+
     /**
      * @brief Tells the user how a local operation of @p type ended that no queue showed.
      */
@@ -171,20 +186,20 @@ void LocalOperationRouter::cancelHostedBy(OperationQueue const& queue)
             auto const& [operationId, routed] = entry;
             if (routed.host != &queue)
                 return false;
-            Nui::RpcClient::callWithBackChannel(
-                "LocalOperationQueue::cancel",
-                [operationId](SharedData::ErrorOrSuccess<> const& result)
-                {
-                    if (!result)
-                        Log::warn(
-                            "Failed to cancel the local operation '{}': {}", operationId.value(), result.error.value()
-                        );
-                },
-                operationId
-            );
+            cancelInBackend(operationId);
             return true;
         }
     );
+}
+
+void LocalOperationRouter::cancelShownIn(OperationQueue const& queue, std::vector<Ids::OperationId> const& operationIds)
+{
+    for (auto const& operationId : operationIds)
+    {
+        const auto found = routed_.find(operationId);
+        if (found != routed_.end() && found->second.host == &queue)
+            cancelInBackend(operationId);
+    }
 }
 
 void LocalOperationRouter::onOperationAdded(SharedData::OperationAdded const& added)
