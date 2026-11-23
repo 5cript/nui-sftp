@@ -2073,9 +2073,9 @@ void OperationQueue::askBackendToCancelAll(SharedData::PartialFilesOnCancel part
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         lifetime_.guarded(
-            [this, partialFiles, before = CancelAll::cardsBefore(impl_->cancelAllCards())](
-                SharedData::ErrorOrSuccess<> const& result
-            )
+            [this,
+                partialFiles,
+                before = CancelAll::cardsBefore(impl_->cancelAllCards())](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (result)
                 {
