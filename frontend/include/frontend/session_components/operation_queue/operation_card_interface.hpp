@@ -51,6 +51,8 @@ class OperationCardInterface
         std::function<void(std::string const& anchorId)> openCancelMenu{};
         std::function<void()> continueTransfer{};
         std::function<void()> discardPartialFiles{};
+        /** @brief Opens the menu of the ways to remove a card that kept its partial files. */
+        std::function<void(std::string const& anchorId)> openRemoveMenu{};
     };
     virtual void setPartialFileHandlers(PartialFileHandlers handlers) = 0;
 

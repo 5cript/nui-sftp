@@ -417,8 +417,14 @@ class OperationCard : public OperationCardInterface
         return fmt::format("opq-cancel-more-{}", operationId_.value());
     }
 
+    std::string removeMenuAnchorId() const
+    {
+        return fmt::format("opq-remove-more-{}", operationId_.value());
+    }
+
     /**
-     * @brief The buttons at the end of the card: continue and discard for a transfer that kept its partial files, a
+     * @brief The buttons at the end of the card: continue and discard for a transfer that kept its partial files, with
+     *        the menu to remove the card alone next to discard, a
      *        quiet remove for an ended operation, cancel otherwise, with the cancel menu next to it for a transfer that
      *        deletes its partial files. The label of cancel hides in a narrow queue, see operation_queue.css.
      */
@@ -453,15 +459,30 @@ class OperationCard : public OperationCardInterface
                     },
                     .styleVariant = ScriptNuiComponents::StyleVariant::Success,
                 }),
-                button{
-                    class_ = "opq-btn opq-discard-btn",
-                    Nui::Attributes::title = language->get("operationQueue", "discardKept"),
-                    "aria-label"_attr = language->get("operationQueue", "discardKept"),
-                    onClick = [this](){
-                        if (partialFileHandlers_.discardPartialFiles)
-                            partialFileHandlers_.discardPartialFiles();
-                    }
-                }(Ui5Icons::delete_())
+                div{
+                    class_ = "opq-cancel-split"
+                }(
+                    button{
+                        class_ = "opq-btn opq-discard-btn",
+                        Nui::Attributes::title = language->get("operationQueue", "discardKept"),
+                        "aria-label"_attr = language->get("operationQueue", "discardKept"),
+                        onClick = [this](){
+                            if (partialFileHandlers_.discardPartialFiles)
+                                partialFileHandlers_.discardPartialFiles();
+                        }
+                    }(Ui5Icons::delete_()),
+                    button{
+                        class_ = "opq-cancel-more",
+                        id = removeMenuAnchorId(),
+                        Nui::Attributes::title = language->get("operationQueue", "moreRemoveOptions"),
+                        "aria-label"_attr = language->get("operationQueue", "moreRemoveOptions"),
+                        onClick = [this](Nui::val event){
+                            event.call<void>("stopPropagation");
+                            if (partialFileHandlers_.openRemoveMenu)
+                                partialFileHandlers_.openRemoveMenu(removeMenuAnchorId());
+                        }
+                    }(Ui5Icons::slim_arrow_down())
+                )
             );
         }
         if (isCompletedState())

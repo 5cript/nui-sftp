@@ -226,25 +226,30 @@ struct OperationQueue::Implementation
     }
 
     /**
-     * @brief The cards of transfers canceled keeping their partial files.
+     * @brief The live and history cards, sorted by how far they are.
      */
-    std::unordered_set<Ids::OperationId, Ids::IdHash> keptOperationIds()
+    CardsBeforeCancelAll cardsBeforeCancelAll()
     {
-        std::unordered_set<Ids::OperationId, Ids::IdHash> kept{};
-        for (auto* cards : {&operations, &priorityOperations})
+        CardsBeforeCancelAll cards{};
+        const auto sort = [&cards](auto const& operation)
         {
-            for (auto const& operation : cards->observedValues().value())
+            if (!operation.isCompletedState())
             {
-                if (operation->keptPartialFiles())
-                    kept.insert(operation->key());
+                cards.active.insert(operation.key());
+                return;
             }
+            cards.ended.insert(operation.key());
+            if (operation.keptPartialFiles())
+                cards.kept.insert(operation.key());
+        };
+        for (auto* live : {&operations, &priorityOperations})
+        {
+            for (auto const& operation : live->observedValues().value())
+                sort(*operation);
         }
         for (auto const& entry : history)
-        {
-            if (entry->keptPartialFiles())
-                kept.insert(entry->key());
-        }
-        return kept;
+            sort(*entry);
+        return cards;
     }
 
     /**
@@ -1129,6 +1134,11 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             [this, opId = added.operationId]()
         {
             discardKept(opId);
+        },
+        .openRemoveMenu =
+            [this, opId = added.operationId](std::string const& anchorId)
+        {
+            openRemoveKeptMenu(anchorId, opId);
         },
     });
     // A continuation comes back under the id of the card that kept its partial files and takes its place.
@@ -2032,60 +2042,84 @@ void OperationQueue::togglePause()
     );
 }
 
-void OperationQueue::askBackendToCancelAll(bool keepPartialFiles)
+void OperationQueue::askBackendToCancelAll(CancelAllPartialFiles partialFiles)
 {
     if (!isActive())
     {
         cancelAll();
         return;
     }
-    // Taken now: a completion of this cancel may turn more cards into kept ones before the reply.
+    // Taken now: the completions of this cancel may come before the reply.
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         lifetime_.guarded(
-            [this, keepPartialFiles, keptBefore = impl_->keptOperationIds()](SharedData::ErrorOrSuccess<> const& result)
+            [this, partialFiles, before = impl_->cardsBeforeCancelAll()](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (result)
                 {
                     Log::info("Operation queue all was canceled");
-                    removeCardsCanceledByAll(keepPartialFiles, keptBefore);
+                    showCancelAll(partialFiles, before);
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 }
                 else
                     Log::error("Failed to cancel all operation queue: {}", result.error.value());
             }
         ),
-        keepPartialFiles
+        partialFiles == CancelAllPartialFiles::Kept
     );
 }
 
-void OperationQueue::removeCardsCanceledByAll(
-    bool keepPartialFiles,
-    std::unordered_set<Ids::OperationId, Ids::IdHash> const& keptBefore
-)
+void OperationQueue::showCancelAll(CancelAllPartialFiles partialFiles, CardsBeforeCancelAll const& before)
 {
     LocalOperationRouter::instance().cancelHostedBy(*this);
     impl_->eraseOperationsIf(
-        [&](DisplayedOperation& operation)
+        [&before](DisplayedOperation& operation)
         {
-            if (keptBefore.contains(operation.key()))
-                return !keepPartialFiles;
-            if (operation.isCompletedState())
-                return !operation.keptPartialFiles();
-            return !operation.card().keepsPartialFilesOnCancel(keepPartialFiles);
+            return before.ended.contains(operation.key());
         }
     );
-    if (keepPartialFiles || keptBefore.empty())
+    for (auto const& operationId : before.active)
+    {
+        // A completion that came first said what became of it.
+        auto* operation = impl_->findOperation(operationId);
+        if (!operation || operation->isCompletedState())
+            continue;
+        // What the completion will say, so the card does not show the other outcome until then.
+        operation->card().keptPartialFiles(
+            operation->card().keepsPartialFilesOnCancel(partialFiles == CancelAllPartialFiles::Kept)
+        );
+        operation->state(SharedData::OperationState::Canceled);
+    }
+    if (before.kept.empty())
         return;
-    // Their partial files stay, the backend only stops holding what continues them.
+    std::vector<Ids::OperationId> kept{before.kept.begin(), before.kept.end()};
+    if (partialFiles != CancelAllPartialFiles::Deleted)
+        return forgetKeptInBackend(std::move(kept));
+    if (!impl_->fileEngine)
+        return;
+    impl_->fileEngine->discardKept(
+        kept,
+        [count = kept.size()](bool success, std::string const& info)
+        {
+            if (!success)
+                Log::error("Cannot delete the partial files of {} canceled transfer(s): {}", count, info);
+        }
+    );
+}
+
+void OperationQueue::forgetKeptInBackend(std::vector<Ids::OperationId> operationIds)
+{
+    if (!isActive())
+        return;
+    const auto count = operationIds.size();
     Nui::RpcClient::callWithBackChannel(
         fmt::format("OperationQueue::{}::forgetKept", impl_->sessionId.value()),
-        [count = keptBefore.size()](SharedData::ErrorOrSuccess<> const& result)
+        [count](SharedData::ErrorOrSuccess<> const& result)
         {
             if (!result)
                 Log::error("Cannot forget {} canceled transfer(s): {}", count, result.error.value());
         },
-        std::vector<Ids::OperationId>{keptBefore.begin(), keptBefore.end()}
+        std::move(operationIds)
     );
 }
 
@@ -2148,6 +2182,37 @@ void OperationQueue::discardKept(Ids::OperationId const& operationId)
             }
         )
     );
+}
+
+void OperationQueue::removeKept(Ids::OperationId const& operationId)
+{
+    impl_->eraseOperation(operationId);
+    forgetKeptInBackend({operationId});
+    Nui::globalEventContext.executeActiveEventsImmediately();
+}
+
+void OperationQueue::openRemoveKeptMenu(std::string const& anchorId, Ids::OperationId const& operationId)
+{
+    namespace Snc = ScriptNuiComponents;
+    impl_->cancelMenu.setItems({
+        Snc::PopupMenu::item(
+            language->get("operationQueue", "discardKept"),
+            Svgs::deleteIcon(),
+            [this, operationId]()
+            {
+                discardKept(operationId);
+            }
+        ),
+        Snc::PopupMenu::item(
+            language->get("operationQueue", "removeKeepingPartialFiles"),
+            Svgs::pause(),
+            [this, operationId]()
+            {
+                removeKept(operationId);
+            }
+        ),
+    });
+    impl_->cancelMenu.openNextTo(anchorId);
 }
 
 void OperationQueue::changeAutoClean(bool doClean)
@@ -2488,7 +2553,9 @@ Nui::ElementRenderer OperationQueue::operator()()
                                 // The outside click listener of the menu opened before would close this one at once.
                                 event.call<void>("stopPropagation");
                                 openCancelMenu(anchorId, true, [this](bool keepPartialFiles) {
-                                    askBackendToCancelAll(keepPartialFiles);
+                                    askBackendToCancelAll(
+                                        keepPartialFiles ? CancelAllPartialFiles::Kept : CancelAllPartialFiles::Deleted
+                                    );
                                 });
                             }
                         }(Ui5Icons::slim_arrow_down())
