@@ -62,20 +62,18 @@ class OperationCardInterface
     virtual void setPartialFileHandlers(PartialFileHandlers handlers) = 0;
 
     /**
-     * @brief Whether a cancel deletes the partial files of the transfer, unknown for other operations. A card that
-     *        deletes them offers to keep them too.
+     * @brief Whether a cancel can keep the partial files of the operation: it is a transfer and no archive, which
+     *        nothing continues.
      */
-    virtual void deletesPartialFilesOnCancel(std::optional<bool> deletes) = 0;
-    virtual std::optional<bool> deletesPartialFilesOnCancel() const = 0;
+    virtual void canKeepPartialFiles(bool canKeep) = 0;
 
     /**
-     * @brief A cancel deletes the partial files of the transfer and can keep them instead: it is no archive, which
-     *        nothing continues.
+     * @brief A cancel deletes the partial files of the transfer and can keep them instead, see canKeepPartialFiles.
      */
     virtual bool offersToKeepPartialFiles() const = 0;
 
     /**
-     * @brief Whether a cancel keeps the partial files, asked to keep them when @p keepRequested is set.
+     * @brief Whether a cancel keeps the partial files: it is asked to with @p keepRequested and the operation can.
      */
     virtual bool keepsPartialFilesOnCancel(bool keepRequested) const = 0;
 

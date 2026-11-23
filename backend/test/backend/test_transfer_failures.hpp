@@ -194,6 +194,33 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(localPath.generic_string() + ".filepart"));
     }
 
+    TEST_F(TransferFailureTests, AFailedDownloadKeepsItsPartialFileOnlyWithoutCleanup)
+    {
+        for (const bool doCleanup : {true, false})
+        {
+            CREATE_SERVER_AND_JOINER(sftpServer);
+            ASSERT_TRUE(serverStartResult->command("failReadsAfter", {{"bytes", 20000}}));
+            auto [_, sftp] = createSftpSession(serverStartResult->port);
+
+            const auto localPath = localDirectory_.path() / (doCleanup ? "cleaned.txt" : "kept.txt");
+            const auto partial = localPath.generic_string() + ".filepart";
+            {
+                DownloadOperation operation{
+                    sftp,
+                    {
+                        .remotePath = remote("/home/test/large.txt"),
+                        .localPath = toLocal(localPath),
+                        .doCleanup = doCleanup,
+                        .bigFileOptimized = true,
+                    }
+                };
+                ASSERT_FALSE(runToEnd(operation).has_value()) << doCleanup;
+            }
+            EXPECT_FALSE(std::filesystem::exists(localPath)) << doCleanup;
+            EXPECT_EQ(std::filesystem::exists(partial), !doCleanup) << doCleanup;
+        }
+    }
+
     TEST_F(TransferFailureTests, AsyncDownloadConnectionDropKeepsExistingFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

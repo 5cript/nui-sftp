@@ -809,7 +809,7 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(partial));
     }
 
-    TEST_F(OperationQueueTests, CancelAllDeletingPartialFilesDeletesThoseOfADownloadWithoutCleanup)
+    TEST_F(OperationQueueTests, CancelAllDeletesThePartialFileOfADownloadThatKeepsItOnFailure)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         ASSERT_TRUE(
@@ -838,7 +838,7 @@ namespace Test
         EXPECT_EQ(keptTransfers_->size(), 0u);
     }
 
-    TEST_F(OperationQueueTests, ACanceledDownloadDeletesItsPartialFileAsConfigured)
+    TEST_F(OperationQueueTests, ACanceledDownloadDeletesItsPartialFile)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         ASSERT_TRUE(
@@ -862,7 +862,7 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(partial));
     }
 
-    TEST_F(OperationQueueTests, ADownloadWithoutCleanupKeepsItsPartialFileOnAPlainCancel)
+    TEST_F(OperationQueueTests, ADownloadThatKeepsItsPartialFileOnFailureDeletesItOnAPlainCancel)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
         ASSERT_TRUE(
@@ -885,8 +885,9 @@ namespace Test
         });
         workUntilCompletions(1);
         ASSERT_EQ(completions().size(), 1u);
-        EXPECT_TRUE(completions().front().keptPartialFiles);
-        EXPECT_TRUE(std::filesystem::exists(partial));
+        EXPECT_FALSE(completions().front().keptPartialFiles);
+        EXPECT_FALSE(std::filesystem::exists(partial));
+        EXPECT_EQ(keptTransfers_->size(), 0u);
     }
 
     TEST_F(OperationQueueTests, AnUploadCanceledKeepingItsPartialFileLeavesItOnTheServerUntilItIsDiscarded)

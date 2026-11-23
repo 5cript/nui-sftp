@@ -9,12 +9,13 @@ What a cancel in the operation queue does with the partial file of a transfer an
 | ES | deleted | stays in the queue |
 | ER | deleted | removed from the queue |
 
-The tables assume that "Delete Partial Files" is on in the download and upload options, which is the default. With
-it off a plain cancel and a plain Cancel All keep the partial file (KS), and the card has no menu to choose. The menu
-next to Cancel All shows once a transfer with the option on was queued. Its two entries decide for every transfer they
-cancel, whatever the option says.
+No setting changes what a cancel does, the choice is made per cancel. The menu next to Cancel All shows once a
+transfer that can keep its partial file was queued.
 
 An archive transfer never keeps its partial archive, nothing continues it. Every cancel of one gives ES.
+
+A transfer that fails is no cancel: a failed upload keeps its partial file, a failed download deletes it unless
+"Delete Partial Files on Failure" is off in the download options.
 
 ## Single operation
 

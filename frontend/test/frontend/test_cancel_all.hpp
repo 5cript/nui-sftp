@@ -12,22 +12,12 @@ namespace CancelAll::Test
 {
     namespace CancelAllTestDetail
     {
-        using SharedData::PartialFilesOnCancel;
-
         /**
-         * @brief A transfer that is not ended, with "Delete Partial Files" on.
+         * @brief A transfer that is not ended.
          */
         inline Card running(std::string const& name)
         {
             return Card{.operationId = Ids::makeOperationId(name), .keepsWhenAsked = true};
-        }
-
-        /**
-         * @brief A transfer that is not ended, with "Delete Partial Files" off.
-         */
-        inline Card runningWithoutCleanup(std::string const& name)
-        {
-            return Card{.operationId = Ids::makeOperationId(name), .keepsWhenAsked = true, .keepsAsConfigured = true};
         }
 
         /**
@@ -94,27 +84,27 @@ namespace CancelAll::Test
     {
         using namespace CancelAllTestDetail;
         const std::vector<Card> cards{running("r"), ended("e"), kept("k")};
-        const auto result = outcome(PartialFilesOnCancel::AsConfigured, cardsBefore(cards), cards);
+        const auto result = outcome(Variant::Plain, cardsBefore(cards), cards);
         EXPECT_EQ(names(result.canceled), (Names{"r"}));
         EXPECT_EQ(names(result.removed), (Names{"e", "k"}));
         EXPECT_EQ(names(result.forgotten), (Names{"k"}));
         EXPECT_EQ(names(result.discarded), (Names{}));
     }
 
-    TEST(CancelAllTests, APlainCancelAllKeepsThePartialFilesOfATransferWithoutCleanup)
+    TEST(CancelAllTests, OnlyKeepingPartialFilesAsksTheBackendToKeepThem)
     {
-        using namespace CancelAllTestDetail;
-        const std::vector<Card> cards{running("r"), runningWithoutCleanup("w")};
-        const auto result = outcome(PartialFilesOnCancel::AsConfigured, cardsBefore(cards), cards);
-        EXPECT_EQ(names(result.canceled), (Names{"r", "w+kept"}));
+        using SharedData::PartialFilesOnCancel;
+        EXPECT_EQ(partialFilesOnCancel(Variant::Plain), PartialFilesOnCancel::Deleted);
+        EXPECT_EQ(partialFilesOnCancel(Variant::DeletingPartialFiles), PartialFilesOnCancel::Deleted);
+        EXPECT_EQ(partialFilesOnCancel(Variant::KeepingPartialFiles), PartialFilesOnCancel::Kept);
     }
 
     TEST(CancelAllTests, DeletingPartialFilesDiscardsTheKeptOnesAndKeepsNone)
     {
         using namespace CancelAllTestDetail;
-        const std::vector<Card> cards{running("r"), runningWithoutCleanup("w"), ended("e"), kept("k")};
-        const auto result = outcome(PartialFilesOnCancel::Deleted, cardsBefore(cards), cards);
-        EXPECT_EQ(names(result.canceled), (Names{"r", "w"}));
+        const std::vector<Card> cards{running("r"), ended("e"), kept("k")};
+        const auto result = outcome(Variant::DeletingPartialFiles, cardsBefore(cards), cards);
+        EXPECT_EQ(names(result.canceled), (Names{"r"}));
         EXPECT_EQ(names(result.removed), (Names{"e", "k"}));
         EXPECT_EQ(names(result.forgotten), (Names{}));
         EXPECT_EQ(names(result.discarded), (Names{"k"}));
@@ -124,7 +114,7 @@ namespace CancelAll::Test
     {
         using namespace CancelAllTestDetail;
         const std::vector<Card> cards{running("r"), runningArchive("a"), ended("e"), kept("k")};
-        const auto result = outcome(PartialFilesOnCancel::Kept, cardsBefore(cards), cards);
+        const auto result = outcome(Variant::KeepingPartialFiles, cardsBefore(cards), cards);
         EXPECT_EQ(names(result.canceled), (Names{"r+kept", "a"}));
         EXPECT_EQ(names(result.removed), (Names{"e", "k"}));
         EXPECT_EQ(names(result.forgotten), (Names{"k"}));
@@ -135,10 +125,9 @@ namespace CancelAll::Test
     {
         using namespace CancelAllTestDetail;
         const auto before = cardsBefore({running("r"), running("s")});
-        for (const auto partialFiles :
-             {PartialFilesOnCancel::AsConfigured, PartialFilesOnCancel::Deleted, PartialFilesOnCancel::Kept})
+        for (const auto variant : {Variant::Plain, Variant::DeletingPartialFiles, Variant::KeepingPartialFiles})
         {
-            const auto result = outcome(partialFiles, before, {kept("r"), ended("s")});
+            const auto result = outcome(variant, before, {kept("r"), ended("s")});
             EXPECT_EQ(names(result.canceled), (Names{}));
             EXPECT_EQ(names(result.removed), (Names{}));
             EXPECT_EQ(names(result.forgotten), (Names{}));
@@ -150,10 +139,9 @@ namespace CancelAll::Test
     {
         using namespace CancelAllTestDetail;
         const auto before = cardsBefore({kept("k")});
-        for (const auto partialFiles :
-             {PartialFilesOnCancel::AsConfigured, PartialFilesOnCancel::Deleted, PartialFilesOnCancel::Kept})
+        for (const auto variant : {Variant::Plain, Variant::DeletingPartialFiles, Variant::KeepingPartialFiles})
         {
-            const auto result = outcome(partialFiles, before, {running("k")});
+            const auto result = outcome(variant, before, {running("k")});
             EXPECT_EQ(names(result.canceled), (Names{}));
             EXPECT_EQ(names(result.removed), (Names{}));
             EXPECT_EQ(names(result.forgotten), (Names{}));
@@ -165,7 +153,7 @@ namespace CancelAll::Test
     {
         using namespace CancelAllTestDetail;
         const auto before = cardsBefore({running("r")});
-        const auto result = outcome(PartialFilesOnCancel::AsConfigured, before, {running("r"), running("n"), ended("m")});
+        const auto result = outcome(Variant::Plain, before, {running("r"), running("n"), ended("m")});
         EXPECT_EQ(names(result.canceled), (Names{"r"}));
         EXPECT_EQ(names(result.removed), (Names{}));
     }
@@ -174,9 +162,9 @@ namespace CancelAll::Test
     {
         using namespace CancelAllTestDetail;
         const auto before = cardsBefore({kept("k")});
-        for (const auto partialFiles : {PartialFilesOnCancel::AsConfigured, PartialFilesOnCancel::Deleted})
+        for (const auto variant : {Variant::Plain, Variant::DeletingPartialFiles})
         {
-            const auto result = outcome(partialFiles, before, {});
+            const auto result = outcome(variant, before, {});
             EXPECT_EQ(names(result.removed), (Names{}));
             EXPECT_EQ(names(result.forgotten), (Names{}));
             EXPECT_EQ(names(result.discarded), (Names{}));

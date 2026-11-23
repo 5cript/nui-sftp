@@ -110,4 +110,6 @@ class BulkUploadOperation : public BulkTransferOperation
 
   private:
     UploadOperation::UploadOperationOptions individualOptions_;
+    /** @brief A cancel keeps the partial files of the entries it has not finished, see keepPartialFiles. */
+    bool keepsPartialFiles_{false};
 };
