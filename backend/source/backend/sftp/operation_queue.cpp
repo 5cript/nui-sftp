@@ -757,16 +757,7 @@ void OperationQueue::discardKeptNow(
     if (!kept)
         return;
     auto& partialFiles = kept->partialFiles;
-    for (auto const& path : partialFiles.local)
-    {
-        std::error_code removeError{};
-        if (std::filesystem::remove(path, removeError))
-            Log::info("OperationQueue: removed the partial download '{}'.", Paths::nativeToUtf8(path));
-        else if (removeError)
-            Log::warn(
-                "OperationQueue: cannot remove '{}': {}", Paths::nativeToUtf8(path), Utility::errorMessage(removeError)
-            );
-    }
+    removeLocalPartialFiles(partialFiles.local);
     if (partialFiles.remote.empty())
         return;
     fileSystem->perform(
