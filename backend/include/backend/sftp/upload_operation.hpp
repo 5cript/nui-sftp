@@ -72,8 +72,6 @@ class UploadOperation : public Operation
         std::optional<std::uint64_t> uncheckedUpToBytes{4u * 1024u};
         bool tryContinue{Persistence::defaultTryContinue};
         bool inheritPermissions{Persistence::defaultInheritPermissions};
-        /** @brief A canceled upload deletes its temporary file, see PartialFile. */
-        bool doCleanup{Persistence::defaultDoCleanup};
         bool bigFileOptimized{false};
         std::optional<std::filesystem::perms> filePermissions{std::nullopt};
         std::optional<std::filesystem::perms> directoryPermissions{std::nullopt};
@@ -175,8 +173,8 @@ class UploadOperation : public Operation
     std::expected<void, UploadOperation::Error> cancel(bool adoptCancelState) override;
 
     /**
-     * @brief What a later cancel(true) does with the temporary file this upload wrote to, as doCleanup says unless
-     *        told otherwise. A temporary file it did not open itself always stays.
+     * @brief What a later cancel(true) does with the temporary file this upload wrote to, it is deleted unless told
+     *        otherwise. A temporary file it did not open itself always stays.
      */
     void partialFileOnCancel(PartialFile partial);
 
@@ -374,7 +372,7 @@ class UploadOperation : public Operation
     bool unsafeFast_{false};
     /** @brief The unsafe fast mode opened the destination, which holds a partial file until the upload completes. */
     bool openedDestination_{false};
-    PartialFile partialFileOnCancel_{PartialFile::Kept};
+    PartialFile partialFileOnCancel_{PartialFile::Discarded};
     std::size_t leftToUpload_{0};
     std::size_t totalSize_{0};
     RemoteIo::BufferLease buffer_;

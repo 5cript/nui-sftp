@@ -372,19 +372,17 @@ class OperationQueue
     void cancelAll();
     void togglePause();
     /**
-     * @brief Cancels every operation and removes the cards that ended before, see showCancelAll. The partial files of
-     *        the transfers it cancels go as @p partialFiles says: as their doCleanup option says, all of them, or none.
+     * @brief Cancels every operation and removes the cards that ended before, see showCancelAll. What becomes of the
+     *        partial files is up to @p variant.
      */
-    void askBackendToCancelAll(
-        SharedData::PartialFilesOnCancel partialFiles = SharedData::PartialFilesOnCancel::AsConfigured
-    );
+    void askBackendToCancelAll(CancelAll::Variant variant = CancelAll::Variant::Plain);
 
     /**
      * @brief Shows what a Cancel All did, see CancelAll::outcome: the operations it canceled stay as canceled cards,
      *        the cards that ended before go. Of those, the ones that kept their partial files lose them only when
-     *        @p partialFiles is Deleted.
+     *        @p variant deletes partial files.
      */
-    void showCancelAll(SharedData::PartialFilesOnCancel partialFiles, CancelAll::CardsBefore const& before);
+    void showCancelAll(CancelAll::Variant variant, CancelAll::CardsBefore const& before);
 
     /**
      * @brief Makes the backend forget the kept transfers @p operationIds, their partial files stay. The queue of the

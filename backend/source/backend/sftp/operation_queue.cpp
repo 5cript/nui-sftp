@@ -181,7 +181,7 @@ namespace
     OperationQueue::PartialFilesOnCancel partialFilesOnCancel(bool keepPartialFiles)
     {
         return keepPartialFiles ? OperationQueue::PartialFilesOnCancel::Kept
-                                : OperationQueue::PartialFilesOnCancel::AsConfigured;
+                                : OperationQueue::PartialFilesOnCancel::Deleted;
     }
 
     void forceTryContinue(Persistence::SftpOptions& options)
@@ -328,7 +328,6 @@ namespace
             .mayOverwrite = opts.mayOverwrite.value_or(def.mayOverwrite),
             .tryContinue = opts.tryContinue.value_or(def.tryContinue),
             .inheritPermissions = opts.inheritPermissions.value_or(def.inheritPermissions),
-            .doCleanup = opts.doCleanup.value_or(def.doCleanup),
             .filePermissions = opts.customFilePermissions ? opts.customFilePermissions : def.filePermissions,
             .directoryPermissions =
                 opts.customDirectoryPermissions ? opts.customDirectoryPermissions : def.directoryPermissions,
@@ -888,7 +887,7 @@ void OperationQueue::completeCancelledByUser(
 {
     if (partialFiles == PartialFilesOnCancel::Kept)
         operation.keepPartialFiles();
-    else if (partialFiles == PartialFilesOnCancel::Deleted)
+    else
         operation.deletePartialFiles();
     std::ignore = operation.cancel(true);
     auto completed = makeCompletedOperation(OperationQueue::CompletionReason::Canceled, id, operation);
@@ -1749,7 +1748,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .allowOverwrite = allowOverwrite,
-                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
+                .canKeepPartialFiles = true,
             }
         );
 
@@ -1797,7 +1796,7 @@ std::expected<void, Operation::Error> OperationQueue::addDownloadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .scanPhase = true,
-                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
+                .canKeepPartialFiles = true,
             }
         );
 
@@ -1952,8 +1951,6 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveDownloadOperatio
             .totalBytes = totalPayloadBytes,
             .localPath = localArchivePath,
             .scanPhase = scanPhase,
-            // Nothing continues a partial archive.
-            .deletesPartialFilesOnCancel = true,
         }
     );
 
@@ -2077,8 +2074,6 @@ std::expected<void, Operation::Error> OperationQueue::addArchiveUploadOperation(
             .totalBytes = estimatedTotalBytes,
             .remotePath = remoteArchivePath,
             .scanPhase = scanPhase,
-            // Nothing continues a partial archive.
-            .deletesPartialFilesOnCancel = true,
         }
     );
     return {};
@@ -2180,7 +2175,7 @@ std::size_t OperationQueue::addBulkDownloadOperation(
                     .insertRefresh = unit.insertRefresh,
                     .localPath = *unit.localRoot,
                     .remotePath = *unit.remoteRoot,
-                    .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
+                    .canKeepPartialFiles = true,
                 }
             );
         }
@@ -2291,7 +2286,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .allowOverwrite = allowOverwrite,
-                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
+                .canKeepPartialFiles = true,
             }
         );
 
@@ -2339,7 +2334,7 @@ std::expected<void, Operation::Error> OperationQueue::addUploadOperation(
                 .localPath = localPath,
                 .remotePath = remotePath,
                 .scanPhase = true,
-                .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
+                .canKeepPartialFiles = true,
             }
         );
 
@@ -2468,7 +2463,7 @@ std::size_t OperationQueue::addBulkUploadOperation(
                     .insertRefresh = unit.insertRefresh,
                     .localPath = *unit.localRoot,
                     .remotePath = *unit.remoteRoot,
-                    .deletesPartialFilesOnCancel = transferOptions.doCleanup.value_or(Persistence::defaultDoCleanup),
+                    .canKeepPartialFiles = true,
                 }
             );
         }

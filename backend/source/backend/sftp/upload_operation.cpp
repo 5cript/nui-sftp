@@ -78,7 +78,6 @@ UploadOperation::UploadOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> file
     if (!options_.localPath.empty())
         localNativePath_ = options_.localPath.native();
     tempPath_ = remotePath_.withFilenameSuffix(options_.tempFileSuffix).value_or(Paths::RemotePath{});
-    partialFileOnCancel_ = options_.doCleanup ? PartialFile::Discarded : PartialFile::Kept;
 }
 
 UploadOperation::~UploadOperation()

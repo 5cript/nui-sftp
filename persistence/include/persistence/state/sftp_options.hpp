@@ -62,7 +62,7 @@ namespace Persistence
     inline constexpr bool defaultMarkAsDownloaded = true;
 
     /**
-     * @brief Whether a canceled transfer deletes its partial file when doCleanup is not set.
+     * @brief Whether a failed download deletes its partial file when doCleanup is not set.
      */
     inline constexpr bool defaultDoCleanup = true;
 
@@ -93,6 +93,10 @@ namespace Persistence
     struct DownloadOptions : public CommonTransferOptions
     {
         std::optional<bool> reserveSpace{std::nullopt};
+        /**
+         * @brief Delete the partial file of a download that fails. What a cancel does with it is the user's choice per
+         *        cancel. Unset means defaultDoCleanup.
+         */
         std::optional<bool> doCleanup{std::nullopt};
         /**
          * @brief Mark downloaded files as coming from the internet (Mark of the Web on Windows, quarantine on macOS).
@@ -105,7 +109,8 @@ namespace Persistence
     struct UploadOptions : public CommonTransferOptions
     {
         /**
-         * @brief Delete the partial file on the server when an upload is canceled. Unset means on.
+         * @brief Unused since a cancel decides about the partial file itself, a failed upload always keeps it. Stays
+         *        for the configs of older versions, which deleted the partial file of a canceled upload by it.
          */
         std::optional<bool> doCleanup{std::nullopt};
     };

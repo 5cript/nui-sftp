@@ -83,7 +83,7 @@ class OperationQueue
      * @brief Cancels every queued operation, each completes as cancelled. Those in the batch out are cancelled once
      *        they are back, what is queued after this stays.
      */
-    void cancelAll(PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
+    void cancelAll(PartialFilesOnCancel partialFiles = PartialFilesOnCancel::Deleted);
 
     /**
      * @brief Drops every queued operation without completing any, for a session that goes: a reconnect may adopt
@@ -96,7 +96,7 @@ class OperationQueue
      * @brief Cancels the operation @p id, it completes as cancelled, once it is back when it is in the batch out. A
      *        transfer that keeps its partial files can continue later, see continueKept and discardKept.
      */
-    void cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles = PartialFilesOnCancel::AsConfigured);
+    void cancel(Ids::OperationId id, PartialFilesOnCancel partialFiles = PartialFilesOnCancel::Deleted);
 
     /**
      * @brief Goes on with the transfer @p id a cancel stopped with its partial files: queues it again under its id on

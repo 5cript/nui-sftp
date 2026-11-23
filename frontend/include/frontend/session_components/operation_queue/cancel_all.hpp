@@ -14,6 +14,28 @@ namespace CancelAll
     using OperationIds = std::unordered_set<Ids::OperationId, Ids::IdHash>;
 
     /**
+     * @brief The ways to cancel all: the button and the two entries of its menu.
+     */
+    enum class Variant
+    {
+        /** @brief Deletes the partial files of the transfers it cancels, those that cards kept before stay. */
+        Plain,
+        /** @brief Deletes the partial files of the transfers it cancels and those that cards kept before. */
+        DeletingPartialFiles,
+        /** @brief Keeps the partial files of the transfers it cancels and those that cards kept before. */
+        KeepingPartialFiles,
+    };
+
+    /**
+     * @brief What the backend does with the partial files of the transfers a Cancel All of @p variant cancels.
+     */
+    inline SharedData::PartialFilesOnCancel partialFilesOnCancel(Variant variant)
+    {
+        return variant == Variant::KeepingPartialFiles ? SharedData::PartialFilesOnCancel::Kept
+                                                       : SharedData::PartialFilesOnCancel::Deleted;
+    }
+
+    /**
      * @brief What a Cancel All needs to know of a card.
      */
     struct Card
@@ -25,8 +47,6 @@ namespace CancelAll
         bool keptPartialFiles{false};
         /** @brief A cancel that is asked to keep the partial files keeps them, an archive never does. */
         bool keepsWhenAsked{false};
-        /** @brief A plain cancel keeps the partial files, as the doCleanup option of the transfer says. */
-        bool keepsAsConfigured{false};
     };
 
     /**
@@ -85,24 +105,19 @@ namespace CancelAll
     }
 
     /**
-     * @brief Whether the transfer of @p card keeps its partial files when it is canceled with @p partialFiles.
+     * @brief Whether the transfer of @p card keeps its partial files when a Cancel All of @p variant cancels it.
      */
-    inline bool keepsPartialFiles(SharedData::PartialFilesOnCancel partialFiles, Card const& card)
+    inline bool keepsPartialFiles(Variant variant, Card const& card)
     {
-        if (partialFiles == SharedData::PartialFilesOnCancel::Kept)
-            return card.keepsWhenAsked;
-        if (partialFiles == SharedData::PartialFilesOnCancel::Deleted)
-            return false;
-        return card.keepsAsConfigured;
+        return variant == Variant::KeepingPartialFiles && card.keepsWhenAsked;
     }
 
     /**
-     * @brief What the reply to a Cancel All with @p partialFiles does with the cards @p now, given the cards @p before
-     *        it. A card counts as it is now: one that ended meanwhile was canceled by this and stays, and a
-     *        continuation that took the place of a kept card is no ended card anymore.
+     * @brief What the reply to a Cancel All of @p variant does with the cards @p now, given the cards @p before it. A
+     *        card counts as it is now: one that ended meanwhile was canceled by this and stays, and a continuation
+     *        that took the place of a kept card is no ended card anymore.
      */
-    inline Outcome
-    outcome(SharedData::PartialFilesOnCancel partialFiles, CardsBefore const& before, std::vector<Card> const& now)
+    inline Outcome outcome(Variant variant, CardsBefore const& before, std::vector<Card> const& now)
     {
         Outcome result{};
         for (auto const& card : now)
@@ -110,7 +125,7 @@ namespace CancelAll
             if (!card.ended)
             {
                 if (before.active.contains(card.operationId))
-                    result.canceled.push_back({card.operationId, keepsPartialFiles(partialFiles, card)});
+                    result.canceled.push_back({card.operationId, keepsPartialFiles(variant, card)});
                 continue;
             }
             if (!before.ended.contains(card.operationId))
@@ -118,7 +133,7 @@ namespace CancelAll
             result.removed.push_back(card.operationId);
             if (!card.keptPartialFiles || !before.kept.contains(card.operationId))
                 continue;
-            if (partialFiles == SharedData::PartialFilesOnCancel::Deleted)
+            if (variant == Variant::DeletingPartialFiles)
                 result.discarded.push_back(card.operationId);
             else
                 result.forgotten.push_back(card.operationId);

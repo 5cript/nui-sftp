@@ -255,7 +255,6 @@ struct OperationQueue::Implementation
                 .ended = operation.isCompletedState(),
                 .keptPartialFiles = operation.keptPartialFiles(),
                 .keepsWhenAsked = operation.card().keepsPartialFilesOnCancel(true),
-                .keepsAsConfigured = operation.card().keepsPartialFilesOnCancel(false),
             });
         };
         for (auto* live : {&priorityOperations, &operations})
@@ -1124,7 +1123,7 @@ void OperationQueue::onOperationAdded(SharedData::OperationAdded const& added)
             }
         );
     }
-    card->deletesPartialFilesOnCancel(added.deletesPartialFilesOnCancel);
+    card->canKeepPartialFiles(added.canKeepPartialFiles);
     if (card->offersToKeepPartialFiles())
         impl_->offersToKeepPartialFiles = true;
     card->setPartialFileHandlers({
@@ -2068,7 +2067,7 @@ void OperationQueue::togglePause()
     );
 }
 
-void OperationQueue::askBackendToCancelAll(SharedData::PartialFilesOnCancel partialFiles)
+void OperationQueue::askBackendToCancelAll(CancelAll::Variant variant)
 {
     if (!isActive())
     {
@@ -2079,26 +2078,26 @@ void OperationQueue::askBackendToCancelAll(SharedData::PartialFilesOnCancel part
         fmt::format("OperationQueue::{}::cancelAll", impl_->sessionId.value()),
         lifetime_.guarded(
             [this,
-                partialFiles,
+                variant,
                 before = CancelAll::cardsBefore(impl_->cancelAllCards())](SharedData::ErrorOrSuccess<> const& result)
             {
                 if (result)
                 {
                     Log::info("Operation queue all was canceled");
-                    showCancelAll(partialFiles, before);
+                    showCancelAll(variant, before);
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 }
                 else
                     Log::error("Failed to cancel all operation queue: {}", result.error.value());
             }
         ),
-        Utility::enumToString(partialFiles)
+        Utility::enumToString(CancelAll::partialFilesOnCancel(variant))
     );
 }
 
-void OperationQueue::showCancelAll(SharedData::PartialFilesOnCancel partialFiles, CancelAll::CardsBefore const& before)
+void OperationQueue::showCancelAll(CancelAll::Variant variant, CancelAll::CardsBefore const& before)
 {
-    const auto outcome = CancelAll::outcome(partialFiles, before, impl_->cancelAllCards());
+    const auto outcome = CancelAll::outcome(variant, before, impl_->cancelAllCards());
 
     const CancelAll::OperationIds removed{outcome.removed.begin(), outcome.removed.end()};
     impl_->eraseOperationsIf(
@@ -2597,8 +2596,8 @@ Nui::ElementRenderer OperationQueue::operator()()
                                 event.call<void>("stopPropagation");
                                 openCancelMenu(anchorId, true, [this](bool keepPartialFiles) {
                                     askBackendToCancelAll(
-                                        keepPartialFiles ? SharedData::PartialFilesOnCancel::Kept
-                                                         : SharedData::PartialFilesOnCancel::Deleted
+                                        keepPartialFiles ? CancelAll::Variant::KeepingPartialFiles
+                                                         : CancelAll::Variant::DeletingPartialFiles
                                     );
                                 });
                             }

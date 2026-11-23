@@ -53,7 +53,6 @@ struct SftpOptions : public GroupKeys
         BoolSetting<true> inheritPermissions;
         NumberSetting<unsigned short, true> customFilePermissions;
         NumberSetting<unsigned short, true> customDirectoryPermissions;
-        BoolSetting<true> doCleanup;
         ComboSetting<Persistence::SymlinkHandling, std::string, true> symlinkHandling;
         BoolSetting<true> failFast;
     };
@@ -79,4 +78,6 @@ struct SftpOptions : public GroupKeys
 
   private:
     std::function<void()> onChange_;
+    /** @brief The doCleanup of the upload options as loaded: no setting anymore, saved back for older versions. */
+    std::optional<bool> legacyUploadDoCleanup_{};
 };

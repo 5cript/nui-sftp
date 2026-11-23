@@ -128,11 +128,6 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
                 .numberBase = decltype(SftpOptions::UploadOptions::customDirectoryPermissions)::NumberBase::Octal,
             }
         },
-        .doCleanup{
-            uploadFactory_.identity({"sftpOptions", "uploadOptions", "doCleanup"}),
-            onChange,
-            nulloptReset(uploadOptions.doCleanup, onChange),
-        },
         .symlinkHandling{
             std::vector<Persistence::SymlinkHandling>{
                 Persistence::SymlinkHandling::AsSymlink,
@@ -201,7 +196,6 @@ SftpOptions::SftpOptions(SettingFactory const& factory, std::function<void()> co
     uploadOptions.tryContinue.fallback(Persistence::defaultTryContinue);
     downloadOptions.markAsDownloaded.fallback(Persistence::defaultMarkAsDownloaded);
     downloadOptions.doCleanup.fallback(Persistence::defaultDoCleanup);
-    uploadOptions.doCleanup.fallback(Persistence::defaultDoCleanup);
 }
 
 void SftpOptions::applyToState(Persistence::SftpOptions& state) const
@@ -251,7 +245,7 @@ void SftpOptions::applyToState(Persistence::SftpOptions& state) const
                 .symlinkHandling = uploadOptions.symlinkHandling.value(),
                 .failFast = uploadOptions.failFast.value(),
             },
-            .doCleanup = uploadOptions.doCleanup.value(),
+            .doCleanup = legacyUploadDoCleanup_,
         };
 #pragma clang diagnostic pop
     }
@@ -309,6 +303,7 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
     if (!state.uploadOptions.has_value())
     {
         uploadOptionsEngaged = false;
+        legacyUploadDoCleanup_ = std::nullopt;
         // All defaults:
         uploadOptions.tempFileSuffix.value(std::nullopt);
         uploadOptions.mayOverwrite.value(std::nullopt);
@@ -316,13 +311,13 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.inheritPermissions.value(std::nullopt);
         uploadOptions.customFilePermissions.value(std::nullopt);
         uploadOptions.customDirectoryPermissions.value(std::nullopt);
-        uploadOptions.doCleanup.value(std::nullopt);
         uploadOptions.symlinkHandling.value(std::nullopt);
         uploadOptions.failFast.value(std::nullopt);
     }
     else
     {
         uploadOptionsEngaged = true;
+        legacyUploadDoCleanup_ = state.uploadOptions->doCleanup;
         uploadOptions.tempFileSuffix.value(state.uploadOptions->tempFileSuffix);
         uploadOptions.mayOverwrite.value(state.uploadOptions->mayOverwrite);
         uploadOptions.tryContinue.value(state.uploadOptions->tryContinue);
@@ -333,7 +328,6 @@ void SftpOptions::loadFromState(Persistence::SftpOptions const& state, bool)
         uploadOptions.customDirectoryPermissions.value(
             filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
-        uploadOptions.doCleanup.value(state.uploadOptions->doCleanup);
         uploadOptions.symlinkHandling.value(state.uploadOptions->symlinkHandling);
         uploadOptions.failFast.value(state.uploadOptions->failFast);
     }
@@ -394,7 +388,6 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.customDirectoryPermissions.inherit(
             filesystemPermsOptionalToUShortOptional(state.uploadOptions->customDirectoryPermissions)
         );
-        uploadOptions.doCleanup.inherit(state.uploadOptions->doCleanup);
         uploadOptions.symlinkHandling.inherit(state.uploadOptions->symlinkHandling);
         uploadOptions.failFast.inherit(state.uploadOptions->failFast);
     }
@@ -406,7 +399,6 @@ void SftpOptions::assumeDefaultsFrom(Persistence::SftpOptions const& state)
         uploadOptions.inheritPermissions.inherit(std::nullopt);
         uploadOptions.customFilePermissions.inherit(std::nullopt);
         uploadOptions.customDirectoryPermissions.inherit(std::nullopt);
-        uploadOptions.doCleanup.inherit(std::nullopt);
         uploadOptions.symlinkHandling.inherit(std::nullopt);
         uploadOptions.failFast.inherit(std::nullopt);
     }
@@ -454,7 +446,6 @@ Nui::ElementRenderer SftpOptions::render()
                 uploadOptions.inheritPermissions(),
                 uploadOptions.customFilePermissions(),
                 uploadOptions.customDirectoryPermissions(),
-                uploadOptions.doCleanup(),
                 uploadOptions.symlinkHandling(),
                 uploadOptions.failFast()
             )

@@ -30,8 +30,8 @@ namespace SharedData
         std::optional<bool> allowOverwrite{};
         /** @brief Local copies and moves only: the directory the items go to. */
         std::optional<Paths::LocalPath> localDestination{};
-        /** @brief Transfers only: a cancel deletes the partial files unless told to keep them. */
-        std::optional<bool> deletesPartialFilesOnCancel{};
+        /** @brief A transfer whose cancel can keep the partial files to continue later, no archive. */
+        bool canKeepPartialFiles{false};
     };
     BOOST_DESCRIBE_STRUCT(
         OperationAdded,
@@ -48,6 +48,6 @@ namespace SharedData
          scanPhase,
          allowOverwrite,
          localDestination,
-         deletesPartialFilesOnCancel)
+         canKeepPartialFiles)
     )
 }

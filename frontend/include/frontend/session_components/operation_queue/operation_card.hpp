@@ -285,7 +285,7 @@ class OperationCard : public OperationCardInterface
             div{
                 class_ = "opq-actions"
             }(
-                observe(state_, deletesPartialFilesOnCancel_, keptPartialFiles_),
+                observe(state_, canKeepPartialFiles_, keptPartialFiles_),
                 [this]() -> Nui::ElementRenderer {
                     return actions();
                 }
@@ -316,24 +316,19 @@ class OperationCard : public OperationCardInterface
         partialFileHandlers_ = std::move(handlers);
     }
 
-    void deletesPartialFilesOnCancel(std::optional<bool> deletes) override
+    void canKeepPartialFiles(bool canKeep) override
     {
-        deletesPartialFilesOnCancel_ = deletes;
-    }
-
-    std::optional<bool> deletesPartialFilesOnCancel() const override
-    {
-        return deletesPartialFilesOnCancel_.value();
+        canKeepPartialFiles_ = canKeep;
     }
 
     bool offersToKeepPartialFiles() const override
     {
-        return canKeepPartialFiles() && *deletesPartialFilesOnCancel_.value();
+        return canKeepPartialFiles_.value();
     }
 
     bool keepsPartialFilesOnCancel(bool keepRequested) const override
     {
-        return canKeepPartialFiles() && (keepRequested || !*deletesPartialFilesOnCancel_.value());
+        return keepRequested && canKeepPartialFiles_.value();
     }
 
     void keptPartialFiles(bool kept) override
@@ -405,14 +400,6 @@ class OperationCard : public OperationCardInterface
     }
 
   private:
-    /**
-     * @brief A transfer other than an archive.
-     */
-    bool canKeepPartialFiles() const
-    {
-        return deletesPartialFilesOnCancel_.value().has_value() && !SharedData::isArchiveTransfer(type_);
-    }
-
     std::string cancelMenuAnchorId() const
     {
         return fmt::format("opq-cancel-more-{}", operationId_.value());
@@ -524,11 +511,9 @@ class OperationCard : public OperationCardInterface
         }
         return button{
             class_ = "opq-cancel-main",
-            Nui::Attributes::title = deletesPartialFilesOnCancel_.value() == false
-                ? language->get("operationQueue", "cancelKeepsPartialFiles")
-                : SharedData::isArchiveTransfer(type_)
-                    ? language->get("operationQueue", "cancelDeletesPartialArchive")
-                    : language->get("operationQueue", "cancel"),
+            Nui::Attributes::title = SharedData::isArchiveTransfer(type_)
+                ? language->get("operationQueue", "cancelDeletesPartialArchive")
+                : language->get("operationQueue", "cancel"),
             onClick = [this](){
                 cancel();
             }
@@ -537,6 +522,19 @@ class OperationCard : public OperationCardInterface
     }
 
   protected:
+    /**
+     * @brief The format of cancelNote: partial files kept, deleted, or none to speak of.
+     */
+    std::string cancelNoteFormat() const
+    {
+        if (keptPartialFiles_.value())
+            return language->get("operationQueue", "cancelledAtKept");
+        // A partial archive is always deleted, nothing continues it.
+        if (canKeepPartialFiles_.value() || SharedData::isArchiveTransfer(type_))
+            return language->get("operationQueue", "cancelledAtDeleted");
+        return language->get("operationQueue", "cancelledAt");
+    }
+
     /**
      * @brief The line under @p bar of a cancelled transfer: how far it got and what became of its partial files.
      *        Empty, and so hidden, while the operation was not cancelled.
@@ -551,18 +549,13 @@ class OperationCard : public OperationCardInterface
         return div{
             class_ = "opq-cancel-note"
         }(
-            observe(state_, keptPartialFiles_, deletesPartialFilesOnCancel_).generate([this, &bar]() -> std::string {
+            observe(state_, keptPartialFiles_, canKeepPartialFiles_).generate([this, &bar]() -> std::string {
                 if (state_.value() != SharedData::OperationState::Canceled)
                     return {};
                 const auto percent = bar.maximum() > 0
                     ? 100.0 * static_cast<double>(bar.progress()) / static_cast<double>(bar.maximum())
                     : 0.0;
-                const auto text = keptPartialFiles_.value()
-                    ? language->get("operationQueue", "cancelledAtKept")
-                    : deletesPartialFilesOnCancel_.value().value_or(false)
-                        ? language->get("operationQueue", "cancelledAtDeleted")
-                        : language->get("operationQueue", "cancelledAt");
-                return fmt::format(fmt::runtime(text), percent);
+                return fmt::format(fmt::runtime(cancelNoteFormat()), percent);
             })
         );
         // clang-format on
@@ -582,6 +575,6 @@ class OperationCard : public OperationCardInterface
     Nui::Observed<std::vector<std::pair<std::string, SharedData::OperationError>>> failedEntries_;
     std::function<void()> kickToTopHandler_;
     PartialFileHandlers partialFileHandlers_{};
-    Nui::Observed<std::optional<bool>> deletesPartialFilesOnCancel_{std::nullopt};
+    Nui::Observed<bool> canKeepPartialFiles_{false};
     Nui::Observed<bool> keptPartialFiles_{false};
 };
