@@ -1534,6 +1534,10 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
     }
     // A card that a cancel showed as ended already was revealed then, or belongs to a Cancel All.
     const bool endsNow = !operation->isCompletedState();
+    // A cancel may have shown the card as keeping its partial files, a transfer that ended otherwise kept none.
+    operation->card().keptPartialFiles(
+        completed.reason == SharedData::OperationCompletionReason::Canceled && completed.keptPartialFiles
+    );
     switch (completed.reason)
     {
         case (SharedData::OperationCompletionReason::Completed):
