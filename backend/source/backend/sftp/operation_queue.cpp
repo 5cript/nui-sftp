@@ -662,6 +662,9 @@ void OperationQueue::cancelQueued(Ids::OperationId const& id, PartialFilesOnCanc
 std::expected<void, std::string>
 OperationQueue::continueKept(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id)
 {
+    // A cancel of it that still waits for the batch out stores what it kept only then.
+    if (std::ranges::contains(batchOperationIds(), id))
+        drainBatch();
     auto kept = keptTransfers_->take(id);
     if (!kept)
         return std::unexpected(fmt::format("nothing kept for '{}'", id.value()));

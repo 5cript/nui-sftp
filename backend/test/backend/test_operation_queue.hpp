@@ -809,6 +809,42 @@ namespace Test
         EXPECT_FALSE(std::filesystem::exists(partial));
     }
 
+    TEST_F(OperationQueueTests, ContinuingAKeptDownloadWaitsForItsCancelBehindTheBatchOut)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", 8 * 1024 * 1024}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_TRUE(addBigDownload(sftp, operationId).has_value());
+        // The strand is held, so the batch the work hands out cannot return before the cancel.
+        std::size_t keptWhileBatchOut = 0u;
+        const auto continued = runOnStrand([&]() {
+            queue->work();
+            queue->cancel(operationId, OperationQueue::PartialFilesOnCancel::Kept);
+            keptWhileBatchOut = keptTransfers_->size();
+            return queue->continueKept(sftp, operationId);
+        });
+        ASSERT_EQ(keptWhileBatchOut, 0u) << "The cancel did not wait for a batch out";
+        EXPECT_TRUE(continued.has_value()) << continued.error();
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_TRUE(completions().front().keptPartialFiles);
+        runOnStrand([&]() {
+            queue->cancelAll();
+        });
+        workUntilCompletions(2);
+        ASSERT_EQ(completions().size(), 2u);
+        EXPECT_EQ(completions().back().operationId, operationId);
+        EXPECT_EQ(completions().back().reason, SharedData::OperationCompletionReason::Canceled);
+    }
+
     TEST_F(OperationQueueTests, CancelAllDeletesThePartialFileOfADownloadThatKeepsItOnFailure)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
