@@ -105,7 +105,7 @@ namespace CancelAll::Test
         const std::vector<Card> cards{running("r"), ended("e"), kept("k")};
         const auto result = outcome(Variant::DeletingPartialFiles, cardsBefore(cards), cards);
         EXPECT_EQ(names(result.canceled), (Names{"r"}));
-        EXPECT_EQ(names(result.removed), (Names{"e", "k"}));
+        EXPECT_EQ(names(result.removed), (Names{"e"})) << "the kept card stays until its partial files are gone";
         EXPECT_EQ(names(result.forgotten), (Names{}));
         EXPECT_EQ(names(result.discarded), (Names{"k"}));
     }
@@ -156,6 +156,31 @@ namespace CancelAll::Test
         const auto result = outcome(Variant::Plain, before, {running("r"), running("n"), ended("m")});
         EXPECT_EQ(names(result.canceled), (Names{"r"}));
         EXPECT_EQ(names(result.removed), (Names{}));
+    }
+
+    TEST(CancelAllTests, WithoutASessionEveryCardGoesAndTheKeptPartialFilesStayUnlessDeleted)
+    {
+        using namespace CancelAllTestDetail;
+        const std::vector<Card> cards{running("r"), runningArchive("a"), ended("e"), kept("k")};
+        for (const auto variant : {Variant::Plain, Variant::KeepingPartialFiles})
+        {
+            const auto result = outcomeWithoutSession(variant, cards);
+            EXPECT_EQ(names(result.canceled), (Names{}));
+            EXPECT_EQ(names(result.removed), (Names{"r", "a", "e", "k"}));
+            EXPECT_EQ(names(result.forgotten), (Names{"k"}));
+            EXPECT_EQ(names(result.discarded), (Names{}));
+        }
+    }
+
+    TEST(CancelAllTests, WithoutASessionDeletingPartialFilesDiscardsTheKeptOnes)
+    {
+        using namespace CancelAllTestDetail;
+        const std::vector<Card> cards{running("r"), ended("e"), kept("k")};
+        const auto result = outcomeWithoutSession(Variant::DeletingPartialFiles, cards);
+        EXPECT_EQ(names(result.canceled), (Names{}));
+        EXPECT_EQ(names(result.removed), (Names{"r", "e"})) << "the kept card stays until its partial files are gone";
+        EXPECT_EQ(names(result.forgotten), (Names{}));
+        EXPECT_EQ(names(result.discarded), (Names{"k"}));
     }
 
     TEST(CancelAllTests, AKeptCardThatWentBeforeTheReplyIsNeitherForgottenNorDiscarded)

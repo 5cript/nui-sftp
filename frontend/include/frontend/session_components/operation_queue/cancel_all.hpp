@@ -73,17 +73,17 @@ namespace CancelAll
     };
 
     /**
-     * @brief What the reply to a Cancel All does, each list in the order of the cards.
+     * @brief What a Cancel All does with the cards, each list in the order of the cards.
      */
     struct Outcome
     {
-        /** @brief The cards that go, they had ended before. */
+        /** @brief The cards that go at once. */
         std::vector<Ids::OperationId> removed{};
         /** @brief The cards of the operations it canceled, they stay. */
         std::vector<Canceled> canceled{};
         /** @brief Removed cards whose kept partial files stay, nothing continues or discards them anymore. */
         std::vector<Ids::OperationId> forgotten{};
-        /** @brief Removed cards whose kept partial files are deleted. */
+        /** @brief Cards whose kept partial files are to be deleted. Each goes once its files are gone, not before. */
         std::vector<Ids::OperationId> discarded{};
     };
 
@@ -113,6 +113,22 @@ namespace CancelAll
     }
 
     /**
+     * @brief Sorts the ended @p card a Cancel All of @p variant takes away into @p result: removed, with what it
+     *        @p kept forgotten, or left to go with the partial files it kept.
+     */
+    inline void takeAway(Outcome& result, Variant variant, Card const& card, bool kept)
+    {
+        if (kept && variant == Variant::DeletingPartialFiles)
+        {
+            result.discarded.push_back(card.operationId);
+            return;
+        }
+        result.removed.push_back(card.operationId);
+        if (kept)
+            result.forgotten.push_back(card.operationId);
+    }
+
+    /**
      * @brief What the reply to a Cancel All of @p variant does with the cards @p now, given the cards @p before it. A
      *        card counts as it is now: one that ended meanwhile was canceled by this and stays, and a continuation
      *        that took the place of a kept card is no ended card anymore.
@@ -130,14 +146,20 @@ namespace CancelAll
             }
             if (!before.ended.contains(card.operationId))
                 continue;
-            result.removed.push_back(card.operationId);
-            if (!card.keptPartialFiles || !before.kept.contains(card.operationId))
-                continue;
-            if (variant == Variant::DeletingPartialFiles)
-                result.discarded.push_back(card.operationId);
-            else
-                result.forgotten.push_back(card.operationId);
+            takeAway(result, variant, card, card.keptPartialFiles && before.kept.contains(card.operationId));
         }
+        return result;
+    }
+
+    /**
+     * @brief What a Cancel All of @p variant does with the cards @p now of a queue without a session: no operation
+     *        of it runs, so every card is taken away and none is canceled.
+     */
+    inline Outcome outcomeWithoutSession(Variant variant, std::vector<Card> const& now)
+    {
+        Outcome result{};
+        for (auto const& card : now)
+            takeAway(result, variant, card, card.keptPartialFiles);
         return result;
     }
 }

@@ -365,24 +365,22 @@ class OperationQueue
 
     /**
      * @brief Cancels the transfer of @p operation, or removes its card once it ended. A transfer keeps its partial
-     *        files when @p keepPartialFiles is set, otherwise as its doCleanup option says.
+     *        files when @p keepPartialFiles is set and it can, otherwise they are deleted.
      */
     template <typename OperationCard>
     void cancelOperation(OperationCard const& operation, bool keepPartialFiles = false);
-    void cancelAll();
     void togglePause();
     /**
      * @brief Cancels every operation and removes the cards that ended before, see showCancelAll. What becomes of the
-     *        partial files is up to @p variant.
+     *        partial files is up to @p variant. Without a session nothing runs, every card goes then.
      */
     void askBackendToCancelAll(CancelAll::Variant variant = CancelAll::Variant::Plain);
 
     /**
      * @brief Shows what a Cancel All did, see CancelAll::outcome: the operations it canceled stay as canceled cards,
-     *        the cards that ended before go. Of those, the ones that kept their partial files lose them only when
-     *        @p variant deletes partial files.
+     *        the cards it removes go. Those whose kept partial files it deletes go once the files are gone.
      */
-    void showCancelAll(CancelAll::Variant variant, CancelAll::CardsBefore const& before);
+    void showCancelAll(CancelAll::Outcome const& outcome);
 
     /**
      * @brief Makes the backend forget the kept transfers @p operationIds, their partial files stay. The queue of the
@@ -407,6 +405,13 @@ class OperationQueue
      * @brief Deletes the partial files the card @p operationId kept, and the card.
      */
     void discardKept(Ids::OperationId const& operationId);
+
+    /**
+     * @brief Deletes the partial files the cards @p operationIds kept, then the cards. A card whose files could not
+     *        be deleted stays. Without a session only local partial files can go, a card with partial files on the
+     *        server stays for the next session.
+     */
+    void discardKept(std::vector<Ids::OperationId> operationIds);
 
     /**
      * @brief Removes the card @p operationId that kept its partial files, the files stay.
