@@ -109,6 +109,8 @@ class OperationQueue
 
     /**
      * @brief Deletes the partial files the transfer @p id kept when it was canceled, remote ones on @p fileSystem.
+     *        Behind a cancel of @p id that still waits for the batch out, which stores what it kept only then. On
+     *        the strand.
      */
     void discardKept(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id);
 
@@ -657,6 +659,11 @@ class OperationQueue
      *        The kept ones are remembered for continueKept and discardKept.
      */
     void completeCancelledByUser(Ids::OperationId const& id, Operation& operation, PartialFilesOnCancel partialFiles);
+
+    /**
+     * @brief Deletes what the transfer @p id kept, see discardKept.
+     */
+    void discardKeptNow(std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem, Ids::OperationId const& id);
 
     /**
      * @brief Remembers the partial files the canceled @p operation kept, with how to continue it: what is left of its

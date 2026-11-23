@@ -779,6 +779,36 @@ namespace Test
         EXPECT_EQ(keptTransfers_->size(), 0u);
     }
 
+    TEST_F(OperationQueueTests, DiscardingAKeptDownloadWaitsForItsCancelBehindTheBatchOut)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        ASSERT_TRUE(
+            serverStartResult->command("createFile", {{"path", "/home/test/big.bin"}, {"size", 8 * 1024 * 1024}})
+        );
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        const auto partial = localDirectory_.path() / "big.bin.filepart";
+        ASSERT_TRUE(addBigDownload(sftp, operationId).has_value());
+        // The strand is held, so the batch the work hands out cannot return before the cancel and the discard.
+        const auto keptWhileBatchOut = runOnStrand([&]() {
+            queue->work();
+            queue->cancel(operationId, OperationQueue::PartialFilesOnCancel::Kept);
+            const auto kept = keptTransfers_->size();
+            queue->discardKept(sftp, operationId);
+            return kept;
+        });
+        ASSERT_EQ(keptWhileBatchOut, 0u) << "The cancel did not wait for a batch out";
+        workUntilCompletions(1);
+
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_TRUE(completions().front().keptPartialFiles);
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+        EXPECT_FALSE(std::filesystem::exists(partial));
+    }
+
     TEST_F(OperationQueueTests, CancelAllDeletingPartialFilesDeletesThoseOfADownloadWithoutCleanup)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);

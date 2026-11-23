@@ -737,6 +737,20 @@ void OperationQueue::discardKept(
     Ids::OperationId const& id
 )
 {
+    onOperation(
+        id,
+        [this, fileSystem, id]()
+        {
+            discardKeptNow(fileSystem, id);
+        }
+    );
+}
+
+void OperationQueue::discardKeptNow(
+    std::shared_ptr<RemoteIo::IRemoteFileSystem> const& fileSystem,
+    Ids::OperationId const& id
+)
+{
     auto kept = keptTransfers_->take(id);
     if (!kept)
         return;
