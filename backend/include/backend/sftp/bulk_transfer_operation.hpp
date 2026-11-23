@@ -224,6 +224,11 @@ class BulkTransferOperation : public Operation
     BulkTransferOperation(std::weak_ptr<RemoteIo::IRemoteFileSystem> fileSystem, CommonOptions common);
 
     /**
+     * @brief Whether a cancel keeps the partial files of the entries it has not finished, see keepPartialFiles.
+     */
+    bool keepsPartialFiles() const;
+
+    /**
      * @brief Flat-list mode: every entry is a file or a directory created without content, @p paths holds both of
      *        its ends (index aligned). A directory that cannot be created fails only its own entry.
      */
