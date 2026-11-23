@@ -39,6 +39,13 @@ A transfer that fails is no cancel: a failed upload keeps its partial file, a fa
 Finished and failed cards are removed by all three, like the cancelled ones. A failed one stays listed in the Failed
 tab. The operations a Cancel All cancels stay as cancelled cards, a second Cancel All removes them.
 
+A card whose kept partial file is deleted (ER from KS) goes once the file is gone. When the file cannot be deleted
+the card stays, to try again.
+
+Without a connected session nothing runs, so all three take every card away, the running and queued ones too. Kept
+partial files stay (KR). "Cancel all and delete partial files" deletes the local ones (ER). A card that kept a partial
+file on the server stays until a session is connected, the file cannot be deleted before.
+
 With "Auto Remove Completed operations" on, a card without kept partial files (ES) goes by itself 5 seconds after it
 ended. A card that kept its partial file (KS) stays until it is continued or removed.
 

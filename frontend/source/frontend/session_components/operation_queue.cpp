@@ -38,6 +38,8 @@
 #include <ui5-sap-icons/icons/synchronize.hpp>
 #include <ui5-sap-icons/icons/slim-arrow-down.hpp>
 
+#include <emscripten/val.h>
+
 #include <algorithm>
 #include <chrono>
 #include <deque>
@@ -482,25 +484,6 @@ OperationQueue::OperationQueue(
 OperationQueue::~OperationQueue()
 {
     LocalOperationRouter::instance().detach(*this);
-}
-
-void OperationQueue::cancelAll()
-{
-    LocalOperationRouter::instance().cancelHostedBy(*this);
-    std::vector<Ids::OperationId> kept{};
-    for (auto const& card : impl_->cancelAllCards())
-    {
-        if (card.keptPartialFiles)
-            kept.push_back(card.operationId);
-    }
-    impl_->eraseOperationsIf(
-        [](DisplayedOperation&)
-        {
-            return true;
-        }
-    );
-    forgetKeptInBackend(std::move(kept));
-    Nui::globalEventContext.executeActiveEventsImmediately();
 }
 
 template <typename OperationCard>
@@ -1553,7 +1536,6 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
         }
         case (SharedData::OperationCompletionReason::Canceled):
         {
-            operation->card().keptPartialFiles(completed.keptPartialFiles);
             operation->state(SharedData::OperationState::Canceled);
             break;
         }
@@ -2075,7 +2057,9 @@ void OperationQueue::askBackendToCancelAll(CancelAll::Variant variant)
 {
     if (!isActive())
     {
-        cancelAll();
+        LocalOperationRouter::instance().cancelHostedBy(*this);
+        showCancelAll(CancelAll::outcomeWithoutSession(variant, impl_->cancelAllCards()));
+        Nui::globalEventContext.executeActiveEventsImmediately();
         return;
     }
     Nui::RpcClient::callWithBackChannel(
@@ -2088,7 +2072,7 @@ void OperationQueue::askBackendToCancelAll(CancelAll::Variant variant)
                 if (result)
                 {
                     Log::info("Operation queue all was canceled");
-                    showCancelAll(variant, before);
+                    showCancelAll(CancelAll::outcome(variant, before, impl_->cancelAllCards()));
                     Nui::globalEventContext.executeActiveEventsImmediately();
                 }
                 else
@@ -2099,10 +2083,8 @@ void OperationQueue::askBackendToCancelAll(CancelAll::Variant variant)
     );
 }
 
-void OperationQueue::showCancelAll(CancelAll::Variant variant, CancelAll::CardsBefore const& before)
+void OperationQueue::showCancelAll(CancelAll::Outcome const& outcome)
 {
-    const auto outcome = CancelAll::outcome(variant, before, impl_->cancelAllCards());
-
     const CancelAll::OperationIds removed{outcome.removed.begin(), outcome.removed.end()};
     impl_->eraseOperationsIf(
         [&removed](DisplayedOperation& operation)
@@ -2123,16 +2105,7 @@ void OperationQueue::showCancelAll(CancelAll::Variant variant, CancelAll::CardsB
     LocalOperationRouter::instance().cancelShownIn(*this, canceled);
 
     forgetKeptInBackend(outcome.forgotten);
-    if (outcome.discarded.empty() || !impl_->fileEngine)
-        return;
-    impl_->fileEngine->discardKept(
-        outcome.discarded,
-        [count = outcome.discarded.size()](bool success, std::string const& info)
-        {
-            if (!success)
-                Log::error("Cannot delete the partial files of {} canceled transfer(s): {}", count, info);
-        }
-    );
+    discardKept(outcome.discarded);
 }
 
 void OperationQueue::forgetKeptInBackend(std::vector<Ids::OperationId> operationIds)
@@ -2214,19 +2187,76 @@ void OperationQueue::continueKept(Ids::OperationId const& operationId)
 
 void OperationQueue::discardKept(Ids::OperationId const& operationId)
 {
-    if (!impl_->fileEngine)
+    discardKept(std::vector<Ids::OperationId>{operationId});
+}
+
+void OperationQueue::discardKept(std::vector<Ids::OperationId> operationIds)
+{
+    if (operationIds.empty())
         return;
-    impl_->fileEngine->discardKept(
-        {operationId},
-        lifetime_.guarded(
-            [this, operationId](bool success, std::string const& info)
+    const auto count = operationIds.size();
+    const auto removeCards = [this](std::vector<Ids::OperationId> const& discarded)
+    {
+        const CancelAll::OperationIds gone{discarded.begin(), discarded.end()};
+        impl_->eraseOperationsIf(
+            [&gone](DisplayedOperation& operation)
             {
-                if (!success)
-                    return Log::error("Cannot delete the partial files of {}: {}", operationId.value(), info);
-                impl_->eraseOperation(operationId);
-                Nui::globalEventContext.executeActiveEventsImmediately();
+                return gone.contains(operation.key());
             }
-        )
+        );
+        Nui::globalEventContext.executeActiveEventsImmediately();
+    };
+
+    if (isActive())
+    {
+        if (!impl_->fileEngine)
+            return Log::error("Cannot delete the partial files of {} canceled transfer(s): no file engine", count);
+        impl_->fileEngine->discardKept(
+            operationIds,
+            lifetime_.guarded(
+                [operationIds, count, removeCards](bool success, std::string const& info)
+                {
+                    if (!success)
+                        return Log::error("Cannot delete the partial files of {} canceled transfer(s): {}", count, info);
+                    removeCards(operationIds);
+                }
+            )
+        );
+        return;
+    }
+
+    Nui::val ids = Nui::val::array();
+    for (auto const& operationId : operationIds)
+        ids.call<void>("push", operationId.value());
+    Nui::val parameters = Nui::val::object();
+    parameters.set("operationIds", ids);
+    Nui::RpcClient::callWithBackChannel(
+        "SessionManager::discardKeptTransfers",
+        lifetime_.guarded(
+            [count, removeCards](Nui::val reply)
+            {
+                if (reply.hasOwnProperty("error"))
+                {
+                    return Log::error(
+                        "Cannot delete the partial files of {} canceled transfer(s): {}",
+                        count,
+                        reply["error"].as<std::string>()
+                    );
+                }
+                std::vector<Ids::OperationId> discarded{};
+                for (auto const& operationId : emscripten::vecFromJSArray<std::string>(reply["discarded"]))
+                    discarded.push_back(Ids::makeOperationId(operationId));
+                if (discarded.size() < count)
+                {
+                    Log::warn(
+                        "{} canceled transfer(s) keep their partial files on the server until a session is connected",
+                        count - discarded.size()
+                    );
+                }
+                removeCards(discarded);
+            }
+        ),
+        parameters
     );
 }
 
