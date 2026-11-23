@@ -271,6 +271,54 @@ namespace Test
         }
 
         /**
+         * @brief Queues the upload of a local big.bin to the server under @p operationId and works it until it waits
+         *        for its transfer, nothing else drives it then.
+         */
+        template <typename FileSystemT>
+        void startBigUpload(FileSystemT const& sftp, Ids::OperationId const& operationId)
+        {
+            const auto localPath = localDirectory_.path() / "big.bin";
+            std::ofstream{localPath, std::ios::binary} << std::string(8 * 1024 * 1024, 'x');
+            ASSERT_TRUE(runOnStrand([&]() {
+                return queue_->addUploadOperation(
+                    sftp, operationId, toLocal(localPath), remote("/home/test/big.bin"), false, true, false, false
+                );
+            }).has_value());
+            for (int step = 0; step < 100 && runOnStrand([this]() {
+                     return queue_->work() || queue_->drainBatch();
+                 });
+                 ++step)
+            {
+            }
+        }
+
+        /**
+         * @brief Queues the upload of a local directory with one big file to /home/test/uploaded under
+         *        @p operationId and works it until that file has its partial file on the server.
+         */
+        template <typename FileSystemT>
+        void startDirectoryUpload(FileSystemT const& sftp, Ids::OperationId const& operationId)
+        {
+            const auto localPath = localDirectory_.path() / "toUpload";
+            std::filesystem::create_directories(localPath);
+            std::ofstream{localPath / "big.bin", std::ios::binary} << std::string(8 * 1024 * 1024, 'x');
+            ASSERT_TRUE(runOnStrand([&]() {
+                return queue_->addUploadOperation(
+                    sftp, operationId, toLocal(localPath), remote("/home/test/uploaded"), false, false, false, false
+                );
+            }).has_value());
+            for (int step = 0;
+                 step < 100 && !remoteNames(*sftp, "/home/test/uploaded").contains("big.bin.filepart");
+                 ++step)
+            {
+                runOnStrand([this]() {
+                    return queue_->work() || queue_->drainBatch();
+                });
+            }
+            ASSERT_TRUE(remoteNames(*sftp, "/home/test/uploaded").contains("big.bin.filepart"));
+        }
+
+        /**
          * @brief What is at @p path on the server now, as a compare that ran right now would have seen it.
          */
         static SharedData::ComparedState remoteStateNow(SecureShell::SftpSession& sftp, std::string const& path)
@@ -933,21 +981,8 @@ namespace Test
         auto queue = makeQueue();
         setPaused(false);
 
-        const auto localPath = localDirectory_.path() / "big.bin";
-        std::ofstream{localPath, std::ios::binary} << std::string(8 * 1024 * 1024, 'x');
         const auto operationId = Ids::generateOperationId();
-        ASSERT_TRUE(runOnStrand([&]() {
-            return queue->addUploadOperation(
-                sftp, operationId, toLocal(localPath), remote("/home/test/big.bin"), false, true, false, false
-            );
-        }).has_value());
-        // Worked until it waits for its transfer, nothing else drives it then.
-        for (int step = 0; step < 100 && runOnStrand([&]() {
-                 return queue->work() || queue->drainBatch();
-             });
-             ++step)
-        {
-        }
+        ASSERT_NO_FATAL_FAILURE(startBigUpload(sftp, operationId));
         ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("big.bin.filepart"));
 
         runOnStrand([&]() {
@@ -963,6 +998,80 @@ namespace Test
         });
         // Queued behind the removal on the processing thread.
         EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("big.bin.filepart"));
+    }
+
+    TEST_F(OperationQueueTests, ACanceledUploadDeletesItsPartialFileEvenWithTheCleanupOptionOfOlderVersionsOff)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        Persistence::SftpOptions options{};
+        options.uploadOptions.emplace().doCleanup = false;
+        auto queue = makeQueue(std::move(options));
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_NO_FATAL_FAILURE(startBigUpload(sftp, operationId));
+        ASSERT_TRUE(remoteNames(*sftp, "/home/test").contains("big.bin.filepart"));
+
+        runOnStrand([&]() {
+            queue->cancel(operationId);
+        });
+        workUntilCompletions(1);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(completions().front().keptPartialFiles);
+        // Queued behind the removal on the processing thread.
+        EXPECT_FALSE(remoteNames(*sftp, "/home/test").contains("big.bin.filepart"));
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+    }
+
+    TEST_F(OperationQueueTests, ACanceledDirectoryUploadDeletesThePartialFilesOfItsFiles)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_NO_FATAL_FAILURE(startDirectoryUpload(sftp, operationId));
+
+        runOnStrand([&]() {
+            queue->cancelAll();
+        });
+        workUntilCompletions(1);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_EQ(completions().front().reason, SharedData::OperationCompletionReason::Canceled);
+        EXPECT_FALSE(completions().front().keptPartialFiles);
+        // Queued behind the removal on the processing thread.
+        EXPECT_FALSE(remoteNames(*sftp, "/home/test/uploaded").contains("big.bin.filepart"));
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+    }
+
+    TEST_F(OperationQueueTests, ADirectoryUploadCanceledKeepingItsPartialFilesLeavesThemUntilTheyAreDiscarded)
+    {
+        CREATE_SERVER_AND_JOINER(sftpServer);
+        auto [_, sftp] = createSftpSession(serverStartResult->port);
+        auto queue = makeQueue();
+        setPaused(false);
+
+        const auto operationId = Ids::generateOperationId();
+        ASSERT_NO_FATAL_FAILURE(startDirectoryUpload(sftp, operationId));
+
+        runOnStrand([&]() {
+            queue->cancelAll(OperationQueue::PartialFilesOnCancel::Kept);
+        });
+        workUntilCompletions(1);
+        ASSERT_EQ(completions().size(), 1u);
+        EXPECT_TRUE(completions().front().keptPartialFiles);
+        EXPECT_TRUE(remoteNames(*sftp, "/home/test/uploaded").contains("big.bin.filepart"));
+        EXPECT_EQ(keptTransfers_->size(), 1u);
+
+        runOnStrand([&]() {
+            queue->discardKept(sftp, operationId);
+        });
+        // Queued behind the removal on the processing thread.
+        EXPECT_FALSE(remoteNames(*sftp, "/home/test/uploaded").contains("big.bin.filepart"));
+        EXPECT_EQ(keptTransfers_->size(), 0u);
     }
 
     TEST_F(OperationQueueTests, ADirectoryDownloadCanceledKeepingItsPartialFilesContinuesWithoutWhatItFinished)
