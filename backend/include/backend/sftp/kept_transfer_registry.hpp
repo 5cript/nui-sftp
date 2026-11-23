@@ -8,10 +8,12 @@
 #include <shared_data/file_operations/operation_type.hpp>
 
 #include <cstddef>
+#include <filesystem>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 /**
  * @brief A single file transfer a continuation queues again under its id.
@@ -42,6 +44,11 @@ struct KeptTransfer
 };
 
 /**
+ * @brief Deletes the local partial files @p paths, one that cannot be removed is logged.
+ */
+void removeLocalPartialFiles(std::vector<std::filesystem::path> const& paths);
+
+/**
  * @brief Process-lifetime store of the transfers canceled keeping their partial files, keyed by operation id. Owned by
  *        SessionManager and shared by the queues of its sessions, so a card can continue or discard after a reconnect
  *        replaced the session that canceled it. Entries stay until a continue, a discard or a card that is removed
@@ -66,6 +73,13 @@ class KeptTransferRegistry
      * @brief Takes the kept transfer @p operationId out, nothing when none is stored.
      */
     std::optional<KeptTransfer> take(Ids::OperationId const& operationId);
+
+    /**
+     * @brief Deletes the partial files of the kept transfer @p operationId and takes it out, for when no session is
+     *        connected: one with partial files on a server stays as it is.
+     * @return Whether nothing is kept under @p operationId anymore.
+     */
+    bool discardWithoutSession(Ids::OperationId const& operationId);
 
     std::size_t size() const;
 

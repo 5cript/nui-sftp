@@ -270,6 +270,13 @@ class SessionManager
     void registerRpcForgetKeptTransfers();
 
     /**
+     * @brief Handles "SessionManager::discardKeptTransfers" with {operationIds}: deletes the partial files of the
+     *        kept transfers that have none on a server, for a card that is discarded while no session is connected.
+     *        Replies with {discarded}, the ids nothing is kept under anymore. The others stay for a session.
+     */
+    void registerRpcDiscardKeptTransfers();
+
+    /**
      * @brief Handles "FileTracking::countOrphaned" with {count} and "FileTracking::forceCleanup" with {removed}: the
      *        instance directories no live process holds, which the latter removes.
      */

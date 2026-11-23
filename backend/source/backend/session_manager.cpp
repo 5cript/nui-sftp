@@ -592,6 +592,7 @@ void SessionManager::registerRpc()
     registerRpcAdoptBulkResume();
     registerRpcDiscardBulkResume();
     registerRpcForgetKeptTransfers();
+    registerRpcDiscardKeptTransfers();
     registerRpcStopFileTracking();
     localOperationQueue_->registerRpc();
 }
@@ -831,6 +832,36 @@ void SessionManager::registerRpcForgetKeptTransfers()
                 {
                     Log::error("Error in forgetKeptTransfers: {}", Utility::errorMessage(e));
                     return reply({{"error", Utility::errorMessage(e)}});
+                }
+            }
+        );
+}
+
+void SessionManager::registerRpcDiscardKeptTransfers()
+{
+    on("SessionManager::discardKeptTransfers")
+        .perform(
+            [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
+            {
+                if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::discardKeptTransfers", parameters}
+                         .hasValueDeep("operationIds"))
+                    return;
+
+                try
+                {
+                    auto discarded = nlohmann::json::array();
+                    for (auto const& raw : parameters["operationIds"])
+                    {
+                        auto operationId = raw.get<std::string>();
+                        if (keptTransferRegistry_->discardWithoutSession(Ids::makeOperationId(operationId)))
+                            discarded.push_back(std::move(operationId));
+                    }
+                    return reply({{"success", true}, {"discarded", std::move(discarded)}});
+                }
+                catch (std::exception const& error)
+                {
+                    Log::error("Error in discardKeptTransfers: {}", Utility::errorMessage(error));
+                    return reply({{"error", Utility::errorMessage(error)}});
                 }
             }
         );

@@ -1216,6 +1216,42 @@ namespace Test
         }).has_value());
     }
 
+    TEST_F(OperationQueueTests, AKeptTransferWithOnlyLocalPartialFilesIsDiscardedWithoutASession)
+    {
+        const auto partial = localDirectory_.path() / "big.bin.filepart";
+        std::ofstream{partial} << "partial";
+        const auto operationId = Ids::generateOperationId();
+        keptTransfers_->store(
+            operationId, KeptTransfer{.partialFiles = Operation::KeptPartialFiles{.local = {partial}}}
+        );
+
+        EXPECT_TRUE(keptTransfers_->discardWithoutSession(operationId));
+        EXPECT_FALSE(std::filesystem::exists(partial));
+        EXPECT_EQ(keptTransfers_->size(), 0u);
+        EXPECT_TRUE(keptTransfers_->discardWithoutSession(operationId)) << "nothing is kept under it anymore";
+    }
+
+    TEST_F(OperationQueueTests, AKeptTransferWithPartialFilesOnTheServerStaysWithoutASession)
+    {
+        const auto partial = localDirectory_.path() / "other.bin.filepart";
+        std::ofstream{partial} << "partial";
+        const auto operationId = Ids::generateOperationId();
+        keptTransfers_->store(
+            operationId,
+            KeptTransfer{
+                .partialFiles =
+                    Operation::KeptPartialFiles{
+                        .local = {partial},
+                        .remote = {remote("/home/test/big.bin.filepart")},
+                    },
+            }
+        );
+
+        EXPECT_FALSE(keptTransfers_->discardWithoutSession(operationId));
+        EXPECT_TRUE(std::filesystem::exists(partial));
+        EXPECT_EQ(keptTransfers_->size(), 1u);
+    }
+
     TEST_F(OperationQueueTests, DirectoryDownloadIsOneUnit)
     {
         CREATE_SERVER_AND_JOINER(sftpServer);
