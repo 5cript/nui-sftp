@@ -818,7 +818,7 @@ void SessionManager::registerRpcForgetKeptTransfers()
             [this](RpcHelper::RpcOnce&& reply, nlohmann::json const& parameters)
             {
                 if (!RpcHelper::ParameterVerifyView{reply, "SessionManager::forgetKeptTransfers", parameters}
-                         .hasValueDeep("operationIds"))
+                        .hasValueDeep("operationIds"))
                     return;
 
                 try
