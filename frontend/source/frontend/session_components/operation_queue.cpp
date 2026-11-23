@@ -1506,7 +1506,12 @@ void OperationQueue::onOperationCompleted(SharedData::OperationCompleted complet
     auto* operation = impl_->findOperation(completed.operationId);
     if (!operation)
     {
-        Log::error("Received operation completed for unknown operation id: {}", completed.operationId.value());
+        // The card of a canceled transfer may have been removed before its completion came, nothing to tell the user.
+        Log::error(
+            Log::Toast::Skip,
+            "Received operation completed for unknown operation id: {}",
+            completed.operationId.value()
+        );
         return;
     }
 
