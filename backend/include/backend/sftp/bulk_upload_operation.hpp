@@ -61,12 +61,9 @@ class BulkUploadOperation : public BulkTransferOperation
      */
     std::optional<SharedData::BulkUploadRequest> resumeRequest(SharedData::BulkUploadRequest request) const;
 
-    void keepPartialFiles() override;
-    void deletePartialFiles() override;
-
     /**
-     * @brief The temporary files of the entries it has not finished, see unfinishedEntryIndices. Nothing when its
-     *        files delete their partial file on cancel.
+     * @brief The temporary files of the entries it has not finished, see unfinishedEntryIndices. Nothing unless its
+     *        cancel keeps the partial files, see keepPartialFiles.
      */
     std::optional<KeptPartialFiles> keptPartialFiles() const override;
 
@@ -110,6 +107,4 @@ class BulkUploadOperation : public BulkTransferOperation
 
   private:
     UploadOperation::UploadOperationOptions individualOptions_;
-    /** @brief A cancel keeps the partial files of the entries it has not finished, see keepPartialFiles. */
-    bool keepsPartialFiles_{false};
 };

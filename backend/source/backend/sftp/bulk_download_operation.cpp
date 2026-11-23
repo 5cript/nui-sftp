@@ -268,21 +268,9 @@ BulkDownloadOperation::resumeRequest(SharedData::BulkDownloadRequest request) co
     return request;
 }
 
-void BulkDownloadOperation::keepPartialFiles()
-{
-    individualOptions_.doCleanup = false;
-    BulkTransferOperation::keepPartialFiles();
-}
-
-void BulkDownloadOperation::deletePartialFiles()
-{
-    individualOptions_.doCleanup = true;
-    BulkTransferOperation::deletePartialFiles();
-}
-
 std::optional<Operation::KeptPartialFiles> BulkDownloadOperation::keptPartialFiles() const
 {
-    if (individualOptions_.doCleanup)
+    if (!keepsPartialFiles())
         return std::nullopt;
     const auto suffix = Persistence::effectiveTempFileSuffix(individualOptions_.tempFileSuffix);
     KeptPartialFiles kept{};

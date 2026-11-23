@@ -763,6 +763,11 @@ void BulkTransferOperation::deletePartialFiles()
     childrenKeepPartialFiles_ = false;
 }
 
+bool BulkTransferOperation::keepsPartialFiles() const
+{
+    return childrenKeepPartialFiles_ == true;
+}
+
 std::expected<void, BulkTransferOperation::Error> BulkTransferOperation::cancel(bool adoptCancelState)
 {
     if (scanPhase_)
