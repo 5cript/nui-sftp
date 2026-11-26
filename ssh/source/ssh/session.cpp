@@ -368,7 +368,9 @@ namespace SecureShell
 #endif
 
         std::optional<std::string> lastAttemptedAppliedOption = "";
-        std::expected<void, std::string> hostKeyVerified{};
+        // Only verifyHostKey() sets it: a sequence that ends before it leaves the key unchecked, not passed.
+        bool hostKeyPassed = false;
+        std::optional<std::string> hostKeyRefusal{};
         std::optional<JumpHostVerification> jumpHostVerification{};
         bool connectFailed = false;
 
@@ -626,12 +628,15 @@ namespace SecureShell
             {
                 // libssh does not check the key on its own, and its StrictHostKeyChecking is not set from the
                 // options: verifyHostKey() turns it on for its lookup.
-                hostKeyVerified = verifyHostKey(
+                const auto verified = verifyHostKey(
                     static_cast<ssh::Session&>(*session).getCSession(),
                     sshOptions.strictHostKeyCheck.value_or(false),
                     askAboutHostKey
                 );
-                return hostKeyVerified ? SSH_OK : SSH_ERROR;
+                hostKeyPassed = verified.has_value();
+                if (!verified)
+                    hostKeyRefusal = verified.error();
+                return hostKeyPassed ? SSH_OK : SSH_ERROR;
             },
             [&]
             {
@@ -687,8 +692,8 @@ namespace SecureShell
             }
         }
 
-        if (!hostKeyVerified)
-            return std::unexpected(fmt::format("Failed to connect: {}", hostKeyVerified.error()));
+        if (hostKeyRefusal)
+            return std::unexpected(fmt::format("Failed to connect: {}", *hostKeyRefusal));
 
         if (result.result == SSH_ERROR)
         {
@@ -700,6 +705,10 @@ namespace SecureShell
                 )
             );
         }
+
+        // Nothing authenticates to a server whose host key did not pass, however the sequence ended.
+        if (!hostKeyPassed)
+            return std::unexpected(std::string{"Failed to connect: The host key of the server was not checked."});
 
         if (result.result != SSH_AUTH_SUCCESS && sshOptions.usePublicKeyAutoAuth &&
             sshOptions.usePublicKeyAutoAuth.value())
