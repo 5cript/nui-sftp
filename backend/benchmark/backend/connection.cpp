@@ -24,6 +24,7 @@ namespace Benchmark
                     .tryAgentForAuthentication = false,
                     .usePublicKeyAutoAuth = false,
                     .usePasswordAuth = true,
+                    .strictHostKeyCheck = false,
                     .bypassConfig = true,
                     .connectTimeoutSeconds = 10,
                 },
@@ -41,6 +42,11 @@ namespace Benchmark
             nullptr,
             nullptr,
             nullptr,
+            // The benchmark only reaches servers it was pointed at, whose keys it does not keep.
+            [](SecureShell::HostKeyQuestion const&)
+            {
+                return SecureShell::HostKeyAnswer::Once;
+            },
             []() {}
         );
         if (!session)

@@ -1,4 +1,5 @@
 #include <ssh/session.hpp>
+#include <ssh/host_key.hpp>
 #include <ssh/sequential.hpp>
 #include <ssh/sftp_error_conversion.hpp>
 #include <ssh/sftp_session.hpp>
@@ -351,6 +352,7 @@ namespace SecureShell
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,
         std::vector<PasswordCacheEntry>* pwCache,
+        HostKeySource const& askAboutHostKey,
         std::function<void()> onConnectionLoss
     )
     {
@@ -366,6 +368,7 @@ namespace SecureShell
 #endif
 
         std::optional<std::string> lastAttemptedAppliedOption = "";
+        std::expected<void, std::string> hostKeyVerified{};
 
         auto result = Detail::sequential(
             [&]
@@ -506,16 +509,6 @@ namespace SecureShell
             },
             [&]
             {
-                if (sshOptions.strictHostKeyCheck)
-                {
-                    lastAttemptedAppliedOption = "Strict Host Key Check";
-                    int strict = sshOptions.strictHostKeyCheck.value() ? 1 : 0;
-                    return static_cast<ssh::Session&>(*session).setOption(SSH_OPTIONS_STRICTHOSTKEYCHECK, &strict);
-                }
-                return 0;
-            },
-            [&]
-            {
                 if (sshOptions.proxyCommand)
                 {
                     lastAttemptedAppliedOption = "Proxy Command";
@@ -618,6 +611,17 @@ namespace SecureShell
             },
             [&]
             {
+                // libssh does not check the key on its own, and its StrictHostKeyChecking is not set from the
+                // options: verifyHostKey() turns it on for its lookup.
+                hostKeyVerified = verifyHostKey(
+                    static_cast<ssh::Session&>(*session).getCSession(),
+                    sshOptions.strictHostKeyCheck.value_or(false),
+                    askAboutHostKey
+                );
+                return hostKeyVerified ? SSH_OK : SSH_ERROR;
+            },
+            [&]
+            {
                 // After the connect, which keeps the 10 s libssh gives it without a timeout.
                 return session->setCallTimeout(callTimeoutOf(sshOptions));
             },
@@ -658,6 +662,9 @@ namespace SecureShell
 #endif
             }
         );
+
+        if (!hostKeyVerified)
+            return std::unexpected(fmt::format("Failed to connect: {}", hostKeyVerified.error()));
 
         if (result.result == SSH_ERROR)
         {

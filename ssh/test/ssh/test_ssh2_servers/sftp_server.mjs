@@ -1007,6 +1007,11 @@ const server = new Server({
     client.on('close', () => {
         logMessage('Client disconnected!');
     });
+
+    // A client that leaves before it logged in resets the connection, which is no reason to end the server.
+    client.on('error', (error) => {
+        logMessage(`Client error: ${error}`);
+    });
 });
 
 server.listen(port, '::', () => {

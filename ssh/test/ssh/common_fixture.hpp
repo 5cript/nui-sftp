@@ -116,8 +116,21 @@ namespace SecureShell::Test
                 .port = port,
                 .users = {Persistence::SshUser{.name = user}},
                 .sshOptions = Persistence::SshOptions{
+                    .knownHostsFile = isolateDirectory_.path() / "known_hosts",
+                    .strictHostKeyCheck = false,
                     .connectTimeoutSeconds = connectTimeout.count(),
                 },
+            };
+        }
+
+        /**
+         * @brief Trusts the host key of the mock server for the connection, its port is new with every test.
+         */
+        static HostKeySource trustingTheMockServer()
+        {
+            return [](HostKeyQuestion const&)
+            {
+                return HostKeyAnswer::Once;
             };
         }
 
@@ -135,6 +148,7 @@ namespace SecureShell::Test
                 nullptr,
                 nullptr,
                 nullptr,
+                trustingTheMockServer(),
                 onConnectionLoss ? std::move(onConnectionLoss) : []()
                 {
                     std::cout << "connection lost." << std::endl;

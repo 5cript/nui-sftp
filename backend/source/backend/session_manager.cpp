@@ -1,5 +1,6 @@
 #include <backend/session_manager.hpp>
 #include <backend/ftp/ftp_connect.hpp>
+#include <utility/algorithm/case_convert.hpp>
 #include <utility/error_message.hpp>
 #include <backend/rpc_helper.hpp>
 #include <log/log.hpp>
@@ -12,6 +13,7 @@
 #include <boost/asio/post.hpp>
 #include <roar/utility/base64.hpp>
 #include <roar/filesystem/special_paths.hpp>
+#include <fmt/format.h>
 
 #include <cassert>
 #include <optional>
@@ -296,17 +298,12 @@ std::optional<std::string> SessionManager::askPassword(std::string const& whatFo
     return std::nullopt;
 }
 
-FtpConnect::TrustAnswer SessionManager::askTrustProvider(FtpConnect::TrustQuestion const& question)
+template <typename Answer>
+Answer SessionManager::awaitPromptAnswer(Answer refused, std::function<void(std::function<void(Answer)>)> const& ask)
 {
-    if (!trustProvider_)
-    {
-        Log::warn("There is no trust provider to ask about the certificate of {}:{}.", question.host, question.port);
-        return FtpConnect::TrustAnswer::Refused;
-    }
-
     const auto request = beginPasswordRequest();
     if (!request)
-        return FtpConnect::TrustAnswer::Refused;
+        return refused;
     const auto endRequest = Nui::ScopeExit(
         [this]() noexcept
         {
@@ -315,18 +312,113 @@ FtpConnect::TrustAnswer SessionManager::askTrustProvider(FtpConnect::TrustQuesti
     );
 
     // The request only wakes the wait and lets shutdown() cancel it, the answer travels beside it.
-    const auto given = std::make_shared<std::atomic<FtpConnect::TrustAnswer>>(FtpConnect::TrustAnswer::Refused);
-    trustProvider_->askTrust(
-        question,
-        [request, given](FtpConnect::TrustAnswer answer)
+    const auto given = std::make_shared<std::atomic<Answer>>(refused);
+    ask(
+        [request, given](Answer answer)
         {
             given->store(answer);
             request->resolve(std::string{});
         }
     );
     if (!request->wait())
-        return FtpConnect::TrustAnswer::Refused;
+        return refused;
     return given->load();
+}
+
+FtpConnect::TrustAnswer SessionManager::askTrustProvider(FtpConnect::TrustQuestion const& question)
+{
+    if (!trustProvider_)
+    {
+        Log::warn("There is no trust provider to ask about the certificate of {}:{}.", question.host, question.port);
+        return FtpConnect::TrustAnswer::Refused;
+    }
+
+    return awaitPromptAnswer<FtpConnect::TrustAnswer>(
+        FtpConnect::TrustAnswer::Refused,
+        [this, &question](std::function<void(FtpConnect::TrustAnswer)> onAnswer)
+        {
+            trustProvider_->askTrust(question, std::move(onAnswer));
+        }
+    );
+}
+
+std::optional<SecureShell::HostKeyAnswer>
+SessionManager::askHostKeyProvider(SecureShell::HostKeyQuestion const& question)
+{
+    // A changed key is only shown, nothing that was trusted before speaks for it.
+    const auto unknown = question.problem == SecureShell::HostKeyProblem::Unknown;
+    // The known hosts files compare hosts without regard to case.
+    const auto server = std::pair{Utility::Algorithm::toLowerCase(question.host), question.port};
+    const auto presentedKey = fmt::format("{} {}", question.keyType, question.fingerprint);
+    const auto trusted = hostKeysOfThisRun_.find(server);
+    const auto trustedInThisRun = unknown && trusted != hostKeysOfThisRun_.end();
+    // The known hosts file did not take the key or no longer holds it, and is left as it is.
+    if (trustedInThisRun && trusted->second == presentedKey)
+        return SecureShell::HostKeyAnswer::Once;
+
+    if (!hostKeyProvider_)
+    {
+        Log::warn("There is no host key provider to ask about the key of {}:{}.", question.host, question.port);
+        return std::nullopt;
+    }
+    const auto prompt = [this](SecureShell::HostKeyQuestion const& shown)
+    {
+        return awaitPromptAnswer<SecureShell::HostKeyAnswer>(
+            SecureShell::HostKeyAnswer::Refused,
+            [this, &shown](std::function<void(SecureShell::HostKeyAnswer)> onAnswer)
+            {
+                hostKeyProvider_->askAboutHostKey(shown, std::move(onAnswer));
+            }
+        );
+    };
+
+    // The known hosts files cannot tell that the key changed, the key trusted for the server in this run can.
+    if (trustedInThisRun)
+    {
+        Log::warn(
+            "The host key of {}:{} is not the one trusted for it in this run, the connection is refused: {}",
+            question.host,
+            question.port,
+            presentedKey
+        );
+        auto changed = question;
+        changed.problem = SecureShell::HostKeyProblem::ChangedSinceTrusted;
+        changed.trustedKey = trusted->second;
+        prompt(changed);
+        return SecureShell::HostKeyAnswer::Refused;
+    }
+
+    const auto answer = prompt(question);
+    // The known hosts file may fail to take the key.
+    if (unknown && answer != SecureShell::HostKeyAnswer::Refused)
+        hostKeysOfThisRun_[server] = presentedKey;
+    return answer;
+}
+
+SecureShell::HostKeyAnswer SessionManager::askAboutHostKey(SecureShell::HostKeyQuestion const& question) noexcept
+{
+    // A prompt that fails is no declined one, its error is reported.
+    lastPromptDeclined_ = false;
+    try
+    {
+        const auto answer = askHostKeyProvider(question);
+        // Nobody saw a prompt or a warning, so the error of the connect is the report.
+        if (!answer)
+            return SecureShell::HostKeyAnswer::Refused;
+        // A changed key is refused whatever the answer, and its warning is the report of that.
+        lastPromptDeclined_ = *answer == SecureShell::HostKeyAnswer::Refused ||
+            question.problem != SecureShell::HostKeyProblem::Unknown;
+        return *answer;
+    }
+    catch (std::exception const& exception)
+    {
+        Log::error("Asking whether to trust a host key failed: {}", Utility::errorMessage(exception));
+    }
+    catch (...)
+    {
+        Log::error("Asking whether to trust a host key failed.");
+    }
+    return SecureShell::HostKeyAnswer::Refused;
 }
 
 FtpConnect::TrustAnswer SessionManager::askTrust(FtpConnect::TrustQuestion const& question) noexcept
@@ -348,6 +440,14 @@ FtpConnect::TrustAnswer SessionManager::askTrust(FtpConnect::TrustQuestion const
         Log::error("Asking whether to trust a certificate failed.");
     }
     return FtpConnect::TrustAnswer::Refused;
+}
+
+SecureShell::HostKeySource SessionManager::hostKeySource()
+{
+    return [this](SecureShell::HostKeyQuestion const& question)
+    {
+        return askAboutHostKey(question);
+    };
 }
 
 FtpConnect::TrustSource SessionManager::trustSource()
@@ -393,6 +493,16 @@ void SessionManager::setTrustProvider(FtpConnect::TrustProvider* provider)
     );
 }
 
+void SessionManager::setHostKeyProvider(HostKeyProvider* provider)
+{
+    within_strand_do(
+        [this, provider]()
+        {
+            hostKeyProvider_ = provider;
+        }
+    );
+}
+
 void SessionManager::setTrustStore(std::shared_ptr<FtpConnect::CertificateTrustStore> store)
 {
     within_strand_do(
@@ -417,6 +527,7 @@ SessionManager::Connect SessionManager::secureShellConnect(Persistence::SshSessi
             &askPassUserDataKeyPhrase,
             &askPassUserDataPassword,
             nullptr,
+            hostKeySource(),
             std::move(onConnectionLoss)
         )
             .transform(&SessionConnection::fromSecureShell);
