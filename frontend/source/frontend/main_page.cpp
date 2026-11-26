@@ -8,6 +8,7 @@
 #include <frontend/licenses.hpp>
 #include <utility/language.hpp>
 #include <frontend/dialog/certificate_trust_prompter.hpp>
+#include <frontend/dialog/host_key_prompter.hpp>
 #include <frontend/dialog/password_prompter.hpp>
 #include <frontend/dialog/confirm_dialog.hpp>
 #include <frontend/dialog/input_dialog.hpp>
@@ -58,6 +59,7 @@ struct MainPage::Implementation
     NewSessionDialog newSessionDialog;
     PasswordPrompter prompter;
     CertificateTrustPrompter trustPrompter;
+    HostKeyPrompter hostKeyPrompter;
     MultiInputDialog multiInputDialog;
     Sidebar sidebar;
     NotificationCenter notificationCenter;
@@ -89,6 +91,7 @@ struct MainPage::Implementation
         , newSessionDialog{"NewSessionDialog"}
         , prompter{}
         , trustPrompter{}
+        , hostKeyPrompter{}
         , multiInputDialog{"MultiInputDialog"}
         , sidebar{stateHolder, events}
         , notificationCenter{events}
@@ -274,6 +277,7 @@ Nui::ElementRenderer MainPage::render()
         impl_->newItemAskDialog(),
         impl_->prompter.dialog(),
         impl_->trustPrompter.dialog(),
+        impl_->hostKeyPrompter.dialog(),
         impl_->confirmDialog(),
         impl_->filePropertyDialog(),
         impl_->archiveTransferDialog(),
