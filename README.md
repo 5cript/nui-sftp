@@ -124,7 +124,9 @@ You can download and upload files and folders directly as tar archives, no manua
 - Automatic key auth via SSH directory.
 - SSH agent support on Linux and macOS.
 - Several users per server, each with their own keys.
-- ProxyJump and ProxyCommand.
+- Host keys are verified against your known hosts files. A changed host key is refused with a warning.
+- An unknown host key is shown with its fingerprint. You can reject it or trust it, which adds it to your known hosts file. Strict Host Key Verification refuses it without asking.
+- ProxyJump and ProxyCommand. The host keys of jump hosts are verified too, they have to be in a known hosts file.
 - Reads your SSH configuration file (can be turned off).
 - Multi channel support (multiple ptys and sftp at the same time).
 - Direct Connect: open a session to a host without adding it as a server.
