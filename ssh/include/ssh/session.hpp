@@ -6,6 +6,7 @@
 #include <persistence/state/session_options.hpp>
 #include <persistence/state/termios.hpp>
 #include <ssh/channel.hpp>
+#include <ssh/host_key.hpp>
 
 #include <libssh/libsshpp.hpp>
 
@@ -149,12 +150,21 @@ namespace SecureShell
      */
     std::chrono::microseconds callTimeoutOf(Persistence::SshOptions const& options);
 
+    /**
+     * @brief Connects to the server of @p sessionOptions, checks its host key as verifyHostKey() does and
+     *        authenticates. Nothing is asked of @p askPass and no credential is sent before the host key passed.
+     *
+     * @param askAboutHostKey Asked about a host key that no known hosts file holds, unless the options verify
+     *        strictly. Empty refuses such a key.
+     * @return Why there is no session.
+     */
     std::expected<std::unique_ptr<Session>, std::string> makeSession(
         Persistence::SshSessionOptions const& sessionOptions,
         AskPassCallback askPass,
         void* askPassUserDataKeyPhrase,
         void* askPassUserDataPassword,
         std::vector<PasswordCacheEntry>* pwCache,
+        HostKeySource const& askAboutHostKey,
         std::function<void()> onConnectionLoss
     );
 }

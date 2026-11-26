@@ -11,6 +11,7 @@
 #include <backend/password/password_request.hpp>
 #include <backend/sftp/bulk_resume_registry.hpp>
 #include <backend/sftp/kept_transfer_registry.hpp>
+#include <backend/ssh/host_key_provider.hpp>
 #include <log/toast.hpp>
 #include <persistence/state/file_tracking_options.hpp>
 #include <persistence/state/session_options.hpp>
@@ -33,6 +34,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 
 /**
  * @brief The engine a SessionManager::connect call asks for: SSH without "engineType", else the one it names, SSH or
@@ -94,6 +96,12 @@ class SessionManager
      *        only.
      */
     void setTrustStore(std::shared_ptr<FtpConnect::CertificateTrustStore> store);
+
+    /**
+     * @brief Who is asked whether to trust a host key of an SSH server that no known hosts file holds. Without one
+     *        such a key fails the connect.
+     */
+    void setHostKeyProvider(HostKeyProvider* provider);
     void joinSessionAdder();
     /**
      * @brief Makes the connection of a new session on the strand, handed the callback for its loss.
@@ -119,6 +127,22 @@ class SessionManager
      *        password providers for the password unless the login is anonymous.
      */
     Connect ftpConnect(Persistence::FtpSessionOptions sessionOptions);
+
+    /**
+     * @brief Connects to the SSH server of @p sessionOptions, asking for passwords and key phrases through the
+     *        password providers. A host key that no known hosts file holds is put to the host key provider first,
+     *        unless the options verify strictly. A key trusted there is not asked about again in this run of the
+     *        application. A changed host key is put to the provider every time and refused.
+     */
+    Connect secureShellConnect(Persistence::SshSessionOptions sessionOptions);
+
+    /**
+     * @brief Asks the host key provider about a host key, on the strand, which it blocks until the answer. An unknown
+     *        key trusted for its server in this run is trusted without asking. Another unknown key for that server is
+     *        shown as a changed one and refused. A prompt that shutdown() cancels or that no provider can answer is
+     *        refused.
+     */
+    SecureShell::HostKeySource hostKeySource();
 
     /**
      * @brief Asks the trust provider about a certificate, on the strand, which it blocks until the answer. A prompt
@@ -171,12 +195,6 @@ class SessionManager
     // void dispatchUpdates();
 
     /**
-     * @brief Connects to the SSH server of @p sessionOptions, asking for passwords and key phrases through the
-     *        password providers.
-     */
-    Connect secureShellConnect(Persistence::SshSessionOptions sessionOptions);
-
-    /**
      * @brief Asks the password providers in the order of their priority until one answers. On the strand, which it
      *        blocks until then.
      *
@@ -202,6 +220,30 @@ class SessionManager
      * @brief Asks as askTrust() does, and lets what the provider throws through.
      */
     FtpConnect::TrustAnswer askTrustProvider(FtpConnect::TrustQuestion const& question);
+
+    /**
+     * @brief Asks the host key provider whether to trust the host key of @p question, unless it is an unknown one
+     *        that was trusted for its server in this run. On the strand, which it blocks until then.
+     *
+     * @return What the user decided, Refused also when prompts are cancelled or asking failed.
+     */
+    SecureShell::HostKeyAnswer askAboutHostKey(SecureShell::HostKeyQuestion const& question) noexcept;
+
+    /**
+     * @brief Asks as askAboutHostKey() does, and lets what the provider throws through.
+     *
+     * @return Nothing when a provider had to be asked and there is none.
+     */
+    std::optional<SecureShell::HostKeyAnswer> askHostKeyProvider(SecureShell::HostKeyQuestion const& question);
+
+    /**
+     * @brief Waits on the strand for the answer @p ask is handed the callback of, as the pending request, so that
+     *        shutdown() can cancel the wait.
+     *
+     * @param refused The answer of a prompt that is cancelled or never begins.
+     */
+    template <typename Answer>
+    Answer awaitPromptAnswer(Answer refused, std::function<void(std::function<void(Answer)>)> const& ask);
 
     /**
      * @brief Stops and removes every session, later ones are refused. On the strand.
@@ -326,13 +368,20 @@ class SessionManager
     std::shared_ptr<FtpConnect::CertificateTrustStore> trustStore_{
         std::make_shared<FtpConnect::CertificateTrustStore>()
     };
+    /** @brief On the strand. */
+    HostKeyProvider* hostKeyProvider_{nullptr};
+    /**
+     * @brief The key type and fingerprint trusted for a host, in lower case, and port since the application started.
+     *        On the strand.
+     */
+    std::map<std::pair<std::string, int>, std::string> hostKeysOfThisRun_{};
     std::mutex passwordRequestMutex_{};
     /** @brief At most one, the prompts only run within the strand. */
     std::shared_ptr<PasswordRequest> pendingPasswordRequest_{};
     bool passwordPromptsCancelled_{false};
     /** @brief Stops the FTP connects, a login that runs among them, once shutdown() begins. Thread-safe. */
     std::stop_source connectsStop_{};
-    /** @brief Whether the last prompt of askPassword or askTrust got no answer, a failed one aside. On the strand. */
+    /** @brief Whether the last password, trust or host key prompt got no answer, a failed one aside. On the strand. */
     bool lastPromptDeclined_{false};
     std::unique_ptr<std::thread> addSessionThread_{};
     std::vector<SecureShell::PasswordCacheEntry> pwCache_{};

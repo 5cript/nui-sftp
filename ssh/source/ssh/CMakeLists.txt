@@ -14,6 +14,7 @@ function(add_secure_shell_library name remoteIo)
             ${SECURE_SHELL_SOURCE_DIRECTORY}/sftp_error_conversion.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/file_stream.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/file_information.cpp
+            ${SECURE_SHELL_SOURCE_DIRECTORY}/host_key.cpp
             ${SECURE_SHELL_SOURCE_DIRECTORY}/key_file.cpp
     )
 

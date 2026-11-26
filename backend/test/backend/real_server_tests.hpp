@@ -102,6 +102,8 @@ class RealServerTests : public ::testing::Test
             .port = port,
             .users = {Persistence::SshUser{.name = user}},
             .sshOptions = Persistence::SshOptions{
+                .knownHostsFile = isolateDirectory_.path() / "known_hosts",
+                .strictHostKeyCheck = false,
                 .connectTimeoutSeconds = connectTimeout.count(),
             },
         };
@@ -120,6 +122,11 @@ class RealServerTests : public ::testing::Test
             nullptr,
             nullptr,
             nullptr,
+            // The mock server, its port is new with every test.
+            [](SecureShell::HostKeyQuestion const&)
+            {
+                return SecureShell::HostKeyAnswer::Once;
+            },
             []() {}
         );
     }

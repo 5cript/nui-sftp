@@ -6,6 +6,7 @@
 #include "test_sftp_in_strand.hpp"
 #include "test_sftp_file_system.hpp"
 #include "test_key_file.hpp"
+#include "test_host_key.hpp"
 #include "test_sftp_error_conversion.hpp"
 
 #include <utility/node/node.hpp>

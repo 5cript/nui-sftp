@@ -231,6 +231,7 @@ namespace SecureShell::Test
             nullptr,
             nullptr,
             nullptr,
+            trustingTheMockServer(),
             []() {}
         );
 
@@ -259,6 +260,7 @@ namespace SecureShell::Test
             nullptr,
             nullptr,
             nullptr,
+            trustingTheMockServer(),
             []() {}
         );
 
@@ -290,6 +292,7 @@ namespace SecureShell::Test
             nullptr,
             nullptr,
             nullptr,
+            trustingTheMockServer(),
             []() {}
         );
 
@@ -314,6 +317,7 @@ namespace SecureShell::Test
             nullptr,
             nullptr,
             nullptr,
+            trustingTheMockServer(),
             []() {}
         );
         auto diff = std::chrono::steady_clock::now() - start;
@@ -369,6 +373,7 @@ namespace SecureShell::Test
             nullptr,
             nullptr,
             nullptr,
+            trustingTheMockServer(),
             []() {}
         );
         auto diff = std::chrono::steady_clock::now() - start;
