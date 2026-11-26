@@ -105,7 +105,7 @@ namespace FtpConnect
         }
         const auto answer = answerOf(decision);
         if (!answer)
-            Log::error("The trust prompt was answered with no decision, the certificate is not trusted.");
+            Log::error("The trust prompt was answered with no decision, which refuses.");
         onAnswer(answer.value_or(TrustAnswer::Refused));
         return true;
     }

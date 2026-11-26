@@ -6,6 +6,7 @@
 #include <backend/ftp/ftp_engine_context.hpp>
 #include <backend/password/password_provider.hpp>
 #include <backend/session_manager.hpp>
+#include <backend/ssh/host_key_prompter.hpp>
 #include <backend/ssh/host_key_provider.hpp>
 #include <paths/native.hpp>
 #include <persistence/state_holder.hpp>
@@ -296,6 +297,14 @@ namespace Test
         EXPECT_EQ(hostKeys.questions().size(), 1u);
         EXPECT_EQ(passwords_.asked, 2u);
         EXPECT_TRUE(std::filesystem::exists(isolateDirectory_.path() / "known_hosts"));
+    }
+
+    TEST(HostKeyPrompterTests, TheFrontendCanOnlySaveAHostKeyOrRefuseIt)
+    {
+        EXPECT_EQ(HostKeyPrompter::answerOf(FtpConnect::TrustAnswer::Always), SecureShell::HostKeyAnswer::Always);
+        EXPECT_EQ(HostKeyPrompter::answerOf(FtpConnect::TrustAnswer::Refused), SecureShell::HostKeyAnswer::Refused);
+        EXPECT_EQ(HostKeyPrompter::answerOf(FtpConnect::TrustAnswer::Once), SecureShell::HostKeyAnswer::Refused)
+            << "trust without saving is not offered";
     }
 
     TEST_F(SessionManagerHostKeyTests, ARefusedHostKeyIsAskedAboutAgain)

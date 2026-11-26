@@ -22,6 +22,7 @@ add_library(
         ftp/ftp_engine_context.cpp
         inspector_environment.cpp
         reduced_motion.cpp
+        ssh/host_key_prompter.cpp
         password/password_prompter.cpp
         password/password_request.cpp
         process/process.cpp

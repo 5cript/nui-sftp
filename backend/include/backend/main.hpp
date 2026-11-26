@@ -8,6 +8,7 @@
 #include <backend/rpc_system.hpp>
 #include <backend/ftp/certificate_trust_prompter.hpp>
 #include <backend/password/password_prompter.hpp>
+#include <backend/ssh/host_key_prompter.hpp>
 #include <backend/theme_finder.hpp>
 #include <backend/program_options.hpp>
 #include <backend/opener.hpp>
@@ -86,6 +87,7 @@ class Main
     PasswordPrompter prompter_;
     std::shared_ptr<FtpConnect::CertificateTrustStore> trustStore_;
     CertificateTrustPrompter trustPrompter_;
+    HostKeyPrompter hostKeyPrompter_;
     std::optional<CommandStore::Store> commandStore_;
     /** @brief StoreRpc, or UnavailableStoreRpc when the store could not be opened. */
     std::unique_ptr<RpcHelper::StrandRpc> commandStoreRpc_;
