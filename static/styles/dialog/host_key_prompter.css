@@ -1,0 +1,55 @@
+.host-key-prompt {
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.host-key-prompt-text {
+    margin: 0;
+    line-height: 1.4;
+}
+
+.host-key-prompt-details {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    align-items: baseline;
+}
+
+.host-key-prompt-label {
+    color: var(--subdued-text);
+    white-space: nowrap;
+}
+
+.host-key-prompt-value {
+    overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.host-key-prompt-fingerprint {
+    font-family: monospace;
+    overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.host-key-prompt-alarm {
+    margin: 0;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: color-mix(in srgb, var(--script-nui-components-toast-error, #d9534f) 75%, currentColor 25%);
+}
+
+.host-key-prompt-refused {
+    margin: 0;
+    line-height: 1.4;
+    font-weight: bold;
+}
+
+/* The lasting choice is the one to take: a saved key is what makes a later change of it noticed. */
+#HostKeyPrompter_ok {
+    background-color: var(--color-success);
+    border-color: var(--border-color-success);
+}
