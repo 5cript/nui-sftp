@@ -111,6 +111,11 @@ namespace SecureShell
             std::string_view capitalizedNoun;
         };
         constexpr ServerWording serverWording{.prefix = "", .noun = "the server", .capitalizedNoun = "The server"};
+        constexpr ServerWording jumpHostWording{
+            .prefix = "the jump host ",
+            .noun = "the jump host",
+            .capitalizedNoun = "The jump host",
+        };
 
         /**
          * @brief Why a key is refused that the known hosts files hold another one for. Logged too.
@@ -331,6 +336,148 @@ namespace SecureShell
             );
         }
 
+        std::string unknownJumpHostKeyRefusal(HostKeyQuestion const& presented)
+        {
+            Log::warn(
+                "The host key of the jump host {} is in no known hosts file, the connection is refused: {}",
+                serverOf(presented),
+                keyOf(presented)
+            );
+            return fmt::format(
+                "The host key of the jump host {} is in no known hosts file, and jump hosts are not asked about."
+                "\nPresented key: {}\nConnect to the jump host directly and trust its key always, or add the key to {}.",
+                serverOf(presented),
+                keyOf(presented),
+                knownHostsFileOf(presented)
+            );
+        }
+
+        std::unexpected<JumpHostRefusal> refusedJumpHost(HostKeyQuestion question, std::string reason)
+        {
+            return std::unexpected{JumpHostRefusal{.question = std::move(question), .reason = std::move(reason)}};
+        }
+    }
+
+    struct JumpHostVerification::Record
+    {
+        /** @brief Set before a jump host can take the record, and left alone from then on. */
+        std::string knownHostsFile{};
+        std::mutex mutex{};
+        std::optional<JumpHostRefusal> refusal{};
+    };
+
+    namespace
+    {
+        /**
+         * @brief The verification that is going on. Never destroyed: a jump thread of libssh may outlive the statics
+         *        of the program.
+         */
+        struct VerificationGoingOn
+        {
+            std::mutex mutex{};
+            std::shared_ptr<JumpHostVerification::Record> record{};
+        };
+
+        VerificationGoingOn& verificationGoingOn()
+        {
+            static auto* const goingOn = new VerificationGoingOn{};
+            return *goingOn;
+        }
+
+        /**
+         * @brief The verification a jump thread of libssh took when it started, kept for as long as the thread runs.
+         */
+        thread_local std::shared_ptr<JumpHostVerification::Record> verificationOfThisJumpThread{};
+
+        /**
+         * @brief Runs @p function in a jump thread of libssh, which nothing may be thrown into.
+         *
+         * @return SSH_ERROR for what it throws.
+         */
+        template <typename Function>
+        int inJumpThread(Function const& function) noexcept
+        {
+            try
+            {
+                return function();
+            }
+            catch (std::exception const& exception)
+            {
+                Log::error("Verifying the host key of a jump host failed, it is refused: {}", exception.what());
+            }
+            catch (...)
+            {
+                Log::error("Verifying the host key of a jump host failed, it is refused.");
+            }
+            return SSH_ERROR;
+        }
+
+        ssh_jump_callbacks_struct& jumpHostCallbacks();
+
+        /**
+         * @brief Before libssh connects to a jump host: takes the verification that is going on, hands the jump host
+         *        its known hosts file and has the jump hosts behind it verified the same way, which libssh takes
+         *        from the session of the jump host before them.
+         */
+        int beginJumpHost(ssh_session jumpSession, void*)
+        {
+            return inJumpThread(
+                [jumpSession]
+                {
+                    {
+                        auto& goingOn = verificationGoingOn();
+                        std::scoped_lock lock{goingOn.mutex};
+                        verificationOfThisJumpThread = goingOn.record;
+                    }
+                    auto const& verification = verificationOfThisJumpThread;
+                    // Without a word in the log: the thread may be all that is left of a program that is ending.
+                    if (!verification)
+                        return SSH_ERROR;
+                    auto const& knownHostsFile = verification->knownHostsFile;
+                    if (!knownHostsFile.empty() &&
+                        ssh_options_set(jumpSession, SSH_OPTIONS_KNOWNHOSTS, knownHostsFile.c_str()) != SSH_OK)
+                        return SSH_ERROR;
+                    return ssh_options_set(jumpSession, SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND, &jumpHostCallbacks());
+                }
+            );
+        }
+
+        /**
+         * @brief In place of the check of libssh. The refusal is left with the verification the thread took.
+         */
+        int verifyJumpHost(ssh_session jumpSession, void*)
+        {
+            return inJumpThread(
+                [jumpSession]
+                {
+                    auto verified = verifyJumpHostKey(jumpSession);
+                    if (verified)
+                        return SSH_OK;
+                    if (auto const& verification = verificationOfThisJumpThread; verification)
+                    {
+                        std::scoped_lock lock{verification->mutex};
+                        verification->refusal = std::move(verified).error();
+                    }
+                    return SSH_ERROR;
+                }
+            );
+        }
+
+        /**
+         * @brief Never destroyed either, libssh keeps the pointer for its jump threads.
+         */
+        ssh_jump_callbacks_struct& jumpHostCallbacks()
+        {
+            static auto* const callbacks = new ssh_jump_callbacks_struct{
+                .userdata = nullptr,
+                .before_connection = &beginJumpHost,
+                .verify_knownhost = &verifyJumpHost,
+                // libssh authenticates as it does without callbacks.
+                .authenticate = nullptr,
+            };
+            return *callbacks;
+        }
+
         std::string strictRefusal(HostKeyQuestion const& presented)
         {
             return fmt::format(
@@ -394,5 +541,78 @@ namespace SecureShell
                 break;
         }
         return std::unexpected{uncheckedKey(*presented, serverWording, session)};
+    }
+
+    std::optional<JumpHostVerification> JumpHostVerification::begin(ssh_session session, std::string knownHostsFile)
+    {
+        if (ssh_options_set(session, SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND, &jumpHostCallbacks()) != SSH_OK)
+            return std::nullopt;
+
+        auto record = std::make_shared<Record>();
+        record->knownHostsFile = std::move(knownHostsFile);
+        auto& goingOn = verificationGoingOn();
+        std::scoped_lock lock{goingOn.mutex};
+        goingOn.record = record;
+        return JumpHostVerification{std::move(record)};
+    }
+
+    JumpHostVerification::JumpHostVerification(std::shared_ptr<Record> record)
+        : record_{std::move(record)}
+    {}
+
+    JumpHostVerification::~JumpHostVerification()
+    {
+        if (!record_)
+            return;
+        auto& goingOn = verificationGoingOn();
+        std::scoped_lock lock{goingOn.mutex};
+        if (goingOn.record == record_)
+            goingOn.record.reset();
+    }
+
+    JumpHostVerification::JumpHostVerification(JumpHostVerification&&) noexcept = default;
+
+    JumpHostVerification& JumpHostVerification::operator=(JumpHostVerification&& other) noexcept
+    {
+        // The verification this one held ends with the temporary.
+        JumpHostVerification ended{std::move(other)};
+        std::swap(record_, ended.record_);
+        return *this;
+    }
+
+    std::optional<JumpHostRefusal> JumpHostVerification::takeRefusal()
+    {
+        if (!record_)
+            return std::nullopt;
+        std::scoped_lock lock{record_->mutex};
+        return std::exchange(record_->refusal, std::nullopt);
+    }
+
+    std::expected<void, JumpHostRefusal> verifyJumpHostKey(ssh_session jumpSession)
+    {
+        auto presented = presentedKeyOf(jumpSession);
+        if (!presented)
+            return refusedJumpHost({.jumpHost = true}, fmt::format("A jump host is refused: {}", presented.error()));
+        presented->jumpHost = true;
+
+        const auto found = lookUpStrictly(jumpSession, *presented);
+        switch (found)
+        {
+            case SSH_KNOWN_HOSTS_OK:
+                Log::debug("The host key of the jump host {} is known: {}", serverOf(*presented), keyOf(*presented));
+                return {};
+            case SSH_KNOWN_HOSTS_CHANGED:
+            case SSH_KNOWN_HOSTS_OTHER:
+            {
+                const auto changed = changedKeyOf(jumpSession, *presented, found);
+                return refusedJumpHost(changed, changedKeyRefusal(changed, jumpHostWording));
+            }
+            case SSH_KNOWN_HOSTS_NOT_FOUND:
+            case SSH_KNOWN_HOSTS_UNKNOWN:
+                return refusedJumpHost(*presented, unknownJumpHostKeyRefusal(*presented));
+            case SSH_KNOWN_HOSTS_ERROR:
+                break;
+        }
+        return refusedJumpHost(*presented, uncheckedKey(*presented, jumpHostWording, jumpSession));
     }
 }

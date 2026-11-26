@@ -35,6 +35,8 @@ namespace SecureShell
     struct HostKeyQuestion
     {
         HostKeyProblem problem{HostKeyProblem::Unknown};
+        /** @brief Whether the key is the one of a ProxyJump host on the way to the server, not of the server. */
+        bool jumpHost{false};
         /** @brief The server as the known hosts files name it, after the ssh config resolved the host. */
         std::string host{};
         int port{};
@@ -90,4 +92,67 @@ namespace SecureShell
      */
     std::expected<void, std::string>
     verifyHostKey(ssh_session session, bool strict, HostKeySource const& askAboutHostKey);
+
+    /**
+     * @brief A host key of a ProxyJump host that verifyJumpHostKey() refused.
+     */
+    struct JumpHostRefusal
+    {
+        HostKeyQuestion question{};
+        /** @brief Why the key was refused, and what to do about it. */
+        std::string reason{};
+    };
+
+    /**
+     * @brief The verification of the ProxyJump hosts of one connect. libssh connects to a jump host in a thread of
+     *        its own, which takes the verification that is going on when it starts, checks the host key with
+     *        verifyJumpHostKey() in place of the check of libssh, which "StrictHostKeyChecking no" of an ssh config
+     *        turns off, and leaves a refusal with it. A jump host that starts when none is going on is refused.
+     *        Connects are expected to use jump hosts one at a time.
+     */
+    class JumpHostVerification
+    {
+      public:
+        /**
+         * @brief Has libssh verify every ProxyJump host of @p session this way. Before the connect.
+         *
+         * @param knownHostsFile The known hosts file the session set of its own, which its jump hosts take too:
+         *        libssh makes their sessions without it. A key trusted always on a direct connect to a jump host
+         *        is then the one the jump host is looked up by. Empty leaves each jump host the file libssh and
+         *        the ssh config give it.
+         * @return Nothing when libssh did not take it.
+         */
+        static std::optional<JumpHostVerification> begin(ssh_session session, std::string knownHostsFile);
+
+        /**
+         * @brief Ends the verification: jump hosts that start from here on are refused. What a jump host that took
+         *        it before refuses reaches nobody.
+         */
+        ~JumpHostVerification();
+        JumpHostVerification(JumpHostVerification const&) = delete;
+        JumpHostVerification& operator=(JumpHostVerification const&) = delete;
+        JumpHostVerification(JumpHostVerification&&) noexcept;
+        JumpHostVerification& operator=(JumpHostVerification&&) noexcept;
+
+        /**
+         * @brief The jump host key that was refused last in this connect, which it forgets. Thread-safe.
+         */
+        std::optional<JumpHostRefusal> takeRefusal();
+
+        struct Record;
+
+      private:
+        explicit JumpHostVerification(std::shared_ptr<Record> record);
+
+        std::shared_ptr<Record> record_;
+    };
+
+    /**
+     * @brief Checks the host key of the connected ProxyJump host of @p jumpSession against its known hosts files.
+     *        Only a key they hold for the jump host passes. Nobody is asked about another one: libssh connects to a
+     *        jump host in a thread of its own, while the connect to the server waits with its timeout running.
+     *
+     * @return The refused key and why it was refused.
+     */
+    std::expected<void, JumpHostRefusal> verifyJumpHostKey(ssh_session jumpSession);
 }
