@@ -225,6 +225,11 @@ namespace Persistence
             Log::info("Applied the one-time move of the terminal renderer from DOM to WebGL.");
             mustSave = true;
         }
+        if (stateCache_.migrateStrictHostKeyCheckToAsking())
+        {
+            Log::info("Applied the one-time move of the default SSH options to asking about unknown host keys.");
+            mustSave = true;
+        }
         if (stateCache_.gatherSessionLayouts())
         {
             Log::info("Gathered the layouts of the servers into the layouts of their type.");
@@ -331,7 +336,7 @@ namespace Persistence
                 .keyExchangeAlgorithms =
                     "curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,"
                     "ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group1-sha1,diffie-hellman-group14-sha1",
-                .strictHostKeyCheck = true,
+                .strictHostKeyCheck = false,
                 .noDelay = true,
 #ifdef __WIN32
                 .bypassConfig = true,

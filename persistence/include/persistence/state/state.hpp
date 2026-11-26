@@ -110,6 +110,14 @@ namespace Persistence
         bool migrateTerminalRendererFromDom();
 
         /**
+         * @brief Turns Strict Host Key Verification of the default SSH options off once, so that unknown host keys
+         *        are asked about. Earlier versions wrote it turned on and never verified a host key.
+         *
+         * @return Whether the migration ran and the state has to be saved.
+         */
+        bool migrateStrictHostKeyCheckToAsking();
+
+        /**
          * @brief Gathers the layouts earlier versions saved per server into the layouts of their type, if not done
          * yet. A name used with a different layout by another server of the type gets the server name appended.
          * The layouts of the servers stay for earlier versions.

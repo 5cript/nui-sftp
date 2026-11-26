@@ -149,6 +149,21 @@ namespace Persistence
         return true;
     }
 
+    bool State::migrateStrictHostKeyCheckToAsking()
+    {
+        constexpr std::string_view migration = "strictHostKeyCheckToAsking";
+        if (!appliedMigrations)
+            appliedMigrations = std::vector<std::string>{};
+        if (std::ranges::find(*appliedMigrations, migration) != appliedMigrations->end())
+            return false;
+        appliedMigrations->emplace_back(migration);
+
+        const auto defaults = sshOptions.find("default");
+        if (defaults != sshOptions.end() && defaults->second.strictHostKeyCheck.value_or(false))
+            defaults->second.strictHostKeyCheck = false;
+        return true;
+    }
+
     bool State::gatherSessionLayouts()
     {
         if (sessionLayouts)

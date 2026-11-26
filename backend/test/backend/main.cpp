@@ -28,6 +28,7 @@
 #include "test_unknown_config_entries.hpp"
 #include "test_ftp_session_options.hpp"
 #include "test_terminal_renderer_migration.hpp"
+#include "test_strict_host_key_check_migration.hpp"
 #include "test_session_layouts.hpp"
 #include "test_ssh_user_selection.hpp"
 #include "test_environment.hpp"
