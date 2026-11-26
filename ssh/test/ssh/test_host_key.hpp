@@ -174,6 +174,19 @@ namespace SecureShell::Test
         }
 
         /**
+         * @brief The options of a connect to the mock server that takes the mock server as its jump host too.
+         */
+        Persistence::SshSessionOptions throughTheServerAsJumpHost()
+        {
+            auto options = getSessionOptions(server_->port);
+            options.sshOptions->knownHostsFile = knownHostsFile();
+            options.sshOptions->strictHostKeyCheck = false;
+            options.sshOptions->bypassConfig = true;
+            options.sshOptions->proxyJump = fmt::format("test@127.0.0.1:{}", server_->port);
+            return options;
+        }
+
+        /**
          * @brief How verifyHostKey() decided, and what it asked on the way.
          */
         struct Verification
@@ -450,6 +463,7 @@ namespace SecureShell::Test
         const auto attempt = connect(false, HostKeyAnswer::Refused);
 
         ASSERT_EQ(attempt.questions.size(), 1u);
+        EXPECT_FALSE(attempt.questions.front().jumpHost);
         EXPECT_TRUE(attempt.questions.front().removalCommand.empty());
     }
 
@@ -477,6 +491,134 @@ namespace SecureShell::Test
         ASSERT_FALSE(verification.verified.has_value());
         ASSERT_EQ(verification.questions.size(), 1u);
         EXPECT_EQ(verification.questions.front().knownHostsFile, Paths::nativeToUtf8(knownHostsFile()));
+    }
+
+    TEST_F(HostKeyTests, AJumpHostKeyTheKnownHostsFileHoldsPasses)
+    {
+        knowServerBy(hostPublicKey);
+        const auto jumpSession = connectedSessionOfLibssh(true);
+        ASSERT_TRUE(jumpSession);
+
+        const auto verified = verifyJumpHostKey(jumpSession.get());
+
+        EXPECT_TRUE(verified.has_value()) << verified.error().reason;
+    }
+
+    TEST_F(HostKeyTests, AnUnknownJumpHostKeyIsRefusedWhateverTheSshConfigSays)
+    {
+        for (const auto strictCheckingOfLibssh : {true, false})
+        {
+            const auto jumpSession = connectedSessionOfLibssh(strictCheckingOfLibssh);
+            ASSERT_TRUE(jumpSession);
+
+            const auto verified = verifyJumpHostKey(jumpSession.get());
+
+            ASSERT_FALSE(verified.has_value()) << "strict checking of libssh: " << strictCheckingOfLibssh;
+            auto const& refusal = verified.error();
+            EXPECT_NE(refusal.reason.find("jump host 127.0.0.1"), std::string::npos) << refusal.reason;
+            EXPECT_NE(refusal.reason.find(hostKeyFingerprint), std::string::npos) << refusal.reason;
+            EXPECT_EQ(refusal.question.problem, HostKeyProblem::Unknown);
+            EXPECT_TRUE(refusal.question.jumpHost);
+            EXPECT_EQ(refusal.question.port, server_->port);
+            EXPECT_EQ(refusal.question.fingerprint, hostKeyFingerprint);
+        }
+        EXPECT_FALSE(std::filesystem::exists(knownHostsFile()));
+    }
+
+    TEST_F(HostKeyTests, AChangedJumpHostKeyIsRefusedWhateverTheSshConfigSays)
+    {
+        knowServerBy(anotherRsaKey);
+        for (const auto strictCheckingOfLibssh : {true, false})
+        {
+            const auto jumpSession = connectedSessionOfLibssh(strictCheckingOfLibssh);
+            ASSERT_TRUE(jumpSession);
+
+            const auto verified = verifyJumpHostKey(jumpSession.get());
+
+            ASSERT_FALSE(verified.has_value()) << "strict checking of libssh: " << strictCheckingOfLibssh;
+            auto const& refusal = verified.error();
+            EXPECT_NE(refusal.reason.find("may be intercepting"), std::string::npos) << refusal.reason;
+            EXPECT_EQ(refusal.question.problem, HostKeyProblem::Changed);
+            EXPECT_EQ(refusal.question.knownHostsFile, Paths::nativeToUtf8(knownHostsFile()));
+        }
+    }
+
+    TEST_F(HostKeyTests, AJumpHostKeyOfAnotherTypeThanTheKnownOneIsRefused)
+    {
+        knowServerBy(anotherEd25519Key);
+        const auto jumpSession = connectedSessionOfLibssh(false);
+        ASSERT_TRUE(jumpSession);
+
+        const auto verified = verifyJumpHostKey(jumpSession.get());
+
+        ASSERT_FALSE(verified.has_value());
+        EXPECT_EQ(verified.error().question.problem, HostKeyProblem::OtherType);
+    }
+
+#ifndef _WIN32
+    // libssh has no ProxyJump on Windows. The mock server is the jump host too.
+    TEST_F(HostKeyTests, AConnectThroughAnUnknownJumpHostFailsWithItsKeyBeforeAnythingIsAsked)
+    {
+        const auto attempt = connect(throughTheServerAsJumpHost(), HostKeyAnswer::Always);
+
+        ASSERT_FALSE(attempt.session.has_value());
+        EXPECT_FALSE(attempt.passwordAsked);
+        EXPECT_TRUE(attempt.questions.empty());
+        auto const& error = attempt.session.error();
+        EXPECT_NE(error.find(fmt::format("jump host 127.0.0.1:{}", server_->port)), std::string::npos) << error;
+        EXPECT_NE(error.find(hostKeyFingerprint), std::string::npos) << error;
+        EXPECT_FALSE(std::filesystem::exists(knownHostsFile()));
+    }
+
+    TEST_F(HostKeyTests, AJumpHostIsLookedUpInTheKnownHostsFileOfTheSession)
+    {
+        // The known hosts files of the user do not hold the port of a test, so only the file of the session can
+        // tell that the key changed.
+        knowServerBy(anotherRsaKey);
+
+        const auto attempt = connect(throughTheServerAsJumpHost(), HostKeyAnswer::Always);
+
+        ASSERT_FALSE(attempt.session.has_value());
+        EXPECT_FALSE(attempt.passwordAsked);
+        ASSERT_EQ(attempt.questions.size(), 1u) << "the warning";
+        EXPECT_EQ(attempt.questions.front().problem, HostKeyProblem::Changed);
+        EXPECT_TRUE(attempt.questions.front().jumpHost) << "the warning has to say whose key changed";
+        EXPECT_EQ(attempt.questions.front().knownHostsFile, Paths::nativeToUtf8(knownHostsFile()));
+        EXPECT_NE(attempt.session.error().find("may be intercepting"), std::string::npos) << attempt.session.error();
+    }
+
+    TEST_F(HostKeyTests, AJumpHostIsRefusedWhenNoConnectIsGoingOn)
+    {
+        knowServerBy(hostPublicKey);
+        const OwnedSession session{ssh_new()};
+        ASSERT_TRUE(session);
+        const auto knownHosts = Paths::nativeToUtf8(knownHostsFile());
+        const auto jump = fmt::format("test@127.0.0.1:{}", server_->port);
+        const unsigned int port = server_->port;
+        const int processConfig = 0;
+        ASSERT_EQ(ssh_options_set(session.get(), SSH_OPTIONS_HOST, "127.0.0.1"), SSH_OK);
+        ASSERT_EQ(ssh_options_set(session.get(), SSH_OPTIONS_PORT, &port), SSH_OK);
+        ASSERT_EQ(ssh_options_set(session.get(), SSH_OPTIONS_KNOWNHOSTS, knownHosts.c_str()), SSH_OK);
+        ASSERT_EQ(ssh_options_set(session.get(), SSH_OPTIONS_PROCESS_CONFIG, &processConfig), SSH_OK);
+        ASSERT_EQ(ssh_options_set(session.get(), SSH_OPTIONS_PROXYJUMP, jump.c_str()), SSH_OK);
+        {
+            const auto ended = JumpHostVerification::begin(session.get(), {});
+            ASSERT_TRUE(ended.has_value());
+        }
+
+        EXPECT_NE(ssh_connect(session.get()), SSH_OK);
+    }
+#endif
+
+    TEST_F(HostKeyTests, ASessionTakesTheVerificationOfItsJumpHosts)
+    {
+        const OwnedSession session{ssh_new()};
+        ASSERT_TRUE(session);
+
+        auto verification = JumpHostVerification::begin(session.get(), {});
+
+        ASSERT_TRUE(verification.has_value());
+        EXPECT_FALSE(verification->takeRefusal().has_value());
     }
 
     TEST_F(HostKeyTests, AnUnknownHostKeyIsRefusedWithoutAQuestionWhenStrict)

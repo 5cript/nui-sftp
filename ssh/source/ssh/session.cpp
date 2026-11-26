@@ -369,6 +369,8 @@ namespace SecureShell
 
         std::optional<std::string> lastAttemptedAppliedOption = "";
         std::expected<void, std::string> hostKeyVerified{};
+        std::optional<JumpHostVerification> jumpHostVerification{};
+        bool connectFailed = false;
 
         auto result = Detail::sequential(
             [&]
@@ -605,9 +607,20 @@ namespace SecureShell
             },
             [&]
             {
+                lastAttemptedAppliedOption = "Proxy Jump Host Keys";
+                jumpHostVerification = JumpHostVerification::begin(
+                    static_cast<ssh::Session&>(*session).getCSession(),
+                    sshOptions.knownHostsFile ? Paths::nativeToUtf8(*sshOptions.knownHostsFile) : std::string{}
+                );
+                return jumpHostVerification ? SSH_OK : SSH_ERROR;
+            },
+            [&]
+            {
                 // clear last attempted option, option setting succeeded, so remove it for the error message
                 lastAttemptedAppliedOption = std::nullopt;
-                return static_cast<ssh::Session&>(*session).connect();
+                const auto connected = static_cast<ssh::Session&>(*session).connect();
+                connectFailed = connected != SSH_OK;
+                return connected;
             },
             [&]
             {
@@ -662,6 +675,17 @@ namespace SecureShell
 #endif
             }
         );
+
+        if (connectFailed && jumpHostVerification)
+        {
+            if (const auto refusal = jumpHostVerification->takeRefusal(); refusal)
+            {
+                // The warning of a changed key, here in the thread of the connect: libssh met the key in its own.
+                if (refusal->question.problem != HostKeyProblem::Unknown && askAboutHostKey)
+                    askAboutHostKey(refusal->question);
+                return std::unexpected(fmt::format("Failed to connect: {}", refusal->reason));
+            }
+        }
 
         if (!hostKeyVerified)
             return std::unexpected(fmt::format("Failed to connect: {}", hostKeyVerified.error()));
